@@ -2354,6 +2354,7 @@ def _kind_notes_tracks(sh, ppq, keys):
         whole, part, same_vel = piece
         knife, knife_d = sh["cut"].get("knife"), moved_by(sh)  # (cut through its notes by the Slice tool)
         mould = sh["cut"].get("mould")  # (cut with a shape, mould.py)
+        floor = sh["cut"].get("from")  # (sliced.cut_through)
         if same_vel:
             vel_sh = whole
         sh = whole
@@ -2448,7 +2449,7 @@ def _kind_notes_tracks(sh, ppq, keys):
                 raw, spots, tracks = whole_tools(src, raw, spots, tracks, ppq)
                 came = None  # (the pages' notes aren't the steps any more)
                 raw = np.column_stack([raw, raw[:, 0]])  # (each page note's start rides along through the cuts)
-            raw, spots, tracks = cut_through(src, raw, spots, tracks, part, ppq, came)
+            raw, spots, tracks = cut_through(src, raw, spots, tracks, part, ppq, came, floor)
             mine = in_part(spots, part)
             raw, tracks = raw[mine], tracks[mine] if tracks is not None else None
             if knife:

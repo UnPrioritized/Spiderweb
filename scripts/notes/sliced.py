@@ -929,16 +929,22 @@ def beat_on(a, r):
     return a[i][0] + (a[i + 1][0] - a[i][0]) * (r - i)
 
 
-def cut_through(whole, raw, spots, tracks, part, ppq, came=None):
+def cut_through(whole, raw, spots, tracks, part, ppq, came=None, floor=None):
     """A line piece's notes (the whole's, before its part is kept): the note sounding at each of the piece's cuts is
     cut in two there (user: slicing adds a note at the cut), the second half starting on the cut's spot, so the piece
     before keeps the first half and the piece after starts with the second (same key and colour).
+    floor: cut["from"], the starts of the pieces this one was cut from (oldest first): each start is cut again here
+    as that piece cut it, and at each start only notes of the piece before are cut (a long page note of an EARLIER
+    piece sounding there stays whole in its own piece, which never learns of the new cut; case 488603472).
     came: "Notes by snap" steps, the line note each came from (start, end): the steps of the line note sounding at
     the cut that start after it go to the piece after (they all share that note's spot); a step held on its own is
     cut in two where the knife goes through it (user 2026-10-28: "a knife sliced through"), a stack of keys goes
     by key row."""
     paths = paths_of(whole)
-    for c in sorted(u for u in part if u):
+    chain = [u for u in floor or () if u and (part[0] is None or u < part[0])]
+    starts = chain + ([part[0]] if part[0] else [])
+    low = dict(zip(starts[1:], starts))  # (each start: the start before it, only notes from there on are cut)
+    for c in starts + ([part[1]] if part[1] else []):
         k = int(c // BIG)
         if k >= len(paths) or len(paths[k]) < 2:
             continue
@@ -947,8 +953,9 @@ def cut_through(whole, raw, spots, tracks, part, ppq, came=None):
         i = max(0, min(int(r), len(a) - 2))
         beat, key = a[i] + (a[i + 1] - a[i]) * (r - i)
         t = int(round(float(beat) * ppq))
+        mine = spots >= low[c] if c in low and c != part[1] else True
         if came is not None:
-            over = (spots < c) & (came[:, 0] < t) & (came[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 1)
+            over = mine & (spots < c) & (came[:, 0] < t) & (came[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 1)
             if over.any():
                 spots = spots.copy()
                 spots[over & (spots == spots[over].max()) & (raw[:, 0] >= t)] = c
@@ -978,7 +985,7 @@ def cut_through(whole, raw, spots, tracks, part, ppq, came=None):
                 tracks = np.append(tracks, tracks[idx])
             continue
         near = np.abs(raw[:, 2] - key) <= 1
-        late = np.flatnonzero((spots < c) & (raw[:, 0] == t) & (raw[:, 1] > t) & near)
+        late = np.flatnonzero(mine & (spots < c) & (raw[:, 0] == t) & (raw[:, 1] > t) & near)
         if len(late):  # (starting under half a tick before the cut, rounded onto it: nothing of it is before the cut,
             # it goes to the piece after whole, partial sweep 11-02: it stayed with the piece before, uncut)
             ks = (spots[late] // BIG).astype(np.int64)
@@ -988,7 +995,7 @@ def cut_through(whole, raw, spots, tracks, part, ppq, came=None):
             if len(late):
                 spots = spots.copy()
                 spots[late] = c
-        hit = (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & near
+        hit = mine & (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & near
         if not hit.any():
             continue
         j = int(np.flatnonzero(hit)[np.argmax(spots[hit])])  # (the one started last along the path)
@@ -1063,6 +1070,11 @@ def cut_in_two(sh, halves, at, scale, mark):
         # (a cut through the notes, its stretch over them: both halves have notes along it)
         mine = [m for m in marks if m.get("segs") or m["u"] >= a - 1e-9 and (b is None or m["u"] <= b + 1e-9)]
         h["cut"] = {"whole": whole, "was": outline(h), "part": [a, b], "vel": None, "marks": mine + [new]}
+        floor = list(cut.get("from") or []) if got else []  # (cut_through's floor: the starts it came from)
+        if a == uc and part[0]:
+            floor.append(part[0])
+        if floor:
+            h["cut"]["from"] = floor
         if knives:
             h["cut"]["knife"] = json.loads(json.dumps(knives))
         if got and cut.get("mould"):  # (cut with a shape before: both halves keep that, mould.py)
@@ -1149,6 +1161,9 @@ def rejoined(olds, new, join=None):
         whole["cut"] = json.loads(json.dumps(src["cut"]))
     out = dict(new, cut={"whole": whole, "was": outline(new), "part": list(part), "vel": None,
                          "marks": list(marks.values())})
+    floor = next((sh["cut"].get("from") for sh, g in zip(olds, got) if g[1][0] == part[0]), None)
+    if floor:  # (the first piece's floor: cut_through)
+        out["cut"]["from"] = floor
     if olds[0]["cut"].get("id"):  # (still one of those pieces: their key, keyed_pieces)
         out["cut"]["id"] = olds[0]["cut"]["id"]
     if knives:
@@ -1413,4 +1428,11 @@ def clean_cut(c):
         out["own_vel"] = True
     if isinstance(c.get("id"), str) and c["id"]:  # (its cut's key: keyed_pieces)
         out["id"] = c["id"][:32]
+    if whole["kind"] != "custom" and isinstance(c.get("from"), list):  # (cut_through's floor)
+        try:
+            got = [float(u) for u in c["from"][:10000]]
+        except (TypeError, ValueError):
+            got = []
+        if got:
+            out["from"] = got
     return out

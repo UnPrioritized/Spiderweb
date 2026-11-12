@@ -309,6 +309,8 @@ def expanded(sh):
     if inside:  # (its whole made with them, in this order: sliced.source)
         E["_whole"] = dict({k: copy.deepcopy(sh[k]) for k in inside}, order=list(sh["order"]),
                            **({"off": copy.deepcopy(sh["off"])} if sh.get("off") else {}))
+        if "sustain" in inside:  # (held inside the whole: its colours keep the held overlaps, case 492791693)
+            E["_sus"] = True
     if GATE_FLIP in have:
         E.pop("gate_flip", None)
     if GLUE in have:
@@ -363,8 +365,10 @@ def _lengths_inside(sh):
         return []
     off = off_tags(sh)
     tags = [t for t in order_of(sh) if t[0] == FX or (t[0] in LENGTHS and t not in off and t[0] in sh)]
-    last = max((p for p, t in enumerate(tags) if t[0] == FX and is_page(fx[t[1]]) and not fx[t[1]].get("off")),
-               default=-1)
+    # (any of the whole's entries after it, a velocity line / glue place too: case 492791693, Glue after Sustain on
+    # the whole merged stacked held notes; the piece held its notes only after the whole's Glue and they came back)
+    last = max((p for p, t in enumerate(tags) if t[0] == FX and (is_page(fx[t[1]]) or p > 0 and any(
+        q[0] == FX and is_page(fx[q[1]]) for q in tags[:p])) and not fx[t[1]].get("off")), default=-1)
     out, n = [], 0
     for p, t in enumerate(tags):
         if t[0] == FX:
