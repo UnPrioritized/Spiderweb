@@ -11,6 +11,7 @@ Measured (dev/scratch/loaded_piece_bytes.py + lp_compare.py): the same sound as 
 over that stretch (-113..-164 dB), Shinki 4.5 s of music made in ~2 s."""
 
 import os
+import re
 from collections import OrderedDict
 
 import numpy as np
@@ -905,6 +906,8 @@ class LoadedSong:
                     last = int(start[i])
             # (the copy's first wait was counted from t_pre: the gap from the last held note to t_pre first)
             head += _vlq(t_pre - last) + b"\xff\x01\x00"
+            if self.sysex:  # (31-EDO: a GM / GS reset in the file wipes our tuning too: sent again right after it)
+                body = _retuned(body, int(self.tport[j]), self.sysex)
             buf += b"MTrk" + (len(head) + len(body) + 4).to_bytes(4, "big")
             buf += head
             buf += body
@@ -1295,6 +1298,35 @@ def _channel_rows(code):
         elif vals:
             rows += [(0xB0 | ch, 101, 127), (0xB0 | ch, 100, 127)]  # (as GM advises after setting one)
     return rows
+
+
+# GM System On / Off (7E <dev> 09 01..03) and GS Reset (41 <dev> 42 12 40 00 7F) as a file stores them (F0, a
+# one-byte length, the data): the resets a synth's scale tuning goes with (Kestrel's sysex_event: ResetParts)
+_RESETS = re.compile(rb"\xf0([\x00-\x7f])(?:\x7e[\x00-\x7f]\x09[\x01-\x03]|\x41[\x00-\x7f]\x42\x12\x40\x00\x7f)")
+
+
+def _retuned(body, port, sysex):
+    """body (a track's copied bytes) with 31-EDO's tuning (sysex = {port: SMF SysEx events}, playback.edo_sysex)
+    sent again right after each reset in it, on our tuned ports (a port change around them, then back to the
+    track's own port): a GM / GS reset mid-song wiped the tuning of the rows played in 31-EDO until the next piece
+    (hunt 2026-11-13; the user's rule: our tuning sent again after a reset). Bytes looking like a reset that aren't
+    one only send the same tuning again (harmless)."""
+    found = list(_RESETS.finditer(body))
+    if not found:
+        return body
+    again = bytearray()
+    for p in sorted(sysex):
+        again += b"\x00\xff\x21\x01" + bytes([p])
+        for ev in sysex[p]:
+            again += b"\x00" + ev
+    again += b"\x00\xff\x21\x01" + bytes([port])
+    out, at = bytearray(), 0
+    for m in found:
+        end = m.start() + 2 + m.group(1)[0]
+        out += body[at:end] + again
+        at = end
+    out += body[at:]
+    return bytes(out)
 
 
 def _sysex_before_notes(b):

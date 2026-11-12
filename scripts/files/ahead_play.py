@@ -285,11 +285,20 @@ class AheadPlay:
 
     def _edo_first(self, engine):
         """31-EDO's first channel for this engine while the 31-EDO + Audio ticks are on, else None: BASSMIDI's after
-        the Hz bass ports like live play (96), the graphics card's the top two ports (playback.EDO_KESTREL)."""
-        from files.playback import EDO_FIRST, EDO_KESTREL
+        the Hz bass ports like live play (96), the graphics card's the highest two ports a loaded MIDI played as
+        written leaves free, like live Kestrel (playback.edo_ports; hunt 2026-11-13: on its ports our tuning put its
+        notes off key), else the top two (playback.EDO_KESTREL)."""
+        from files.playback import EDO_FIRST, EDO_KESTREL, edo_ports
         if not self.app.out.edo:
             return None
-        return EDO_FIRST if engine == "bassmidi" else EDO_KESTREL
+        if engine == "bassmidi":
+            return EDO_FIRST
+        lm = self._loaded()
+        if lm is None:
+            return EDO_KESTREL
+        from files.play_loaded import track_ports
+        kit = {0} if self.app.out.edo_drums else set()  # (channel 10's drums: port 1, ahead_pieces.EDO_DRUMS)
+        return edo_ports(set((track_ports(lm)[0] % 16).tolist()) | kit)
 
     def _say_why(self, why):
         if why:

@@ -2,6 +2,7 @@
 soundfont and settings."""
 
 import collections
+import heapq
 import math
 import os
 import threading
@@ -426,9 +427,21 @@ class Playback:
         self.player.set_tempo(bpm, heard_tempo(self.tempo, bpm, ppq, end, self.file_heard()))
 
     def play_parts(self, ppq, bpm, device=None):
-        """play_apart's, the CC lines as the player's messages (cc_list)."""
-        rendered, msgs, ports = self.play_apart(ppq, bpm, device)
-        return rendered, cc_list(msgs, self.picture_use10, ports) if msgs else [], ports
+        """play_apart's, the CC lines as the player's messages (cc_list). 31-EDO's Loaded MIDI tick: its controllers'
+        list made once and handed over as the SAME list while nothing of it changed (a loaded MIDI's millions took ~2 s
+        at every Play and edit while playing, hunt 2026-11-13; the Player then knows it's unchanged), your own merged
+        into it when there are any."""
+        rendered, msgs, ports, edo_ev = self.play_apart(ppq, bpm, device, edo_apart=True)
+        own = cc_list(msgs, self.picture_use10, ports) if msgs else []
+        if not edo_ev:
+            return rendered, own, ports
+        key = (edo_ev, self.picture_use10, ports)
+        got = getattr(self, "_edo_cc_list", None)
+        if got is None or got[0][0] is not edo_ev or got[0][1:] != key[1:]:
+            self._edo_cc_list = got = (key, cc_list(edo_ev, self.picture_use10, ports))
+        if not own:
+            return rendered, got[1], ports
+        return rendered, list(heapq.merge(own, got[1], key=lambda e: e[0])), ports
 
     def ahead_parts(self):
         """(rendered, ccs, ports, ppq, bpm, tempo) as Play would hand Rendered ahead from the play line, while
@@ -461,11 +474,12 @@ class Playback:
         if go:
             self._ahead_idle_job = self.after(AHEAD_IDLE_MS, self._ahead_idle)
 
-    def play_apart(self, ppq, bpm, device=None):
+    def play_apart(self, ppq, bpm, device=None, edo_apart=False):
         """(the notes, the Hz basses' CC lines {slot: messages}, the synth's ports) for the player: Built-in BASSMIDI
         puts slots on its ports as the MIDI export does (engine.slot_ports; other MIDI outs have one port: 16 channels). A Hz
         bass's CC lines never reach other shapes' notes while there's a free channel (hz_cc.cc_apart; files keep
-        their channels). device = the MIDI out to plan for (None: the open one)."""
+        their channels). device = the MIDI out to plan for (None: the open one). edo_apart: 31-EDO's loaded MIDI
+        messages NOT merged in but handed back as a 4th item (play_parts keeps their list)."""
         per_shape = {i: self.cc_messages(ppq, bpm, {i}) for i, sh in enumerate(self.shapes)
                      if has_cc(sh.get("hz") or {})}
         per_shape = {i: got for i, got in per_shape.items() if got}
@@ -476,7 +490,7 @@ class Playback:
         heard = self.track_list.unmuted(self.outgoing())
         edo = self.edo_loaded_rows(device)  # (31-EDO's Loaded MIDI tick: its notes as rows, beside your own)
         edo_ev = self.edo_loaded_events(device) if edo is not None else None  # (+ its instruments / controllers)
-        if edo_ev:  # (a copy: neither one's lists changed)
+        if edo_ev and not edo_apart:  # (a copy: neither one's lists changed)
             pasted = {s: list(ms) for s, ms in pasted.items()}
             for s, ms in edo_ev.items():
                 pasted[s] = pasted.get(s, []) + ms
@@ -485,9 +499,12 @@ class Playback:
             if edo is None or not len(edo):
                 return notes
             return np.concatenate([np.asarray(notes, np.int64).reshape(-1, edo.shape[1]), edo])
-        if not per_shape and not any(pasted.values()):
-            return with_edo(heard), {}, 0
+
+        def done(notes, msgs, ports):
+            return (notes, msgs, ports, edo_ev or None) if edo_apart else (notes, msgs, ports)
         ports = LIVE_PORTS if (device or self.out.name) in (BUILTIN, KESTREL, MAESTRO, AHEAD) else 0
+        if not per_shape and not any(pasted.values()):
+            return done(with_edo(heard), {}, ports if edo_apart and edo_ev else 0)
         if per_shape and self.edo_heard(device or self.out.name):
             # (31-EDO played tuned: the channel sets the octave, so a moved Hz bass jumped 2 / 4 octaves; its CC lines
             # go to every channel of its channel's group, like the files' players: playback.edo_fan)
@@ -503,7 +520,7 @@ class Playback:
             if ms:
                 msgs.setdefault(s, []).extend(ms)
                 msgs[s].sort(key=lambda e: e[0])
-        return with_edo(rendered), msgs, ports
+        return done(with_edo(rendered), msgs, ports)
 
     def _play_tick(self):
         self._play_job = None
@@ -1594,6 +1611,11 @@ class Playback:
             self.out.handle.tune(edo_tuning())
         elif self.out.edo_bent is not None:  # (Kestrel: tuned again now)
             self.out.tune_edo()
+        # (Kestrel / Rendered ahead: right-drag listening's own Built-in synth too, hunt 2026-11-13: it kept the
+        # tuning it opened with while the keys moved by the new whole keys)
+        side = getattr(self, "_scrub_side", None)
+        if side is not None and side is not self.out and side.handle is not None and hasattr(side.handle, "tune"):
+            side.handle.tune(edo_tuning())
         if playing:
             self.start_play(keep=True)
         else:

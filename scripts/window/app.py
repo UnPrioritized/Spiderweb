@@ -2362,6 +2362,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             edo_forget(self.loaded)
             if getattr(self, "ahead_play", None) is not None:
                 self.ahead_play._edo_part = None
+            self._edo_cc_list = None  # (its controllers as the player's messages, play_parts; + the player's fanned)
+            if getattr(self, "player", None) is not None and not self.player.running:
+                self.player._fanned = None
+            from files import ahead_pieces
+            ahead_pieces._fanned = None
 
     def edo_loaded_ticked(self):
         """The Loaded MIDI tick: heard from now on (playing: started again from where it is)."""

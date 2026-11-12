@@ -208,6 +208,8 @@ def cc_events(messages):
             out.append((_EV_CC[one], two, ch, tick, 0))
         elif status == 0xB0 and one in (101, 100):
             rpn[ch, one] = two
+        elif status == 0xB0 and one in (99, 98):  # (an NRPN picked: its data isn't the bend range, hunt 2026-11-13)
+            rpn[ch, 101] = rpn[ch, 100] = None
         elif status == 0xB0 and one == 6 and rpn.get((ch, 101)) == 0 and rpn.get((ch, 100)) == 0:
             out.append((_EV_PITCHRANGE, two, ch, tick, 0))
     return np.array(out, EVENT) if out else np.zeros(0, EVENT)
@@ -1080,6 +1082,8 @@ class Live(_Limited):
             event(self.handle, ch, _EV_CC[a], b)
         elif kind == 0xB0 and a in (101, 100):
             self._rpn[ch, a] = b
+        elif kind == 0xB0 and a in (99, 98):  # (an NRPN picked: the data after it isn't the bend range, hunt 2026-11-13)
+            self._rpn[ch, 101] = self._rpn[ch, 100] = None
         elif kind == 0xB0 and a == 6 and self._rpn.get((ch, 101)) == 0 and self._rpn.get((ch, 100)) == 0:
             event(self.handle, ch, _EV_PITCHRANGE, b)
 

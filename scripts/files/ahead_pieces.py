@@ -159,6 +159,7 @@ def _one_sound_rows(r, s, e):
     return end_o, end_o > s
 
 
+_fanned = None  # (31-EDO: (the ccs a Song was given, its channels, them fanned to the groups), Song._edo_ccs)
 EDO_DRUMS = 9  # (31-EDO: channel 10's drum notes on port 1 channel 10, made drums in the pieces: Song.drums)
 
 
@@ -265,10 +266,17 @@ class Song:
 
     def _edo_ccs(self, ccs):
         """ccs as played: 31-EDO = each on every channel of its colour's group (playback.edo_fan, like live)."""
+        global _fanned
         if self.edo_first is None or not ccs:
             return ccs
+        key = (self.edo_first, self.drums)
+        got = _fanned  # (the same list as the last song's = its fanned list again: a loaded MIDI's millions of
+        if got is not None and got[0] is ccs and got[1] == key:  # controllers were fanned at every edit, hunt 11-13)
+            return got[2]
         from files.playback import edo_fan
-        return [(t, m2) for t, m in ccs for m2 in edo_fan(m, self.edo_first, self.drums)]
+        out = sorted([(t, m2) for t, m in ccs for m2 in edo_fan(m, self.edo_first, self.drums)], key=lambda e: e[0])
+        _fanned = (ccs, key, out)  # (in order as _finish would put it: it takes it as it is)
+        return out
 
     def _one_sound(self):
         """31-EDO rows as live Built-in play sounds them (playback.Player: a new note on a sounding row lets the old
@@ -364,9 +372,16 @@ class Song:
         return self
 
     def _finish(self, ccs):
+        global _fanned
         n = len(self.start)
-        self.ccs = sorted(ccs, key=lambda e: e[0]) if ccs else []
-        self.cc_ticks = np.array([t for t, _ in self.ccs], np.int64)
+        got = _fanned
+        if got is not None and ccs is got[2]:  # (31-EDO's fanned list again: in order already, its ticks kept)
+            if len(got) < 4:
+                _fanned = got = got + (np.array([t for t, _ in ccs], np.int64),)
+            self.ccs, self.cc_ticks = ccs, got[3]
+        else:
+            self.ccs = sorted(ccs, key=lambda e: e[0]) if ccs else []
+            self.cc_ticks = np.array([t for t, _ in self.ccs], np.int64)
         # the longest note (held notes before a tick are among the ones starting up to that much earlier)
         self.longest = int((self.end - self.start).max()) if n else 0
         self.first = self.frame(int(self.start[0])) if n else 0

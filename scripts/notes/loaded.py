@@ -756,13 +756,16 @@ def edo_events(lm, muted, ppq):
             tick, code, ch = tick[keep], code[keep], ch[keep]
         kind, one, two = code & 0xF0, code >> 8 & 0x7F, code >> 16 & 0x7F
         keep = np.ones(len(code), bool)
-        rpn = (kind == 0xB0) & np.isin(one, (101, 100, 6, 38))  # (fine / coarse tune data: dropped, our tuning wins)
+        # (fine / coarse tune data: dropped, our tuning wins; an NRPN picked (99 / 98) = its data isn't an RPN's)
+        rpn = (kind == 0xB0) & np.isin(one, (101, 100, 99, 98, 6, 38))
         if rpn.any():
             sel = {}
             for i in np.flatnonzero(rpn).tolist():
                 c, n_, v = int(ch[i]), int(one[i]), int(two[i])
                 if n_ in (101, 100):
                     sel[c, n_] = v
+                elif n_ in (99, 98):
+                    sel[c, 101] = sel[c, 100] = None
                 elif (sel.get((c, 101)), sel.get((c, 100))) in _RPN_TUNE:
                     keep[i] = False
         if ppq != lm.ppq:

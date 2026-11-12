@@ -177,11 +177,12 @@ def edo_code(rows, first=EDO_FIRST, ch=None, drums=None):
 def edo_fan(msg, first=EDO_FIRST, drums=True):
     """A channel message (CC, bend, program...) to a note colour's channel (its low 4 bits; port byte dropped) ->
     the same message on every channel of its 31-EDO group (Kestrel's triplet rule, user 2026-11-13); channel 10:
-    none with drums, else channel 10 as piano's group."""
+    drums = the drum channel's code (edo_code's drums; True = port 1 channel 10): there, as the drum notes (volume,
+    pan, kit of a loaded MIDI's drums, hunt 2026-11-13); None / False = channel 10 as piano's group."""
     ch = msg & 15
     if ch == 9:
-        if drums:
-            return []
+        if drums is not None and drums is not False:
+            return [msg & 0xFFFFF0 | (9 if drums is True else int(drums))]
         chans = [first + 16 + n for n in range(3)]
     else:
         start = first + ch - int(EDO_LANE[ch])
@@ -508,9 +509,17 @@ class _Ons:
 
 
 RPN = (101, 100, 6, 38)  # (the CCs that set the bend range: sent in their order, never thinned out)
+# RPN / NRPN steps (select, data, data +1 / -1): caught up in the file's order, never thinned out (an NRPN's data
+# went on as a bend range once the selections were sent ahead of it, hunt 2026-11-13)
+STEPS = RPN + (99, 98, 96, 97)
 # what a Hz bass's CC lines are put back to on a channel when playing stops (hz_settings.CC_START: where players
 # start them, user: nothing left on the channel), the bend range back to 2 keys
 CC_RESET = [(CC_NUMBER[n], CC_START[n]) for n in CC_NUMBER]
+# + a loaded MIDI's in 31-EDO (hunt 2026-11-13: "reset controllers" leaves reverb, chorus, the sound controllers
+# and portamento time as the file set them): modulation, portamento time / switch, pedals, sound controllers,
+# portamento control, reverb, chorus back to where players start them
+CC_RESET += [(1, 0), (5, 0), (65, 0), (66, 0), (67, 0), (71, 64), (72, 64), (73, 64), (75, 64), (76, 64), (77, 64),
+             (78, 64), (84, 0), (91, 40), (93, 0)]
 RANGE_RESET = [(101, 0), (100, 0), (6, 2), (38, 0), (101, 127), (100, 127)]
 
 
@@ -531,17 +540,26 @@ def cc_list(messages, use10, ports=0):
 
 def cc_before(ccs, tick):
     """The messages of ccs (cc_list) before tick a player starting there sends first: each CC's and the pitch
-    bend's last value on each channel (the bend range's messages all, in order)."""
+    bend's last value on each channel (RPN / NRPN steps all), IN THE ORDER THEY CAME (a bank select stays before its
+    program, an NRPN's data after its selection: hunt 2026-11-13). Sounds / notes off, reset controllers and the
+    mode messages (CC 120-127) are one-off: only heard when the line passes them (an edit while playing sent a
+    file's "all notes off" again and cut what sounded, hunt 2026-11-13)."""
     last, out = {}, []
-    for t, m in ccs:
+    for i, (t, m) in enumerate(ccs):
         if t >= tick:
             break
         kind = m & 0xF0
-        if kind == 0xB0 and (m >> 8) & 0x7F in RPN:
-            out.append(m)
-        else:
-            last[(m & 0x7FFF if kind == 0xB0 else m & 0xFF) | m & 0xFF000000] = m  # (its port too)
-    return out + list(last.values())
+        if kind == 0xB0:
+            n = (m >> 8) & 0x7F
+            if n >= 120:
+                continue
+            if n in STEPS:
+                out.append((i, m))
+                continue
+        last[(m & 0x7FFF if kind == 0xB0 else m & 0xFF) | m & 0xFF000000] = (i, m)  # (its port too)
+    out += last.values()
+    out.sort()
+    return [m for _, m in out]
 
 
 def _cc_kind(m):
@@ -630,6 +648,7 @@ class Player:
         self.ready = None  # a threading.Event the line waits for before it starts (play_loaded.LoadedPlayer.ready)
         self.notes_ver = 0  # (+1 each time other notes are handed over: Kestrel's remembered note limits start over)
         self._notes_of = None
+        self._fanned = None  # (31-EDO: (the cc list handed over, its channels, it fanned to the groups), _edo_cc)
 
     @property
     def running(self):
@@ -687,8 +706,15 @@ class Player:
         """cc as played: 31-EDO = each message on every channel of its colour's group (edo_fan), else as it is."""
         if not self.tune or not cc:
             return cc
-        drums = self.edo_drums is not None
-        return [(t, m2) for t, m in cc for m2 in edo_fan(m, self.edo_first, drums)]
+        # (the same list as last time = the same fanned one: a loaded MIDI's millions of controllers in 31-EDO were
+        # fanned again at every Play and every edit while playing, ~2 s; hunt 2026-11-13)
+        key = (self.edo_first, self.edo_drums)
+        got = self._fanned
+        if got is not None and got[0] is cc and got[1] == key:
+            return got[2]
+        out = [(t, m2) for t, m in cc for m2 in edo_fan(m, self.edo_first, self.edo_drums)]
+        self._fanned = (cc, key, out)
+        return out
 
     def _new_notes(self, notes):
         """notes_ver goes up when these notes aren't the ones handed over last (the same array = unchanged). Held
@@ -830,14 +856,18 @@ class Player:
             out.handle.resync()
         # (Kestrel falling behind = the line waits: here when alone, else the loaded MIDI's feeder does it)
         behind = out.handle if kestrel and not self.along else None
+        # (the CC lines' values where it starts, worked out BEFORE the line's clock starts: a loaded MIDI's millions of
+        # controllers in 31-EDO took ~1 s here and the first notes came too late to play, hunt 2026-11-13)
+        first = cc_before(ccs, t0)
+        j = bisect.bisect_left(ccs, (t0,)) if ccs else 0
         # (Kestrel: the line starts `lead` from now, so the first notes are sent ahead too)
         self._clock = (clock() + lead, self.map.sec(t0), self.map)
         held = self.held = {}
         sent = self.cc_sent = set()
-        for m in cc_before(ccs, t0):  # (the CC lines' values where it starts)
+        for m in first:
             emit(m, self._clock[0])
             sent.add(_cc_kind(m))
-        j = next((n for n, (t, _) in enumerate(ccs) if t >= t0), len(ccs))
+        del first
         offs = []  # (end tick, channel | key << 8) of the notes sounding
         batch, k, i = [], 0, 0
         done = t0 - 1  # the last tick played
@@ -859,6 +889,7 @@ class Player:
                     busy = 0
                     pace()
             if self._swap is not None:
+                was = ccs
                 (ons, ccs), self._swap = self._swap, None
                 # (on from the notes of the tick it's on that weren't sent yet, not the next tick: a big chord
                 # mid-way keeps its other notes)
@@ -885,7 +916,9 @@ class Player:
                         else:
                             del held[key]
                     heapq.heapify(offs)
-                j = next((n for n, (t, _) in enumerate(ccs) if t > done), len(ccs))
+                if ccs is was:  # (the same messages: nothing to send again, j stays; a loaded MIDI's millions in
+                    continue    # 31-EDO took ~2 s here at every edit and notes came too late, hunt 2026-11-13)
+                j = bisect.bisect_left(ccs, (done + 1,)) if ccs else 0
                 # (the CC lines changed: each channel's values where it is now, heard at once; channels the lines
                 # no longer use put back, so nothing is left on them for what plays there)
                 now = cc_before(ccs, done + 1)
