@@ -132,6 +132,7 @@ def joined(spans):
 
 
 DENSE_WAIT_MS = 300  # Keep timing notes too close: worked out this long after the tempo / notes stop changing
+REBAR_KINDS = ("rebar_dense", "rebar_cc", "rebar_round")  # (Change visual time signature's spots: TempoPane.rebar_marks)
 DRAWS = {"line": "line", "formula": "formula"}  # pencil kind -> the curve the drawn part gets (bent by its handle)
 
 
@@ -3306,6 +3307,26 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             self.set_view(u - room, u - room + span)
         self.request_redraw()
 
+    def rebar_marks(self, spots, a, b):
+        """Change visual time signature just done (user 2026-11-12): where its notes / CC rounded a tick or came under
+        a tick apart, {kind: sorted beats} (REBAR_KINDS), shown like Keep timing's limit texts on the changed bars
+        a..b until the next step (an edit or undo)."""
+        self._rebar = {"spots": {k: sorted(set(v)) for k, v in spots.items()}, "a": a, "b": b,
+                       "step": len(self.app.undo_stack)}
+        self.request_redraw()
+
+    def rebar_now(self):
+        """rebar_marks' while no other step was made since (an edit or undo drops them), else None."""
+        got = getattr(self, "_rebar", None)
+        if got is not None and got["step"] != len(self.app.undo_stack):
+            got = self._rebar = None
+        return got
+
+    def all_limits(self):
+        """The limit texts' spots: Keep timing's (self._limits) + Change visual time signature's (rebar_now)."""
+        got = self.rebar_now()
+        return dict(self._limits, **got["spots"]) if got else self._limits
+
     def draw_limit_arrows(self, words, kb, w, h):
         """A small arrow at a Keep timing part's edge in view when the part has limit spots (draw_limits' texts)
         out of view that way (user 2026-10-30: they showed only when the spot itself was in view; everywhere
@@ -3316,8 +3337,8 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         arrows = []
         for x0, x1, _, _, b1, b0 in words:
             near = {}  # left / right: (beat, kind) of the nearest spot out of view
-            for kind in ("dense", "unfit", "gave", "moved"):
-                spots = self._limits.get(kind) or []
+            for kind in ("dense", "unfit", "gave", "moved") + REBAR_KINDS:
+                spots = self.all_limits().get(kind) or []
                 i = bisect.bisect_left(spots, vl - 1e-9)  # (left: in the part, before the view)
                 if i > 0 and spots[i - 1] >= b0 - 1e-9 and (near.get("left") is None or spots[i - 1] > near["left"][0]):
                     near["left"] = (spots[i - 1], kind)
@@ -3332,7 +3353,8 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         for x, y, left, _, kind in arrows:
             d = -1 if left else 1
             self.create_polygon(x + 6 * s * d, y, x - 4 * s * d, y - 6 * s, x - 4 * s * d, y + 6 * s,
-                                fill=look.ERROR if kind in ("dense", "unfit") else look.WARN, outline=look.ROLL_BG,
+                                fill=look.ERROR if kind in ("dense", "unfit", "rebar_dense") else look.WARN,
+                                outline=look.ROLL_BG,
                                 tags="limit_arrow")
 
     def limit_arrow_at(self, x, y):
@@ -3597,6 +3619,10 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             if x1 - x0 > 70 * self.scale:
                 self.create_text((x0 + x1) / 2, top + 8 * self.scale, text=text, fill=colour,
                                  font=look.font(8, "bold"))
+        marks = self.rebar_now()  # (Change visual time signature's spots: arrows at the changed bars' edges too)
+        if marks and roll.t2x(marks["b"]) > kb and roll.t2x(marks["a"]) < w:
+            words.append([max(kb, roll.t2x(marks["a"])), min(w, roll.t2x(marks["b"])), False, None, marks["b"],
+                          marks["a"]])
         self.draw_limit_arrows(words, kb, w, h)
         # the line itself (faded while the heard line is drawn: user 2026-10-24)
         preview = self.drag_preview()  # (a line being drawn: the tempo as letting go gives it)
@@ -3783,8 +3809,9 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         sig_x = [roll.t2x(b) for b, _, _, _ in self.sig_marks()]
         taken = []  # (x0, x1, y0, y1) of the texts put
         for kind, colour in (("dense", look.ERROR), ("unfit", look.ERROR), ("gave", look.WARN),
-                             ("moved", look.WARN)):  # (bar lines written a little off: BAR CARRY-OVER, user)
-            spots = self._limits.get(kind) or []
+                             ("moved", look.WARN), ("rebar_dense", look.ERROR), ("rebar_cc", look.WARN),
+                             ("rebar_round", look.WARN)):  # (bar lines written a little off: BAR CARRY-OVER, user)
+            spots = self.all_limits().get(kind) or []
             lo = bisect.bisect_left(spots, roll.x2t(kb))
             hi = bisect.bisect_right(spots, roll.x2t(w))
             free_from = -math.inf

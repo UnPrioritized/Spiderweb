@@ -295,10 +295,44 @@ def kept_sound(sh, old, new, pl, ppq, f):
             and abs(int(new[:, 1].max()) - a1) <= tol and set(old[:, 2].tolist()) == set(new[:, 2].tolist()))
 
 
+def _rounded(pl, ticks, ppq):
+    """Of ticks inside the bars: (their new ticks, which ones land between ticks: rounded to the nearest)."""
+    t = np.asarray(ticks, np.int64)
+    ta = np.array([round(r[0] * ppq) for r in pl["runs"]], np.int64)
+    f = np.array([r[4] for r in pl["runs"]], float)
+    i = np.maximum(np.searchsorted(ta, t, "right") - 1, 0)
+    exact = (t - ta[i]) * f[i]
+    return R.map_ticks(pl, t, ppq), np.abs(exact - np.rint(exact)) > 1e-6
+
+
+def spots_of(app, pl, old_r):
+    """Where the change can't be exact (user 2026-11-12: shown like Keep timing's limit texts on the changed bars
+    until the next step): {"rebar_round": beats of notes moved to the nearest tick, "rebar_dense": notes a tick or
+    more apart now on one tick, "rebar_cc": pasted CC events moved to the nearest tick}, new beats."""
+    ppq = app.ppq
+    a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
+    on = (old_r[:, 0] >= a_t) & (old_r[:, 0] < b_t)
+    ticks = np.unique(np.concatenate([old_r[on, 0], old_r[on, 1]]))
+    ticks = ticks[(ticks >= a_t) & (ticks <= b_t)]
+    out = {"rebar_round": [], "rebar_dense": [], "rebar_cc": []}
+    if len(ticks):
+        new, off = _rounded(pl, ticks, ppq)
+        out["rebar_round"] = (np.unique(new[off]) / ppq).tolist()
+        same = np.flatnonzero(new[1:] == new[:-1])  # (two old ticks on one new tick)
+        out["rebar_dense"] = (np.unique(new[same]) / ppq).tolist()
+    from notes.passengers import placed
+    cc = [t for sh in app.shapes if sh.get("cc") and "notes" in sh
+          for t, *_ in placed(sh, unpack_notes(sh["notes"]), ppq) if a_t <= t < b_t]
+    if cc:
+        new, off = _rounded(pl, np.array(cc, np.int64), ppq)
+        out["rebar_cc"] = (np.unique(new[off]) / ppq).tolist()
+    return out
+
+
 def apply(app, pl, name, dry=False):
     """The change done on the project in one undo step: {"ok": True, "plain": shapes made plain notes by the safety
     net, "cut": shapes cut at the edges, "off": shapes whose notes still differ} or {"why", "at"} (nothing changed)."""
-    new_tempo = R.tempo_of(app.tempo, app.tempo_pane.base(), pl)
+    new_tempo = R.tempo_of(app.tempo, app.tempo_pane.base(), pl, app.ppq)
     if "why" in new_tempo:
         return new_tempo
     if app.notes_late:
@@ -309,6 +343,7 @@ def apply(app, pl, name, dry=False):
     ppq = app.ppq
     old_r = np.array(app.rendered[:, :6], np.int64)
     olds = rows_by_owner(old_r)
+    spots = None if dry else spots_of(app, pl, old_r)
     for i, k in kinds.items():  # (a shape after the bars whose notes hang on a grid from the song's start (spam
         if k == "after":         # Aligned, Chop "from the song's start", a Hz bass without tones...) and change when
             sh = app.shapes[i]   # moved: plain notes, moved, so it keeps its sound)
@@ -379,4 +414,5 @@ def apply(app, pl, name, dry=False):
     app.roll.show_playhead()
     app.tempo_changed()
     app.meter_changed()
+    app.tempo_pane.rebar_marks(spots, pl["a"], pl["new_b"])
     return got

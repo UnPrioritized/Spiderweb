@@ -113,17 +113,14 @@ def map_ticks(pl, ticks, ppq):
     """Old ticks -> new ticks (nearest tick; NumPy int64 for an array). Before the stretch unchanged, after it
     moved by the whole number of ticks the stretch grew."""
     t = np.asarray(ticks, np.int64)
-    out = t.copy()
-    a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
-    after = t >= b_t
-    out[after] = t[after] + (round(pl["new_b"] * ppq) - b_t)
-    on = (t >= a_t) & ~after
-    if on.any():
-        ta = np.array([round(r[0] * ppq) for r in pl["runs"]], np.int64)
-        tn = np.array([round(r[2] * ppq) for r in pl["runs"]], np.int64)
-        f = np.array([r[4] for r in pl["runs"]], float)
-        i = np.maximum(np.searchsorted(ta, t[on], "right") - 1, 0)
-        out[on] = tn[i] + np.rint((t[on] - ta[i]) * f[i]).astype(np.int64)
+    # (one pass: every piece (before, each run, after) its own start, new start and factor, found by halving)
+    b_t = round(pl["b"] * ppq)
+    starts = np.array([-2 ** 62] + [round(r[0] * ppq) for r in pl["runs"]] + [b_t], np.int64)
+    new0 = np.array([-2 ** 62] + [round(r[2] * ppq) for r in pl["runs"]] + [round(pl["new_b"] * ppq)], np.int64)
+    f = np.array([1.0] + [r[4] for r in pl["runs"]] + [1.0])
+    i = np.searchsorted(starts, t, "right") - 1
+    d = t - starts[i]
+    out = new0[i] + np.where(f[i] == 1.0, d, np.rint(d * f[i]).astype(np.int64))
     return int(out) if np.ndim(ticks) == 0 else out
 
 
@@ -200,9 +197,86 @@ def _scale_heard(p, pl):
         h["end"] = T.clamp_bpm(h["end"] * factor_at(pl, p[0]))
 
 
-def tempo_of(tempo, base, pl):
+def tempo_of(tempo, base, pl, ppq=None):
     """The new tempo line (a copy; the old one untouched) or {"why", "at"} when it can't keep the sound. base =
-    the project's BPM (before the first point)."""
+    the project's BPM (before the first point). ppq: the file's ticks known = each run's tempo nudged so its bars
+    end exactly when they did (nudge)."""
+    out = _tempo_of(tempo, base, pl)
+    if ppq and "why" not in out:
+        nudge(tempo, out, base, ppq, pl)
+    return out
+
+
+NUDGE_ROUNDS = 4  # (each round: every run's tempo scaled by how far off its bars' end still is)
+NUDGE_TICKS = 0.25  # (off by less than this share of a tick at the run's end: left as it is)
+
+
+def nudge(old, new, base, ppq, pl):
+    """The runs' tempo points (in place, in new) scaled a hair each so every run's bars END exactly when they did
+    (plan section 1: "the section's last step nudged so the bars stay in time"): curved parts step every Interval
+    ticks from their own start, so with more / fewer ticks (or a glide cut at an edge: its pieces step on their own)
+    they read the line elsewhere, and microseconds round. The first run also takes up what the cut glide before the
+    bars gained / lost; the part after the bars up to the next point (a glide cut at the end restarts its steps) is
+    nudged too, so nothing after drifts. Within a quarter tick: untouched (a held tempo usually is). Every part
+    worked out together once a round (a part's time only hangs on its own points). Returns how many were nudged."""
+    from notes.tempo_file import heard_tempo, seconds_at
+    pts = new["points"]
+    shift_t = round(pl["new_b"] * ppq) - round(pl["b"] * ppq)
+    # parts: (old end tick, new start tick, new end tick, first, last point index scaled)
+    parts, beats = [], [p[0] for p in pts]
+    for oa, ob, na, nb, _ in pl["runs"]:
+        parts.append([round(ob * ppq), round(na * ppq), round(nb * ppq), _owned(pts, beats, na, nb)])
+    nb = pl["new_b"]
+    after = [i for i, p in enumerate(pts) if p[0] > nb + EPS]
+    if after:  # (the part after the bars: the point leaving the end, up to the next point's beat)
+        nxt = pts[after[0]][0]
+        leave = [i for i, p in enumerate(pts) if abs(p[0] - nb) <= EPS][-1:]
+        if leave:
+            t1 = round(nxt * ppq)
+            parts.append([t1 - shift_t, round(nb * ppq), t1, leave])
+    if not parts:
+        return 0
+    end_o, end_n = max(p[0] for p in parts) + 1, max(p[2] for p in parts) + 1
+    ro = heard_tempo(old, base, ppq, end_o)
+    want = seconds_at(ro, ppq, np.array([p[0] for p in parts], np.int64)).tolist()  # (when each part must end)
+    n0s = np.array([p[1] for p in parts], np.int64)
+    n1s = np.array([p[2] for p in parts], np.int64)
+    nudged = set()
+    for _ in range(NUDGE_ROUNDS):
+        rn = heard_tempo(new, base, ppq, end_n)
+        s0, s1, s1b = (seconds_at(rn, ppq, x).tolist() for x in (n0s, n1s, n1s - 1))  # (all at once)
+        moves = []
+        for k, (o1, n0, n1, own) in enumerate(parts):
+            start = s0[k] if k == 0 or parts[k - 1][2] != n0 else want[k - 1]  # (earlier parts end as wanted)
+            got = s1[k] - s0[k]
+            need = want[k] - start
+            tick = s1[k] - s1b[k]
+            if abs(got - need) > NUDGE_TICKS * tick and need > 0 and own:
+                moves.append((k, got / need))
+        if not moves:
+            break
+        for k, s in moves:
+            for i in parts[k][3]:
+                pts[i][1] = T.clamp_bpm(pts[i][1] * s)
+            nudged.add(k)
+    return len(nudged)
+
+
+def _owned(pts, beats, na, nb):
+    """The indexes of a run's own points: inside it, the one leaving its start, the one arriving at its end (beats:
+    the points' beats, in order)."""
+    lo, hi = bisect.bisect_left(beats, na - EPS), bisect.bisect_right(beats, nb + EPS)
+    out = []
+    for i in range(lo, hi):
+        b = pts[i][0]
+        last_on = i + 1 >= len(pts) or abs(pts[i + 1][0] - b) > EPS
+        first_on = i == 0 or abs(pts[i - 1][0] - b) > EPS
+        if na + EPS < b < nb - EPS or abs(b - na) <= EPS and last_on or abs(b - nb) <= EPS and first_on \
+                and not last_on:
+            out.append(i)
+    return out
+
+def _tempo_of(tempo, base, pl):
     why = check(tempo, base, pl)
     if why:
         return why
