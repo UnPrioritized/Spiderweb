@@ -133,6 +133,7 @@ def joined(spans):
 
 DENSE_WAIT_MS = 300  # Keep timing notes too close: worked out this long after the tempo / notes stop changing
 REBAR_KINDS = ("rebar_dense", "rebar_cc", "rebar_round")  # (Change visual time signature's spots: TempoPane.rebar_marks)
+LIMIT_JOIN = 12  # px: limit spots (draw_limits) closer than this on screen = one band, one text
 DRAWS = {"line": "line", "formula": "formula"}  # pencil kind -> the curve the drawn part gets (bent by its handle)
 
 
@@ -3800,42 +3801,61 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
     def draw_limits(self, lines, kb, w, h, lw):
         """Short texts naming what the file can't do where Keep timing asks for it (user 2026-10-24): notes under a
         tick apart / a bar no time signature fits (red), CC messages moved a tick / bar lines written a little off
-        (orange). One text where a stretch
-        of such spots starts in view (the next one once past its end), a short mark on every spot; at the bottom,
-        at the top when a line runs through that place (below the signature marks when one is there)."""
+        (orange). Spots closer than LIMIT_JOIN px on screen = ONE BAND (user 2026-11-12: thousands of spots after a
+        dense Change visual time signature drew a text + mark each, piled up and lagged): a lone spot = a short mark
+        as before, a band = a bar along the bottom over its spots; one text where a band starts in view (the next
+        one once past its end); at the bottom, at the top when a line runs through that place (below the signature
+        marks when one is there). Red bars drawn over orange ones."""
         roll, s = self.app.roll, self.scale
         font = look.font(8, "bold")
         th = 13 * s  # (a text's height)
         sig_x = [roll.t2x(b) for b, _, _, _ in self.sig_marks()]
         taken = []  # (x0, x1, y0, y1) of the texts put
-        for kind, colour in (("dense", look.ERROR), ("unfit", look.ERROR), ("gave", look.WARN),
-                             ("moved", look.WARN), ("rebar_dense", look.ERROR), ("rebar_cc", look.WARN),
-                             ("rebar_round", look.WARN)):  # (bar lines written a little off: BAR CARRY-OVER, user)
-            spots = self.all_limits().get(kind) or []
-            lo = bisect.bisect_left(spots, roll.x2t(kb))
-            hi = bisect.bisect_right(spots, roll.x2t(w))
-            free_from = -math.inf
-            text = tr("tempo.limit_" + kind)
-            tw = tkfont.Font(font=font).measure(text)
-            for b in spots[lo:hi]:
-                x = roll.t2x(b)
+        lims = self.all_limits()
+        t0, t1 = roll.x2t(kb), roll.x2t(w)
+        texts = []
+        for kind, colour in (("gave", look.WARN), ("moved", look.WARN), ("rebar_cc", look.WARN),
+                             ("rebar_round", look.WARN), ("dense", look.ERROR), ("unfit", look.ERROR),
+                             ("rebar_dense", look.ERROR)):  # (bar lines written a little off: BAR CARRY-OVER, user)
+            spots = lims.get(kind) or []
+            lo = bisect.bisect_left(spots, t0)
+            hi = bisect.bisect_right(spots, t1)
+            if hi <= lo:
+                continue
+            xs = np.asarray(roll.t2x(np.asarray(spots[lo:hi], float)), float)
+            cut = np.flatnonzero(np.diff(xs) > LIMIT_JOIN * s) + 1  # (bands: spots close on screen joined)
+            for a, b in zip(np.concatenate([[0], cut]).tolist(), np.concatenate([cut, [len(xs)]]).tolist()):
+                xa, xb = float(xs[a]), float(xs[b - 1])
                 if kind != "dense":  # (dense spots have their orange dashed lines already)
-                    self.create_line(x, h - 8 * s, x, h, fill=colour, width=lw * 2, tags=("limit", "limit_" + kind))
-                if x < free_from:
-                    continue
-                x0, x1 = x + 3 * s, x + 3 * s + tw
-                free_from = x1 + 20 * s
-                low = any(self.crosses(lx, ly, x0, x1, h - th - 4 * s, h) for lx, ly in lines)
-                # (at the top: under the "Keep timing" words, lower still under a signature mark)
-                y = (2 * ROW * s + 12 * s if any(x0 - 4 * s <= sx <= x1 for sx in sig_x) else 24 * s) if low \
-                    else h - th - 2 * s
-                while any(a < x1 and x0 < b2 and abs(y - y0) < th for a, b2, y0, _ in taken):  # (texts don't overlap)
-                    y = y + th if low else y - th
-                taken.append((x0, x1, y, y + th))
-                self.create_rectangle(x0 - 2 * s, y, x1 + 2 * s, y + th, fill=look.ROLL_BG, outline="",
-                                      tags=("limit", "limit_" + kind))
-                self.create_text(x0, y + th / 2, text=text, anchor="w", fill=colour, font=font,
-                                 tags=("limit", "limit_" + kind))
+                    if xb - xa < 1:
+                        self.create_line(xa, h - 8 * s, xa, h, fill=colour, width=lw * 2,
+                                         tags=("limit", "limit_" + kind))
+                    else:
+                        self.create_rectangle(xa - lw, h - 8 * s, xb + lw, h, fill=colour, outline="",
+                                              tags=("limit", "limit_" + kind))
+                texts.append((kind, colour, max(xa, kb), xb - xa >= 1 and kind != "dense"))
+        tws = {}
+        free = {}
+        for kind, colour, x, band in sorted(texts, key=lambda t: t[2]):  # (the texts on top, left to right)
+            text = tr("tempo.limit_" + kind)
+            if kind not in tws:
+                tws[kind] = tkfont.Font(font=font).measure(text)
+            tw = tws[kind]
+            if x < free.get(kind, -math.inf):
+                continue
+            x0, x1 = x + 3 * s, x + 3 * s + tw
+            free[kind] = x1 + 20 * s
+            low = any(self.crosses(lx, ly, x0, x1, h - th - 4 * s, h) for lx, ly in lines)
+            # (at the top: under the "Keep timing" words, lower still under a signature mark)
+            y = (2 * ROW * s + 12 * s if any(x0 - 4 * s <= sx <= x1 for sx in sig_x) else 24 * s) if low \
+                else h - th - (10 if band else 2) * s  # (a band's text above its bar, a lone mark's as before)
+            while any(a < x1 and x0 < b2 and abs(y - y0) < th for a, b2, y0, _ in taken):  # (texts don't overlap)
+                y = y + th if low else y - th
+            taken.append((x0, x1, y, y + th))
+            self.create_rectangle(x0 - 2 * s, y, x1 + 2 * s, y + th, fill=look.ROLL_BG, outline="",
+                                  tags=("limit", "limit_" + kind))
+            self.create_text(x0, y + th / 2, text=text, anchor="w", fill=colour, font=font,
+                             tags=("limit", "limit_" + kind))
 
     @staticmethod
     def crosses(lx, ly, x0, x1, y0, y1):
