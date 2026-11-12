@@ -124,6 +124,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_fine.py       Hz bass: made on the file's finer ticks in Keep timing parts (the export)
     fonts.py         letter outlines from the fonts installed in Windows
     fonts_ft.py      the same on Linux (fontconfig + FreeType)
+    fonts_hb.py      the same on a Mac (font files read by uharfbuzz; untested)
     shaping.py       joined letters + right-to-left order for the Text tool (optional uharfbuzz + python-bidi)
     poly_union.py    one outline of polygons laid over each other (Turn into custom shape: joined letters)
     funnel.py        funnels: curves, note grid, gates

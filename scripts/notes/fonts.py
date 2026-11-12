@@ -8,7 +8,8 @@ which is what the nonzero fill rule needs.
 Letters the font doesn't have come from another installed font that has them (like Windows' own programs do): the
 fonts Windows lists as stand-ins for this one, then BACKUPS. Not for symbol fonts (their letters ARE other pictures).
 
-Elsewhere (Linux) Font is fonts_ft.FtFont: the same, read with fontconfig + FreeType. Untested under WINE
+Elsewhere (Linux) Font is fonts_ft.FtFont: the same, read with fontconfig + FreeType; on a Mac with the joining
+package, fonts_hb.HbFont (font files read by uharfbuzz; untested). Untested under WINE
 (system.WINE: its own GDI and fonts; a missing font takes the usual missing-font way).
 """
 
@@ -17,7 +18,7 @@ import ctypes
 import struct
 
 from files.lang import tr
-from files.system import WINDOWS, wintypes
+from files.system import MAC, WINDOWS, wintypes
 
 EM = 2048  # the font is asked for at this many units per em (fine enough for any size)
 # where letters a font lacks are looked for, after the ones Windows lists for that font (first that has it wins)
@@ -337,9 +338,22 @@ def _parse(raw):
     return contours
 
 
-if WINDOWS:
+def _font_files():
+    """A Mac with the joining package reads the font files itself (fonts_hb; untested). Tests force it anywhere
+    with SPIDERWEB_FONTS=hb."""
+    import importlib.util
+    import os
+    forced = os.environ.get("SPIDERWEB_FONTS") == "hb"
+    return (MAC or forced) and importlib.util.find_spec("uharfbuzz") is not None
+
+
+FROM_FILES = _font_files()
+if FROM_FILES:
+    from notes.fonts_hb import HbFont as Font, default_family
+    DEFAULT_FONT = default_family()
+elif WINDOWS:
     DEFAULT_FONT = "Arial"  # new texts, and a text whose font isn't installed once it's edited
-else:
+else:  # (Linux; a Mac without the joining package too, as before)
     from notes.fonts_ft import FtFont as Font, default_family
     DEFAULT_FONT = default_family()
 
@@ -381,5 +395,8 @@ def backup_font(font, ch):
 
 def font_families(root):
     """Installed font family names, sorted (vertical "@" variants left out)."""
+    if FROM_FILES:  # (the fonts the font files hold: the ones the text tool can read)
+        from notes import fonts_hb
+        return fonts_hb.families()
     from tkinter import font as tkfont
     return sorted({f for f in tkfont.families(root) if not f.startswith("@")}, key=str.lower)
