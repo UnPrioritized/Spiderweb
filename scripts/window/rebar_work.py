@@ -11,11 +11,13 @@ Shapes (user 2026-11-12):
 A mask that isn't wholly before / after / inside one run: refused (its notes elsewhere would change)."""
 
 import copy
+import json
 import math
 
 import numpy as np
 
 from notes import rebar as R
+from notes.tempo import changed as tempo_changed_now
 from notes.custom import notes_shape, unpack_notes, block_shift
 from notes.engine import pasted_notes
 from notes.hz_settings import stretched_hz
@@ -368,7 +370,25 @@ def spots_of(app, pl, old_r):
 
 def apply(app, pl, name, dry=False, dense=True):
     """The change done on the project in one undo step: {"ok": True, "plain": shapes made plain notes by the safety
-    net, "cut": shapes cut at the edges, "off": shapes whose notes still differ} or {"why", "at"} (nothing changed)."""
+    net, "cut": shapes cut at the edges, "off": shapes whose notes still differ} or {"why", "at"} (nothing changed).
+    dry: a test run (OK first, user 2026-11-12) taken back from its OWN copy, never through undo / redo, so Cancel
+    leaves the History, Ctrl+Y, a half-drawn shape and the tool windows' tries exactly as they were."""
+    if not dry:
+        return _apply(app, pl, name, False, dense)
+    kept = (list(app.shapes), json.dumps(app.tempo))
+    try:
+        return _apply(app, pl, name, True, dense)
+    finally:
+        if (len(app.shapes) != len(kept[0]) or any(a is not b for a, b in zip(app.shapes, kept[0]))
+                or json.dumps(app.tempo) != kept[1]):
+            app.shapes[:] = kept[0]
+            app.tempo.clear()
+            app.tempo.update(json.loads(kept[1]))
+            tempo_changed_now()
+            app.shapes_changed(now=True)
+
+
+def _apply(app, pl, name, dry, dense):
     new_tempo = R.tempo_of(app.tempo, app.tempo_pane.base(), pl, app.ppq)
     if "why" in new_tempo:
         return new_tempo
@@ -396,10 +416,12 @@ def apply(app, pl, name, dry=False, dense=True):
     loose = [i for i, k in kinds.items() if k == "cut" or isinstance(k, tuple)]
     plains = app.plain_copies(set(loose)) if loose else {}  # (as they sound now: the cut pieces + the net's way back)
     bases = {i: base_of(app, i, plains.get(i), pl) for i in loose}
-    from window import track_tempo
-    track_tempo.visual(app)
-    app.roll.end_typing()
-    app.push_undo(name=name)
+    if not dry:
+        from window import track_tempo
+        track_tempo.visual(app)
+        app.roll.end_typing()
+        app.roll.cancel_draft()  # (a half-drawn shape goes, as with undo: the shapes change under it)
+        app.push_undo(name=name)
     shapes, extra, cut = list(app.shapes), [], 0
     was_plain = {i: not becomes_plain(sh) for i, sh in enumerate(app.shapes)}
     for i, k in kinds.items():
@@ -416,7 +438,9 @@ def apply(app, pl, name, dry=False, dense=True):
     app.shapes[:] = shapes + extra
     app.tempo.clear()
     app.tempo.update(new_tempo)
-    app.select_many([], None)
+    tempo_changed_now()
+    if not dry:  # (a test run only adds shapes at the end: the picks still point at the same ones)
+        app.select_many([], None)
     app.shapes_changed(now=True)
     # the safety net: a stretched shape whose notes aren't the old ones moved = plain notes, cut and moved
     news = rows_by_owner(np.array(app.rendered[:, :6], np.int64))
@@ -446,10 +470,7 @@ def apply(app, pl, name, dry=False, dense=True):
         if not was_plain[i] and (r != "net" or i in back):
             whys[r] = whys.get(r, 0) + 1
     got = {"ok": True, "plain": plain_n, "cut": cut, "off": off, "whys": whys, "dense": dense_n}
-    if dry:  # (a test run: everything back as it was, no step left behind)
-        app.undo()
-        app.redo_stack.pop()
-        app.sync_history()
+    if dry:  # (a test run: put back by apply)
         return got
     app.playhead = max(0.0, R.map_beat(pl, app.playhead))  # (on the same music)
     app.roll.show_playhead()
