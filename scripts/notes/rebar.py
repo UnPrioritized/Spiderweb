@@ -212,10 +212,12 @@ def tempo_of(tempo, base, pl):
     edges = _edges(pl)
     for x in edges:  # (the line cut at each edge, looking the same: split_at)
         T.split_at(pts, x, base, beats)
+    arrivals = []
     for x in edges:
         fl, fr = factor_at(pl, x, -1), factor_at(pl, x, 1)
         if abs(fl - fr) > EPS:
             arrive, leave = _pair(pts, x, beats)
+            arrivals.append(arrive)
             arrive[1] *= fl
             leave[1] *= fr
             arrive[0] = leave[0] = x
@@ -230,6 +232,12 @@ def tempo_of(tempo, base, pl):
         _scale_heard(p, pl)
         p[0] = map_beat(pl, p[0])
         p[1] = T.clamp_bpm(p[1])
+    place = {id(p): i for i, p in enumerate(pts)} if arrivals else {}
+    for arrive in arrivals:  # (a curved part arriving at its own BPM is flat: held, so the arrival can go and it
+        k = place[id(arrive)]  # never glides on to the leaving point instead)
+        prev = pts[k - 1] if k > 0 else None
+        if prev is not None and prev[2] != "hold" and abs(prev[1] - arrive[1]) <= 1e-12 * arrive[1]:
+            prev[2] = "hold"
     T.drop_loose(pts)
     for c in out["catch"]:
         c[0] = map_beat(pl, c[0])
