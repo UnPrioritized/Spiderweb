@@ -35,6 +35,12 @@ Spam text can be a Hz bass too: one tone for all the letters, and the text keeps
 
 Letters the font doesn't have are taken from another font. If no font on the PC has a letter, the status line says so.
 
+Arabic, Persian, Urdu and Hebrew are written right to left, with their letters joined where they should be. Hindi, Thai and other scripts with joined letters come out joined too. A line that mixes them with English words or numbers puts each part in its usual order.
+
+In right-to-left text the arrow keys follow the reading order, and one press moves past a whole letter with its marks. Letter turn and Flip letters turn each joined piece (a word, or the part up to a letter that doesn't join) as one, so the joins stay. Split into letters keeps each letter's joined shape. Player down always uses separate letters.
+
+Running Spiderweb from its source files, this needs two free packages, uharfbuzz and python-bidi: Spiderweb offers to install them once. Without them the letters aren't joined and right-to-left text runs left to right.
+
 Click a text with the Text tool (or double-click it with Select, or right-click → Edit text) to retype it. Drag, Shift+arrows, double-click (a word) or Ctrl+A select letters; Ctrl+C / X / V copy, cut and paste them (with no letters selected, Ctrl+C copies the whole shape).
 
 Right-click → Split into letters: every letter becomes its own text, right where it was, with the same notes (spaces go). If letters overlap, or the text has Claw, Chop or a Gate range (they then work on each letter alone), some notes change and the status line says so. All of them stay selected, so you can move, turn or flip each one, or click one to retype it.

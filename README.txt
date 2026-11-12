@@ -18,7 +18,8 @@ https://github.com/UnPrioritized/Spiderweb
 What it can do
 --------------
 - Draw: lines, polylines, freehand strokes, curves, arcs, circles, polygons,
-  stars, funnels, glissando runs, text, and shapes you draw yourself.
+  stars, funnels, glissando runs, text (any font; Arabic, Hebrew and the
+  like right to left, joined scripts joined), and shapes you draw yourself.
 - Fill: shapes with notes, one long note per key or chopped into notes of
   any length (spam). Inside fills can be smaller copies of the shape
   (Nested), another shape repeated like wallpaper (Tiles), or rings
