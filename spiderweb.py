@@ -149,6 +149,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     loaded.py        a loaded MIDI file (Load MIDI): the loading pass's results, run on several cores
     tempo_file.py    the tempo line in a MIDI file: Keep timing moves notes exactly, bar lines fitted, warnings
     melody.py        Fill with tempo jumps: where the jumps go (melody note starts, rests, snap steps)
+    rebar.py         Change visual time signature: bars + tempo stretched together, the same sound
     fx.py            a shape's Claw machine / Strum / Chop pages in order, flips and velocities after them
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
     picture.py       image to notes: a picture file -> a grid of up to 16 colours (picking, blending, details)
