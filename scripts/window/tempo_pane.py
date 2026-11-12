@@ -2446,6 +2446,9 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             if menu.index("end") is not None:
                 menu.add_separator()
         on_mark = item is None and self.sig_menu_items(menu, e)  # (time / key signatures: Add here, or the mark's)
+        if not on_mark and item is None and self.bands and self.in_band(e.x) and self.box.mode == "visual":
+            sep()  # (Change visual time signature: only from a kept Select box, user 2026-11-12)
+            self.rebar_item(menu)
         zone = self.zone_at(e.x) if item is None and not on_mark else None
         if not on_mark and self.box.mode == "visual" and zone is None:  # (catch-ups: the visual tempo's only; never
             sep()                                                       # inside another one's area, user)

@@ -11,7 +11,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr, trn
-from notes.meter import BOTTOMS, TOPS, at_beat, bar_at, bar_line, key_name, on_bars, sig_text, sigs_of
+from notes.meter import BOTTOMS, TOPS, at_beat, bar_at, bar_line, key_name, on_bars, sig_text, sigs_of, where
 from window import look
 
 MARK_LEN = 10  # px (x the window's scale): a mark's line down from the pane's top edge
@@ -106,6 +106,81 @@ def ask_key_sig(parent, sharps, minor):
     return _dialog(parent, tr("conductor.key_sig_title"), body)
 
 
+def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of):
+    """Change visual time signature's box (user 2026-11-12): the new signature for the bars lo..hi grow to, with
+    which bars and what the tempo becomes shown as it's typed. bpm_at(beat) = the tempo there; why_of(plan) = a
+    refusal text or None. The plan (rebar.plan) to do, or None (cancelled)."""
+    from notes import rebar as R
+    now = at_beat(sigs, bar_line(sigs, lo))
+
+    def body(f):
+        t, b = tk.StringVar(value=str(now[1])), tk.StringVar(value=str(now[2]))
+        ttk.Label(f, text=tr("conductor.rebar_sig")).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 6))
+        e = ttk.Spinbox(f, from_=TOPS[0], to=TOPS[1], textvariable=t, width=5)
+        e.grid(row=1, column=0)
+        ttk.Label(f, text="/").grid(row=1, column=1, padx=4)
+        ttk.Combobox(f, values=[str(v) for v in BOTTOMS], textvariable=b, state="readonly", width=5).grid(row=1,
+                                                                                                          column=2)
+        where = ttk.Label(f, text="")
+        where.grid(row=2, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        bpm = ttk.Label(f, text="")
+        bpm.grid(row=3, column=0, columnspan=3, sticky="w")
+        ttk.Label(f, text=tr("conductor.rebar_tip"), foreground=look.HINT, wraplength=300 * look.WIDE,
+                  justify="left").grid(row=4, column=0, columnspan=3, sticky="w", pady=(8, 0))
+        hint = ttk.Label(f, text="", foreground=look.WARN, wraplength=300 * look.WIDE, justify="left")
+        hint.grid(row=5, column=0, columnspan=3, sticky="w", pady=(6, 0))
+
+        def top():
+            try:
+                n = int(t.get().strip())
+            except ValueError:
+                return None
+            return n if TOPS[0] <= n <= TOPS[1] else None
+
+        def plan():
+            n = top()
+            return None if n is None else R.plan(sigs, lo, hi, n, int(b.get()))
+
+        def show(*_):
+            pl = plan()
+            if pl is None:
+                return
+            first, last = pl["bars"][0] + 1, pl["bars"][1] + 1
+            where.config(text=trn("conductor.rebar_bars", pl["count"], first=first, last=last))
+            fs = [r[4] for r in pl["runs"]]
+            if len(fs) == 1:
+                old = bpm_at(pl["a"])
+                bpm.config(text=tr("conductor.rebar_bpm", old=f"{old:g}", new=f"{old * fs[0]:.6g}"))
+            else:
+                bpm.config(text=tr("conductor.rebar_times", times=", ".join(f"{f:.4g}" for f in fs)))
+            hint.config(text="")
+        t.trace_add("write", show)
+        b.trace_add("write", show)
+        show()
+        e.focus_set()
+        e.selection_range(0, "end")
+
+        def get():
+            pl = plan()
+            if pl is None:
+                hint.config(text=tr("conductor.top_range", lo=TOPS[0], hi=TOPS[1]))
+                t.set(str(now[1]))
+                e.focus_set()
+                e.selection_range(0, "end")
+                return None
+            if all(abs(r[4] - 1) < 1e-12 for r in pl["runs"]) and all(
+                    at_beat(sigs, s)[1:] == pl["sig"] for s, _ in R.old_bars(sigs, pl["a"], pl["b"])):
+                hint.config(text=tr("conductor.rebar_same"))
+                return None
+            why = why_of(pl)
+            if why:
+                hint.config(text=why)
+                return None
+            return pl
+        return get
+    return _dialog(parent, tr("conductor.rebar_title"), body)
+
+
 def _accidentals(s):
     return tr("conductor.no_accidentals") if s == 0 else (trn("conductor.sharps", s, n=s) if s > 0
                                                           else trn("conductor.flats", -s, n=-s))
@@ -164,6 +239,60 @@ class ConductorMarks:
         menu.add_command(label=tr("conductor.add_time"), command=lambda: self.edit_time_sig(max(0.0, beat)))
         menu.add_command(label=tr("conductor.add_key"), command=lambda: self.edit_key_sig(max(0.0, beat)))
         return False
+
+    def rebar_item(self, menu):
+        """The right-click menu's "Change visual time signature…" (inside a kept Select box; user 2026-11-12: only
+        from the Conductor pane's box). Greyed with a loaded MIDI holding notes after the box's start; the status
+        line says why while it's pointed at."""
+        lo, hi = self.bands_reach()
+        lm = self.app.loaded
+        busy = lm is not None and lm.notes and lm.end / lm.ppq > bar_line(sigs_of(self.app.tempo), lo) + 1e-9
+        menu.add_command(label=tr("conductor.rebar"), command=lambda: self.rebar(lo, hi),
+                         state="disabled" if busy else "normal")
+        if busy:
+            k = menu.index("end")
+
+            def said(e):
+                try:
+                    on = menu.index("active") == k
+                except tk.TclError:
+                    on = False
+                if on:
+                    self.app.status.config(text=tr("conductor.rebar_loaded"))
+            menu.bind("<<MenuSelect>>", said, add="+")
+
+    def rebar_why(self, got):
+        """A refusal ({"why", "at"}) as the text the box / status line shows."""
+        bar = where(sigs_of(self.app.tempo), max(0.0, got["at"]))[0] + 1
+        return tr("conductor.rebar_why_" + got["why"], bar=bar)
+
+    def rebar(self, lo, hi):
+        """Change visual time signature on the bars lo..hi grow to (asked in a small box; one undo step)."""
+        from notes import rebar as R
+        from notes.tempo import drawn_bpm
+        from window import rebar_work
+        tempo, base = self.app.tempo, self.base()
+
+        def why_of(pl):
+            got = R.tempo_of(tempo, base, pl)
+            return self.rebar_why(got) if "why" in got else None
+        pl = ask_rebar(self, sigs_of(tempo), lo, hi, lambda b: round(float(drawn_bpm(tempo, base, [b])[0]), 3),
+                       why_of)
+        if pl is None:
+            return
+        got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"))
+        if "why" in got:
+            self.app.status.config(text=self.rebar_why(got))
+            return
+        self.bands = []
+        first, last = pl["bars"][0] + 1, pl["bars"][1] + 1
+        text = tr("conductor.rebar_done", bars=trn("conductor.rebar_bars", pl["count"], first=first, last=last),
+                  sig=sig_text(pl["sig"]))
+        n = got["cut"] + got["plain"]
+        if n:
+            text += " " + trn("conductor.rebar_plain", n, n=n)
+        self.app.status.config(text=text)
+        self.request_redraw()
 
     def edit_time_sig(self, beat):
         """Add / change the time signature on the bar line at or before beat (asked in a small box)."""
