@@ -36,13 +36,19 @@ def _big_texts(sh):
     return got
 
 
+class StateText(str):
+    """undo_state's JSON (no big texts in it): as_state hands it back as it is (it read a long text's JSON back
+    and wrote it out again twice per step)."""
+    __slots__ = ()
+
+
 def undo_state(shapes):
     """The shapes as an undo step keeps them: their JSON, or with big texts (JSON, the texts) where the JSON has
     a mark in each one's place. The texts are the shapes' own strings, shared, never copied (a 4 M-note paste is
     60 MB: every step copying it ran out of memory). Equal states = equal shapes."""
     places = [p for sh in shapes for p in _big_texts(sh)]
     if not places:
-        return json.dumps(shapes)
+        return StateText(json.dumps(shapes))
     texts = tuple(d[k] for d, k in places)
     for i, (d, k) in enumerate(places):
         d[k] = BIG_MARK + str(i)
@@ -56,7 +62,7 @@ def undo_state(shapes):
 def as_state(state, shapes):
     """A state given as plain JSON (json.dumps of the shapes, made by a tool window) -> undo_state's, its big
     texts swapped for the same ones in shapes (shared, not kept twice)."""
-    if not isinstance(state, str) or len(state) <= BIG_TEXT:
+    if not isinstance(state, str) or len(state) <= BIG_TEXT or isinstance(state, StateText):
         return state
     got = undo_state(json.loads(state))
     if isinstance(got, str):
