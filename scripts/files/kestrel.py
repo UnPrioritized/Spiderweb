@@ -217,7 +217,9 @@ def load():
                             ("kb_longest_release", [p, ctypes.POINTER(_Options)], ctypes.c_double),  # (0.8.0 on)
                             # (Kestrel's own output stage for Rendered ahead's joined sound, connector 0.7.0 on)
                             ("kb_stage_new", [ctypes.POINTER(_Options)], p), ("kb_stage_latency", [p], u32),
-                            ("kb_stage_process", [p, p, u32], None), ("kb_stage_free", [p], None)):
+                            ("kb_stage_process", [p, p, u32], None), ("kb_stage_free", [p], None),
+                            # (31-EDO's channel tunings, connector 0.10.0 on: KestrelOut.tune)
+                            ("kb_tune", [p, u32, u32, ctypes.c_int32], None)):
         fn = getattr(d, name, None)
         if fn is not None:
             fn.argtypes, fn.restype = args, res
@@ -717,6 +719,17 @@ class Kestrel:
         if self.handle:
             self.dll.kb_cancel(self.handle)
 
+    def tune(self, tunings):
+        """[(channel 0-255, 12 cents)] (playback.edo_tuning): each note name of each channel tuned from the next block
+        on (31-EDO). False: the connector is too old (no kb_tune)."""
+        fn = getattr(self.dll, "kb_tune", None)
+        if fn is None or not self.handle:
+            return False
+        for ch, cents in tunings:
+            for pc, c in enumerate(cents):
+                fn(self.handle, int(ch), pc, int(round(c * 2048)))
+        return True
+
     def cut(self, frame):
         """What push_copies sent from frame on taken back (never sound already made): the frame it was taken back
         from, or None (the connector didn't answer: nothing taken back)."""
@@ -827,6 +840,11 @@ class KestrelOut:
     def send(self, msg):
         self.send_at(msg, time.perf_counter())
         self.flush(everything=True)
+
+    def tune(self, tunings):
+        """31-EDO's channels tuned (Kestrel.tune; playback.MidiOut.tune_edo), messages waiting flushed first."""
+        self.flush(everything=True)
+        return self.k.tune(tunings)
 
     def send_at(self, msg, when, length=None):
         """msg sounds at perf_counter time `when`; length = a note-on's length in seconds (None: not known)."""

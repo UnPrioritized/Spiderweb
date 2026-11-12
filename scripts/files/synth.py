@@ -68,6 +68,7 @@ WARM_MS = 500  # warm_piano: the start of every piano sound loaded ahead (hunt 2
 # disk hadn't read took 0.8 s and 22 MB, and the first play then lost no sound)
 _EV_END, _EV_NOTE, _EV_PROGRAM, _EV_PITCH, _EV_DRUMS, _EV_TEMPO = 0, 1, 2, 4, 6, 62
 _EV_PITCHRANGE = 5
+_EV_SCALETUNING = 63  # (31-EDO's channels: Live.tune)
 MOST_CHANNELS = 128  # a BASSMIDI stream's most channels (measured 2026-10-21: 129+ refused, error 20; an event
 # list's notes past 127 silent)
 STREAM_PORTS = MOST_CHANNELS // 16  # ports (16 channels each) the Hz preview's stream has
@@ -78,6 +79,12 @@ LIVE_DRUMS = 127  # Live's last channel (past 31-EDO's): drums, for a loaded MID
 LIVE_DRUMS_CODE = (LIVE_DRUMS >> 4) << 24 | LIVE_DRUMS & 15  # (Live.send's channel part: group << 24 | channel)
 # the control changes a Hz bass's CC lines send (hz_cc.py) as BASSMIDI's own events: Volume, Pan, Expression, Cutoff
 _EV_CC = {7: 12, 10: 13, 11: 14, 74: 25}
+# + every other controller BASSMIDI has an event for (a loaded MIDI's in 31-EDO, PLAN.md 2026-11-13: its channels
+# past 16 take events, not raw messages): bank, modulation, portamento, sustain, sostenuto, soft, sound controllers,
+# vibrato, reverb, chorus, sounds / controllers / notes off
+_EV_CC.update({0: 10, 1: 11, 5: 20, 32: 70, 64: 15, 65: 19, 66: 76, 67: 60, 71: 26, 72: 27, 73: 28, 75: 29,
+               76: 80, 77: 81, 78: 82, 84: 21, 91: 23, 93: 24, 120: 16, 121: 17, 123: 18})
+_EV_CHANPRES, _EV_KEYPRES = 3, 71
 _EVENTS_RAW, _EVENTS_CANCEL = 0x10000, 0x4000000
 
 EVENT = np.dtype([("event", "<u4"), ("param", "<u4"), ("chan", "<u4"), ("tick", "<u4"), ("pos", "<u4")])
@@ -191,6 +198,12 @@ def cc_events(messages):
     for tick, status, one, two, ch in messages:
         if status == 0xE0:
             out.append((_EV_PITCH, one | two << 7, ch, tick, 0))
+        elif status == 0xC0:
+            out.append((_EV_PROGRAM, one, ch, tick, 0))
+        elif status == 0xD0:
+            out.append((_EV_CHANPRES, one, ch, tick, 0))
+        elif status == 0xA0:
+            out.append((_EV_KEYPRES, one | two << 8, ch, tick, 0))
         elif status == 0xB0 and one in _EV_CC:
             out.append((_EV_CC[one], two, ch, tick, 0))
         elif status == 0xB0 and one in (101, 100):
@@ -979,8 +992,8 @@ class _Limited:
 
 class Live(_Limited):
     """A BASSMIDI stream with LIVE_CHANNELS channels (0-15 as on any GM synth, but 10 is a piano too; 16-95 =
-    ports 2-6's channels, 16 each, for a Hz bass's own channel per note; 96-126 = 31-EDO's steps, each
-    pitch-bent once here, playback.EDO_BENDS) that sounds each message the moment it's sent, set up like the
+    ports 2-6's channels, 16 each, for a Hz bass's own channel per note; 96-114 = 31-EDO's, each retuned once
+    here, playback.edo_tuning) that sounds each message the moment it's sent, set up like the
     common BASSMIDI MIDI-out driver (user, 2026-10-07: Player's Limiter + Python feeding the sound pumped and stuttered next to it): BASS plays the stream itself, straight into the sound device's mix (no
     Python in the sound thread, so a busy window can't starve it), full volume and no limiter (too loud = clipped,
     as there), linear sample interpolation, notes killed rather than faded at the voice limit, voices dropped
@@ -1028,10 +1041,9 @@ class Live(_Limited):
             midi.BASS_MIDI_StreamEvent(h, LIVE_DRUMS, _EV_DRUMS, 1)
         synth._load_samples(h)  # (program 0: no wait at the first notes; one stream at a time, see _load_samples)
         self._rpn = {}  # (channel past 16, CC 101 / 100: the bend range being set, send)
-        if not plain:
-            from files.playback import edo_bends
-            for msg in edo_bends():
-                self.send(msg)
+        if not plain:  # (31-EDO's own channels, used by nothing else: tuned whether it's on or not)
+            from files.playback import edo_tuning
+            self.tune(edo_tuning())
         if not plain and not bass.BASS_ChannelPlay(h, 0):
             err = bass.BASS_ErrorGetCode()
             self.close()
@@ -1045,7 +1057,7 @@ class Live(_Limited):
         """One short MIDI message (status | data1 << 8 | data2 << 16, as a MIDI-out device takes it; channels past 16:
         + its group of 16's number << 24 (= its port), the status naming the channel within it). Those go one event
         at a time naming the channel: raw messages with the group added to the mode all land on the group's FIRST
-        channel (measured 2026-10-10). Only note on / off, pitch bend, the CCs in _EV_CC and the bend range (RPN 0)
+        channel (measured 2026-10-10). Only note on / off, pitch bend, programs, pressure, the CCs in _EV_CC and the bend range (RPN 0)
         are sent there."""
         if not self.handle:
             return
@@ -1058,12 +1070,28 @@ class Live(_Limited):
             event(self.handle, ch, _EV_PITCH, a | b << 7)
         elif kind in (0x80, 0x90):
             event(self.handle, ch, _EV_NOTE, a | (b << 8 if kind == 0x90 else 0))
+        elif kind == 0xC0:  # (a loaded MIDI's in 31-EDO: its instruments loaded before playing, App.edo_preload)
+            event(self.handle, ch, _EV_PROGRAM, a)
+        elif kind == 0xD0:
+            event(self.handle, ch, _EV_CHANPRES, a)
+        elif kind == 0xA0:
+            event(self.handle, ch, _EV_KEYPRES, a | b << 8)
         elif kind == 0xB0 and a in _EV_CC:
             event(self.handle, ch, _EV_CC[a], b)
         elif kind == 0xB0 and a in (101, 100):
             self._rpn[ch, a] = b
         elif kind == 0xB0 and a == 6 and self._rpn.get((ch, 101)) == 0 and self._rpn.get((ch, 100)) == 0:
             event(self.handle, ch, _EV_PITCHRANGE, b)
+
+    def tune(self, tunings):
+        """[(channel, 12 cents)] (playback.edo_tuning): the tuning of each of a channel's 12 note names (scale/octave
+        tuning, +-100 cents)."""
+        if not self.handle:
+            return
+        event = self.synth.midi.BASS_MIDI_StreamEvent
+        for ch, cents in tunings:
+            for n, c in enumerate(cents):
+                event(self.handle, ch, _EV_SCALETUNING, max(0, min(16383, int(round(8192 + c * 8192 / 100)))) | n << 16)
 
     def send_raw(self, at, size):
         """size bytes of raw MIDI messages at address at (each with its status byte; channels 1-16) in one go."""

@@ -2316,7 +2316,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def edo_loaded(self, device=None):
         """True when the loaded MIDI is played in 31-EDO, forced (user 2026-11-10): its notes go out as rows, like
-        Spiderweb's own, on the tuned channels (one piano sound; its bends, instruments and controllers left out).
+        Spiderweb's own, on the tuned channels, its bends, instruments and controllers along (edo_loaded_events).
         device = the MIDI out to plan for (None: the one picked). Past EDO_MOST notes: played as written."""
         return self.edo_loaded_wanted(device) and self.loaded.notes <= self.edo_most()
 
@@ -2339,6 +2339,19 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return edo_rows(self.loaded, self.track_list.loaded_mutes(), self.ppq)
         except Exception:  # (a file that changed / went: plays nothing of it, said when drawing / exporting)
             errors.write_log(*sys.exc_info(), "(a loaded MIDI's notes for 31-EDO)")
+            return None
+
+    def edo_loaded_events(self, device=None):
+        """The loaded MIDI's instrument / controller / bend changes as play_apart's messages while edo_loaded
+        (notes.loaded.edo_events; PLAN.md 2026-11-13), {} when it has none, None when not edo_loaded or too many to
+        keep (then left out, edo_left_text says so)."""
+        if not self.edo_loaded(device):
+            return None
+        from notes.loaded import edo_events
+        try:
+            return edo_events(self.loaded, self.track_list.loaded_mutes(), self.ppq)
+        except Exception:  # (as edo_loaded_rows)
+            errors.write_log(*sys.exc_info(), "(a loaded MIDI's controllers for 31-EDO)")
             return None
 
     def edo_loaded_tidy(self):

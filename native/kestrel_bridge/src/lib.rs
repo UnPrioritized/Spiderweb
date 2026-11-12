@@ -227,6 +227,9 @@ struct Inbox {
     cut: Option<(u64, u64)>,
     cut_done: (u64, u64),
     cuts: u64,
+    /// kb_tune: (channel, pitch class, offset in 1/2048 cents) waiting for the render thread's next block (31-EDO's
+    /// channels: Spiderweb's playback.edo_tuning)
+    tunes: Vec<(u8, u8, i32)>,
 }
 
 struct Shared {
@@ -680,6 +683,12 @@ impl Synth {
         inbox.cancels += 1;
     }
 
+    /// A channel's pitch class tuned `units` (1/2048 cents) from the next block on (scale/octave tuning; any size:
+    /// Kestrel keeps the whole offset).
+    pub fn tune(&self, ch: u8, pc: u8, units: i32) {
+        self.shared.inbox.lock().unwrap().tunes.push((ch, pc % 12, units));
+    }
+
     /// Tests: note-ons a block fixed at `allow` (0 = learned again), the voice cap at Max voices: the choice and
     /// merging measured with no real-time timing in it.
     pub fn fix_allowance(&self, allow: u32, merge: bool) {
@@ -847,6 +856,10 @@ fn render_loop(s: &Shared, mut driver: Driver, mut synth: GpuSynth, block: u32, 
                 budget.restart();
             }
             future.extend(inbox.batches.drain(..));
+            for (ch, pc, units) in inbox.tunes.drain(..) {
+                // (at the block's start, before its notes)
+                driver.push_scaled(end - block as u64, Event::Tune { ch, pc, units }, 1.0);
+            }
             if let Some((id, frame)) = inbox.cut.take() {
                 // (blocks before this one are made: never taken back)
                 let from = frame.max(end - block as u64);
@@ -1115,7 +1128,7 @@ fn guard<T>(fallback: T, f: impl FnOnce() -> T) -> T {
 /// "bridge version; Kestrel version + where it came from".
 #[no_mangle]
 pub extern "C" fn kb_version() -> *const c_char {
-    static V: &CStr = c"0.9.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 547e634)";
+    static V: &CStr = c"0.10.0; Kestrel 1.4.0 (mbms0/kestrel-midi 844b002 moved onto 1.4.0 + Spiderweb's changes UnPrioritized/kestrel-midi 547e634)";
     V.as_ptr()
 }
 
@@ -1415,6 +1428,14 @@ pub unsafe extern "C" fn kb_push_copies(
             copies,
         )
     })
+}
+
+/// Channel `ch` (0-255)'s pitch class `pc` (0-11) tuned `units` 1/2048 cents from the next block on (31-EDO).
+#[no_mangle]
+pub unsafe extern "C" fn kb_tune(h: *const Synth, ch: u32, pc: u32, units: i32) {
+    if !h.is_null() {
+        guard((), || (*h).tune(ch as u8, pc as u8, units))
+    }
 }
 
 #[no_mangle]

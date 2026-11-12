@@ -647,7 +647,8 @@ EDO_MOST = 4_000_000  # notes a loaded MIDI may have to be played in 31-EDO (edo
 
 def edo_notes(lm):
     """Every note of lm as (track, start, end, key, channel, velocity) arrays, for playing it in 31-EDO (user
-    2026-11-10: forced, one piano sound): removed tracks and Extract's hidden notes left out, keys up to 255.
+    2026-11-10: forced; its instruments / controllers too since 2026-11-13: edo_events): removed tracks and
+    Extract's hidden notes left out, keys up to 255.
     Read once per hidden set (gather_box over the whole song), kept on lm."""
     key = (lm.hide_ver, lm.gone)
     got = getattr(lm, "_edo_notes", None)
@@ -666,7 +667,7 @@ def edo_notes(lm):
 
 def edo_forget(lm):
     """The 31-EDO copies of lm's notes let go (the Loaded MIDI tick / 31-EDO / Audio off: ~0.4 GB at 4 M notes)."""
-    for name in ("_edo_notes", "_edo_rows"):
+    for name in ("_edo_notes", "_edo_rows", "_edo_events"):
         if getattr(lm, name, None) is not None:
             setattr(lm, name, None)
 
@@ -709,6 +710,68 @@ def edo_rows(lm, muted, ppq):
     rows = np.column_stack([s, e, k, vel, OWN0 + ch.astype(np.int64), np.full(len(s), -1, np.int64)]).astype(np.int64)
     lm._edo_rows = (key, rows)
     return rows
+
+
+EDO_EVENTS_MOST = 2_000_000  # controller events a loaded MIDI may have to be played along in 31-EDO (edo_events)
+_RPN_TUNE = ((0, 1), (0, 2))  # (RPN fine / coarse tune: left out in 31-EDO, our tuning wins, user 2026-11-13)
+
+
+def edo_events(lm, muted, ppq):
+    """lm's instrument / controller / bend / pressure changes for playing it in 31-EDO WITH them (PLAN.md 2026-11-13):
+    {OWN0 + file channel: [(tick in ppq's, status kind, data 1, data 2)]} as App.play_apart's messages (each then
+    goes to every channel of its channel's group, playback.edo_fan), ports folded as edo_rows does, muted tracks /
+    channels left out. The file's own fine / coarse tune (RPN 1 / 2 data) left out: our tuning wins (user). None =
+    not kept (more than the index keeps, or past EDO_EVENTS_MOST). Kept on lm like edo_rows."""
+    key = (lm.gone, tuple(muted), ppq)
+    got = getattr(lm, "_edo_events", None)
+    if got is not None and got[0] == key:
+        return got[1]
+    ticks, codes, trks = [], [], []
+    for n, t in enumerate(lm.tracks):
+        if n in lm.gone:
+            continue
+        if getattr(t, "cc_over", False):
+            lm._edo_events = (key, None)
+            return None
+        c_tick = getattr(t, "c_tick", None)
+        if c_tick is not None and len(c_tick):
+            ticks.append(np.asarray(c_tick, np.int64))
+            codes.append(np.asarray(t.c_code, np.int64)[:len(c_tick)])
+            trks.append(np.full(len(c_tick), n, np.int64))
+    total = sum(len(a) for a in ticks)
+    if total > EDO_EVENTS_MOST:
+        lm._edo_events = (key, None)
+        return None
+    from notes.engine import OWN0
+    out = {}
+    if total:
+        tick, code, trk = (np.concatenate(a) for a in (ticks, codes, trks))
+        o = np.argsort(tick, kind="stable")
+        tick, code, trk = tick[o], code[o], trk[o]
+        ch = code & 15
+        if len(muted):
+            from files.play_loaded import mute_masks
+            mask = mute_masks(muted, len(lm.tracks)).astype(np.int64)
+            keep = ((mask[trk] >> ch) & 1) == 0
+            tick, code, ch = tick[keep], code[keep], ch[keep]
+        kind, one, two = code & 0xF0, code >> 8 & 0x7F, code >> 16 & 0x7F
+        keep = np.ones(len(code), bool)
+        rpn = (kind == 0xB0) & np.isin(one, (101, 100, 6, 38))  # (fine / coarse tune data: dropped, our tuning wins)
+        if rpn.any():
+            sel = {}
+            for i in np.flatnonzero(rpn).tolist():
+                c, n_, v = int(ch[i]), int(one[i]), int(two[i])
+                if n_ in (101, 100):
+                    sel[c, n_] = v
+                elif (sel.get((c, 101)), sel.get((c, 100))) in _RPN_TUNE:
+                    keep[i] = False
+        if ppq != lm.ppq:
+            tick = tick * ppq // lm.ppq
+        for c in np.unique(ch[keep]).tolist():
+            m = keep & (ch == c)
+            out[OWN0 + c] = list(zip(tick[m].tolist(), kind[m].tolist(), one[m].tolist(), two[m].tolist()))
+    lm._edo_events = (key, out)
+    return out
 
 
 def set_boxes(lm, boxes, found=None):

@@ -188,7 +188,9 @@ class EdoPart:
     also how one sound a row leaves them: one = (row order, each note kept or not, each note's new end)."""
 
     def __init__(self, rows, edo_first, one=False, drums=False):
+        from files.playback import edo_keys_moved
         self.rows, self.edo_first, self.drums = rows, edo_first, drums
+        self.moved = edo_keys_moved()  # (A = Hz's whole keys, in the keys made here)
         # (its rows' slots = OWN0 + file channel: use10 doesn't matter for them)
         self.start, self.end, self.key, self.vel, self.chan, self.port = edo_columns(rows, edo_first, False, drums)
         self.one = None
@@ -203,7 +205,9 @@ class EdoPart:
             self.one = (ro.astype(np.int32) if n < 2 ** 31 else ro, keep, new_end)
 
     def fits(self, rows, edo_first, one, drums=False):
+        from files.playback import edo_keys_moved
         return (rows is self.rows and edo_first == self.edo_first and drums == self.drums
+                and self.moved == edo_keys_moved()
                 and (self.one is not None or not one))
 
 
@@ -211,8 +215,9 @@ class Song:
     """What the pieces are made of. notes = App.play_parts' rows (start, end, key, velocity, slot ... in ticks),
     ccs = its [(tick, message)] (playback.cc_list: channel | port << 24), ports = its synth ports (0 = one port),
     tempo = heard [(tick, us)] from tick 0 (None = one tempo: bpm). Keys over 127 are left out, unless edo_first:
-    31-EDO's sound (R6, like live play: playback.edo_code), each row on its own pitch-bent channel from that channel
-    (port x 16 + channel), the bends at every piece's start."""
+    31-EDO's sound (R6, like live play: playback.edo_code), each row on its channel's group from that channel (port x
+    16 + channel), the groups' tunings at every piece's start (SysEx / BASSMIDI events) and the CC lines on every
+    channel of their group."""
 
     def __init__(self, notes, ccs, ports, use10, ppq, bpm, tempo=None, edo_first=None, one_sound=False,
                  drums=False):
@@ -246,11 +251,24 @@ class Song:
             if one_sound:
                 self._one_sound()
         del slot, order
-        self.bends = []  # (31-EDO: its channels' bends, as CC-line messages at a piece's start)
+        self._edo_set(edo_first)
+        self._finish(self._edo_ccs(ccs))
+
+    def _edo_set(self, edo_first):
+        """31-EDO: its channels' tunings (playback.edo_tuning) for BASSMIDI's event list and as SysEx starting each
+        piece's track on their ports (edo_sysex); none otherwise."""
+        self.tunes, self.sysex = [], {}
         if edo_first is not None:
-            from files.playback import edo_bends
-            self.bends = edo_bends(first=edo_first)
-        self._finish(ccs)
+            from files.playback import edo_keys_moved, edo_sysex, edo_tuning
+            self.tunes, self.sysex = edo_tuning(edo_first), edo_sysex(edo_first)
+            self.edo_keys = edo_keys_moved()
+
+    def _edo_ccs(self, ccs):
+        """ccs as played: 31-EDO = each on every channel of its colour's group (playback.edo_fan, like live)."""
+        if self.edo_first is None or not ccs:
+            return ccs
+        from files.playback import edo_fan
+        return [(t, m2) for t, m in ccs for m2 in edo_fan(m, self.edo_first, self.drums)]
 
     def _one_sound(self):
         """31-EDO rows as live Built-in play sounds them (playback.Player: a new note on a sounding row lets the old
@@ -317,9 +335,8 @@ class Song:
         at = np.searchsorted(pos, p0, "left") if pos is not None else p0
         self.start, self.end, self.key, self.vel, self.chan, self.port = (
             np.insert(b, at, x) if len(x) else b for b, x in zip(base, own))
-        from files.playback import edo_bends
-        self.bends = edo_bends(first=edo_first)
-        self._finish(ccs)
+        self._edo_set(edo_first)
+        self._finish(self._edo_ccs(ccs))
         return self
 
     @classmethod
@@ -335,7 +352,7 @@ class Song:
             notes, chans = notes[keep], chans[keep]
         else:
             notes = np.zeros((0, 4), np.int64)
-        self.edo_first, self.bends, self.ppq = None, [], ppq
+        self.edo_first, self.tunes, self.sysex, self.ppq = None, [], {}, ppq
         self.tempo = list(tempo) if tempo else [(0, int(round(60e6 / bpm)))]
         self.map = TimeMap(ppq, self.tempo)
         order = np.argsort(notes[:, 0], kind="stable") if len(notes) else np.zeros(0, np.int64)
@@ -472,7 +489,7 @@ class Song:
         # tick, order on a shared tick (ends 0, CC lines 1, starts 2), status, data 1, data 2, port
         n = len(idx)
         from files.playback import cc_before
-        cc = [(0, m) for m in self.bends + cc_before(self.ccs, t0)] + [(t - t0, m) for t, m in self.ccs[c0:c1]]
+        cc = [(0, m) for m in cc_before(self.ccs, t0)] + [(t - t0, m) for t, m in self.ccs[c0:c1]]
         cm = np.array([m for _, m in cc], np.int64)
         tick = np.concatenate([self.end[idx] - t0, np.maximum(self.start[idx], t0) - t0,
                                np.array([t for t, _ in cc], np.int64)])
@@ -501,6 +518,7 @@ class Song:
             # (31-EDO's channel 10 as drums: port 1's left drums, EDO_DRUMS)
             drums = q % 16 in file_ports or (getattr(self, "drums", False) and q == EDO_DRUMS >> 4)
             head = [(0, b"\xff\x21\x01" + bytes([q & 127]))] + ([] if drums else [(0, _MELODIC_10)])
+            head += [(0, s) for s in getattr(self, "sysex", {}).get(q, ())]  # (31-EDO's channel tunings)
             tracks.append(_track(head, _messages(tick[sel], st[sel], d1[sel], d2[sel])))
         return tracks
 
@@ -517,8 +535,13 @@ class Song:
                 np.zeros((0, 4), np.int64)
             chans = self.port.astype(np.int64) * 16 + self.chan
             cc = [(t, m & 0xF0, (m >> 8) & 0x7F, (m >> 16) & 0x7F, (m >> 24) * 16 + (m & 15))
-                  for t, m in [(0, b) for b in self.bends] + self.ccs]
+                  for t, m in self.ccs]
             extra = synth.cc_events(cc)
+            tunes = getattr(self, "tunes", ())
+            if tunes:  # (31-EDO's channels retuned at the start: Live.tune's events)
+                tune = np.array([(synth._EV_SCALETUNING, max(0, min(16383, int(round(8192 + c * 8192 / 100)))) | n << 16,
+                                  ch, 0, 0) for ch, cents in tunes for n, c in enumerate(cents)], synth.EVENT)
+                extra = np.concatenate([tune, extra]) if len(extra) else tune
             used = sorted({int(c) for c in np.unique(chans)} | {int(c[4]) for c in cc})
             kit = EDO_DRUMS if getattr(self, "drums", False) else -1  # (31-EDO's channel 10 as drums)
             drums = np.array([(synth._EV_DRUMS, 1 if c == kit else 0, c, 0, 0) for c in used if c % 16 == 9],

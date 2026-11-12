@@ -167,6 +167,8 @@ class Playback:
         self.piano_back()
         if along:  # (first: the play line waits until its first notes are read)
             self.start_loaded(int(round(self.playhead * ppq)))
+        elif self.edo_loaded() and self.out.name == BUILTIN:  # (31-EDO's: its instruments loaded before playing)
+            self.edo_preload()
         self.kestrel_parts()
         self.slow_down.reset()  # (each Play at the song's own speed: Player.start too)
         self._pace_seen = self._pace_seen_b = None  # (Kestrel's silence / BASSMIDI's notes thinned, seen)
@@ -186,8 +188,8 @@ class Playback:
             self.overload.start(self.out.handle, self.play_voices, self.play_guard.get(), keep)
         elif self.out.edo and not self.out.tuned:
             self.status.config(text=tr("app.edo31_audio_builtin_only"))
-        if self.edo_loaded():  # (what the tuned play leaves out of the loaded MIDI, when it has any; user)
-            left = self.edo_left_text()
+        if self.edo_loaded():  # (its controllers too many to keep: what the tuned play leaves out, said; user)
+            left = self.edo_left_text() if self.edo_loaded_events() is None else ""
             if left:
                 self.status.config(text=left)
         elif self.edo_loaded_wanted():  # (too many notes to hold: as written, said; Rendered ahead too, hunt)
@@ -247,10 +249,10 @@ class Playback:
         kit = {0} if self.out.tuned and self.out.drum_code is not None else set()
         for port in range(16):
             self.out.handle.send(PART_TYPE | 9 << 8 | (1 if port in files_ports | kit else 0) << 16 | port << 24)
-        # 31-EDO (13g): its channels bent for this play on the highest two ports the loaded MIDI leaves free (hunt
+        # 31-EDO (13g): its channels tuned for this play on the highest two ports the loaded MIDI leaves free (hunt
         # 2026-10-29: on its ports they played as drums / bent its notes), else the last ones put back
         from files.playback import edo_ports
-        self.out.bend_edo(edo_ports(files_ports | kit) if self.out.tuned else False)
+        self.out.tune_edo(edo_ports(files_ports | kit) if self.out.tuned else False)
 
     def play_end(self, ppq, beats, start):
         """Where playing stops: one beat after the last note ends (a loaded MIDI's too; or after the play line if
@@ -311,6 +313,31 @@ class Playback:
             self.busy(None)
             if self.player.running and self.loaded is lm:
                 self._start_loaded_now(t0, gate)
+        self.after(30, done)
+
+    def edo_preload(self):
+        """31-EDO's Loaded MIDI tick on Built-in BASSMIDI: the file's instruments loaded in the background before the
+        play line starts (its program changes go to the main synth now: never loaded while playing, as start_loaded;
+        PLAN.md 2026-11-13), "Loading…" shown meanwhile."""
+        from files.play_loaded import instruments, preload
+        synth, lm = self.synth, self.loaded
+        if synth is None or lm is None or not synth.presets_missing(*instruments(lm)):
+            return
+        gate, me = threading.Event(), object()
+        self.player.ready = gate
+        self._instruments_job = me
+        self.busy(tr("app.loading_instruments"))
+        job = threading.Thread(target=preload, args=(synth, lm), daemon=True)
+        job.start()
+
+        def done():
+            if job.is_alive():
+                self.after(30, done)
+                return
+            if self._instruments_job is me:
+                self._instruments_job = None
+                self.busy(None)
+            gate.set()
         self.after(30, done)
 
     def _start_loaded_now(self, t0, gate=None):
@@ -448,6 +475,11 @@ class Playback:
         # (tracks muted in the track list: not played; + wrapped kept notes, App.outgoing)
         heard = self.track_list.unmuted(self.outgoing())
         edo = self.edo_loaded_rows(device)  # (31-EDO's Loaded MIDI tick: its notes as rows, beside your own)
+        edo_ev = self.edo_loaded_events(device) if edo is not None else None  # (+ its instruments / controllers)
+        if edo_ev:  # (a copy: neither one's lists changed)
+            pasted = {s: list(ms) for s, ms in pasted.items()}
+            for s, ms in edo_ev.items():
+                pasted[s] = pasted.get(s, []) + ms
 
         def with_edo(notes):
             if edo is None or not len(edo):
@@ -458,7 +490,7 @@ class Playback:
         ports = LIVE_PORTS if (device or self.out.name) in (BUILTIN, KESTREL, MAESTRO, AHEAD) else 0
         if per_shape and self.edo_heard(device or self.out.name):
             # (31-EDO played tuned: the channel sets the octave, so a moved Hz bass jumped 2 / 4 octaves; its CC lines
-            # never reach the tuned notes anyway (live play sends none, Rendered ahead's go on the plain channels))
+            # go to every channel of its channel's group, like the files' players: playback.edo_fan)
             rendered, msgs = heard, {}
             for messages in per_shape.values():
                 for s, events in messages.items():
@@ -1542,7 +1574,7 @@ class Playback:
     def on_edo_tuning(self, ev=None):
         """Settings → Sound's 31-EDO tuning (C pinned / A = Hz; user 2026-11-12): a wrong Hz goes back to the one in
         use; a change is heard at once (playing: started again from where it is, like the channel 10 tick)."""
-        from files.playback import EDO_A_RANGE, edo_bends, set_edo_a
+        from files.playback import EDO_A_RANGE, edo_tuning, set_edo_a
         try:
             v = round(float(self.edo_a_var.get().strip().replace(",", ".")), 1)
             ok = EDO_A_RANGE[0] <= v <= EDO_A_RANGE[1]
@@ -1558,11 +1590,10 @@ class Playback:
         if playing:
             self.stop_play()
         self.scrub_end()
-        if self.out.name == BUILTIN and self.out.handle:  # (its 31-EDO channels are bent once, at open)
-            for msg in edo_bends():
-                self.out.handle.send(msg)
-        elif self.out.edo_bent is not None:  # (Kestrel: bent again now)
-            self.out.bend_edo()
+        if self.out.name == BUILTIN and self.out.handle:  # (its 31-EDO channels are tuned at open: again now)
+            self.out.handle.tune(edo_tuning())
+        elif self.out.edo_bent is not None:  # (Kestrel: tuned again now)
+            self.out.tune_edo()
         if playing:
             self.start_play(keep=True)
         else:

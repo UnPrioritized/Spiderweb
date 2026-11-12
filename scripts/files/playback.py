@@ -29,21 +29,28 @@ OLD_NAMES = {"Kestrel (GPU)": KESTREL}  # (saved MIDI outs under an earlier name
 DEFAULT_DEVICE = MAPPER_NAME if WINDOWS and not WINE else BUILTIN  # (Wine-like systems often have no MIDI device)
 MAPPER = 0xFFFFFFFF
 
-# 31-EDO sound (Built-in BASSMIDI only): row r = 31-EDO step r above C0. Each step of the octave has its own
-# channel (EDO_FIRST + step), pitch-bent once when the synth opens (EDO_BENDS, at the usual +-2 key bend range),
-# so any number of notes can sound at once and the note colours' channels don't matter. A message to channel 16
-# or past carries its group of 16's number in its top byte (synth.Live.send). Channels 16-95 = ports 2-6's
-# (a Hz bass's own channel per note: synth.LIVE_PORTS), so 31-EDO's come after them.
+# 31-EDO sound (PLAN.md "31-EDO with bends and instruments", user 2026-11-13): row r = 31-EDO step r above C0, played
+# on 16 channels of its own from EDO_FIRST (one port laid out as Kestrel's 31-EDO template: groups 1-3, 4-6, 7-9,
+# 11-13, 14-16, edo_code), each group's 3 channels RETUNED once (edo_tuning: each of the 12 note names moved up to
+# +-100 cents, scale/octave tuning, Kestrel's edo31.rs table) so a channel holds any notes and its own pitch bend,
+# CCs and programs (sent to the whole group: edo_fan). A message to channel 16 or past carries its group of 16's
+# number in its top byte (synth.Live.send). Channels 16-95 = ports 2-6's (a Hz bass's own channel per note:
+# synth.LIVE_PORTS), so 31-EDO's come after them; channel 10 as piano = 3 more from EDO_FIRST + 16.
 PACE_EVERY = 2048  # (Kestrel alone: messages in a burst between looks at "fell behind" / a new speed, Player._run)
 STACKED = 512  # notes still sounding on one channel at Stop past which it gets one "all notes off" (Player.stop)
 EDO = 31
 EDO_FIRST = 96  # (synth.LIVE_PORTS x 16)
-_EDO_KEYS = np.array([round(s * 1200 / EDO / 100) for s in range(EDO)], np.int64)  # nearest key above C, per step
-EDO_BENDS = [8192 + round((s * 1200 / EDO - 100 * int(_EDO_KEYS[s])) / 100 * 4096) for s in range(EDO)]
+# (key above C, lane in the group) of each step of an octave: Kestrel's edo31.rs STEPS, the 31-EDO template's
+EDO_STEPS = ((0, 0), (0, 1), (1, 0), (1, 1), (2, 2), (2, 0), (2, 1), (3, 0), (3, 1), (4, 2), (4, 0), (4, 1), (5, 2),
+             (5, 0), (5, 1), (6, 0), (6, 1), (7, 2), (7, 0), (7, 1), (8, 0), (8, 1), (9, 2), (9, 0), (9, 1), (10, 0),
+             (10, 1), (11, 2), (11, 0), (11, 1), (12, 2))
+_EDO_KEYS = np.array([k for k, _ in EDO_STEPS], np.int64)
+_EDO_STEP_LANE = np.array([lane for _, lane in EDO_STEPS], np.int64)
 # 31-EDO tuning (Settings → Sound, user 2026-11-12): C PINNED (default) = step 0 is the usual C, so A (step 23) sits
 # EDO_A_BELOW cents under A = 440 (~437.6 Hz), as other 31-EDO players tune it; "A =" moves every step by the same
-# cents so step 23 = the Hz typed (sound only: saved MIDI / Domino copies never change). The shift rides on each
-# step's bend (+-2 keys): a step's own bend is at most ~48 cents, so A_RANGE keeps the sum inside the bend range.
+# cents so step 23 = the Hz typed (sound only: saved MIDI / Domino copies never change). Its whole keys move the
+# notes (edo_keys_moved), the rest (at most 50 cents) rides on the channels' tuning on top of each note name's own
+# (at most ~46), so a note name stays inside the +-100 cents a tuning can move it.
 EDO_A_BELOW = 900 - 23 * 1200 / EDO  # (9.68 cents)
 EDO_A_RANGE = (401.0, 477.0)
 EDO_A_DEFAULT = 440.0
@@ -56,7 +63,7 @@ def edo_shift_for(a_hz):
 
 
 def set_edo_a(a_hz):
-    """31-EDO's A from now on (None = C pinned): later edo_bends carry it. Returns True when it changed."""
+    """31-EDO's A from now on (None = C pinned): later edo_tuning carries it. Returns True when it changed."""
     global edo_shift
     new = edo_shift_for(a_hz)
     changed = new != edo_shift
@@ -64,10 +71,68 @@ def set_edo_a(a_hz):
     return changed
 
 
-def step_bends(shift=0.0):
-    """Each 31-EDO step's pitch-bend value (0..16383, +-2 keys) with every step moved `shift` cents."""
-    return [max(0, min(16383, 8192 + round((s * 1200 / EDO - 100 * int(_EDO_KEYS[s]) + shift) / 100 * 4096)))
-            for s in range(EDO)]
+def edo_keys_moved(shift=None):
+    """Whole keys every 31-EDO note moves for the tuning picked (edo_shift): the rest of the shift (at most 50 cents)
+    rides on the channels' tuning (edo_cents)."""
+    return int(round((edo_shift if shift is None else shift) / 100))
+
+
+def edo_cents(lane, shift=0.0):
+    """[cents for each of the 12 note names] of a group's lane-th channel, every step moved `shift` cents less its
+    whole keys (edo_keys_moved; names no step of the lane uses: that rest alone)."""
+    whole = edo_keys_moved(shift)
+    rest = shift - 100 * whole
+    cents = [rest] * 12
+    for s, (key, ln) in enumerate(EDO_STEPS):
+        if ln == lane:  # (moved by whole keys, a step plays under another note name: its tuning goes along)
+            cents[(key + whole) % 12] = 1200 * s / EDO - 100 * key + rest
+    return cents
+
+
+def edo_tuning(first=EDO_FIRST):
+    """[(channel, 12 cents)] retuning 31-EDO's channels from first (edo_code: its 16 + channel 10 as piano's 3 after
+    them; not its channel 10, drums), the tuning picked now (edo_shift) included."""
+    lanes = [edo_cents(n, edo_shift) for n in range(3)]
+    out = [(first + c, lanes[int(EDO_LANE[c])]) for c in range(16) if c != 9]
+    return out + [(first + 16 + n, lanes[n]) for n in range(3)]
+
+
+def edo_sysex(first=EDO_FIRST):
+    """{port: [SMF SysEx events (F0, length, data .. F7)]} tuning 31-EDO's channels from first in a piece file (the
+    track playing on that port starts with them): edo_tuning as scale/octave messages, one per lane."""
+    out = {}
+    for ch, cents in edo_tuning(first):
+        out.setdefault(ch >> 4, {}).setdefault(tuple(cents), []).append(ch & 15)
+    events = {}
+    for port, by in out.items():
+        for cents, chans in by.items():
+            raw = tuning_sysex(chans, cents)
+            events.setdefault(port, []).append(b"\xf0" + _vlq(len(raw) - 1) + raw[1:])
+    return events
+
+
+def _vlq(n):
+    out = [n & 0x7F]
+    n >>= 7
+    while n:
+        out.append(0x80 | (n & 0x7F))
+        n >>= 7
+    return bytes(reversed(out))
+
+
+def tuning_sysex(chans, cents):
+    """The scale/octave tuning message (MTS, 2-byte form, real-time: F0 7F 7F 08 09 ...) giving channels chans (0-15)
+    the 12 note names' cents, as raw bytes F0 .. F7 (Rendered ahead's piece files, Kestrel)."""
+    mask = 0
+    for c in chans:
+        mask |= 1 << (c & 15)
+    out = bytearray([0xF0, 0x7F, 0x7F, 0x08, 0x09, (mask >> 14) & 3, (mask >> 7) & 0x7F, mask & 0x7F])
+    for c in cents:
+        v = max(0, min(16383, int(round(8192 + c * 8192 / 100))))
+        out += bytes([v >> 7, v & 0x7F])
+    return bytes(out + b"\xf7")
+
+
 # Kestrel (13g): 16 ports of its own and no Hz bass channels, so 31-EDO goes on the TOP two ports (15-16), or the
 # highest two a loaded MIDI leaves free (hunt 2026-10-29: Lagtester's 8 ports shared 7-8 = drums + bends clashed)
 EDO_KESTREL = 14 * 16
@@ -82,20 +147,11 @@ def edo_ports(used):
     return EDO_KESTREL
 
 
-def edo_bends(center=False, first=EDO_FIRST):
-    """The 31 pitch-bend messages setting up 31-EDO's channels from `first` (center: put back to no bend), packed for
-    Live.send / KestrelOut.send (top byte = channel group); the tuning picked now (edo_shift) included."""
-    out = []
-    for step, bend in enumerate(EDO_BENDS if not edo_shift else step_bends(edo_shift)):
-        ch, bend = first + step, 8192 if center else bend
-        out.append(0xE0 | ch & 15 | (bend & 0x7F) << 8 | (bend >> 7) << 16 | (ch >> 4) << 24)
-    return out
-
-
 # The 31-EDO template's channel groups (user 2026-11-10: pitches as Kestrel 1.4.0 + the 256-key Domino's dispatcher
 # play them, edo31.rs map_note): channels 1-3, 4-6, 7-9, 11-13, 14-16 are groups of three; row r on a group's n-th
-# channel = r's step above MIDI key 0 + 2 x n octaves (the higher channels reach the top keys). Channel 10 = drums:
-# keys as written (key & 127), unless "Channel 10 as piano" (Settings → Sound): then a group of its own, no lanes.
+# channel = r's step above MIDI key 0 + 2 x n octaves (the higher channels reach the top keys), sounding on the
+# group's channel for the step's lane (EDO_STEPS). Channel 10 = drums: keys as written (key & 127), unless "Channel
+# 10 as piano" (Settings → Sound): then a group of its own (3 channels after the 16).
 EDO_LANE = np.array([0, 1, 2, 0, 1, 2, 0, 1, 2, 0, 0, 1, 2, 0, 1, 2], np.int64)  # (a channel's place in its group)
 
 
@@ -106,15 +162,32 @@ def edo_code(rows, first=EDO_FIRST, ch=None, drums=None):
     (as Kestrel plays them)."""
     rows = np.asarray(rows, np.int64)
     step = rows % EDO
-    c = first + step
-    key = 12 * (rows // EDO) + _EDO_KEYS[step]
-    if ch is not None:
-        ch = np.asarray(ch, np.int64) & 15
-        key = key + 24 * EDO_LANE[ch]
-    code = (c & 15) | np.minimum(key, 127) << 8 | (c >> 4) << 24
-    if ch is not None and drums is not None:
+    key = 12 * (rows // EDO) + _EDO_KEYS[step] + edo_keys_moved()  # (A = Hz: its whole keys)
+    lane = _EDO_STEP_LANE[step]
+    ch = np.zeros_like(rows) if ch is None else np.asarray(ch, np.int64) & 15
+    place = EDO_LANE[ch]
+    key = key + 24 * place
+    c = np.where(ch == 9, first + 16 + lane, first + ch - place + lane)
+    code = (c & 15) | np.clip(key, 0, 127) << 8 | (c >> 4) << 24
+    if drums is not None:
         code = np.where(ch == 9, drums | (rows & 127) << 8, code)
     return code
+
+
+def edo_fan(msg, first=EDO_FIRST, drums=True):
+    """A channel message (CC, bend, program...) to a note colour's channel (its low 4 bits; port byte dropped) ->
+    the same message on every channel of its 31-EDO group (Kestrel's triplet rule, user 2026-11-13); channel 10:
+    none with drums, else channel 10 as piano's group."""
+    ch = msg & 15
+    if ch == 9:
+        if drums:
+            return []
+        chans = [first + 16 + n for n in range(3)]
+    else:
+        start = first + ch - int(EDO_LANE[ch])
+        chans = [start, start + 1, start + 2]
+    body = msg & 0xFFFFF0
+    return [body | c & 15 | (c >> 4) << 24 for c in chans]
 
 try:
     _winmm = ctypes.WinDLL("winmm")
@@ -239,21 +312,19 @@ class MidiOut:
         errors.note("MIDI out", name if err is None else f"{name} (couldn't open)")
         return err
 
-    def bend_edo(self, first=None):
-        """(Kestrel) 31-EDO's channels bent from `first` (None = keep edo_first), the ones bent before put back first
-        when they were others; first False = only put back (not tuned now)."""
-        if self.name != KESTREL or not self.handle:
+    def tune_edo(self, first=None):
+        """(Built-in BASSMIDI, Kestrel) 31-EDO's channels retuned from `first` (None = keep edo_first; edo_tuning),
+        the ones tuned before put back first when they were others; first False = only put back (not tuned now)."""
+        if self.name not in (BUILTIN, KESTREL) or not self.handle:
             return
         new = self.edo_first if first is None else first
         if self.edo_bent is not None and self.edo_bent != new:
-            for msg in edo_bends(center=True, first=self.edo_bent):
-                self.handle.send(msg)
+            self.handle.tune([(c, [0.0] * 12) for c, _ in edo_tuning(self.edo_bent)])
             self.edo_bent = None
         if new is False:
             return
         self.edo_first = new
-        for msg in edo_bends(first=new):  # (sent again each time: a restart / reset may have put them back)
-            self.handle.send(msg)
+        self.handle.tune(edo_tuning(new))  # (sent again each time: a restart / reset may have put them back)
         self.edo_bent = new
 
     @property
@@ -285,8 +356,8 @@ class MidiOut:
             self.name = name
             self.edo_first = EDO_KESTREL if name == KESTREL else EDO_FIRST
             self.edo_bent = None
-            if name == KESTREL and self.edo:  # (listening before any Play: 31-EDO's channels bent already)
-                self.bend_edo()
+            if self.edo:  # (listening before any Play: 31-EDO's channels tuned already)
+                self.tune_edo()
             return None
         if name == MAESTRO:
             return self._open_maestro()
@@ -479,8 +550,15 @@ def _cc_kind(m):
     ch = m & 0xFF00000F  # (with its port)
     if m & 0xF0 == 0xE0:
         return ch, "bend"
+    if m & 0xF0 in (0xC0, 0xD0):  # (a loaded MIDI's in 31-EDO: back to the piano, no pressure)
+        return ch, "program" if m & 0xF0 == 0xC0 else "pressure"
+    if m & 0xF0 == 0xA0:
+        return ch, None
     n = (m >> 8) & 0x7F
-    return (ch, n) if n in dict(CC_RESET) else (ch, None)
+    if n in dict(CC_RESET):
+        return ch, n
+    # (any other controller, a loaded MIDI's in 31-EDO: all controllers reset + sustain let go, no pedal left down)
+    return (ch, None) if n in RPN or n in (0, 32) or n >= 120 else (ch, "ctl")
 
 
 def cc_reset(kinds):
@@ -490,6 +568,12 @@ def cc_reset(kinds):
         if kind == "bend":
             out.append(0xE0 | ch | 64 << 16)
             out += [0xB0 | ch | n << 8 | v << 16 for n, v in RANGE_RESET]
+        elif kind == "program":  # (bank 0, program 0: the piano Spiderweb's own notes play)
+            out += [0xB0 | ch, 0xB0 | ch | 32 << 8, 0xC0 | ch]
+        elif kind == "pressure":
+            out.append(0xD0 | ch)
+        elif kind == "ctl":
+            out += [0xB0 | ch | 121 << 8, 0xB0 | ch | 64 << 8]
         elif kind is not None:
             out.append(0xB0 | ch | kind << 8 | dict(CC_RESET)[kind] << 16)
     return out
@@ -555,8 +639,8 @@ class Player:
         """Play from start_beat until stop_beat (notes: rendered [start, end, pitch, vel, slot, ...] in ticks, never
         changed in place; use10: the slots use channel 10 too, engine.slot_track_channel; cc = other MIDI messages,
         cc_list: the values before start_beat are sent first; ports: the synth's ports, each slot on its port's
-        channels (engine.slot_ports; Built-in BASSMIDI only, synth.LIVE_PORTS). 31-EDO: no cc (its channels aren't
-        the notes'). tempo = [(tick, us)] tempo changes instead of the one bpm (the Tempo pane's)."""
+        channels (engine.slot_ports; Built-in BASSMIDI only, synth.LIVE_PORTS). 31-EDO: each cc on every channel of
+        its colour's group (edo_fan). tempo = [(tick, us)] tempo changes instead of the one bpm (the Tempo pane's)."""
         self.ports = 0 if self.out.tuned else ports
         self.stop()
         self._new_notes(notes)
@@ -571,7 +655,7 @@ class Player:
         self._swap = self._wanted = None
         self._stop.clear()
         sys.setswitchinterval(0.001)  # hand the thread the processor quickly while the window redraws
-        self.thread = threading.Thread(target=self._run, args=(notes, use10, () if self.tune else cc), daemon=True)
+        self.thread = threading.Thread(target=self._run, args=(notes, use10, self._edo_cc(cc)), daemon=True)
         self.thread.start()
         from files import errors
         errors.note("playing", "yes")  # (the next start's crash message: was it playing?)
@@ -594,10 +678,17 @@ class Player:
                 self._clock = (now, new.sec(old.tick(sec + now - t)), new)
         self.map = new
         with self._lock:  # (a thread just ending would miss these notes: it says it's done under the same lock)
-            self._wanted = (self._gen, notes, use10, () if self.tune else cc)
+            self._wanted = (self._gen, notes, use10, self._edo_cc(cc))
             if not self._sorting:
                 self._sorting = True
                 threading.Thread(target=self._sort, daemon=True).start()
+
+    def _edo_cc(self, cc):
+        """cc as played: 31-EDO = each message on every channel of its colour's group (edo_fan), else as it is."""
+        if not self.tune or not cc:
+            return cc
+        drums = self.edo_drums is not None
+        return [(t, m2) for t, m in cc for m2 in edo_fan(m, self.edo_first, drums)]
 
     def _new_notes(self, notes):
         """notes_ver goes up when these notes aren't the ones handed over last (the same array = unchanged). Held
