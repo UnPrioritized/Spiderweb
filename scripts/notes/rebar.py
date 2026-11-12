@@ -374,12 +374,8 @@ def _tempo_of(tempo, base, pl, ppq=None):
         if id(p) not in on_edge:
             p[1] *= factor_at(pl, p[0])
     for p in pts:
-        if not T.MIN_BPM - 1e-9 <= p[1] <= T.MAX_BPM:
-            return {"why": "limit", "at": p[0]}
-    for p in pts:
         _scale_heard(p, pl)
         p[0] = map_beat(pl, p[0])
-        p[1] = T.clamp_bpm(p[1])
     place = {id(p): i for i, p in enumerate(pts)} if arrivals else {}
     for arrive in arrivals:  # (a curved part arriving at its own BPM is flat: held, so the arrival can go and it
         k = place[id(arrive)]  # never glides on to the leaving point instead)
@@ -387,6 +383,10 @@ def _tempo_of(tempo, base, pl, ppq=None):
         if prev is not None and prev[2] != "hold" and abs(prev[1] - arrive[1]) <= 1e-12 * arrive[1]:
             prev[2] = "hold"
     T.drop_loose(pts)
+    for p in pts:  # (only BPMs that play: an edge's arrival copy nothing glides into is gone by now, hunt: a slow
+        if not T.MIN_BPM - 1e-9 <= p[1] <= T.MAX_BPM:  # part right after the bars was refused for a BPM never heard)
+            return {"why": "limit", "at": was.get(id(p), p[0])}  # (said in the bars as they are now)
+        p[1] = T.clamp_bpm(p[1])
     if ppq:
         _own_steps(out, pl, ppq, was, own_old, every, sound, tempo)
         for st in T.stretches(tempo, base):  # (a catch-up inside: its steps are worked out for its time, not
