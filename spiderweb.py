@@ -330,8 +330,8 @@ def offer_extras():
     """Pillow (pictures to the screen faster, more picture kinds) is optional: Spiderweb works without it, slower.
     Numba too, but only where our own compiled loops can't load (own_loops_work). uharfbuzz + python-bidi too
     (the Text tool's joined letters / right-to-left writing; without them it draws letters one by one). Run from source with one
-    missing: offer to install it, once (a "No" or a failed install is remembered in packages.json; the exe has
-    what it needs inside)."""
+    missing (or, for the Text tool's two, older than notes.shaping.LOWEST: pip updates it): offer to install it,
+    once (a "No" or a failed install is remembered in packages.json; the exe has what it needs inside)."""
     if getattr(sys, "frozen", False):
         return
     import importlib
@@ -344,8 +344,10 @@ def offer_extras():
             declined = list(json.load(f).get("declined", []))
     except (OSError, ValueError, AttributeError):
         declined = []
+    from notes.shaping import too_old
+    old = too_old()  # (installed but too old for the Text tool: offered like a missing one, pip updates it)
     missing = [(pip, text) for module, pip, text in EXTRAS
-               if pip not in declined and importlib.util.find_spec(module) is None]
+               if pip not in declined and (importlib.util.find_spec(module) is None or pip in old)]
     if any(pip == "numba" for pip, _ in missing) and own_loops_work():
         missing = [m for m in missing if m[0] != "numba"]
     if not missing:

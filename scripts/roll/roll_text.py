@@ -276,7 +276,10 @@ class TextTyping:
         if gone:
             self.app.status.config(text=tr("roll_text.no_font_has", letters=gone[:20]))
         elif tx.get("direction") != "down" and no_joining(tx["text"]):
-            self.app.status.config(text=tr("roll_text.no_joining"))
+            from notes.shaping import too_old
+            old = too_old()  # (installed but too old: say so, "not installed" looked wrong)
+            self.app.status.config(text=tr("roll_text.joining_too_old", names=" + ".join(old)) if old else
+                                   tr("roll_text.no_joining"))
 
     def name_typing_step(self):
         """The History name of this typing's undo step follows the text (it was named after the first letter)."""

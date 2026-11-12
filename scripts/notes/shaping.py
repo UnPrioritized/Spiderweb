@@ -53,6 +53,26 @@ def available():
     return _load()
 
 
+# The oldest of each package the text tool works with (pip name, lowest version; spiderweb.py PIP_SPEC asks for these).
+LOWEST = (("uharfbuzz", (0, 57)), ("python-bidi", (0, 6)))
+
+
+def too_old():
+    """pip names of the packages that are installed but older than LOWEST (2026-11-12: python-bidi 0.4, which other
+    Arabic tools install, has none of the parts used here; it looked "installed", so nothing was offered). Reads
+    the installed versions only, nothing is loaded."""
+    import importlib.metadata as md
+    out = []
+    for pip, lowest in LOWEST:
+        try:
+            got = tuple(int(n) for n in re.findall(r"\d+", md.version(pip))[:2])
+        except (md.PackageNotFoundError, ValueError):
+            continue
+        if got < lowest:
+            out.append(pip)
+    return out
+
+
 _LEVEL = re.compile(r"Level\(\s*(\d+),?\s*\)")
 
 

@@ -2265,6 +2265,7 @@
  "roll_text.erase": "Erase text: {text}",
  "roll_text.no_font_has": "No font on this PC has {letters}: they show as boxes or \"?\"",
  "roll_text.no_joining": "Letters aren't joined and right-to-left text runs left to right: the packages uharfbuzz and python-bidi aren't installed (see README)",
+ "roll_text.joining_too_old": "Letters aren't joined and right-to-left text runs left to right: the installed {names} is too old (see README)",
  "roll_funnel.funnel_curve": "Funnel curve",
  "roll_funnel.no_room": "No room for curves here: the line meets the wall at this spot",
  "roll_funnel.add_a_funnel_line": "Add a funnel line",
