@@ -895,9 +895,11 @@ def to_custom(sh):
     info = {}
     cons = layout(tx, info)[0]
     groups = [info["glyphs"][g][2] for g, _ in cons]
-    if tx.get("grow"):
-        polys = text_polys(dict(sh, text=tx))
-        sh["strokes"] = [{"kind": "poly", "pts": [list(frame_uv(sh["pts"], b, p)) for b, p in poly]} for poly in polys]
+    # the letters as the text's own outlines (straight steps as the text cuts its curves, Grow baked in), never its
+    # font curves: a custom shape cuts each curve piece into 48 steps, so 800 letters became 2.9 M points instead
+    # of ~68,000 and the turn took 14 s, every edit after it slow too (user 2026-11-12, picked this)
+    polys = text_polys(dict(sh, text=tx))
+    sh["strokes"] = [{"kind": "poly", "pts": [list(frame_uv(sh["pts"], b, p)) for b, p in poly]} for poly in polys]
     if len(groups) == len(sh["strokes"]):
         groups = _merge_joined(sh, cons, groups, (x0, y0, x1 - x0, y1 - y0))
     sh["round"] = (y1 - y0) / (x1 - x0)  # (the letters' own look: the outline gate shrinks them the same way)
@@ -975,6 +977,67 @@ def _bunches(box):
 CROSS_ROWS = 64  # pieces of an outline checked at a time by parts_overlap
 
 
+def any_self_crossing(loops):
+    """parts_overlap's crosses(p, p) for every outline at once: any piece of an outline properly crossing another
+    piece of it (the same sums, in the same order). Only pairs whose own boxes overlap are looked at (pieces can
+    only cross there), found by sorting each outline's pieces by their left end: 800 letters took 5 s one outline
+    at a time, most of it pieces nowhere near each other."""
+    segs, owner = [], []
+    for n, p in enumerate(loops):
+        a = np.asarray(p, float).reshape(-1, 2)
+        if len(a) >= 2:
+            segs.append(np.hstack([a[:-1], a[1:]]))
+            owner.append(np.full(len(a) - 1, n))
+    if not segs:
+        return False
+    S = np.vstack(segs)
+    L = np.concatenate(owner)
+    xlo, xhi = np.minimum(S[:, 0], S[:, 2]), np.maximum(S[:, 0], S[:, 2])
+    ylo, yhi = np.minimum(S[:, 1], S[:, 3]), np.maximum(S[:, 1], S[:, 3])
+    # each outline's pieces sorted along x (or y): a piece's partners are the ones after it starting no further
+    # than it ends, every pair of boxes meeting that way once. Each outline takes the way with fewer pairs (along x
+    # alone, every piece of an upright stroke paired with all the others)
+    N = len(S)
+    starts = np.searchsorted(L, np.arange(len(loops) + 1), "left").tolist()
+    ways = []
+    for lo, hi in ((xlo, xhi), (ylo, yhi)):
+        order = np.lexsort((lo, L))  # (sorted position -> piece)
+        slo, shi = lo[order], hi[order]
+        stop = np.empty(N, np.int64)
+        for n in range(len(loops)):  # (each outline's own sorted list: exact comparisons)
+            s, e = starts[n], starts[n + 1]
+            if e > s:
+                stop[s:e] = s + np.searchsorted(slo[s:e], shi[s:e], "right")
+        count = np.maximum(stop - np.arange(N) - 1, 0)  # (partners after each sorted position)
+        ways.append((order, count, np.add.reduceat(count, starts[:-1]) if N else count))
+    blocks = []
+    for n in range(len(loops)):
+        s, e = starts[n], starts[n + 1]
+        if e - s < 2:
+            continue
+        order, count, _ = ways[0] if ways[0][2][n] <= ways[1][2][n] else ways[1]
+        c = count[s:e]
+        pos = np.repeat(np.arange(s, e), c)
+        other = np.repeat(np.arange(s, e) + 1, c) + (np.arange(int(c.sum())) - np.repeat(np.cumsum(c) - c, c))
+        blocks.append((order[pos], order[other]))
+    for i, j in blocks:
+        ok = (xhi[j] >= xlo[i]) & (xlo[j] <= xhi[i]) & (yhi[j] >= ylo[i]) & (ylo[j] <= yhi[i])
+        i, j = i[ok], j[ok]
+        if not len(i):
+            continue
+        ax, ay, bx, by = S[i, 0], S[i, 1], S[i, 2], S[i, 3]  # (a piece of a ...)
+        cx, cy, dx, dy = S[j, 0], S[j, 1], S[j, 2], S[j, 3]  # (... against a piece of b, as crosses does)
+        for (ax, ay, bx, by), (cx, cy, dx, dy) in (((ax, ay, bx, by), (cx, cy, dx, dy)),
+                                                   ((cx, cy, dx, dy), (ax, ay, bx, by))):
+            d1 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx)
+            d2 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx)
+            d3 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax)
+            d4 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax)
+            if ((d1 * d2 < 0) & (d3 * d4 < 0)).any():
+                return True
+    return False
+
+
 def parts_overlap(loops, glyphs):
     """Whether two outlines of one letter overlap with the same turn (the letter's parts drawn on top of each
     other: the text fills them, a custom shape's even-odd fill would empty them)."""
@@ -1002,7 +1065,7 @@ def parts_overlap(loops, glyphs):
         return False
 
     box = [(min(x for x, _ in p), min(y for _, y in p), max(x for x, _ in p), max(y for _, y in p)) for p in loops]
-    if any(crosses(p, p) for p in loops):  # (one outline crossing itself: some fonts' A)
+    if any_self_crossing(loops):  # (one outline crossing itself: some fonts' A)
         return True
     same = {}  # (each letter's outlines: only pairs within one letter are looked at)
     for i, g in enumerate(glyphs):
