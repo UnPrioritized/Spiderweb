@@ -495,6 +495,7 @@
  "conductor.rebar_bars_one": "Bar {first}",
  "conductor.rebar_bpm": "Tempo {old} → {new} BPM",
  "conductor.rebar_times": "Tempo × {times} (each bar by its own length)",
+ "conductor.rebar_type": "Type {lo} to {hi}",
  "conductor.rebar_same": "These bars are that long already: nothing would change.",
  "conductor.rebar_loaded": "Not with a loaded MIDI that has notes after these bars' start (for now).",
  "conductor.rebar_why_catch": "A catch-up near bar {bar} reaches over these bars' edge, so it can't keep its sound. Change the box or the catch-up first.",

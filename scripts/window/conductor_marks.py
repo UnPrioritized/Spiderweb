@@ -185,7 +185,10 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
 
         def show(*_):
             pl = plan()
-            if pl is None:
+            if pl is None:  # (0, 300, nothing typed: never the last good one's lines, hunt; user: "Type 1 to 255")
+                where.config(text="")
+                bpm.config(text=tr("conductor.rebar_type", lo=TOPS[0], hi=TOPS[1]))
+                say({})
                 return
             first, last = pl["bars"][0] + 1, pl["bars"][1] + 1
             where.config(text=trn("conductor.rebar_bars", pl["count"], first=first, last=last))
