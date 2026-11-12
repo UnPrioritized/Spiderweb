@@ -4,6 +4,7 @@ retype it. The text is a custom shape with sh["text"] (notes/text.py); it's rebu
 import math
 import unicodedata
 
+from files import system
 from files.lang import tr
 from notes.custom import custom_settings
 from notes.text import (anchor_spot, build, caret_line, caret_snap, caret_step, from_roll, layout, letter_matrix,
@@ -13,12 +14,14 @@ from roll.roll_shared import CTRL, SHIFT
 from window import look
 
 BLINK_MS = 530
+IME_MS = 40  # how often the typing helper is asked for a half-typed letter while typing (Windows)
 
 
 class TextTyping:
     """Mixed into PianoRoll. self.typing: None, or {"i": the text's shape number (None while it's still empty),
     "caret": where in the text, "anchor": the other end of the selection (== caret: nothing selected), "tx" / "axes": the settings and place while there's no shape (only spaces or
     nothing typed yet), "undo": its undo step is taken}."""
+    _ime_job = None
 
     def text_at(self, x, y):
         """The text shape whose box is under (x, y) on screen, or None."""
@@ -44,6 +47,7 @@ class TextTyping:
         app = self.app
         i = self.text_at(e.x, e.y)
         self.drag = ("textsel",)
+        self.drop_composing()  # (a half-typed letter: thrown away, as in Windows' own boxes when clicking elsewhere)
         if self.typing and i is not None and i == self.typing["i"]:
             ty = self.typing
             ty["caret"] = self.caret_at(e)
@@ -145,7 +149,11 @@ class TextTyping:
     def end_typing(self):
         if not self.typing:
             return
+        self.drop_composing()
         self.typing = None
+        if self._ime_job:
+            self.after_cancel(self._ime_job)
+            self._ime_job = None
         if self._caret_job:
             self.after_cancel(self._caret_job)
             self._caret_job = None
@@ -155,10 +163,68 @@ class TextTyping:
 
     # ------------------------------------------------------------ keys
 
+    # ------------------------------------------------------------ unfinished letters (Korean, Chinese, Japanese input)
+    # Windows' typing helper holds a half-typed syllable (ㄱ -> 가 -> 각) and Tk only passes the finished letter
+    # on, so the text asks the helper every IME_MS while typing (system.ime_composing) and shows the unfinished part
+    # in the text as notes (user 2026-11-12), inside the typing's own undo step. ty["comp"] = (the text without
+    # it, selection start, end, what's shown). The finished letter's key puts it in for real; anything else first
+    # takes the unfinished part away. Elsewhere (Linux / Mac): None, finished letters only (untested there).
+
+    def ime_start(self):
+        if self._ime_job is None and system.WINDOWS:
+            self._ime_job = self.after(IME_MS, self.ime_poll)
+
+    def ime_poll(self):
+        self._ime_job = None
+        if not self.typing:
+            return
+        got = system.ime_composing()
+        if got is None:
+            return
+        self.show_composing(got)
+        self._ime_job = self.after(IME_MS, self.ime_poll)
+
+    def show_composing(self, got):
+        ty = self.typing
+        comp = ty.get("comp")
+        if got == (comp[3] if comp else ""):
+            return
+        if comp:
+            real, s0, s1 = comp[:3]
+        else:
+            real = self.typing_state()[0]["text"]
+            s0, s1 = self.text_selection()
+        if got:
+            ty["comp"] = (real, s0, s1, got)
+            self.set_text(real[:s0] + got + real[s1:], s0 + len(got))
+        else:  # (taken back in the helper: the text as it was, selection too)
+            ty.pop("comp")
+            self.set_text(real, s0)
+            ty["anchor"], ty["caret"] = s0, s1
+        self.show_caret()
+
+    def drop_composing(self, cancel=True):
+        """The text without the unfinished part again (cancel: the helper forgets it too)."""
+        comp = self.typing and self.typing.pop("comp", None)
+        if comp:
+            real, s0, s1, _ = comp
+            if cancel:
+                system.ime_cancel()
+            self.set_text(real, s0)
+            self.typing["anchor"], self.typing["caret"] = s0, s1
+        return comp
+
     def type_key(self, e):
         """A key while typing. "break" = it was the text's (so the window's shortcuts don't run too)."""
         app, ty = self.app, self.typing
         k = e.keysym
+        if ty.get("comp"):
+            if e.char and e.char >= " " and e.char != "\x7f" and not e.state & CTRL:  # (the finished letter)
+                real, s0, s1, _ = ty.pop("comp")
+                self.set_text(real[:s0] + e.char + real[s1:], s0 + len(e.char))
+                self.show_caret()
+                return "break"
+            self.drop_composing(cancel=False)
         text, c = self.typing_state()[0]["text"], ty["caret"]
         down = self.typing_down()
         s0, s1 = self.text_selection()
@@ -390,6 +456,7 @@ class TextTyping:
         self.delete("caret")
         if not self.typing or self.sx is None:
             return
+        self.ime_start()
         self.draw_typing(on)
         self._caret_job = self.after(BLINK_MS, lambda: self.show_caret(not on))
 
