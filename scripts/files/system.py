@@ -42,6 +42,59 @@ except (ImportError, ValueError):  # (Linux on an older Python can't load it: fi
     wintypes = _PlainTypes()
 
 
+def ime_composing():
+    """The letters a typing helper (Korean / Chinese / Japanese input) holds unfinished in the focused window,
+    e.g. a half-typed Korean syllable ("" = none). Tk only passes the finished letters on. Windows only (asks the
+    input helper itself); elsewhere None = can't tell (untested there, the text tool shows finished letters only)."""
+    if not WINDOWS:
+        return None
+    try:
+        user32, imm = ctypes.windll.user32, ctypes.windll.imm32
+        user32.GetFocus.restype = wintypes.HWND
+        imm.ImmGetContext.restype = wintypes.HANDLE
+        imm.ImmGetContext.argtypes = [wintypes.HWND]
+        imm.ImmReleaseContext.argtypes = [wintypes.HWND, wintypes.HANDLE]
+        imm.ImmGetCompositionStringW.restype = wintypes.LONG
+        imm.ImmGetCompositionStringW.argtypes = [wintypes.HANDLE, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+        hwnd = user32.GetFocus()
+        if not hwnd:
+            return ""
+        himc = imm.ImmGetContext(hwnd)
+        if not himc:
+            return ""
+        try:
+            size = imm.ImmGetCompositionStringW(himc, 0x0008, None, 0)  # (GCS_COMPSTR: bytes of the unfinished part)
+            if size <= 0:
+                return ""
+            buf = ctypes.create_unicode_buffer(size // 2 + 1)
+            imm.ImmGetCompositionStringW(himc, 0x0008, buf, size)
+            return buf.value[:size // 2]
+        finally:
+            imm.ImmReleaseContext(hwnd, himc)
+    except (AttributeError, OSError):
+        return None
+
+
+def ime_cancel():
+    """Throws away what ime_composing shows (the caret left the text: the typing helper must not finish it later)."""
+    if not WINDOWS:
+        return
+    try:
+        user32, imm = ctypes.windll.user32, ctypes.windll.imm32
+        user32.GetFocus.restype = wintypes.HWND
+        imm.ImmGetContext.restype = wintypes.HANDLE
+        imm.ImmGetContext.argtypes = [wintypes.HWND]
+        imm.ImmReleaseContext.argtypes = [wintypes.HWND, wintypes.HANDLE]
+        imm.ImmNotifyIME.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.DWORD, wintypes.DWORD]
+        hwnd = user32.GetFocus()
+        himc = imm.ImmGetContext(hwnd) if hwnd else None
+        if himc:
+            imm.ImmNotifyIME(himc, 0x0015, 0x0004, 0)  # (NI_COMPOSITIONSTR, CPS_CANCEL)
+            imm.ImmReleaseContext(hwnd, himc)
+    except (AttributeError, OSError):
+        pass
+
+
 def double_click_ms():
     """How quick a second click has to be to make a double click (the system's setting; 500 ms when unknown)."""
     if WINDOWS:
