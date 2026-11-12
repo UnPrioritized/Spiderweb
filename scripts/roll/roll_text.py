@@ -16,6 +16,9 @@ from window import look
 
 BLINK_MS = 530
 IME_MS = 40  # how often the typing helper is asked for a half-typed letter while typing (Windows)
+IME_WAIT = 1  # a change shows after it held this many more asks (~40 ms; 2 = 80 ms didn't help the flashing: that
+# was IME_KEY presses dropping the half-typed letter)
+IME_KEY = 229  # Windows' key code for a key the typing helper takes (VK_PROCESSKEY); Tk passes it on as a key press
 
 
 class TextTyping:
@@ -191,11 +194,15 @@ class TextTyping:
         if got == (comp[3] if comp else ""):
             ty.pop("next", None)
             return
-        # (a change shows on the NEXT ask, if it still holds: the helper finishes a syllable and starts the next one
-        # at once, but the finished letter's key reaches the text a moment later; acting at once showed the text
-        # without it, then with it again: Korean flashed in and out, user 2026-11-12)
-        if ty.get("next") != got:
-            ty["next"] = got
+        # (a change shows once it has held for IME_WAIT more asks: the helper finishes a syllable and starts the next
+        # one at once, but the finished letter's key reaches the text a moment later; acting at once showed the text
+        # without it, then with it again: Korean flashed in and out, user 2026-11-12; 1 ask less but still some)
+        seen, held = ty.get("next") or (None, 0)
+        if seen != got:
+            ty["next"] = (got, 1)
+            return
+        if held < IME_WAIT:
+            ty["next"] = (got, held + 1)
             return
         ty.pop("next", None)
         if comp:
@@ -227,6 +234,10 @@ class TextTyping:
         """A key while typing. "break" = it was the text's (so the window's shortcuts don't run too)."""
         app, ty = self.app, self.typing
         k = e.keysym
+        if getattr(e, "keycode", None) == IME_KEY and not e.char:
+            # (a key the typing helper is using to put a letter together: it's the helper's, not the text's; taken
+            # as "another key", it dropped the half-typed letter until the next ask: Korean flashed, user's video)
+            return "break"
         if ty.get("comp"):
             if e.char and e.char >= " " and e.char != "\x7f" and not e.state & CTRL:  # (the finished letter)
                 real, s0, s1, _ = ty.pop("comp")
