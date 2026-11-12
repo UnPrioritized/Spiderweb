@@ -94,6 +94,12 @@ def forecast(app, pl):
     for i, r in kinds.reasons.items():
         if becomes_plain(app.shapes[i]):
             out[r] = out.get(r, 0) + 1
+    ppq, r = app.ppq, app.rendered  # (notes the change brings under a tick apart: "dense", counted apart)
+    a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
+    starts = r[(r[:, 0] >= a_t) & (r[:, 0] < b_t), 0]
+    groups = R.dense_spots(pl, starts, ppq)
+    if groups:
+        out["dense"] = int(np.isin(starts, np.concatenate([np.array(g, np.int64) for g in groups])).sum())
     return out
 
 
@@ -271,7 +277,7 @@ def same_notes(old, new, pl, ppq, f=1.0):
         return False
     if not len(old):
         return True
-    m = old[:, :4].astype(float)
+    m = np.column_stack([old[:, :4].astype(float), np.ones((len(old), 2))])  # (+ each end's leeway in ticks)
     for c in (0, 1):
         exact = R.map_beats(pl, old[:, c] / ppq) * ppq
         if pl.get("sound"):  # (ramps placed by when they sound: there the sound's own nearest tick)
@@ -282,12 +288,18 @@ def same_notes(old, new, pl, ppq, f=1.0):
                 from notes.tempo_file import seconds_at, ticks_at
                 ro, rn = pl["sound"]
                 exact[snd] = ticks_at(rn, ppq, seconds_at(ro, ppq, old[snd, c].astype(float)))
+        dm = pl.get("dense_map")
+        if dm:  # (kept apart by short BPM changes: exactly there)
+            i = np.minimum(np.searchsorted(dm[0], old[:, c]), len(dm[0]) - 1)
+            hit = dm[0][i] == old[:, c]
+            exact[hit] = dm[1][i[hit]]
+            m[hit, 4 + c] = 0.0  # (its own tick exactly: a shape's rounding put it back on its neighbour's)
         m[:, c] = exact
     a = m[np.lexsort((m[:, 3], m[:, 0], m[:, 2]))]
     n = np.asarray(new[:, :4], np.int64)
     b = n[np.lexsort((n[:, 3], n[:, 0], n[:, 2]))]
     return bool((a[:, 2] == b[:, 2]).all() and (a[:, 3] == b[:, 3]).all()
-                and (np.abs(a[:, :2] - b[:, :2]) <= 1.0 + 1e-6).all())
+                and (np.abs(a[:, :2] - b[:, :2]) <= a[:, 4:6] + 1e-6).all())
 
 
 def kept_sound(sh, old, new, pl, ppq, f):
@@ -338,7 +350,7 @@ def spots_of(app, pl, old_r):
     return out
 
 
-def apply(app, pl, name, dry=False):
+def apply(app, pl, name, dry=False, dense=True):
     """The change done on the project in one undo step: {"ok": True, "plain": shapes made plain notes by the safety
     net, "cut": shapes cut at the edges, "off": shapes whose notes still differ} or {"why", "at"} (nothing changed)."""
     new_tempo = R.tempo_of(app.tempo, app.tempo_pane.base(), pl, app.ppq)
@@ -352,6 +364,10 @@ def apply(app, pl, name, dry=False):
     ppq = app.ppq
     old_r = np.array(app.rendered[:, :6], np.int64)
     olds = rows_by_owner(old_r)
+    a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
+    starts = old_r[(old_r[:, 0] >= a_t) & (old_r[:, 0] < b_t), 0]
+    pl["dense_map"] = None  # (user 2026-11-12: "Short BPM changes for exact timing" ticked = notes kept apart)
+    dense_n = R.dense_fix(app.tempo, new_tempo, app.tempo_pane.base(), ppq, pl, starts) if dense else 0
     spots = None if dry else spots_of(app, pl, old_r)
     for i, k in kinds.items():  # (a shape after the bars whose notes hang on a grid from the song's start (spam
         if k == "after":         # Aligned, Chop "from the song's start", a Hz bass without tones...) and change when
@@ -413,7 +429,7 @@ def apply(app, pl, name, dry=False):
     for i, r in kinds.reasons.items():  # (shapes that were something else than notes, by why)
         if not was_plain[i] and (r != "net" or i in back):
             whys[r] = whys.get(r, 0) + 1
-    got = {"ok": True, "plain": plain_n, "cut": cut, "off": off, "whys": whys}
+    got = {"ok": True, "plain": plain_n, "cut": cut, "off": off, "whys": whys, "dense": dense_n}
     if dry:  # (a test run: everything back as it was, no step left behind)
         app.undo()
         app.redo_stack.pop()

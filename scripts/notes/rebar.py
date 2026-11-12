@@ -132,6 +132,14 @@ def map_ticks(pl, ticks, ppq):
             tt = np.atleast_1d(t)
             o = np.atleast_1d(on)
             out[o] = np.rint(ticks_at(snd[1], ppq, seconds_at(snd[0], ppq, tt[o].astype(float)))).astype(np.int64)
+    dm = pl.get("dense_map")
+    if dm:  # (notes that came under a tick apart, each given its own tick: dense_fix)
+        out = np.array(out, np.int64, ndmin=1) if np.ndim(out) == 0 else out
+        keys, vals = dm
+        tt = np.atleast_1d(t)
+        i = np.minimum(np.searchsorted(keys, tt), len(keys) - 1)
+        hit = keys[i] == tt
+        out[hit] = vals[i[hit]]
     return int(np.atleast_1d(out)[0]) if np.ndim(ticks) == 0 else out
 
 
@@ -500,6 +508,150 @@ def _own_steps(out, pl, ppq, was, own, every, sound, tempo):
         out["every_at"] = sorted(got)
     else:
         out.pop("every_at", None)
+
+def dense_spots(pl, ticks, ppq):
+    """Old note ticks the change brings under a tick apart: [[old ticks], ...], each group the notes that need ticks
+    of their own from its first one's on (a note pushed on by the one before it joins: 4 notes over 3 new ticks =
+    one group of 4)."""
+    ticks = np.unique(np.asarray(ticks, np.int64))
+    if len(ticks) < 2:
+        return []
+    new = map_ticks(dict(pl, dense_map=None), ticks, ppq).tolist()
+    out, run, last, prev = [], None, None, None
+    for o, n in zip(ticks.tolist(), new):
+        if last is not None and n <= last:  # (on or before the tick the note before took: pushed on by one)
+            if run is None:
+                run = [prev]
+                out.append(run)
+            run.append(o)
+            last += 1
+        else:
+            run, last = None, n
+        prev = o
+    return out
+
+def dense_fix(old, new, base, ppq, pl, ticks):
+    """Notes the change brings under a tick apart each keep a tick of their own, with SHORT BPM CHANGES right there
+    (user 2026-11-12: "Short BPM changes for exact timing", Keep timing's dense way): old ticks o1 < o2 < ... landing
+    on new tick N get N, N + 1, ...; a held BPM on each of those ticks lasts exactly the old gap, then one held BPM up
+    to the next note (or tempo point / the bars' end) takes the rest, so that note and everything after sound when
+    they did. In place on new; pl["dense_map"] = (old ticks, new ticks) for map_ticks. A spot with no room (the next
+    note too close) is left rounded. How many notes got their own tick."""
+    from notes.tempo_file import heard_tempo, seconds_at
+    groups = dense_spots(pl, ticks, ppq)
+    if not groups:
+        pl["dense_map"] = None
+        return 0
+    allt = np.unique(np.asarray(ticks, np.int64))
+    pts = new["points"]
+    pt_ticks = sorted(T.beat_tick(p[0], ppq) for p in pts)
+    b_t = round(pl["new_b"] * ppq)
+    ro = heard_tempo(old, base, ppq, int(allt.max()) + 2)
+    rn = heard_tempo(new, base, ppq, int(map_ticks(pl, int(allt.max()), ppq)) + ppq)
+    keys, vals, puts, done = [], [], [], 0
+    firsts = map_ticks(pl, np.array([g[0] for g in groups], np.int64), ppq)  # (every spot's reads at once:
+    nexts = np.searchsorted(allt, [g[-1] for g in groups], "right")           # one read per spot was slow)
+    nxt_new = map_ticks(pl, allt[np.minimum(nexts, len(allt) - 1)], ppq)
+    ends = []
+    for k, g in enumerate(groups):
+        n0 = int(firsts[k])
+        j = bisect.bisect_right(pt_ticks, n0)  # (the next tempo point after it: by halving)
+        ends.append(min([b_t] + ([int(nxt_new[k])] if nexts[k] < len(allt) else []) + pt_ticks[j:j + 1]))
+    flat = np.concatenate([np.array(g, float) for g in groups])
+    so_all = seconds_at(ro, ppq, flat)
+    sn0, snr = seconds_at(rn, ppq, firsts.astype(float)), seconds_at(rn, ppq, np.array(ends, float))
+    at = 0
+    for k, g in enumerate(groups):
+        so, at = so_all[at:at + len(g)], at + len(g)
+        n0, r = int(firsts[k]), ends[k]
+        last = n0 + len(g) - 1
+        if r - last < 1:  # (no room before what comes next: left rounded)
+            continue
+        total = snr[k] - sn0[k]  # (kept: everything after stays)
+        gaps = np.diff(so)
+        rest = total - gaps.sum()
+        if rest <= 0 or (gaps <= 0).any():
+            continue
+        bpms = [60.0 / (d * ppq) for d in gaps] + [60.0 * (r - last) / (rest * ppq)]
+        if not all(T.MIN_BPM <= v <= T.MAX_BPM for v in bpms):
+            continue
+        puts.append((n0, bpms, r))
+        keys += g
+        vals += list(range(n0, n0 + len(g)))
+        done += len(g)
+    beats = [p[0] for p in pts]
+    # (spots between held tempos, the usual case: every new point made at once and merged in one pass: thousands
+    # of spots each cutting the line one by one moved the whole list each time)
+    adds, hard, sets = [], [], []  # (hard: a curve runs into / through the spot; sets: points there already taking a
+    # BPM, after every read)
+    for n0, bpms, r in puts:
+        i0 = bisect.bisect_left(beats, n0 / ppq - EPS) - 1  # (the part running into the spot)
+        ir = bisect.bisect_right(beats, r / ppq + EPS) - 1  # (the part holding its end)
+        on_r = ir >= 0 and abs(beats[ir] - r / ppq) <= EPS
+        if _curved(pts, i0) or (not on_r and _curved(pts, ir)):
+            hard.append((n0, bpms, r))
+            continue
+        if not on_r:
+            src = pts[ir] if ir >= 0 else None
+            adds.append([r / ppq, src[1] if src else base] + (copy.deepcopy(src[2:]) if src else
+                                                              ["hold", "", "lin", False, list(T.BEND)]))
+        for j, v in enumerate(bpms):
+            b = (n0 + j) / ppq
+            on = T.on_beat(pts, b, beats)
+            if on:  # (a point there already: it takes the BPM)
+                sets.append((on[-1], T.clamp_bpm(v)))
+            else:
+                adds.append([b, T.clamp_bpm(v), "hold", "", "lin", False, list(T.BEND)])
+    for i, v in sets:
+        pts[i][1], pts[i][2] = v, "hold"
+    if adds:
+        pts[:] = sorted(pts + adds, key=lambda p: p[0])  # (stable: points on one beat keep their order)
+        beats[:] = [p[0] for p in pts]
+    for n0, bpms, r in hard:  # (the line cut at the spot's end first, so the tempo after it stays as it was)
+        i = bisect.bisect_left(beats, r / ppq - EPS) - 1
+        if 0 <= i < len(pts) - 1 and pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1]:
+            # (a curve cut at the spot's end: the step it was in held on from there, as it played, and the curve
+            # again from its next step: its steps stay where they were)
+            e, origin = T.own_every(new).get(round(pts[i][0], 9), (new.get("every", T.EVERY), None))
+            p0 = T.beat_tick(pts[i][0], ppq)
+            origin = p0 if origin is None else origin
+            q0 = T.beat_tick(pts[i + 1][0], ppq)
+            g_prev = origin + (r - origin) // e * e
+            g_next = g_prev + e if g_prev < r else r
+            step_bpm = float(T.drawn_bpm(new, base, [max(g_prev, p0) / ppq])[0])
+            if g_next < q0:
+                gn = T.split_at(pts, g_next / ppq, base, beats)
+                if e != new.get("every", T.EVERY):
+                    new["every_at"] = sorted((new.get("every_at") or []) + [[gn[0], e]])
+            rp = T.split_at(pts, r / ppq, base, beats)
+            if g_next > r:
+                rp[1], rp[2] = step_bpm, "hold"
+        else:
+            T.split_at(pts, r / ppq, base, beats)
+        for j, v in enumerate(bpms):
+            q = T.split_at(pts, (n0 + j) / ppq, base, beats)
+            k = T.on_beat(pts, q[0], beats)[-1]
+            p = pts[k - 1] if j == 0 and k > 0 else None
+            if p is not None and p[2] != "hold" and p[1] != q[1] and p[0] < q[0]:
+                # (a curve runs into the spot: its last step held up to it, as it played, so the curve still ends
+                # on its own steps and doesn't glide into the new BPM)
+                e, origin = T.own_every(new).get(round(p[0], 9), (new.get("every", T.EVERY), None))
+                p0 = T.beat_tick(p[0], ppq)
+                origin = p0 if origin is None else origin
+                s = max(p0, origin + (n0 - 1 - origin) // e * e)
+                held = T.split_at(pts, s / ppq, base, beats)
+                held[2] = "hold"
+            q[1], q[2] = T.clamp_bpm(v), "hold"
+    o = np.argsort(keys)
+    pl["dense_map"] = (np.array(keys, np.int64)[o], np.array(vals, np.int64)[o]) if keys else None
+    if puts and pl.get("sound_spans"):  # (notes placed by when they sound: read again under the BPM changes)
+        _sound_map(old, new, base, ppq, pl)
+    return done
+
+
+def _curved(pts, i):
+    return 0 <= i < len(pts) - 1 and pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1]
+
 
 def _sound_map(old, new, base, ppq, pl):
     """For the ramps placed by when they sound (pl["sound_spans"], old ticks): the old and the new heard tempo, so

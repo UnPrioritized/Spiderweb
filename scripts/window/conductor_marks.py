@@ -13,6 +13,7 @@ from tkinter import ttk
 from files.lang import tr, trn
 from notes.meter import BOTTOMS, TOPS, at_beat, bar_at, bar_line, key_name, on_bars, sig_text, sigs_of, where
 from window import look
+from window.widgets import Tooltip
 
 MARK_LEN = 10  # px (x the window's scale): a mark's line down from the pane's top edge
 ROW = 12  # px (x scale) between the time signature row and the key signature row
@@ -107,12 +108,14 @@ def ask_key_sig(parent, sharps, minor):
     return _dialog(parent, tr("conductor.key_sig_title"), body)
 
 
-def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=None):
+def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=None, dense=True):
     """Change visual time signature's box (user 2026-11-12): the new signature for the bars lo..hi grow to, with
     which bars and what the tempo becomes shown as it's typed. bpm_at(beat) = the tempo there; why_of(plan) = a
     refusal text or None. forecast_of(plan) = {reason: shapes} that will become plain notes (cheap, shown as typed),
     test_of(plan) = the same found by a quiet test run on OK (more = the box stays open, OK becomes "Change anyway";
-    user 2026-11-12) or a refusal text. The plan (rebar.plan) to do, or None (cancelled)."""
+    user 2026-11-12) or a refusal text. dense: "Short BPM changes for exact timing" ticked to start with (shown only
+    when the change brings notes under a tick apart, forecast_of's "dense"). The plan (rebar.plan, + "dense": the
+    tick) to do, or None (cancelled)."""
     from notes import rebar as R
     now = at_beat(sigs, bar_line(sigs, lo))
 
@@ -130,16 +133,29 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
         bpm.grid(row=3, column=0, columnspan=3, sticky="w")
         plain = ttk.Label(f, text="", foreground=look.WARN, wraplength=300 * look.WIDE, justify="left")
         plain.grid(row=4, column=0, columnspan=3, sticky="w")
+        close = ttk.Label(f, text="", foreground=look.WARN, wraplength=300 * look.WIDE, justify="left")
+        keep = tk.BooleanVar(value=dense)  # (user 2026-11-12: under the warning line, "these" = those notes)
+        tick = ttk.Checkbutton(f, text=tr("conductor.rebar_dense_tick"), variable=keep)
+        Tooltip(tick, tr("conductor.rebar_dense_tip"))
         ttk.Label(f, text=tr("conductor.rebar_tip"), foreground=look.HINT, wraplength=300 * look.WIDE,
-                  justify="left").grid(row=5, column=0, columnspan=3, sticky="w", pady=(8, 0))
+                  justify="left").grid(row=7, column=0, columnspan=3, sticky="w", pady=(8, 0))
         hint = ttk.Label(f, text="", foreground=look.WARN, wraplength=300 * look.WIDE, justify="left")
-        hint.grid(row=6, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        hint.grid(row=8, column=0, columnspan=3, sticky="w", pady=(6, 0))
         state = {"anyway": None}  # (the signature "Change anyway" stands for)
 
         def say(counts):
+            counts = dict(counts)
+            near = counts.pop("dense", 0)
             n = sum(counts.values())
             whys = ", ".join(trn("conductor.rebar_plain_" + k, v, n=v) for k, v in counts.items() if v)
             plain.config(text=trn("conductor.rebar_will", n, n=n, why=whys) if n else "")
+            if near:  # (shown only when some notes would come under a tick apart)
+                close.config(text=trn("conductor.rebar_dense", near, n=near))
+                close.grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 0))
+                tick.grid(row=6, column=0, columnspan=3, sticky="w")
+            else:
+                close.grid_remove()
+                tick.grid_remove()
 
         def ok_text(anyway):
             state["anyway"] = anyway
@@ -197,16 +213,17 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
             if why:
                 hint.config(text=why)
                 return None
+            pl["dense"] = bool(keep.get())
             key = (pl["a"], pl["b"], tuple(pl["sig"]))
             if test_of and state["anyway"] != key:
                 ahead = forecast_of(pl) if forecast_of else {}
-                ahead = {} if "why" in ahead else ahead
+                ahead = {k: v for k, v in ahead.items() if k != "dense"} if "why" not in ahead else {}
                 got = test_of(pl)
                 if isinstance(got, str):  # (refused: a mask over the edge...)
                     hint.config(text=got)
                     return None
                 if sum(got.values()) > sum(ahead.values()):
-                    say(got)
+                    say(dict(got, dense=(forecast_of(pl) or {}).get("dense", 0)) if forecast_of else got)
                     hint.config(text=tr("conductor.rebar_found_more"))
                     ok_text(key)
                     return None
@@ -313,19 +330,21 @@ class ConductorMarks:
         seen = {}
 
         def forecast_of(pl):  # (shapes sorted once per stretch + factors: typing the same again is free)
-            key = (pl["a"], pl["b"], tuple((r[0], r[1]) for r in pl["runs"]))
+            key = (pl["a"], pl["b"], tuple((r[0], r[1], r[4]) for r in pl["runs"]))  # (factors too: notes under a tick)
             if key not in seen:
                 seen[key] = rebar_work.forecast(self.app, pl)
             return seen[key]
 
         def test_of(pl):
-            got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"), dry=True)
+            got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"), dry=True, dense=pl.get("dense", True))
             return self.rebar_why(got) if "why" in got else got["whys"]
         pl = ask_rebar(self, sigs_of(tempo), lo, hi, lambda b: round(float(drawn_bpm(tempo, base, [b])[0]), 3),
-                       why_of, forecast_of, test_of)
+                       why_of, forecast_of, test_of, getattr(self, "rebar_dense", True))
         if pl is None:
             return
-        got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"))
+        self.rebar_dense = pl.get("dense", True)  # (the tick remembered: saved with the window, project.py)
+        self.app.schedule_autosave()
+        got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"), dense=self.rebar_dense)
         if "why" in got:
             self.app.status.config(text=self.rebar_why(got))
             return
