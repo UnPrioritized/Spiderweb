@@ -62,6 +62,18 @@ def clean_text(tx):
             pass
         if tx.get("joined") is True:  # (laid out with joined letters: an old text without it is joined on open)
             out["joined"] = True
+        try:  # (line starts on whole ticks / keys, points on ticks: with_grid)
+            grid = float(tx["grid"])
+            if math.isfinite(grid) and grid > 0:
+                out["grid"] = grid
+        except (KeyError, TypeError, ValueError):
+            pass
+        try:
+            ppq = int(tx["ppq"])
+            if 1 <= ppq <= 65535:
+                out["ppq"] = ppq
+        except (KeyError, TypeError, ValueError):
+            pass
         form = _clean_form(tx.get("form"))
         if form:  # (a letter group split out of a joined line: the glyphs it keeps)
             out["form"] = form
@@ -156,6 +168,7 @@ def layout(tx, info=None):
     contours, places = [], []
     g = 0
     form = kept_form(tx)
+    grid = tx.get("grid")
     if info is not None:
         info["glyphs"] = []
     for n, line in enumerate(lines):
@@ -163,7 +176,7 @@ def layout(tx, info=None):
             if info is not None:  # the letters one by one, as typed)
                 info["joined"] = True
             g = _joined_line(font, line, n, step, track, mid, desc, asc, (a, b, c, d), way, tx["align"],
-                             contours, places, g, form, info)
+                             contours, places, g, form, info, grid)
             continue
         xs, x, prev = [], 0.0, None
         for ch in line:
@@ -172,7 +185,7 @@ def layout(tx, info=None):
             xs.append(x)
             x += font.glyph(ch)[0]
             prev = ch
-        shift = {"left": 0.0, "center": -x / 2, "right": -x}[tx["align"]]
+        shift = line_shift(tx["align"], x, False, grid) if way != "down" else 0.0
         for k in range(len(line) + 1):
             adv = font.glyph(line[k])[0] if k < len(line) else 0.0
             cx, cy = turn(adv / 2, mid)  # (where the letter's middle goes when it's turned)
@@ -263,8 +276,50 @@ def caret_snap(text, c):
     return min(stops, key=lambda k: (abs(k - c), k)) if stops else c
 
 
+def line_shift(align, width, rtl, grid):
+    """Where a line of this width starts (its left end, em) for Align. grid (tx["grid"], with_grid): one tick (or
+    key, Across) in em along the line: the line's START (left end; right end for a right-to-left line, where its
+    first letters are) lands on a whole one, so typing on moves the letters already typed by whole ticks only and
+    their notes stay the same (user 2026-11-12: centred / right-aligned / right-to-left lines wobbled)."""
+    shift = {"left": 0.0, "center": -width / 2, "right": -width}[align]
+    if not grid:
+        return shift
+    start = shift + width if rtl else shift
+    start = round(start / grid) * grid
+    return start - width if rtl else start
+
+
+def with_grid(tx, axes, ppq):
+    """tx with "grid" (line_shift) for these axes: a tick in em when the lines run along time unturned by the box,
+    a key in em when they run up the keys (Across); none otherwise (a turned / slanted box, Down). And "ppq": the
+    ticks text_polys lands the letters' points on (tick_round)."""
+    _, X, Y = axes
+    way = tx.get("direction", "roll")
+    grid = None
+    if way == "roll" and abs(X[1]) < 1e-12 and abs(X[0]) > 1e-12:
+        grid = 1.0 / abs(X[0] * ppq)
+    elif way == "across" and abs(Y[0]) < 1e-12 and abs(Y[1]) > 1e-12:
+        grid = 1.0 / abs(Y[1])
+    out = {k: v for k, v in tx.items() if k != "grid"}
+    if grid:
+        out["grid"] = grid
+    out["ppq"] = int(ppq)
+    return out
+
+
+TICK_STEPS = 1024  # (tick_round: points land on 1/1024 ticks ...)
+TICK_LIFT = 1 / 8192  # (... and a little past, so none sits exactly half way between two ticks)
+
+
+def tick_round(b, ppq):
+    """A letter point's beat on 1/1024 ticks, lifted 1/8192 tick: a point half way between two ticks always goes
+    to the later one, wherever the text is (rounding beats to 9 places picked by the beat's decimals, so a text
+    moved by whole ticks could change its notes: user 2026-11-12, letters typed before changed as typing went on)."""
+    return (math.floor(b * ppq * TICK_STEPS + 0.5) / TICK_STEPS + TICK_LIFT) / ppq
+
+
 def _joined_line(font, line, n, step, track, mid, desc, asc, m, way, align, contours, places, g, form=None,
-                 info=None):
+                 info=None, grid=None):
     """layout's line n with joined letters: its letter shapes into contours, one place per character (+ the line's
     end) into places, as layout's own lines ("roll" / "across"; a place also says "rtl": the character reads right
     to left, its caret on its right side). Letter turn / Flip turn each JOINED PIECE on its own spot (user
@@ -278,7 +333,7 @@ def _joined_line(font, line, n, step, track, mid, desc, asc, m, way, align, cont
         sl = shaping.kept_line(font, form) or shaping.shape_line(font, line, track, (form["pre"], form["post"]))
     if sl is None:
         sl = shaping.shape_line(font, line, track)
-    shift = {"left": 0.0, "center": -sl["width"] / 2, "right": -sl["width"]}[align]
+    shift = line_shift(align, sl["width"], sl["rtl"], grid)
     plain = way == "roll" and m == (1.0, 0.0, 0.0, 1.0)  # (unturned: every letter exactly where it starts)
     span = {}  # (each joined piece's left and right)
     for (gx, adv, _, _), p in zip(sl["glyphs"], sl["pieces"]):
@@ -425,9 +480,11 @@ def from_roll(axes, b, p):
     return ((db * Y[1] - dp * Y[0]) / det, (X[0] * dp - X[1] * db) / det)
 
 
-def build(sh, tx, axes):
+def build(sh, tx, axes, ppq=None):
     """Lay out tx at axes into shape sh (its strokes, box and sh["text"]). False (sh unchanged) if there's
-    nothing to see (no text, or only spaces)."""
+    nothing to see (no text, or only spaces). ppq: the lines start on whole ticks (with_grid); none = tx's own."""
+    if ppq:
+        tx = with_grid(tx, axes, ppq)
     info = {}
     contours, _ = layout(tx, info)
     if not contours:
@@ -558,7 +615,10 @@ def onto_anchor(sh, at, notes_of, ppq):
     """Slide the text so the part Align picks (align_parts) sits on the anchor `at` (beat, pitch): Left = its first
     note starts there and its lowest note is on the anchor's key (a "g" tail too: the other letters sit higher), and
     keep the anchor in it. Whole ticks and whole keys only, so the notes move exactly."""
-    # first the box roughly there (notes before beat 0 or under the lowest key aren't made: kept off those)
+    # first the box roughly there (notes before beat 0 or under the lowest key aren't made: kept off those). Only
+    # when it reaches there: a text that stays clear is measured where it is, so the letters typed before never
+    # move when the anchor is already right (user 2026-11-12: an edge half way between two ticks let two spots
+    # fit, and the rough move picked the other one at every second letter typed)
     ft, fk = align_parts(sh["text"])
     (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
     corners = sh["pts"] + [[b1 + b2 - b0, p1 + p2 - p0]]
@@ -567,24 +627,32 @@ def onto_anchor(sh, at, notes_of, ppq):
     bottom = max(-0.5, round(at[1]) - 0.5 - fk * (max(ps) - min(ps)))
     # (whole ticks / keys here too: a box moved by part of a tick can land its edges on other ticks)
     db, dp = round((left - min(bs)) * ppq) / ppq, round(bottom - min(ps))
-    sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
-    for n in range(4):  # (looked at again: an edge exactly half way between two ticks rounds either way, so a
+    moved = abs(db * ppq) > 1.5 or dp or min(bs) < 0 or min(ps) < -0.5  # (a tick or less: measured where it is)
+    if moved:
+        sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
+    tries = 0
+    while tries < 4:  # (looked at again: an edge exactly half way between two ticks rounds either way, so a
         ns = letter_notes(sh, notes_of)  # second try also moves it a quarter tick off that half way)
+        if not len(ns) and not moved:  # (none seen where it is, e.g. past the keys: the rough move after all)
+            moved = True
+            sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
+            continue
         if not len(ns):
             break
         t, k = anchor_ref(sh["text"], ns)
-        dt, dp = round(at[0] * ppq) - t, round(at[1]) - k
-        if not dt and not dp:
+        dt, dk = round(at[0] * ppq) - t, round(at[1]) - k
+        if not dt and not dk:
             break
-        nudge = 0.25 if n == 1 and dt else 0.0
-        sh["pts"] = [[b + (dt + nudge) / ppq, p + dp] for b, p in sh["pts"]]
+        nudge = 0.25 if tries == 1 and dt else 0.0
+        sh["pts"] = [[b + (dt + nudge) / ppq, p + dk] for b, p in sh["pts"]]
+        tries += 1
     keep_anchor(sh, at)
 
 
 def rebuild(sh, tx, axes, notes_of, ppq):
     """build, keeping the text on its anchor (if it has one)."""
     at = anchor_spot(sh, notes_of, ppq)
-    if not build(sh, tx, axes):
+    if not build(sh, tx, axes, ppq):
         return False
     if at:
         onto_anchor(sh, at, notes_of, ppq)
@@ -856,6 +924,9 @@ def text_polys(sh):
                  for i, poly in enumerate(polys)]
     # float noise dropped: letter edges often sit exactly half way between two ticks (font sizes are round
     # numbers), so noise picked the tick, and a split letter (Split into letters) could land a tick off the whole
+    ppq = tx.get("ppq")
+    if ppq:  # (laid out since 2026-11-12: on the ticks themselves, the same wherever the text is moved by whole ticks)
+        return [[(tick_round(b, ppq), round(p, 9)) for b, p in poly] for poly in polys]
     return [[(round(b, 9), round(p, 9)) for b, p in poly] for poly in polys]
 
 

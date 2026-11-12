@@ -250,7 +250,7 @@ class TextTyping:
             at, kept = ty.get("kept") or (None, None)
             sh = dict(kept) if kept else dict(app.defaults, kind="custom",
                                               **custom_settings(app.custom_defaults, patterns=False))
-            if build(sh, tx, axes):
+            if build(sh, tx, axes, app.ppq):
                 if ty.get("at"):
                     onto_anchor(sh, ty["at"], app.notes_of, app.ppq)
                 ty.pop("kept", None)
