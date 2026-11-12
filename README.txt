@@ -177,6 +177,10 @@ package is optional: Pillow (images shown faster; the Image tool opens JPG,
 WebP, BMP and TIFF too, not just PNG and GIF). Spiderweb works without it,
 just slower. It offers to install it once; to do it yourself later, type
   pip install pillow
+Two more are optional for the Text tool: uharfbuzz and python-bidi (letters
+joined, and right-to-left writing, for Arabic, Persian, Hebrew, Hindi, Thai
+and more). Spiderweb offers them once too; by hand:
+  pip install uharfbuzz python-bidi
 On a Mac, or a Linux too old for the included fast code,
   pip install numba
 gets you that speed back (the first start then takes a minute while it
@@ -251,5 +255,7 @@ python native/loops/build_release.py). They carry the Rust libraries rayon
 and its helpers; their licences are in THIRD-PARTY-NOTICES.txt.
 
 The .exe also carries Python, Tcl/Tk, NumPy, Pillow, PyNaCl (with libsodium,
-cffi and pycparser) and PyInstaller's starter program. Their licences are in
+cffi and pycparser), uharfbuzz (with HarfBuzz), python-bidi (LGPL-3: run from
+source or rebuild with build.bat to use your own copy) and PyInstaller's
+starter program. Their licences are in
 THIRD-PARTY-NOTICES.txt.

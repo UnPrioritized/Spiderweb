@@ -124,6 +124,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_fine.py       Hz bass: made on the file's finer ticks in Keep timing parts (the export)
     fonts.py         letter outlines from the fonts installed in Windows
     fonts_ft.py      the same on Linux (fontconfig + FreeType)
+    shaping.py       joined letters + right-to-left order for the Text tool (optional uharfbuzz + python-bidi)
     funnel.py        funnels: curves, note grid, gates
     bezier.py        Bezier curves (anchors + handles) for curves and funnel curves, symmetry, fitting to points
     arc.py           arcs: pieces of a perfect circle through three points
@@ -302,8 +303,10 @@ def run_pip(root, packages):
     return failed, output.strip()
 
 
-EXTRAS = (("numba", "numba", "extras.numba"), ("PIL", "pillow", "extras.pillow"))  # (module, pip name, text)
-SHOWN = {"numba": "Numba", "pillow": "Pillow"}  # (their names while they're installed)
+EXTRAS = (("numba", "numba", "extras.numba"), ("PIL", "pillow", "extras.pillow"),
+          ("uharfbuzz", "uharfbuzz", "extras.uharfbuzz"), ("bidi", "python-bidi", "extras.bidi"))  # (module, pip, text)
+SHOWN = {"numba": "Numba", "pillow": "Pillow", "uharfbuzz": "uharfbuzz",
+         "python-bidi": "python-bidi"}  # (their names while they're installed)
 
 
 def own_loops_work():
@@ -318,7 +321,8 @@ def own_loops_work():
 
 def offer_extras():
     """Pillow (pictures to the screen faster, more picture kinds) is optional: Spiderweb works without it, slower.
-    Numba too, but only where our own compiled loops can't load (own_loops_work). Run from source with one
+    Numba too, but only where our own compiled loops can't load (own_loops_work). uharfbuzz + python-bidi too
+    (the Text tool's joined letters / right-to-left writing; without them it draws letters one by one). Run from source with one
     missing: offer to install it, once (a "No" or a failed install is remembered in packages.json; the exe has
     what it needs inside)."""
     if getattr(sys, "frozen", False):

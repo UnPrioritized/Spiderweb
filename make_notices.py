@@ -1,6 +1,7 @@
 """Writes THIRD-PARTY-NOTICES.txt: the licences of everything Spiderweb.exe carries inside it besides Spiderweb itself
-(Python, Tcl/Tk, NumPy, Pillow, PyNaCl + cffi + pycparser, PyInstaller's starter), read from the copies installed here
-so the notices match the versions built in, then the own compiled loops' Rust crates (native/loops/NOTICES.txt) and
+(Python, Tcl/Tk, NumPy, Pillow, PyNaCl + cffi + pycparser, uharfbuzz + HarfBuzz, python-bidi, PyInstaller's
+starter), read from the copies installed here so the notices match the versions built in (HarfBuzz's own text:
+licences/HarfBuzz-COPYING.txt, uharfbuzz's wheel leaves it out), then the own compiled loops' Rust crates (native/loops/NOTICES.txt) and
 the Kestrel connector's (native/kestrel_bridge/NOTICES.txt), each written by its own make_notices.py. build.bat runs
 it before building."""
 
@@ -26,6 +27,12 @@ its helpers): their licences come after the packages below. Kestrel (GPU) playba
 connector (scripts/kestrel, also inside the .exe): its licences, Kestrel's own among them, are at the
 end of this file.
 """
+
+BIDI_NOTE = """python-bidi is free software under the GNU Lesser General Public License, version 3 or later
+(its full text is above, COPYING + COPYING.LESSER). Its source code: https://github.com/MeirKriheli/python-bidi
+Spiderweb.exe carries an unchanged copy of it. To use your own or a changed copy instead, run Spiderweb
+from its source (Spiderweb-source.zip, or the public repository) with that copy installed, or rebuild
+the .exe with build.bat after installing it."""
 
 
 def section(title, *texts):
@@ -65,6 +72,11 @@ def main():
              package("pynacl", "PyNaCl (with libsodium; checks update signatures)"),
              package("cffi", "cffi (used by PyNaCl)"),
              package("pycparser", "pycparser (used by cffi)"),
+             package("uharfbuzz", "uharfbuzz (joins letters in the Text tool)"),
+             section("HarfBuzz (inside uharfbuzz)",
+                     open(os.path.join(HERE, "licences", "HarfBuzz-COPYING.txt"), encoding="utf-8").read()),
+             package("python-bidi", "python-bidi (right-to-left writing in the Text tool)"),
+             section("About python-bidi's licence (LGPL-3)", BIDI_NOTE),
              package("pyinstaller", "PyInstaller (its starter program runs Spiderweb.exe)")]
     for own in (("loops", "NOTICES.txt"), ("kestrel_bridge", "NOTICES.txt")):
         path = os.path.join(HERE, "native", *own)
