@@ -248,8 +248,8 @@ class AheadPlay:
         lm = self._loaded()
         if engine != "merlin":  # (BASSMIDI with a loaded MIDI: the card's piece files read by BASSMIDI, L4)
             return engine, None
-        if self.app.out.edo:  # (31-EDO's channels are retuned per note name: Merlin leaves that out, measured
-            return "kestrel", "edo31"  # 2026-11-13, PLAN.md "31-EDO with bends and instruments")
+        # (31-EDO's per-note-name tuning: Merlin plays it since our Kestrel fork's per-note tuning, measured equal
+        # to Kestrel 2026-11-13, dev/scratch/hear_edo_merlin.py)
         why = merlin_gap(ccs, font_list(self.app.hz_preview)) or (loaded_gap(lm) if lm is not None else None)
         if why == "cc" and not self.app.ahead_opts.get("exact"):  # (user 2026-11-03: speed first unless ticked)
             why = None
