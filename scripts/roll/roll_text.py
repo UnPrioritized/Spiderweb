@@ -76,7 +76,7 @@ class TextTyping:
         if not self.typing or self.text_at(e.x, e.y) != self.typing["i"] or self.typing["i"] is None:
             return self.on_press(e)
         text, c = self.typing_state()[0]["text"], self.caret_at(e)
-        marks = line_stops(text, c)[0] is not None  # (joined lines: a letter's marks are part of its word)
+        marks = line_stops(text, c, self.typing_down())[0] is not None  # (joined lines: marks are part of a word)
         word = lambda ch: ch.isalnum() or ch == "_" or (marks and unicodedata.category(ch)[0] == "M")
         kind = word(text[c]) if c < len(text) else word(text[c - 1]) if c else False
         a = c
@@ -87,6 +87,10 @@ class TextTyping:
             b += 1
         self.typing["anchor"], self.typing["caret"] = a, b
         self.show_caret()
+
+    def typing_down(self):
+        """The text being typed has Direction Down (never joined: its caret moves as for Latin)."""
+        return self.typing_state()[0].get("direction", "roll") == "down"
 
     def text_selection(self):
         """(start, end) of the selected characters (start == end: nothing selected)."""
@@ -122,6 +126,7 @@ class TextTyping:
         app, ty = self.app, self.typing
         k = e.keysym
         text, c = self.typing_state()[0]["text"], ty["caret"]
+        down = self.typing_down()
         s0, s1 = self.text_selection()
         if e.state & CTRL:
             low = k.lower()
@@ -161,14 +166,14 @@ class TextTyping:
                 self.set_text(text[:c - 1] + text[c:], c - 1)
         elif k == "Delete":  # (a joined line: the whole letter group, as Windows does; Backspace = one character)
             if c < len(text):
-                self.set_text(text[:c] + text[caret_step(text, c, True):], c)
+                self.set_text(text[:c] + text[caret_step(text, c, True, down):], c)
         elif k in ("Left", "Right", "Home", "End", "Up", "Down"):
             # (a right-to-left line, as Windows' boxes: Left = on in the typed text (reading order), Right = back)
-            forward = (k == "Right") != line_stops(text, c)[1]
+            forward = (k == "Right") != line_stops(text, c, down)[1]
             if k in ("Left", "Right") and s0 != s1 and not e.state & SHIFT:
                 c = s1 if forward else s0  # a selection: to its end / start
             elif k in ("Left", "Right"):
-                c = caret_step(text, c, forward)
+                c = caret_step(text, c, forward, down)
             elif k in ("Home", "End"):
                 start, end = caret_line(text, c)
                 c = start if k == "Home" else end
@@ -191,7 +196,8 @@ class TextTyping:
         if not 0 <= m < len(lines):
             return c
         start = sum(len(l) + 1 for l in lines[:m])
-        if line_stops(text, c)[0] is None and line_stops(text, start)[0] is None:
+        down = self.typing_down()
+        if line_stops(text, c, down)[0] is None and line_stops(text, start, down)[0] is None:
             col = c - (text.rfind("\n", 0, c) + 1)
             return start + min(col, len(lines[m]))
         tx = self.typing_state()[0]
@@ -199,7 +205,7 @@ class TextTyping:
         along = 1 if tx.get("direction", "roll") == "across" else 0  # (the letters run along x, or up the keys)
         spot = lambda j: (places[j]["caret"][0][along] + places[j]["caret"][1][along]) / 2
         here = spot(c)
-        stops = line_stops(text, start)[0] or range(start, start + len(lines[m]) + 1)
+        stops = line_stops(text, start, down)[0] or range(start, start + len(lines[m]) + 1)
         return min(stops, key=lambda j: (abs(spot(j) - here), j))
 
     def insert_text(self, s):

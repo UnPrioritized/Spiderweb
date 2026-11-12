@@ -233,21 +233,22 @@ def caret_line(text, c):
     return text.rfind("\n", 0, c) + 1, len(text) if end < 0 else end
 
 
-def line_stops(text, c):
+def line_stops(text, c, down=False):
     """(stops, rtl) of c's line: a joined line gives where its caret may stop (typed positions, shaping.caret_stops)
-    and whether it reads right to left; any other line None, False (every position, as before)."""
+    and whether it reads right to left; any other line None, False (every position, as before). down = the text's
+    Direction is Down: never joined (letters one by one in typed order), so the arrows act as for Latin."""
     s, e = caret_line(text, c)
     line = text[s:e]
-    if not joined(line):
+    if down or not joined(line):
         return None, False
     from notes import shaping
     return [s + k for k in shaping.caret_stops(line)], shaping.line_rtl(line)
 
 
-def caret_step(text, c, forward):
+def caret_step(text, c, forward, down=False):
     """The typed position one step on (forward) or back from c. Joined lines step by their caret stops; past a
     line's end / start the caret goes to the next / last line, one character, as before."""
-    stops, _ = line_stops(text, c)
+    stops, _ = line_stops(text, c, down)
     if stops:
         nxt = [k for k in stops if k > c] if forward else [k for k in stops if k < c]
         if nxt:
