@@ -1343,3 +1343,87 @@ def with_layers(hz, every, picked=None):
 def each_layer(hz, fn):
     """hz with fn(layer's Hz bass) done to every layer (e.g. moved: every layer's notes and lines alike)."""
     return with_layers(hz, [fn(l) for l in layers_of(hz)])
+
+
+# ---------------------------------------------------------------- stretched in time (Change visual time signature)
+
+def stretched_hz(hz, f):
+    """hz for its shape stretched f times in beats while the tempo goes f times as fast (Change visual time signature,
+    user 2026-11-12: the same sound, other bar lines): every time in beats x f, every rate "times a beat" / f, its
+    tempo x f (each wave the same seconds long, so it stays in tune). Seconds (CC run-on), Hz, cents, shares along a
+    note (u) and values stay. A copy."""
+    import copy
+    if abs(f - 1.0) < 1e-12:
+        return hz
+    out = copy.deepcopy({k: v for k, v in hz.items() if k != "_memo"})
+    out["bpm"] = out["bpm"] * f
+    if out.get("tempo"):
+        out["tempo"] = [[b * f, v * f] for b, v in out["tempo"]]
+    return each_layer(out, lambda src: _stretched_layer(src, f))
+
+
+def _times(d, keys, f, rate=False):
+    """d's numbers under keys x f (rate: / f)."""
+    if not isinstance(d, dict):
+        return
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            d[k] = v / f if rate else v * f
+
+
+def _stretched_layer(src, f):
+    src = dict(src)
+    tones = []
+    for n in src.get("tones") or ():
+        n = dict(n, t=n["t"] * f, len=n["len"] * f)
+        n["to"] = [dict(s, out=s["out"] * f, **{"in": s["in"] * f}) for s in n.get("to") or ()]
+        if n.get("wobble"):
+            n["wobble"] = [dict(w, rate=w["rate"] / f) for w in n["wobble"]]
+        tones.append(n)
+    if "tones" in src:
+        src["tones"] = tones
+    if src.get("fx"):  # (effect lines: beats from the left edge, or within one repeat)
+        src["fx"] = {k: [[p[0] * f, *p[1:]] for p in pts] for k, pts in src["fx"].items()}
+    for key in ("loop", "sustain"):  # (a repeat's length / a sustain point: beats)
+        if src.get(key):
+            src[key] = {k: v * f for k, v in src[key].items()}
+    if src.get("loud"):
+        src["loud"] = [[p[0] * f, *p[1:]] for p in src["loud"]]
+    for key in ("lfo", "voice", "mode", "arp", "mod", "filter", "osc2", "rack", "bypass", "own_length", "length"):
+        if isinstance(src.get(key), (dict, list)):
+            src[key] = copy_of(src[key])
+    fx = src.get("fx") or {}
+    if "vibrato" in fx:  # (its rate: times a beat, the knob's or the usual one)
+        lfo = src["lfo"] = dict(src.get("lfo") or {})
+        lfo["vibrato_rate"] = min(LFO["vibrato_rate"][1], lfo.get("vibrato_rate", VIBRATO_RATE) / f)
+    if "tremolo" in fx and all(p[1] / f <= 1.0 for p in fx["tremolo"]):  # (its line = how fast: x TREMOLO a beat;
+        fx["tremolo"] = [[p[0], p[1] / f, *p[2:]] for p in fx["tremolo"]]  # can't go past 1: the net decides)
+    _times(src.get("lfo"), ("tremolo_wait", "tremolo_rise"), f)
+    for voice in (src.get("voice"), (src.get("bypass") or {}).get("voice")):
+        _times(voice, ("glide",), f)
+    for mode in (src.get("mode"), (src.get("osc2") or {}).get("mode"), (src.get("bypass") or {}).get("mode")):
+        _times(mode, ("time",), f)
+        _times(mode, ("rate",), f, rate=True)
+        if isinstance(mode, dict) and mode.get("kind") == "crush":  # (its grid = amount^2 x CRUSH beats)
+            mode["amount"] = min(1.0, mode["amount"] * math.sqrt(f))
+    _times(src.get("arp"), ("speed",), f, rate=True)
+    for e in src.get("rack") or ():
+        _times(e, ("rate",), f, rate=True)
+        _times(e, ("time", "length", "attack", "release"), f)
+    mod = src.get("mod")
+    if isinstance(mod, dict):
+        for lfo in mod.get("lfo") or ():
+            _times(lfo, ("rate",), f, rate=True)
+        for env in mod.get("env") or ():
+            _times(env, ("attack", "decay", "release"), f)
+        _times(mod, ("phase",), f)
+    _times(src.get("filter"), ("attack", "decay", "release"), f)
+    for key in ("length", "own_length"):
+        _times(src.get(key), ("beats",), f)
+    return src
+
+
+def copy_of(v):
+    import copy
+    return copy.deepcopy(v)

@@ -18,6 +18,7 @@ import numpy as np
 from notes import rebar as R
 from notes.custom import notes_shape, unpack_notes, block_shift
 from notes.engine import pasted_notes
+from notes.hz_settings import stretched_hz
 from notes.mask import is_mask
 from notes.passengers import pack_cc, rides_of
 
@@ -49,7 +50,7 @@ def classify(app, pl):
             out[i] = "before"
         elif s0 >= b_t:
             out[i] = "after"
-        elif s0 >= a_t and e1 <= b_t and R._inside_run(pl, b0, b1) and not sh.get("hz"):
+        elif s0 >= a_t and e1 <= b_t and R._inside_run(pl, b0, b1):
             out[i] = ("run", R._run(pl, b0))
         else:
             if is_mask(sh):
@@ -115,6 +116,8 @@ def stretched(app, sh, pl, k):
     oa, ob, na, nb, f = pl["runs"][k]
     new = app.stretched(sh, oa, f, 0.0, 1.0)
     new["pts"] = [[round(b + na - oa, 9) + 0.0, p] for b, p in new["pts"]]
+    if new.get("hz"):  # (a Hz bass: its notes, lines, rates and tempo with it, so it stays in tune)
+        new["hz"] = stretched_hz(new["hz"], f)
     return scaled(new, f)
 
 
@@ -232,6 +235,20 @@ def same_notes(old, new, pl, ppq, f=1.0):
                 and (np.abs(a[:, :2] - b[:, :2]) <= tol).all())
 
 
+def kept_sound(sh, old, new, pl, ppq, f):
+    """same_notes, or for a Hz bass: its repeats are made again at the stretched gates, so their count and ticks may
+    differ by rounding (Fixed gates are whole ticks: rounded again). Kept when its notes cover the same time (first
+    start, last end within rounding), as many within 2 %, on the same keys."""
+    if same_notes(old, new, pl, ppq, f):
+        return True
+    if not sh.get("hz") or not len(old) or not len(new):
+        return False
+    tol = math.ceil(f / 2) + 1
+    a0, a1 = R.map_ticks(pl, int(old[:, 0].min()), ppq), R.map_ticks(pl, int(old[:, 1].max()), ppq)
+    return (abs(len(new) - len(old)) <= 0.02 * len(old) and abs(int(new[:, 0].min()) - a0) <= tol
+            and abs(int(new[:, 1].max()) - a1) <= tol and set(old[:, 2].tolist()) == set(new[:, 2].tolist()))
+
+
 def apply(app, pl, name):
     """The change done on the project in one undo step: {"ok": True, "plain": shapes made plain notes by the safety
     net, "cut": shapes cut at the edges, "off": shapes whose notes still differ} or {"why", "at"} (nothing changed)."""
@@ -281,7 +298,7 @@ def apply(app, pl, name):
     news = rows_by_owner(np.array(app.rendered[:, :6], np.int64))
     back = []
     for i, k in kinds.items():
-        if isinstance(k, tuple) and not same_notes(olds(i), news(i), pl, ppq, pl["runs"][k[1]][4]):
+        if isinstance(k, tuple) and not kept_sound(app.shapes[i], olds(i), news(i), pl, ppq, pl["runs"][k[1]][4]):
             back.append(i)
     plain_n = 0
     if back:
@@ -298,7 +315,7 @@ def apply(app, pl, name):
     news = rows_by_owner(np.array(app.rendered[:, :6], np.int64))
     for i, k in kinds.items():
         if k in ("after",) or isinstance(k, tuple):
-            off += not same_notes(olds(i), news(i), pl, ppq, max(r[4] for r in pl["runs"]))
+            off += not kept_sound(app.shapes[i], olds(i), news(i), pl, ppq, max(r[4] for r in pl["runs"]))
     app.playhead = max(0.0, R.map_beat(pl, app.playhead))  # (on the same music)
     app.roll.show_playhead()
     app.tempo_changed()
