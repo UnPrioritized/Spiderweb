@@ -1194,7 +1194,15 @@ def rejoined(olds, new, join=None):
     if keep:
         out["cut"]["mould"] = keep
     if same_vel:
-        out["cut"]["vel"] = velocity(new)
+        # (the whole's line over the bigger piece's time, as a cut gives it (joined.piece_velocity): the joined
+        # drawing's line samples the pieces' lines and lost a jump in the whole's line (two points on one spot), so
+        # a velocity line drawn on it later changed notes outside it; sweep 106583784)
+        from notes.engine import cached_arrays
+        from notes.joined import piece_velocity
+        t_new, t_src = (np.concatenate(cached_arrays(s))[:, 0] for s in (out, src))
+        piece_velocity(out, src, (float(t_new.min()), float(t_new.max())),
+                       (float(t_src.min()), float(t_src.max())), lead=True)
+        out["cut"]["vel"] = velocity(out)
     else:
         out["cut"]["own_vel"] = True
     return out

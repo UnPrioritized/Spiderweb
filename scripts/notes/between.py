@@ -652,6 +652,11 @@ def own_fx_vel(mine, want):
     k = len(fx)
     while k and fx[k - 1].get("tool") == "vel":
         k -= 1
+    # (the step as made may end in velocity lines of its own already (its ends' trailing "vel" steps): only the ones
+    # past those are drawn on it; sweep 206580853, every trailing one was taken and it became a key)
+    wfx = list(want.get("fx") or [])
+    if k < len(wfx) < len(fx) and close(fx[:len(wfx)], wfx):
+        k = len(wfx)
     if k == len(fx) or not pages(fx[:k]):
         return None
     core = dict(mine, fx=fx[:k])
@@ -927,7 +932,7 @@ def sync_groups(shapes):
                     b.pop("ord", None)
                 mine = dict(mine, fx=[s for s in mine["fx"]][:len(mine["fx"]) - len(vels)])
                 mine.pop("order", None)
-            if close(_no_own(mine), _no_own(want if vels is None else plain)):
+            if close(_no_own(mine), _no_own(want if vels is None else {k: v for k, v in plain.items() if k != "order"})):
                 # (only its velocity / Sustain / Gate subtract: its own, user)
                 if not close(mine, dict(_no_vel(mine), **{k: want[k] for k in VEL_KEYS if k in want})):
                     b["vel"] = {k: sh[k] for k in VEL_KEYS if k in sh}
