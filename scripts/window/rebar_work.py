@@ -99,8 +99,24 @@ def forecast(app, pl):
     starts = r[(r[:, 0] >= a_t) & (r[:, 0] < b_t), 0]
     groups = R.dense_spots(pl, starts, ppq)
     if groups:
-        out["dense"] = int(np.isin(starts, np.concatenate([np.array(g, np.int64) for g in groups])).sum())
+        out["dense"] = n = int(np.isin(starts, np.concatenate([np.array(g, np.int64) for g in groups])).sum())
+        if n >= DENSE_MOST * len(starts):  # (user 2026-11-12: a 1-tick spam squashed = short BPM changes everywhere,
+            out["dense_most"] = ppq_times(pl, starts, ppq)  # undoing the change: say a higher PPQ is needed instead)
     return out
+
+
+DENSE_MOST = 0.5  # (share of the bars' notes under a tick apart from which the box says "most notes": my pick)
+
+
+def ppq_times(pl, starts, ppq, most=16):
+    """How many times the PPQ the change needs so no note comes under a tick apart (2 = twice), or 0 (more than
+    `most`)."""
+    u = np.unique(np.asarray(starts, np.int64))
+    pl = dict(pl, sound=None)  # (the beat map only: by-sound spans are in this PPQ's ticks)
+    for k in range(2, most + 1):
+        if not R.dense_spots(pl, u * k, ppq * k):
+            return k
+    return 0
 
 
 class Kinds(dict):

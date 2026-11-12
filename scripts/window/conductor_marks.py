@@ -143,13 +143,22 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
         hint.grid(row=8, column=0, columnspan=3, sticky="w", pady=(6, 0))
         state = {"anyway": None}  # (the signature "Change anyway" stands for)
 
-        def say(counts):
+        def say(counts, sig=None):
             counts = dict(counts)
             near = counts.pop("dense", 0)
+            most = counts.pop("dense_most", None)
             n = sum(counts.values())
             whys = ", ".join(trn("conductor.rebar_plain_" + k, v, n=v) for k, v in counts.items() if v)
             plain.config(text=trn("conductor.rebar_will", n, n=n, why=whys) if n else "")
-            if near:  # (shown only when some notes would come under a tick apart)
+            if near and most is not None:  # (user 2026-11-12: most notes under a tick apart = short BPM changes
+                # everywhere would undo the change: say what PPQ it needs, no tick box; OK rounds them)
+                s = sig_text(sig) if sig else ""
+                close.config(text=tr("conductor.rebar_dense_most_2", sig=s) if most == 2 else
+                             tr("conductor.rebar_dense_most", sig=s, k=most) if most else
+                             tr("conductor.rebar_dense_most_far", sig=s))
+                close.grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 0))
+                tick.grid_remove()
+            elif near:  # (shown only when some notes would come under a tick apart)
                 close.config(text=trn("conductor.rebar_dense", near, n=near))
                 close.grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 0))
                 tick.grid(row=6, column=0, columnspan=3, sticky="w")
@@ -188,7 +197,7 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
                 bpm.config(text=tr("conductor.rebar_times", times=", ".join(f"{f:.4g}" for f in fs)))
             hint.config(text="")
             got = forecast_of(pl) if forecast_of else {}
-            say({} if "why" in got else got)
+            say({} if "why" in got else got, pl["sig"])
             if state["anyway"] is not None and state["anyway"] != (pl["a"], pl["b"], tuple(pl["sig"])):
                 ok_text(None)
         t.trace_add("write", show)
@@ -213,17 +222,19 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
             if why:
                 hint.config(text=why)
                 return None
-            pl["dense"] = bool(keep.get())
+            fore = (forecast_of(pl) or {}) if forecast_of else {}
+            fore = {} if "why" in fore else fore
+            pl["dense"] = bool(keep.get()) and "dense_most" not in fore  # (most notes: rounded, tick not shown)
+            pl["dense_most"] = "dense_most" in fore
             key = (pl["a"], pl["b"], tuple(pl["sig"]))
             if test_of and state["anyway"] != key:
-                ahead = forecast_of(pl) if forecast_of else {}
-                ahead = {k: v for k, v in ahead.items() if k != "dense"} if "why" not in ahead else {}
+                ahead = {k: v for k, v in fore.items() if k not in ("dense", "dense_most")}
                 got = test_of(pl)
                 if isinstance(got, str):  # (refused: a mask over the edge...)
                     hint.config(text=got)
                     return None
                 if sum(got.values()) > sum(ahead.values()):
-                    say(dict(got, dense=(forecast_of(pl) or {}).get("dense", 0)) if forecast_of else got)
+                    say(dict(got, **{k: v for k, v in fore.items() if k in ("dense", "dense_most")}), pl["sig"])
                     hint.config(text=tr("conductor.rebar_found_more"))
                     ok_text(key)
                     return None
@@ -342,9 +353,10 @@ class ConductorMarks:
                        why_of, forecast_of, test_of, getattr(self, "rebar_dense", True))
         if pl is None:
             return
-        self.rebar_dense = pl.get("dense", True)  # (the tick remembered: saved with the window, project.py)
-        self.app.schedule_autosave()
-        got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"), dense=self.rebar_dense)
+        if not pl.get("dense_most"):  # (the tick hidden for "most notes": its choice kept as it was)
+            self.rebar_dense = pl.get("dense", True)  # (the tick remembered: saved with the window, project.py)
+            self.app.schedule_autosave()
+        got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"), dense=pl.get("dense", True))
         if "why" in got:
             self.app.status.config(text=self.rebar_why(got))
             return
