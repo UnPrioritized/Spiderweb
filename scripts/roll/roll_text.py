@@ -77,7 +77,9 @@ class TextTyping:
             return self.on_press(e)
         text, c = self.typing_state()[0]["text"], self.caret_at(e)
         marks = line_stops(text, c, self.typing_down())[0] is not None  # (joined lines: marks are part of a word)
-        word = lambda ch: ch.isalnum() or ch == "_" or (marks and unicodedata.category(ch)[0] == "M")
+        # (joined lines: the zero-width joiner / non-joiner are inside words too, Persian types them mid-word)
+        word = lambda ch: (ch.isalnum() or ch == "_"
+                           or (marks and (unicodedata.category(ch)[0] == "M" or ch in "‌‍")))
         kind = word(text[c]) if c < len(text) else word(text[c - 1]) if c else False
         a = c
         while a > 0 and text[a - 1] != "\n" and word(text[a - 1]) == kind:
