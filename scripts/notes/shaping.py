@@ -167,15 +167,39 @@ def _hb_font(font):
             blob, index = font.hb_blob()
             if blob:
                 hb = _state["hb"]
-                face = hb.Face(blob, index)
+                face = hb.Face(blob, index & 0xFFFF)
                 hf = hb.Font(face)
-                if "fvar" in face.table_tags:  # (a font with a weight dial: the weight asked for)
-                    hf.set_variations({"wght": float(font.weight)})
+                if "fvar" in face.table_tags:  # (a font with dials: the style the system draws, else the weight)
+                    hf.set_variations(_style_dials(face, font, index >> 16))
                 hf = (hf, face.upem)
         except Exception:  # (a font the package can't read: letter by letter, as before)
             hf = None
         font._hb = hf
     return hf
+
+
+def _style_dials(face, font, instance=0):
+    """A font with dials (weight, width...): the settings of the named style the system draws for this Font, so the
+    joined line's letter widths match the letters drawn (2026-11-12: "Bahnschrift Light Condensed" was spaced as
+    the normal-width Regular). Windows lists each named style as its own family ("<family> <style>"); Linux's
+    font index names it in its top bits (instance = its number + 1). No match: the font's weight on its weight
+    dial, every other dial at its default (as before)."""
+    insts = face.named_instances
+    pick = insts[instance - 1] if 0 < instance <= len(insts) else None
+    if pick is None:
+        base = (face.get_name(16) or face.get_name(1) or "").casefold()
+        want = font.family.casefold()
+        for ni in insts:
+            sub = (face.get_name(ni.subfamily_name_id) or "").casefold()
+            if want == (base if sub == "regular" else f"{base} {sub}"):
+                pick = ni
+                break
+    dials = {"wght": float(font.weight)}
+    if pick is not None:
+        dials = {ax.tag: float(v) for ax, v in zip(face.axis_infos, pick.design_coords)}
+        if font.weight != 400 and "wght" in dials:  # (bold asked of a named style: the weight asked for)
+            dials["wght"] = float(font.weight)
+    return dials
 
 
 def _kind(ch):
