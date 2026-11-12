@@ -14,6 +14,7 @@ beats per key then).
 """
 
 import copy
+import itertools
 import math
 
 import numpy as np
@@ -709,6 +710,34 @@ def _merge_joined(sh, cons, groups, box):
     return out
 
 
+def _bunches(box):
+    """The outlines (their boxes: x0, y0, x1, y1) bunched where boxes touch or overlap, a chain of them one bunch:
+    lists of their numbers, each in order, bunches in order of their first one. Sorted along x, each box only
+    against those still reaching it (a line of letters: a few each)."""
+    n = len(box)
+    head = list(range(n))
+
+    def find(i):
+        while head[i] != i:
+            head[i] = head[head[i]]
+            i = head[i]
+        return i
+
+    order = sorted(range(n), key=lambda i: box[i][0])
+    live = []  # (boxes still reaching the sweep's x: only those can touch the next one)
+    for i in order:
+        x0, y0, x1, y1 = box[i]
+        live = [j for j in live if box[j][2] >= x0]
+        for j in live:
+            if box[j][1] <= y1 and y0 <= box[j][3]:
+                head[find(j)] = find(i)
+        live.append(i)
+    bunches = {}
+    for i in range(n):
+        bunches.setdefault(find(i), []).append(i)
+    return list(bunches.values())
+
+
 CROSS_ROWS = 64  # pieces of an outline checked at a time by parts_overlap
 
 
@@ -741,10 +770,13 @@ def parts_overlap(loops, glyphs):
     box = [(min(x for x, _ in p), min(y for _, y in p), max(x for x, _ in p), max(y for _, y in p)) for p in loops]
     if any(crosses(p, p) for p in loops):  # (one outline crossing itself: some fonts' A)
         return True
-    for i in range(len(loops)):
-        for j in range(i + 1, len(loops)):
+    same = {}  # (each letter's outlines: only pairs within one letter are looked at)
+    for i, g in enumerate(glyphs):
+        same.setdefault(g, []).append(i)
+    for idx in same.values():
+        for i, j in itertools.combinations(idx, 2):
             a, b = box[i], box[j]
-            if glyphs[i] != glyphs[j] or a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1]:
+            if a[2] < b[0] or b[2] < a[0] or a[3] < b[1] or b[3] < a[1]:
                 continue
             if (area(loops[i]) > 0) != (area(loops[j]) > 0):
                 continue  # (a hole and its letter: fine either way)
@@ -759,19 +791,26 @@ SLIVER = 1e-9  # (an area this small, in the box's 0..1 units, is no area: empty
 def empty_areas(loops):
     """Area colour spots (areas.py: [u, v, 0] = left empty) for every area the outlines close in that the text
     leaves empty (its turns add up to none, nonzero rule): inside an O, or between an A's legs and its crossbar
-    when they're separate parts. With Overlaps cancel out off the rest is all filled."""
-    from notes.faces import faces
-    xs, ys, size, lab = faces(loops).pieces()
+    when they're separate parts. With Overlaps cancel out off the rest is all filled.
+    Worked out bunch by bunch (_bunches: outlines whose boxes touch): an area is closed in by one bunch's lines
+    only, and the other bunches' outlines wind 0 times round it. All at once, faces.py's slabs ran across every
+    letter of the line: 200 letters took 261 s and 23 GB (2026-11-12); bunch by bunch the areas are the same (a
+    spot may sit elsewhere in its area)."""
+    from notes.faces import Faces
     boxes = [(min(x for x, _ in p), min(y for _, y in p), max(x for x, _ in p), max(y for _, y in p)) for p in loops]
     out = []
-    for g in sorted(set(lab.tolist())):
-        mine = np.flatnonzero(lab == g)
-        if size[mine].sum() < SLIVER:  # (no room: between two lines lying on each other, e.g. where joined
-            continue  # letters' strokes meet; its spot would land in the filled join)
-        k = max(mine, key=lambda i: size[i])  # (its biggest piece's middle)
-        x, y = float(xs[k]), float(ys[k])
-        if not sum(winding(p, x, y) for p, (a, b, c, d) in zip(loops, boxes) if a <= x <= c and b <= y <= d):
-            out.append([round(x, 9), round(y, 9), 0])
+    for idx in _bunches(boxes):
+        part = [loops[i] for i in idx]
+        xs, ys, size, lab = Faces([np.ascontiguousarray(p, float).reshape(-1, 2) for p in part]).pieces()
+        for g in sorted(set(lab.tolist())):
+            mine = np.flatnonzero(lab == g)
+            if size[mine].sum() < SLIVER:  # (no room: between two lines lying on each other, e.g. where joined
+                continue  # letters' strokes meet; its spot would land in the filled join)
+            k = max(mine, key=lambda i: size[i])  # (its biggest piece's middle)
+            x, y = float(xs[k]), float(ys[k])
+            if not sum(winding(loops[i], x, y) for i in idx
+                       if boxes[i][0] <= x <= boxes[i][2] and boxes[i][1] <= y <= boxes[i][3]):
+                out.append([round(x, 9), round(y, 9), 0])
     return out
 
 
