@@ -59,10 +59,30 @@ def clean_text(tx):
                     out["anchor_way"] = way
         except (KeyError, TypeError, ValueError):
             pass
+        if tx.get("joined") is True:  # (laid out with joined letters: an old text without it is joined on open)
+            out["joined"] = True
+        form = _clean_form(tx.get("form"))
+        if form:  # (a letter group split out of a joined line: the glyphs it keeps)
+            out["form"] = form
         if len(out["bbox"]) != 4:
             return None
         return out
     except (AttributeError, KeyError, TypeError, ValueError):
+        return None
+
+
+def _clean_form(form):
+    """A split letter group's kept glyphs (shaping.keep_form) from a file, or None."""
+    try:
+        out = {"of": str(form["of"]), "font": [str(form["font"][0]), int(form["font"][1]), bool(form["font"][2])],
+               "glyphs": [[str(g[0]), int(g[1])] + [float(v) for v in g[2:6]] for g in form["glyphs"]],
+               "cells": [[float(a), float(b), bool(r)] for a, b, r in form["cells"]], "width": float(form["width"]),
+               "rtl": bool(form["rtl"]), "pre": str(form.get("pre", "")), "post": str(form.get("post", ""))}
+        nums = [v for g in out["glyphs"] for v in g[2:]] + [v for c in out["cells"] for v in c[:2]] + [out["width"]]
+        if len(out["cells"]) != len(out["of"]) or not out["glyphs"] or not all(math.isfinite(v) for v in nums):
+            return None
+        return out
+    except (AttributeError, KeyError, IndexError, TypeError, ValueError):
         return None
 
 
@@ -102,11 +122,14 @@ def letter_matrix(tx):
     return cos, -sin * f, sin, cos * f
 
 
-def layout(tx):
+def layout(tx, info=None):
     """The text laid out in em units: (contours, places). contours = [(glyph number, Bezier points)]; places = one
     for every spot the caret can be (before each character; a line's end), in text order: {"o": where the letter's
     own (0, 0) went (em = o + letter_matrix x its point), "cell": its room as 4 em points (a line's end: none
     wide), "caret": the caret line there (2 em points)}.
+    info (a dict, optional) gets "joined" (a line was laid out with joined letters) and "glyphs": per glyph number
+    (line, its letter group's first character in the line or None for a letter-by-letter line, its piece: the
+    letters turned as one).
     Direction: "roll" = letters along time, lines downwards (as typed in many programs); "across" = letters up the
     keys, each next line earlier (in a player: reads across, lines fall in turn); "down" = letters along time in
     steady steps, first letter first, each line a column next to the last (higher keys) at the same time; Align
@@ -131,10 +154,15 @@ def layout(tx):
         step = max(font.line_height, band) * tx["leading"] / 100  # (columns never overlap at 100%)
     contours, places = [], []
     g = 0
+    form = kept_form(tx)
+    if info is not None:
+        info["glyphs"] = []
     for n, line in enumerate(lines):
-        if way != "down" and joined(line):  # (joined letters / right to left: shaping.py; "down" stacks the
-            g = _joined_line(font, line, n, step, track, mid, desc, asc, (a, b, c, d), way, tx["align"],  # letters
-                             contours, places, g)  # one by one, as typed)
+        if way != "down" and (form or joined(line)):  # (joined letters / right to left: shaping.py; "down" stacks
+            if info is not None:  # the letters one by one, as typed)
+                info["joined"] = True
+            g = _joined_line(font, line, n, step, track, mid, desc, asc, (a, b, c, d), way, tx["align"],
+                             contours, places, g, form, info)
             continue
         xs, x, prev = [], 0.0, None
         for ch in line:
@@ -168,8 +196,20 @@ def layout(tx):
             if k < len(line):
                 for cont in font.glyph(line[k])[1]:
                     contours.append((g, [list(put(px, py)) for px, py in cont]))
+                if info is not None:
+                    info["glyphs"].append((n, None, ("g", g)))
                 g += 1
     return contours, places
+
+
+def kept_form(tx):
+    """A split letter group's kept glyphs (tx["form"], shaping.keep_form) while they still fit its text and the
+    packages load, else None (retyped: its own letters again)."""
+    form = tx.get("form")
+    if not form or form.get("of") != tx["text"] or "\n" in tx["text"]:
+        return None
+    from notes import shaping
+    return form if shaping.available() else None
 
 
 def joined(line):
@@ -221,15 +261,27 @@ def caret_snap(text, c):
     return min(stops, key=lambda k: (abs(k - c), k)) if stops else c
 
 
-def _joined_line(font, line, n, step, track, mid, desc, asc, m, way, align, contours, places, g):
+def _joined_line(font, line, n, step, track, mid, desc, asc, m, way, align, contours, places, g, form=None,
+                 info=None):
     """layout's line n with joined letters: its letter shapes into contours, one place per character (+ the line's
     end) into places, as layout's own lines ("roll" / "across"; a place also says "rtl": the character reads right
-    to left, its caret on its right side). Returns the next glyph number."""
+    to left, its caret on its right side). Letter turn / Flip turn each JOINED PIECE on its own spot (user
+    2026-11-12: a joined word, a letter group), so the joins stay. form: a split letter group's kept glyphs
+    (kept_form). Returns the next glyph number."""
     from notes import shaping
     a, b, c, d = m
     turn = lambda x, y: (a * x + b * y, c * x + d * y)
-    sl = shaping.shape_line(font, line, track)
+    sl = None
+    if form:
+        sl = shaping.kept_line(font, form) or shaping.shape_line(font, line, track, (form["pre"], form["post"]))
+    if sl is None:
+        sl = shaping.shape_line(font, line, track)
     shift = {"left": 0.0, "center": -sl["width"] / 2, "right": -sl["width"]}[align]
+    plain = way == "roll" and m == (1.0, 0.0, 0.0, 1.0)  # (unturned: every letter exactly where it starts)
+    span = {}  # (each joined piece's left and right)
+    for (gx, adv, _, _), p in zip(sl["glyphs"], sl["pieces"]):
+        lo, hi = span.get(p, (gx, gx + adv))
+        span[p] = (min(lo, gx), max(hi, gx + adv))
 
     def origin(pos, adv):  # (where a letter's own (0, 0) goes, as layout does it)
         cx, cy = turn(adv / 2, mid)
@@ -239,12 +291,20 @@ def _joined_line(font, line, n, step, track, mid, desc, asc, m, way, align, cont
             return (pos, -n * step)
         return (pos + adv / 2 - cx, -n * step + mid - cy)
 
+    def placed(pos, adv, p):  # (origin, but inside its joined piece turned as one)
+        if plain or p is None:
+            return origin(pos + shift, adv)
+        lo, hi = span[p]
+        o = origin(lo + shift, hi - lo)
+        return (o[0] + a * (pos - lo), o[1] + c * (pos - lo))
+
     def putter(o):
         return lambda x, y: (o[0] + a * x + b * y, o[1] + c * x + d * y)
 
-    for x0, x1, rtl in sl["cells"]:
+    char_piece = shaping.piece_of(sl, len(line)) if sl["glyphs"] else [None] * len(line)
+    for (x0, x1, rtl), p in zip(sl["cells"], char_piece):
         adv = x1 - x0
-        o = origin(x0 + shift, adv)
+        o = placed(x0, adv, p)
         put = putter(o)
         side = adv if rtl else 0.0
         places.append({"o": o, "cell": [put(x, y) for x, y in ((0, -desc), (adv, -desc), (adv, asc), (0, asc))],
@@ -260,10 +320,12 @@ def _joined_line(font, line, n, step, track, mid, desc, asc, m, way, align, cont
     put = putter(o)
     places.append({"o": o, "cell": [put(0, -desc), put(0, -desc), put(0, asc), put(0, asc)],
                    "caret": [put(0, -desc), put(0, asc)], "rtl": sl["rtl"]})
-    for gx, adv, conts, _ in sl["glyphs"]:
-        put = putter(origin(gx + shift, adv))
+    for (gx, adv, conts, cl), p in zip(sl["glyphs"], sl["pieces"]):
+        put = putter(placed(gx, adv, p))
         for cont in conts:
             contours.append((g, [list(put(px, py)) for px, py in cont]))
+        if info is not None:
+            info["glyphs"].append((n, cl, ("p", n, p)))
         g += 1
     return g
 
@@ -364,7 +426,8 @@ def from_roll(axes, b, p):
 def build(sh, tx, axes):
     """Lay out tx at axes into shape sh (its strokes, box and sh["text"]). False (sh unchanged) if there's
     nothing to see (no text, or only spaces)."""
-    contours, _ = layout(tx)
+    info = {}
+    contours, _ = layout(tx, info)
     if not contours:
         return False
     pts = [p for _, c in contours for p in flatten(c)]
@@ -380,8 +443,36 @@ def build(sh, tx, axes):
     sh["pts"] = [list(to_roll(axes, x0, y0)), list(to_roll(axes, x1, y0)), list(to_roll(axes, x0, y1))]
     font = text_font(tx)
     sh["text"] = dict(tx, bbox=[x0, y0, x1, y1], cap=font.cap, holes=find_holes(contours))
+    sh["text"].pop("joined", None)
+    if info.get("joined"):  # (an old text, saved before joined letters, has none: rejoin_old)
+        sh["text"]["joined"] = True
     sh["name"] = text_name(tx["text"])
     return True
+
+
+def needs_rejoin(tx):
+    """A text saved before joined letters (1.7.2) that has lines needing them, and the packages load here."""
+    return (tx.get("direction", "roll") != "down" and not tx.get("joined") and not tx.get("form")
+            and any(joined(line) for line in tx["text"].split("\n")))
+
+
+def rejoin_old(shapes, notes_of, ppq):
+    """Opening a project (user 2026-11-12): texts saved with Arabic / Hindi / ... letters drawn one by one are laid
+    out again with joined letters, kept on their anchor as when retyped. Other texts aren't touched. Sliced pieces
+    keep their notes (they come from the whole text). How many changed."""
+    done = 0
+    for sh in shapes:
+        tx = sh.get("text")
+        if not isinstance(tx, dict) or sh.get("cut") or not needs_rejoin(tx):
+            continue
+        was = copy.deepcopy(sh)
+        try:
+            if rebuild(sh, dict(tx), text_axes(sh), notes_of, ppq):
+                done += 1
+        except Exception:  # noqa: BLE001 (a text that can't be laid out again stays as it was saved)
+            sh.clear()
+            sh.update(was)
+    return done
 
 
 def frame_uv(pts, b, p):
@@ -507,20 +598,48 @@ def set_anchor(sh, notes_of, ppq):
 
 def split_letters(sh, notes_of, ppq):
     """Split into letters: each letter you can see as its own one-letter text (a copy of sh: fill, colour, gate
-    ... kept) exactly where it was, so the notes stay the same; spaces go. [] if there's nothing to split."""
+    ... kept) exactly where it was, so the notes stay the same; spaces go. [] if there's nothing to split.
+    A line with joined letters splits into its LETTER GROUPS (user 2026-11-12: each keeps the joined shape it had:
+    shaping.keep_form; lam-alef = one group of two letters, a Hindi conjunct one group)."""
+    from notes import shaping
     tx, (O, X, Y) = sh["text"], text_axes(sh)
-    places = layout(tx)[1]  # (place j = where character j went)
-    out = []
-    for j, ch in enumerate(tx["text"]):
-        if ch == "\n":
-            continue
+    info = {}
+    contours, places = layout(tx, info)  # (place j = where character j went)
+    first = {}  # (each glyph's first point in the whole text)
+    for g, pts in contours:
+        first.setdefault(g, pts[0])
+    groups = {}  # ((line, letter group) -> its glyph numbers)
+    for g, (n, cl, _) in enumerate(info["glyphs"]):
+        if cl is not None:
+            groups.setdefault((n, cl), []).append(g)
+    base = {k: v for k, v in tx.items() if k not in ("anchor", "anchor_way", "bbox", "holes", "joined", "form")}
+    font, out, j0 = text_font(tx), [], 0
+
+    def put_one(letter, at):
         one = copy.deepcopy({k: v for k, v in sh.items() if k not in ("strokes", "pts", "text", "name")})
-        letter = dict({k: v for k, v in tx.items() if k not in ("anchor", "anchor_way", "bbox", "holes")}, text=ch)
-        own = layout(letter)[1][0]["o"]  # (where it would go alone: moved onto where it was)
-        at = (places[j]["o"][0] - own[0], places[j]["o"][1] - own[1])
         if build(one, letter, (to_roll((O, X, Y), *at), X, Y)):
             set_anchor(one, notes_of, ppq)
             out.append(one)
+
+    for n, line in enumerate(tx["text"].split("\n")):
+        if any((n, c) in groups for c in range(len(line))):  # (laid out joined)
+            sl = shaping.shape_line(font, line, tx["tracking"] / 1000)
+            for c, e, ks in shaping.cluster_parts(sl, len(line)):
+                was = next((first[g] for g in groups.get((n, c), ()) if g in first), None)
+                if was is None:  # (a space: nothing to see)
+                    continue
+                form = shaping.keep_form(font, line, sl, c, e, ks)
+                letter = dict(base, text=line[c:e], **({"form": form} if form else {}))
+                own = layout(letter)[0]
+                if own:  # (its own drawing moved onto where it was in the whole text)
+                    put_one(letter, (was[0] - own[0][1][0][0], was[1] - own[0][1][0][1]))
+        else:
+            for k, ch in enumerate(line):
+                j = j0 + k
+                letter = dict(base, text=ch)
+                own = layout(letter)[1][0]["o"]  # (where it would go alone: moved onto where it was)
+                put_one(letter, (places[j]["o"][0] - own[0], places[j]["o"][1] - own[1]))
+        j0 += len(line) + 1
     return out
 
 
@@ -528,24 +647,63 @@ def to_custom(sh):
     """Turn into custom shape: the letters stay as they look (Grow baked into their lines), but it's a plain custom
     shape now, filled by its rules (the notes can move a little: no threshold). A letter drawn from parts that
     overlap (some fonts' A, K, X) stays solid: Overlaps cancel out goes off and its real holes (inside an O) are
-    emptied areas."""
+    emptied areas. Joined letters overlapping where they join: each joined piece becomes ONE outline (poly_union),
+    so it stays filled there with the plain fill (Overlaps cancel out over a whole text = far too much memory)."""
     from notes.custom import refit, stroke_points
     from notes.hzbass import left_edge, shifted_hz
     left = left_edge(sh)  # (a Hz bass's tones count from here, Grow included: they stay on their beats)
     tx = sh.pop("text")
     x0, y0, x1, y1 = tx["bbox"]
+    info = {}
+    cons = layout(tx, info)[0]
+    groups = [info["glyphs"][g][2] for g, _ in cons]
     if tx.get("grow"):
         polys = text_polys(dict(sh, text=tx))
         sh["strokes"] = [{"kind": "poly", "pts": [list(frame_uv(sh["pts"], b, p)) for b, p in poly]} for poly in polys]
+    if len(groups) == len(sh["strokes"]):
+        groups = _merge_joined(sh, cons, groups, (x0, y0, x1 - x0, y1 - y0))
     sh["round"] = (y1 - y0) / (x1 - x0)  # (the letters' own look: the outline gate shrinks them the same way)
     refit(sh)
     if sh.get("hz"):
         sh["hz"] = shifted_hz(sh["hz"], left - left_edge(sh))
     loops = [[tuple(p) for p in stroke_points(st)] for st in sh["strokes"]]
-    glyphs = [g for g, _ in layout(tx)[0]]
-    if len(glyphs) == len(loops) and parts_overlap(loops, glyphs):
+    if len(groups) == len(loops) and parts_overlap(loops, groups):
         sh["union"] = True
         sh["areas"] = empty_areas(loops)
+
+
+def _merge_joined(sh, cons, groups, box):
+    """to_custom: each joined piece whose letters overlap (where they join) made one outline, in the strokes' own
+    0..1 box (curves cut into steps as text_polys does). The pieces' new group names, one per stroke."""
+    from notes.poly_union import union
+    x0, y0, w, h = box
+    pieces = {}
+    for i, g in enumerate(groups):
+        if g[0] == "p":
+            pieces.setdefault(g, []).append(i)
+
+    def poly(i):
+        st = sh["strokes"][i]
+        if st["kind"] == "poly":
+            return [tuple(p) for p in st["pts"]]
+        return [((x - x0) / w, (y - y0) / h) for x, y in flatten(cons[i][1], 0.001)]
+
+    # (every piece of 2+ outlines: letters only touching where they join also count as crossing later on)
+    merged = {g: union([poly(i) for i in idx]) for g, idx in pieces.items() if len(idx) > 1}
+    if not merged:
+        return groups
+    strokes, out, done = [], [], set()
+    for st, g in zip(sh["strokes"], groups):
+        if g in merged:
+            for k, loop in enumerate(merged.pop(g)):  # (at its first stroke's place; that piece's others go)
+                strokes.append({"kind": "poly", "pts": [list(p) for p in loop]})
+                out.append(("u", g, k))  # (each its own: they don't overlap any more)
+            done.add(g)
+        elif g not in done:
+            strokes.append(st)
+            out.append(g)
+    sh["strokes"] = strokes
+    return out
 
 
 CROSS_ROWS = 64  # pieces of an outline checked at a time by parts_overlap
@@ -592,6 +750,9 @@ def parts_overlap(loops, glyphs):
     return False
 
 
+SLIVER = 1e-9  # (an area this small, in the box's 0..1 units, is no area: empty_areas)
+
+
 def empty_areas(loops):
     """Area colour spots (areas.py: [u, v, 0] = left empty) for every area the outlines close in that the text
     leaves empty (its turns add up to none, nonzero rule): inside an O, or between an A's legs and its crossbar
@@ -601,7 +762,10 @@ def empty_areas(loops):
     boxes = [(min(x for x, _ in p), min(y for _, y in p), max(x for x, _ in p), max(y for _, y in p)) for p in loops]
     out = []
     for g in sorted(set(lab.tolist())):
-        k = max(np.flatnonzero(lab == g), key=lambda i: size[i])  # (its biggest piece's middle)
+        mine = np.flatnonzero(lab == g)
+        if size[mine].sum() < SLIVER:  # (no room: between two lines lying on each other, e.g. where joined
+            continue  # letters' strokes meet; its spot would land in the filled join)
+        k = max(mine, key=lambda i: size[i])  # (its biggest piece's middle)
         x, y = float(xs[k]), float(ys[k])
         if not sum(winding(p, x, y) for p, (a, b, c, d) in zip(loops, boxes) if a <= x <= c and b <= y <= d):
             out.append([round(x, 9), round(y, 9), 0])

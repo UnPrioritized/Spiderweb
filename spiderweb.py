@@ -125,6 +125,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     fonts.py         letter outlines from the fonts installed in Windows
     fonts_ft.py      the same on Linux (fontconfig + FreeType)
     shaping.py       joined letters + right-to-left order for the Text tool (optional uharfbuzz + python-bidi)
+    poly_union.py    one outline of polygons laid over each other (Turn into custom shape: joined letters)
     funnel.py        funnels: curves, note grid, gates
     bezier.py        Bezier curves (anchors + handles) for curves and funnel curves, symmetry, fitting to points
     arc.py           arcs: pieces of a perfect circle through three points

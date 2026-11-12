@@ -30,6 +30,11 @@ _SCRIPTS = sorted([
     (0x10A00, 0x10A5F, "Khar"), (0x11000, 0x11FFF, "Brah"), (0x1E900, 0x1E95F, "Adlm")])
 _FIRSTS = [s[0] for s in _SCRIPTS]
 _RTL = {"R", "AL", "AN"}
+# Joined pieces (Letter turn / Flip turn each on its own spot, user 2026-11-12): letters of these scripts join when
+# the joining package marks them as not breakable apart; headline scripts' whole words hang on one line; any other
+# script: a letter group (cluster) each.
+_CURSIVE = {"Arab", "Syrc", "Nkoo", "Mong", "Mand", "Adlm"}
+_HEADLINE = {"Deva", "Beng", "Guru"}
 
 
 def _load():
@@ -184,15 +189,17 @@ def _kind(ch):
     return "L" if unicodedata.bidirectional(ch) in ("L", "R", "AL") else None
 
 
-def shape_line(font, line, track=0.0):
+def shape_line(font, line, track=0.0, context=("", "")):
     """One line laid out with joined letters, in em units from x = 0 (left) to "width":
     {"glyphs": [(x, advance, contours, cluster)] left to right, "cells": [(x0, x1, rtl)] one per character in
     typed order (the room it takes; characters joined into one shape share its room evenly, in reading order),
-    "width", "rtl" (the line's own direction is right to left)}.
+    "width", "rtl" (the line's own direction is right to left), "pieces": each glyph's joined piece (numbers going
+    left to right), "src": each glyph's (font, glyph number or None, dx, dy) (Split into letters keeps them)}.
     Each character's font: the line's font, or the backup font that has it (fonts.backup_font); marks follow the
     letter before them. A run = characters with the same direction level, font and script, shaped together
     (with the whole line around it, so letters join across a font change). Tracking goes between letter shapes,
-    but not inside a run of one joining script (it would cut the joins)."""
+    but not inside a run of one joining script (it would cut the joins). context = (letters before, after) the line
+    that its letters join to without being drawn (a split letter group in another font)."""
     from notes.fonts import backup_font, no_width
     n = len(line)
     base = "R" if line_rtl(line) else "L"
@@ -223,32 +230,52 @@ def shape_line(font, line, track=0.0):
         if not shown or shown[-1] != run_of[i]:
             shown.append(run_of[i])
     hb = _state["hb"]
-    cps = [ord(ch) for ch in line]
+    pre, post = context
+    cps = [ord(ch) for ch in pre + line + post]
+    off = len(pre)
     glyphs, x, prev = [], 0.0, None  # (prev = the last shape's character: tracking between clusters)
+    src, joins, run_at = [], [], []  # (per glyph: where it came from, joined to the glyph on its left, its run)
     for r in shown:
         a, b = runs[r]
         f, rtl = fonts[a], lv[a] % 2 == 1
         hf = _hb_font(f)
         if hf is None:  # (letter by letter, in the order they show)
-            items = [(i, f.glyph(line[i])[0], f.glyph(line[i])[1], 0.0, 0.0) for i in
+            items = [(i, f.glyph(line[i])[0], f.glyph(line[i])[1], 0.0, 0.0, None, 0) for i in
                      (range(b - 1, a - 1, -1) if rtl else range(a, b))]
         else:
             buf = hb.Buffer()
-            buf.add_codepoints(cps, a, b - a)
+            buf.add_codepoints(cps, a + off, b - a)
             buf.guess_segment_properties()
             buf.direction = "rtl" if rtl else "ltr"
             hb.shape(hf[0], buf)
             u = hf[1]
-            items = [(info.cluster, pos.x_advance / u, f.glyph_at(info.codepoint), pos.x_offset / u,
-                      pos.y_offset / u) for info, pos in zip(buf.glyph_infos, buf.glyph_positions)]
-        for c, adv, conts, dx, dy in items:
+            items = [(info.cluster - off, pos.x_advance / u, f.glyph_at(info.codepoint), pos.x_offset / u,
+                      pos.y_offset / u, info.codepoint, int(info.flags) & 1)
+                     for info, pos in zip(buf.glyph_infos, buf.glyph_positions)]
+        flags = [it[6] for it in items]
+        for k, (c, adv, conts, dx, dy, gid, _) in enumerate(items):
             if prev is not None and c != prev and not (kinds[c] == kinds[prev] != "L"):
                 x += track
+            joined = False
+            if k and c == items[k - 1][0]:
+                joined = True  # (one letter group: always together)
+            elif k and kinds[c] in _CURSIVE:  # (the package marks a glyph whose letter group joins the one typed
+                joined = bool(flags[k - 1] if rtl else flags[k])  # before it: on its right in a right-to-left run)
+            elif k and kinds[c] in _HEADLINE:  # (a word on its headline: letters up to a space / sign)
+                joined = _word(line[c]) and _word(line[items[k - 1][0]])
+            src.append((f, gid, dx, dy))
+            joins.append(joined)
+            run_at.append(r)
             if dx or dy:
                 conts = [[[px + dx, py + dy] for px, py in cont] for cont in conts]
             glyphs.append((x, adv, conts, c))
             x += adv
             prev = c
+    pieces, p = [], -1
+    for k in range(len(glyphs)):
+        if not (k and joins[k] and run_at[k] == run_at[k - 1]):
+            p += 1
+        pieces.append(p)
     room = {}  # (each cluster's room, shared by its characters)
     for gx, adv, _, c in glyphs:
         lo, hi = room.get(c, (gx, gx))
@@ -265,4 +292,66 @@ def shape_line(font, line, track=0.0):
     for i in range(n):  # (none left: every character is in a cluster from 0 on; kept safe anyway)
         if cells[i] is None:
             cells[i] = (0.0, 0.0, lv[i] % 2 == 1)
-    return {"glyphs": glyphs, "cells": cells, "width": x, "rtl": base == "R"}
+    return {"glyphs": glyphs, "cells": cells, "width": x, "rtl": base == "R", "pieces": pieces, "src": src}
+
+
+def _word(ch):
+    """A letter or mark of a word (not a space, number or sign)."""
+    return unicodedata.category(ch)[0] in "LM"
+
+
+def cluster_parts(sl, n):
+    """A shaped line's letter groups: [(first character, end, [its glyph numbers in sl["glyphs"]])] in typed order;
+    n = the line's length."""
+    by = {}
+    for k, g in enumerate(sl["glyphs"]):
+        by.setdefault(g[3], []).append(k)
+    starts = sorted(by)
+    return [(c, starts[i + 1] if i + 1 < len(starts) else n, by[c]) for i, c in enumerate(starts)]
+
+
+def piece_of(sl, line_len):
+    """Each character's joined piece (its letter group's), for a shaped line."""
+    out = [0] * line_len
+    for c, e, ks in cluster_parts(sl, line_len):
+        out[c:e] = [sl["pieces"][ks[0]]] * (e - c)
+    return out
+
+
+def keep_form(font, line, sl, c, e, ks):
+    """What a letter group split out of a joined line keeps (Split into letters, user: its joined shape): the glyphs
+    it is made of, as {"of": its characters, "font": the text's font settings, "glyphs": [[font family, glyph
+    number, x from the group's left, dx, dy, advance]], "cells": its characters' rooms from its left, "width",
+    "rtl"}. None when a glyph has no glyph number (a font the joining package couldn't read)."""
+    x0 = min(sl["glyphs"][k][0] for k in ks)
+    x1 = max(sl["glyphs"][k][0] + sl["glyphs"][k][1] for k in ks)
+    gl = []
+    for k in ks:
+        f, gid, dx, dy = sl["src"][k]
+        if gid is None:
+            return None
+        gx, adv, _, _ = sl["glyphs"][k]
+        gl.append([f.family, int(gid), gx - x0, dx, dy, adv])
+    cells = [[a - x0, b - x0, bool(r)] for a, b, r in sl["cells"][c:e]]
+    return {"of": line[c:e], "font": [font.family, int(font.weight), bool(font.italic)], "glyphs": gl,
+            "cells": cells, "width": x1 - x0, "rtl": bool(sl["cells"][c][2]),
+            "pre": line[max(0, c - 5):c], "post": line[e:e + 5]}  # (the joining package looks 5 letters around)
+
+
+def kept_line(font, form):
+    """shape_line's answer for a split letter group from its kept glyphs (keep_form): the same glyphs, so it keeps
+    the joined shape it had in its word. None when the text's font settings changed since (then it's joined again
+    from its own letters)."""
+    from notes.fonts import get_font
+    if [font.family, int(font.weight), bool(font.italic)] != form["font"]:
+        return None
+    glyphs, src = [], []
+    for fam, gid, gx, dx, dy, adv in form["glyphs"]:
+        f = font if fam == font.family else get_font(fam, font.weight, font.italic)
+        conts = f.glyph_at(gid)
+        if dx or dy:
+            conts = [[[px + dx, py + dy] for px, py in cont] for cont in conts]
+        glyphs.append((gx, adv, conts, 0))
+        src.append((f, gid, dx, dy))
+    return {"glyphs": glyphs, "cells": [tuple(c) for c in form["cells"]], "width": form["width"],
+            "rtl": form["rtl"], "pieces": [0] * len(glyphs), "src": src}
