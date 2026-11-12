@@ -766,7 +766,10 @@ def onto_anchor(sh, at, notes_of, ppq, past=(False, False)):
     left, bottom = left if past[0] else max(0.0, left), bottom if past[1] else max(-0.5, bottom)
     # (whole ticks / keys here too: a box moved by part of a tick can land its edges on other ticks)
     db, dp = round((left - min(bs)) * ppq) / ppq, round(bottom - min(ps))
-    moved = (abs(db * ppq) > 1.5 or dp or (min(bs) < 0 and not past[0])  # (a tick or less: measured where it is)
+    # (a tick or a key or less: measured where it is. The box's bottom sits above the lowest note, so a key off was
+    # the usual answer: the rough move dropped the text a key and the measuring lifted it back = every text's notes
+    # made twice a key typed)
+    moved = (abs(db * ppq) > 1.5 or abs(dp) > 1 or (min(bs) < 0 and not past[0])
              or (min(ps) < -0.5 and not past[1]))
     if moved:
         sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
