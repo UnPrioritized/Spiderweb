@@ -1,6 +1,7 @@
 """Piano roll: the Text tool. Click to put a blinking caret there and type straight onto the roll; click a text to
 retype it. The text is a custom shape with sh["text"] (notes/text.py); it's rebuilt on every key."""
 
+import json
 import math
 import unicodedata
 
@@ -322,7 +323,7 @@ class TextTyping:
             col = c - (text.rfind("\n", 0, c) + 1)
             return start + min(col, len(lines[m]))
         tx = self.typing_state()[0]
-        places = layout(tx)[1]
+        places = self.typing_places(tx)
         along = 1 if tx.get("direction", "roll") == "across" else 0  # (the letters run along x, or up the keys)
         spot = lambda j: (places[j]["caret"][0][along] + places[j]["caret"][1][along]) / 2
         here = spot(c)
@@ -438,7 +439,7 @@ class TextTyping:
         em = from_roll(axes, self.x2t(e.x), self.y2p(e.y))
         if em is None:
             return len(tx["text"])
-        places = layout(tx)[1]
+        places = self.typing_places(tx)
         text = tx["text"]
         for j, pl in enumerate(places):  # (joined lines: inside a letter, the half clicked picks its side)
             if "rtl" not in pl or j >= len(text) or text[j] == "\n":
@@ -473,10 +474,20 @@ class TextTyping:
         self.draw_typing(on)
         self._caret_job = self.after(BLINK_MS, lambda: self.show_caret(not on))
 
+    _places = (None, None)
+
+    def typing_places(self, tx):
+        """layout(tx)'s places, kept for the last settings: the caret blinks and is drawn twice a key, and laying out
+        a long text again each time took ~25 ms (800 letters)."""
+        key = json.dumps(tx, sort_keys=True, default=str)
+        if self._places[0] != key:
+            self._places = (key, layout(tx)[1])
+        return self._places[1]
+
     def draw_typing(self, caret):
         """The dashed box around the text being typed, the selected characters' highlight and (caret) the caret."""
         tx, axes = self.typing_state()
-        places = layout(tx)[1]
+        places = self.typing_places(tx)
         O, X, Y = axes
         xy = lambda x, y: (self.t2x(O[0] + x * X[0] + y * Y[0]), self.p2y(O[1] + x * X[1] + y * Y[1]))
 
