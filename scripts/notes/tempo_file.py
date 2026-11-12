@@ -22,7 +22,7 @@ import numpy as np
 from files import speed
 from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of
 from notes.tempo import (EVERY, PAIR_REACH, SAFE_REACH, _fit_blocks, _fit_exact, _flat_pair, _put_all, _put_many, _runs, base_us, beat_tick, domino_safe,
-                         typed_bpms,
+                         typed_bpms, step_of,
                          file_segments, has_tempo, keep_heard, layout, tempo_text)
 
 MAX_US = 0xFFFFFF  # the slowest tempo a file holds, in microseconds per beat
@@ -536,7 +536,9 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     lay, segs, out["bad"], keeps, gaps, out["dense"], out["gave"], times = keep_gaps(tempo, base, ppq, beats, ticks,
                                                                                     bars, loose, heard)
     end = segs[-1][1]
-    every = tempo.get("every", EVERY)
+    every_all = tempo.get("every", EVERY)
+    # (each Keep timing part's drawn ramp steps by its own Interval, point[8]: user 2026-11-12)
+    every_at = {a: step_of(tempo["points"][i], every_all)[0] for i, a, _, _ in lay["keeps"]}
     fit_bars = tempo.get("bars", True)
     if fit_bars and gaps:
         if keeps:  # (bar lines far enough for every part)
@@ -551,8 +553,9 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         file_segs += [(x + offset, y + offset, v) for x, y, v in _cut(segs, at, a, seg_starts)]
         buf = _RunBuf()
         pre = []
+        every = every_at.get(a, every_all)
 
-        def slow(j, last, a=a, n=n, total=total, k=k, drawn=drawn, buf=buf, pre=pre):
+        def slow(j, last, a=a, n=n, total=total, k=k, drawn=drawn, buf=buf, pre=pre, every=every):
             """Gap j's file tempo into buf the NumPy way (no compiled loops, or a gap gap_plan leaves to Python:
             _fit_exact / the full pair search); last = the value the gap before ended on (None = none) -> its."""
             if not pre:  # (the part's gaps at once, the first time one is asked; k is only ever changed at gaps

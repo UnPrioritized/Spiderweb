@@ -23,9 +23,9 @@ line (beats are the song's, so a part cut in two keeps reading the same line); b
 heard just before the part, as without one.
 
 Saved in the project as "tempo": {"points": [[beat, bpm, curve, formula, "lin" / "exp", keep timing, bend, heard
-line?], ...],
-"catch": [[beat, shape, formula, start, end, bend, drawn], ...], "every": ticks, "bars": Fit bar lines}, beats like the shapes (a PPQ change
-moves nothing).
+line?, own Interval?], ...],
+"catch": [[beat, shape, formula, start, end, bend, drawn, own Interval?], ...], "every": ticks (the Interval box: new
+ramps' and those without their own), "bars": Fit bar lines}, beats like the shapes (a PPQ change moves nothing).
 
 Exact timing (user's rule: tick and microsecond perfect, not "too small to hear"): a MIDI file's time is whole
 numbers, ticks x microseconds per beat, so the catch-up is picked tick by tick to make each stretch's sum exactly
@@ -162,17 +162,6 @@ def clean_tempo(data):
     every = data.get("every", EVERY)
     out["every"] = every if isinstance(every, int) and not isinstance(every, bool) and 1 <= every <= 65535 else EVERY
     out["bars"] = data.get("bars", True) is not False
-    own = []  # (curved parts' own Intervals, own_every; saved only when there are any)
-    for e in data.get("every_at") or () if isinstance(data.get("every_at"), list) else ():
-        if (isinstance(e, list) and len(e) in (2, 3) and isinstance(e[0], (int, float)) and not isinstance(e[0], bool)
-                and math.isfinite(e[0]) and 0 <= e[0] <= FAR and isinstance(e[1], int) and not isinstance(e[1], bool)
-                and 1 <= e[1] <= 65535):
-            got = [float(e[0]), e[1]]
-            if len(e) == 3 and isinstance(e[2], int) and not isinstance(e[2], bool) and abs(e[2]) <= FAR * 65535:
-                got.append(e[2])  # (where its steps are counted from, a tick: the old ramp's own)
-            own.append(got)
-    if own:
-        out["every_at"] = sorted(own)
     seen = set()
     for c in data.get("catch", []) if isinstance(data.get("catch"), list) else []:
         if not isinstance(c, list):
@@ -203,6 +192,8 @@ def clean_tempo(data):
                 isinstance(x, (int, float)) and not isinstance(x, bool) and 0 <= x <= 1 for x in bend):
             catch_set(item, 5, [float(x) for x in bend])
         catch_set(item, 6, clean_drawn(c[6] if len(c) > 6 else None))
+        own = _clean_step(c[7]) if len(c) > 7 else None  # (its own Interval: a plain number only)
+        catch_set(item, 7, own if isinstance(own, int) else None)
         out["catch"].append(item)
     out["catch"].sort(key=lambda c: c[0])
     out["sigs"] = clean_sigs(data.get("sigs"))
@@ -242,8 +233,11 @@ def _clean_points(raw, inner=False):
         # (formulas up to 4000 letters: a part cut by a paste writes its formula again, longer each time)
         pt = [b, clamp_bpm(v), kind, text[:4000], scale, keep and not inner, bend]
         heard = None if inner or len(p) < 8 else clean_heard(p[7])
-        if heard:
-            pt.append(heard)
+        step = _clean_step(p[8]) if len(p) > 8 else None  # (its own Interval)
+        if heard or step is not None:
+            pt.append(heard or None)
+        if step is not None:
+            pt.append(step)
         pts.append(pt)
     pts.sort(key=lambda p: p[0])  # (stable: a pair keeps its order)
     for i in range(len(pts) - 1):  # (a pair on exactly one beat, not a hair apart)
@@ -307,11 +301,12 @@ def drop_loose(pts):
 def catch_set(c, k, v):
     """A catch-up line's start (k = 3, the yellow area's left edge) or end (k = 4, the teal area's right edge) set
     by hand, or None = where Spiderweb puts it; k = 5: its bend [x, y] (None = CATCH_BEND); k = 6: its drawn points
-    (None: none drawn yet). Kept short: [beat, shape, formula] when none is set."""
+    (None: none drawn yet); k = 7: its own Interval in ticks (None: tempo["every"]). Kept short: [beat, shape,
+    formula] when none is set."""
     while len(c) <= k:
         c.append(None)
     c[k] = None if v is None or k == 5 and v == CATCH_BEND else list(v) if k == 5 else \
-        [list(p) for p in v] if k == 6 else float(v)
+        [list(p) for p in v] if k == 6 else int(v) if k == 7 else float(v)
     while len(c) > 3 and c[-1] is None:
         c.pop()
 
@@ -346,6 +341,103 @@ def set_bend(p, bend):
     """Point p's part bend set (its heard tempo line after it kept)."""
     p.extend([False] * (6 - len(p)) + [None] * (len(p) < 7))
     p[6] = bend
+
+
+def set_heard(p, h):
+    """Point p's heard tempo line (point[7]) set, None = none; its own Interval (point[8]) kept."""
+    step = p[8] if len(p) > 8 else None
+    p.extend([False] * (6 - len(p)) + [list(BEND)] * (len(p) < 7))
+    del p[7:]
+    if h or step is not None:
+        p.append(h or None)
+    if step is not None:
+        p.append(step)
+
+
+# OWN INTERVAL (user 2026-11-12, like Domino's "snapshot": a ramp keeps the Interval it was drawn with; changing the
+# Interval box later never steps older ramps again; with ramps picked, the box shows / sets theirs): point[8] =
+# its part's Interval in ticks, or [Interval, offset] (its steps counted from offset ticks after its first tick: a
+# piece of a ramp Change visual time signature stretched keeps the old staircase); none = tempo["every"], which the
+# Interval box sets for new ramps (it stamps the old value on every ramp without one first). A curved catch-up:
+# catch[7].
+
+def own_step(p):
+    """Point p's own Interval: (ticks, offset) or None (follows tempo["every"])."""
+    v = p[8] if len(p) > 8 else None
+    if isinstance(v, list):
+        return int(v[0]), int(v[1])
+    return None if v is None else (int(v), 0)
+
+
+def step_of(p, every):
+    """(Interval, offset) point p's part steps by: its own, else every (tempo["every"]) from its first tick."""
+    return own_step(p) or (int(every), 0)
+
+
+def set_step(p, every, off=0):
+    """Point p's own Interval set (None: follows tempo["every"] again); off = where its steps start after its first
+    tick (kept within one Interval)."""
+    if every is None:
+        if len(p) > 8:
+            del p[8:]
+            while len(p) > 7 and p[-1] is None:
+                p.pop()
+        return
+    every = int(every)
+    off = int(off) % every
+    p.extend([False] * (6 - len(p)) + [list(BEND)] * (len(p) < 7))
+    if len(p) < 8:
+        p.append(None)
+    del p[8:]
+    p.append([every, off] if off else every)
+
+
+def copy_step(p, src, offset=True):
+    """src's own Interval onto point p (offset False: only the Interval, its steps from p's own first tick)."""
+    got = own_step(src)
+    if got is not None:
+        set_step(p, got[0], got[1] if offset else 0)
+
+
+def catch_step(c, every):
+    """A curved catch-up's Interval: its own (catch[7]), else every (tempo["every"])."""
+    v = catch_get(c, 7)
+    return int(v) if v is not None else int(every)
+
+
+def _clean_step(v):
+    """point[8] / catch[7] from a file / undo step -> a safe one, None when broken."""
+    def whole(x, lo, hi):
+        return isinstance(x, int) and not isinstance(x, bool) and lo <= x <= hi
+    if whole(v, 1, 65535):
+        return v
+    if isinstance(v, list) and len(v) == 2 and whole(v[0], 1, 65535) and whole(v[1], 0, 65534) and v[1] < v[0]:
+        return list(v) if v[1] else v[0]
+    return None
+
+
+def stamp_steps(tempo, every):
+    """Every curved part and curved catch-up (heard tempo lines' parts too) without an Interval of its own gets
+    every (the Interval box's value before it changes: user 2026-11-12, older ramps keep theirs). True when any
+    did."""
+    did = False
+
+    def stamp(pts):
+        nonlocal did
+        for i, p in enumerate(pts[:-1]):
+            if p[2] != "hold" and own_step(p) is None:
+                set_step(p, every)
+                did = True
+    stamp(tempo["points"])
+    for p in tempo["points"]:
+        h = heard_of(p)
+        if h and h.get("line"):
+            stamp(h["line"])
+    for c in tempo.get("catch", []):
+        if c[1] != "flat" and catch_get(c, 7) is None:
+            catch_set(c, 7, every)
+            did = True
+    return did
 
 
 def bent(t, bend):
@@ -571,7 +663,7 @@ def stretches(tempo, base):
                   "pin": hand if hand is not None and hand >= b else None,
                   "pin_end": hand_end if hand_end is not None and hand_end <= b else None,
                   "line": b, "end": end, "shape": shape, "text": text, "bend": catch_get(c, 5),
-                  "drawn": catch_get(c, 6)}
+                  "drawn": catch_get(c, 6), "every": catch_step(c, tempo.get("every", EVERY))}
     return out
 
 
@@ -741,7 +833,7 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
     # (every held part's BPM read at once: one read per part made a loaded MIDI with 35,000 tempo changes hang)
     arrays = point_arrays(near["points"]) if near["points"] else None
     held_bpm = drawn_bpm(near, base, np.maximum(edges[:-1], t0) / ppq, arrays).tolist()
-    own, every_all = own_every(tempo), tempo.get("every", EVERY)
+    every_all = tempo.get("every", EVERY)
     for j in range(len(edges) - 1):
         k = k0 + j
         a, b = max(edges[j], t0), min(edges[j + 1], t1)
@@ -753,9 +845,9 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
             bpm = held_bpm[j]
             out.append((a, b, base_u if bpm == base else held_us(bpm)))
         else:  # (a new value every "every" ticks from the part's first tick; the first step the start point's
-            # BPM, the last the end point's: step_shares; a part's own Interval: own_every)
-            every, origin = own.get(round(pts[i][0], 9), (every_all, None))
-            origin = edges[j] if origin is None else origin
+            # BPM, the last the end point's: step_shares; a part's own Interval: point[8])
+            every, off = step_of(pts[i], every_all)
+            origin = edges[j] + off
             part = (edges[j], edges[j + 1])
             jump = to_jump(pts, i)
 
@@ -882,7 +974,7 @@ def catch_plan(tempo, base, st, ppq, real=None):
         return out
     total = (e - s0) * base_u
     bpm = 60_000_000 / base_u
-    every = tempo.get("every", EVERY)
+    every = st.get("every") or tempo.get("every", EVERY)  # (its own Interval, stretches)
     why = [None]
     w = weight(st, (np.arange(512) + 0.5) / 512)
     if not np.any(w > 1e-9) or np.any(w < -1e-9):  # (a shape that never works: said first, not the BPM limits
@@ -1091,7 +1183,7 @@ def layout(tempo, base, ppq):
         return _put_many(segs, puts)
 
     worked = []
-    pts, every = tempo["points"], [tempo.get("every", EVERY), tempo.get("every_at")]  # (own Intervals too)
+    pts, every = tempo["points"], tempo.get("every", EVERY)  # (own Intervals: in the points / st themselves)
     for n, st in enumerate(sts):
         st = dict(st, base_u=bases[n], base=60_000_000 / bases[n])
         pk = _plan_key(st, pts, ppq, base, every, keeps_out, lines) if ordered else None
@@ -1185,9 +1277,7 @@ def end_point(tempo, base, ppq, i, force=False):
     for k in run:
         m = pts[k]
         if not heard_of(m):
-            m.extend([False] * (6 - len(m)) + [list(BEND)] * (len(m) < 7))
-            del m[7:]
-            m.append({"line": []})
+            set_heard(m, {"line": []})
         m[7]["end"] = v
     if len(on) == 1 and p[2] != "hold" and p[1] != q[1]:  # (a glide arrives: it stays, the tempo jumps from there)
         pts.insert(on[0] + 1, [q[0], v] + copy.deepcopy(q[2:]))
@@ -1221,8 +1311,11 @@ def swap_part(tempo, base, ppq, i, j=None):
     first = [q for q in hl if abs(q[0] - a) < 1e-9][-1]
     inner = [q for q in hl if a + 1e-9 < q[0] and (e is None or q[0] < e - 1e-9)]
     arrive = next((q[1] for q in hl if e is not None and abs(q[0] - e) < 1e-9), None)
-    # the drawn line over the run becomes the heard line
-    line = [[q[0], q[1], q[2], q[3], q[4], False, list(bend_of(q))] for q in pts[i:j + 1]]
+    # the drawn line over the run becomes the heard line (each part's own Interval with it)
+    line = []
+    for q in pts[i:j + 1]:
+        line.append([q[0], q[1], q[2], q[3], q[4], False, list(bend_of(q))])
+        copy_step(line[-1], q)
     q = pts[j]
     if e is not None and q[2] != "hold" and q[1] != pts[j + 1][1]:
         line.append([e, pts[j + 1][1], "hold", "", "lin", False, list(BEND)])
@@ -1236,11 +1329,15 @@ def swap_part(tempo, base, ppq, i, j=None):
     p[1], p[2:5] = first[1], copy.deepcopy(first[2:5])
     set_bend(p, list(bend_of(first)))
     p[5] = True
-    del p[7:]
-    if new["line"] or "visual" in new:
-        p.append(new)
-    mids = [[q[0], q[1], q[2], q[3], q[4], True, list(bend_of(q))] + ([copy.deepcopy(new)] if len(p) > 7 else [])
-            for q in inner]
+    set_heard(p, new if new["line"] or "visual" in new else None)
+    set_step(p, None)  # (the heard line's first part's own Interval comes with it)
+    copy_step(p, first)
+    mids = []
+    for q in inner:
+        m = [q[0], q[1], q[2], q[3], q[4], True, list(bend_of(q))]
+        set_heard(m, copy.deepcopy(new) if heard_of(p) else None)
+        copy_step(m, q)
+        mids.append(m)
     pts[i + 1:j + 1] = mids
     last = i + len(mids)
     if e is not None:
@@ -1273,36 +1370,19 @@ def step_edges(tempo, worked, ppq):
     every = tempo.get("every", EVERY)
     if got is None:
         first = _first_ticks([p[0] for p in pts], ppq)
-        own = own_every(tempo)
-        got = [(first[i], first[i + 1], pts[i][0], pts[i + 1][0], to_jump(pts, i),
-                *own.get(round(pts[i][0], 9), (every, None)))
-               for i in range(len(pts) - 1)
-               if pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1] and first[i + 1] > first[i]]
+        got = []
+        for i in range(len(pts) - 1):
+            if pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1] and first[i + 1] > first[i]:
+                e, off = step_of(pts[i], every)  # (its own Interval, point[8])
+                got.append((first[i], first[i + 1], pts[i][0], pts[i + 1][0], to_jump(pts, i), e, first[i] + off))
         if len(_edges) > 4:
             _edges.clear()
         _edges[key] = got
-    return got + [(beat_tick(st["line"], ppq), beat_tick(st["end"], ppq), None, None, False, every, None)
-                  for st, plan in worked if plan["ok"] and st["shape"] != "flat"]
+    return got + [(beat_tick(st["line"], ppq), beat_tick(st["end"], ppq), None, None, False,
+                   st.get("every") or every, None) for st, plan in worked if plan["ok"] and st["shape"] != "flat"]
 
 
 _edges = {}
-
-
-def own_every(tempo):
-    """{part's start beat (9 places): (its own Interval in ticks, the tick its steps count from or None = its first
-    tick)} (tempo["every_at"] [[beat, ticks(, from)]]: a ramp stretched by Change visual time signature keeps its old
-    staircase stretched, user 2026-11-12: 24 ticks x 1.5 = 36, a piece of it on the old steps); the other curved
-    parts step every tempo["every"] from their first tick. {} when none."""
-    got = tempo.get("every_at")
-    if not got:
-        return {}
-    key = (id(got), len(got), got[0][0], got[-1][0])  # (remembered: every read of the line asks, thousands a change)
-    if _own.get("key") != key or _own.get("list") is not got:
-        _own.update(key=key, list=got, map={round(e[0], 9): (e[1], e[2] if len(e) > 2 else None) for e in got})
-    return _own["map"]
-
-
-_own = {}
 
 
 def step_shares(a, b, starts, every):
@@ -1353,6 +1433,7 @@ def split_at(pts, b, base, beats=None):
     p = pts[i]
     if i + 1 >= len(pts):  # (after the last point: it holds)
         new = [float(b), p[1]] + copy.deepcopy(p[2:])
+        copy_step(new, p, offset=False)
         put(i + 1, new)
         return new
     if p[2] == "s":  # (its two halves: a bent line, then the same bend mirrored)
@@ -1361,6 +1442,7 @@ def split_at(pts, b, base, beats=None):
         mid = [(p[0] + q[0]) / 2, float(_along(p, q, 0.5)), "line", "", p[4], keeps(p), [1 - cx, 1 - cy]]
         if heard_of(p):
             mid.append(copy.deepcopy(p[7]))
+        copy_step(mid, p, offset=False)  # (each piece keeps the ramp's own Interval, its steps from its start)
         p[2] = "line"
         set_bend(p, [cx, cy])
         put(i + 1, mid)
@@ -1371,6 +1453,7 @@ def split_at(pts, b, base, beats=None):
     q = pts[i + 1]
     f = (b - p[0]) / (q[0] - p[0])
     new = [float(b), p[1]] + copy.deepcopy(p[2:])
+    copy_step(new, p, offset=False)
     if p[2] == "line":
         cx, cy = bend_of(p)
         a = 1 - 2 * cx

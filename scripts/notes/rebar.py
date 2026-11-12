@@ -351,7 +351,7 @@ def _tempo_of(tempo, base, pl, ppq=None):
     pts = out["points"]
     beats = [p[0] for p in pts]
     edges = _edges(pl)
-    own_old, every = T.own_every(tempo), tempo.get("every", T.EVERY)
+    own_old, every = None, tempo.get("every", T.EVERY)  # (ramps' own Intervals: in their points, T.step_of)
     sound = []  # (old tick spans placed by when they sound: ramps whose steps can't stretch to whole ticks)
     if ppq:
         for x in edges:  # (a ramp cut by an edge: cut on its own steps instead, so every piece keeps them)
@@ -429,8 +429,13 @@ def _steps_of(tempo, beat, ppq, own, every):
     i = max(0, bisect.bisect_right(beats, beat + EPS) - 1)
     while i > 0 and abs(pts[i - 1][0] - pts[i][0]) <= EPS and pts[i][0] > beat - EPS:
         i -= 1
-    e, origin = own.get(round(pts[i][0], 9), (every, None)) if pts else (every, None)
-    return e, (T.beat_tick(pts[i][0], ppq) if origin is None else origin)
+    if not pts:
+        return every, None
+    j = i  # (the Interval is the leaving point's: the last one on that beat)
+    while j + 1 < len(pts) and abs(pts[j + 1][0] - pts[i][0]) <= EPS:
+        j += 1
+    e, off = T.step_of(pts[j], every)
+    return e, T.beat_tick(pts[i][0], ppq) + off
 
 
 def _grid_cut(out, x, base, ppq, own, every, sound, tempo):
@@ -472,11 +477,11 @@ def _grid_cut(out, x, base, ppq, own, every, sound, tempo):
 
 
 def _own_steps(out, pl, ppq, was, own, every, sound, tempo):
-    """After the change: each ramp's own staircase (out["every_at"] [beat, Interval, from], tempo.own_every). Inside
+    """After the change: each ramp's own staircase (its point's own Interval, tempo.set_step). Inside
     a run its steps are the old ones stretched: Interval x factor, counted from the old ramp's first step moved (24 ->
     36 at x1.5), when both are whole ticks; else it keeps a whole-tick Interval and its old span goes to sound (its
     notes placed by when they sound). Outside the runs: its old staircase, moved along."""
-    pts, got = out["points"], []
+    pts = out["points"]
     starts = [r[0] for r in pl["runs"]]
     shift_t = round(pl["new_b"] * ppq) - round(pl["b"] * ppq)
     pl["off_ticks"] = False  # (a tempo change landing between two ticks: its bars' ends need the nudge)
@@ -509,12 +514,8 @@ def _own_steps(out, pl, ppq, was, own, every, sound, tempo):
                 step, new_origin = e, first
         else:
             step, new_origin = e, origin + (shift_t if ob >= pl["b"] - EPS else 0)
-        if step != every or new_origin != first:
-            got.append([p[0], step] + ([new_origin] if new_origin != first else []))
-    if got:
-        out["every_at"] = sorted(got)
-    else:
-        out.pop("every_at", None)
+        if step != every or new_origin != first or T.own_step(p) is not None:
+            T.set_step(p, step, new_origin - first)
 
 def dense_spots(pl, ticks, ppq):
     """Old note ticks the change brings under a tick apart: [[old ticks], ...], each group the notes that need ticks
@@ -619,17 +620,15 @@ def dense_fix(old, new, base, ppq, pl, ticks):
         if 0 <= i < len(pts) - 1 and pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1]:
             # (a curve cut at the spot's end: the step it was in held on from there, as it played, and the curve
             # again from its next step: its steps stay where they were)
-            e, origin = T.own_every(new).get(round(pts[i][0], 9), (new.get("every", T.EVERY), None))
+            e, off = T.step_of(pts[i], new.get("every", T.EVERY))
             p0 = T.beat_tick(pts[i][0], ppq)
-            origin = p0 if origin is None else origin
+            origin = p0 + off
             q0 = T.beat_tick(pts[i + 1][0], ppq)
             g_prev = origin + (r - origin) // e * e
             g_next = g_prev + e if g_prev < r else r
             step_bpm = float(T.drawn_bpm(new, base, [max(g_prev, p0) / ppq])[0])
-            if g_next < q0:
-                gn = T.split_at(pts, g_next / ppq, base, beats)
-                if e != new.get("every", T.EVERY):
-                    new["every_at"] = sorted((new.get("every_at") or []) + [[gn[0], e]])
+            if g_next < q0:  # (the piece from the next step: the ramp's own Interval, steps from there, split_at)
+                T.split_at(pts, g_next / ppq, base, beats)
             rp = T.split_at(pts, r / ppq, base, beats)
             if g_next > r:
                 rp[1], rp[2] = step_bpm, "hold"
@@ -642,9 +641,9 @@ def dense_fix(old, new, base, ppq, pl, ticks):
             if p is not None and p[2] != "hold" and p[1] != q[1] and p[0] < q[0]:
                 # (a curve runs into the spot: its last step held up to it, as it played, so the curve still ends
                 # on its own steps and doesn't glide into the new BPM)
-                e, origin = T.own_every(new).get(round(p[0], 9), (new.get("every", T.EVERY), None))
+                e, off = T.step_of(p, new.get("every", T.EVERY))
                 p0 = T.beat_tick(p[0], ppq)
-                origin = p0 if origin is None else origin
+                origin = p0 + off
                 s = max(p0, origin + (n0 - 1 - origin) // e * e)
                 held = T.split_at(pts, s / ppq, base, beats)
                 held[2] = "hold"

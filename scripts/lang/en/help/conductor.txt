@@ -38,7 +38,7 @@ A picked part shows its settings below the tools:
 
 Ctrl+C copies the picked stretch, Ctrl+X cuts it, Ctrl+V pastes it at the play line (a Select double-click on empty space pastes there). A paste replaces only that stretch; the tempo after it stays as it was. These keys work on the pane while it was the last thing you clicked.
 
-Interval: curved parts change the tempo every this many ticks (24 like many MIDI programs; 1 = every tick). The pane draws the steps the file will have.
+Interval: curved parts change the tempo every this many ticks (24 like many MIDI programs; 1 = every tick). The pane draws the steps the file will have. Each ramp keeps the Interval it was drawn with: changing the box only changes the ramps you draw after. To change a ramp that's there already, pick it (click its part, pick its points or draw a Select box over it): the box then shows its Interval and sets only the picked ones (empty when they differ). Pointing at a ramp shows its Interval on the hint line.
 
 Graph: Linear shows the BPM evenly from 0; Exponential doubles the BPM with every step up, so huge spikes and very slow stops fit on one screen. Fit shows the whole line. The bold number on the left is the tempo at the piano roll's left edge. The wheel over the numbers on the left zooms, Shift+wheel or a drag there scrolls. Where the tempo goes higher or lower than the pane shows, a small arrow at its top or bottom edge points to it: click the arrow to scroll there.
 [clip:conductor-arrows]
