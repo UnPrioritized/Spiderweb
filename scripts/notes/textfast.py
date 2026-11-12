@@ -238,3 +238,148 @@ def _late_fixed(notes, owner, X, ps, S):
     code = owner * (int(notes[:, 2].max()) - kmin + 1) + (notes[:, 2] - kmin)  # (outline + key)
     extra = late & np.isin(code, code[long])
     return notes[~extra] if extra.any() else notes
+
+
+def grow_many(bx, by, counts, d, k):
+    """text.offset of every outline at once (the Grow setting), the very same numbers: closed outlines in beats /
+    pitch (bx, by, counts), d = each outline's grow (holes shrink), k = the text's beats per key-width. The lengths
+    (math.dist / math.hypot) and each outline's turning way (text.area) are Python's own, the rest the same float
+    steps in NumPy. -> (bx, by, counts) grown, not rounded."""
+    from notes.text import area
+    S = len(counts)
+    X = bx / k
+    Y = by
+    xs, ys = X.tolist(), Y.tolist()
+    e0 = np.cumsum(counts)
+    s0 = e0 - counts
+    # pts: each point but the closing one, dropping one closer than 1e-9 to the next (math.dist, as offset does)
+    pair = np.ones(len(X), bool)
+    pair[e0 - 1] = False  # (the closing point has no next)
+    idx = np.flatnonzero(pair)
+    far = np.zeros(len(X), bool)
+    far[idx] = [math.dist((xs[i], ys[i]), (xs[i + 1], ys[i + 1])) > 1e-9 for i in idx.tolist()]
+    pid = np.repeat(np.arange(S), counts)
+    n = np.bincount(pid[far], minlength=S)
+    keep_whole = n < 3  # (offset gives such an outline back as it was)
+    use = far & ~keep_whole[pid]
+    P = np.flatnonzero(use)
+    ppid = pid[P]
+    px, py = X[P], Y[P]
+    m = n * ~keep_whole
+    e1 = np.cumsum(m)
+    s1 = e1 - m
+    j = np.arange(len(P))
+    nx_i = np.where(j + 1 == e1[ppid], s1[ppid], j + 1)  # (the next point, round the outline)
+    pv_i = np.where(j == s1[ppid], e1[ppid] - 1, j - 1)  # (the one before)
+    pxl, pyl = px.tolist(), py.tolist()
+    sign = np.ones(S)
+    for p in np.flatnonzero(m).tolist():
+        a, b = int(s1[p]), int(e1[p])
+        ring = list(zip(pxl[a:b], pyl[a:b]))
+        sign[p] = 1 if area(ring + [ring[0]]) > 0 else -1
+    s = sign[ppid]
+    dx, dy = px[nx_i] - px, py[nx_i] - py
+    ll = np.array([math.hypot(a, b) for a, b in zip(dx.tolist(), dy.tolist())])
+    nx_, ny_ = s * dy / ll, -s * dx / ll
+    ax, ay = nx_[pv_i], ny_[pv_i]
+    bxn, byn = nx_, ny_
+    dd = np.asarray(d, float)[ppid]
+    dot = ax * bxn + ay * byn
+    one = dot > -0.5
+    mm = dd / (1 + dot)
+    o1x, o1y = px + (ax + bxn) * mm, py + (ay + byn) * mm  # (one point where the two moved edges meet)
+    o2x, o2y = px + ax * dd, py + ay * dd  # (a cut-off corner: two points)
+    o3x, o3y = px + bxn * dd, py + byn * dd
+    per = np.where(one, 1, 2)
+    at = np.cumsum(per) - per
+    tot = int(per.sum())
+    gx, gy = np.empty(tot), np.empty(tot)
+    gx[at] = np.where(one, o1x, o2x)
+    gy[at] = np.where(one, o1y, o2y)
+    two = np.flatnonzero(~one)
+    gx[at[two] + 1], gy[at[two] + 1] = o3x[two], o3y[two]
+    gpid = np.repeat(ppid, per)
+    # each outline: grown points + its first again; outlines kept whole: as they were
+    gc = np.bincount(gpid, minlength=S)
+    out_c = np.where(keep_whole, counts, gc + 1)
+    oe = np.cumsum(out_c)
+    os_ = oe - out_c
+    OX, OY = np.empty(int(oe[-1]) if S else 0), np.empty(int(oe[-1]) if S else 0)
+    ge = np.cumsum(gc)
+    gs = ge - gc
+    grown = np.flatnonzero(~keep_whole)
+    if len(grown):
+        dest = np.repeat(os_[grown], gc[grown]) + (np.arange(int(gc[grown].sum())) - np.repeat(
+            np.cumsum(gc[grown]) - gc[grown], gc[grown]))
+        src = np.concatenate([np.arange(gs[p], ge[p]) for p in grown.tolist()])
+        OX[dest], OY[dest] = gx[src], gy[src]
+        OX[oe[grown] - 1], OY[oe[grown] - 1] = gx[gs[grown]], gy[gs[grown]]
+    for p in np.flatnonzero(keep_whole).tolist():
+        OX[os_[p]:oe[p]], OY[os_[p]:oe[p]] = X[s0[p]:e0[p]], Y[s0[p]:e0[p]]
+    return OX * k, OY, out_c
+
+
+def threshold_rows(polys, q0, q1, threshold, sub_rows):
+    """text.threshold_spans for every key q0..q1 -> [spans of q0, ...], the very same numbers: each key's lines
+    looked at together (crossings, the nonzero rule, the threshold count) instead of one line at a time."""
+    E = [(a[0], a[1], b[0], b[1]) for poly in polys for a, b in zip(poly, poly[1:]) if a[1] != b[1]]
+    if not E:
+        return [[] for _ in range(q0, q1 + 1)]
+    xa, ya, xb, yb = np.array(E, float).T
+    ylo, yhi = np.minimum(ya, yb), np.maximum(ya, yb)
+    dirs = np.where(yb > ya, 1, -1)
+    need = max(1, math.ceil(threshold / 100 * sub_rows - 1e-9))
+    out_all = []
+    for q in range(q0, q1 + 1):
+        lo = q - 0.5
+        pick = np.flatnonzero((ylo < lo + 1) & (yhi > lo))
+        if not len(pick):
+            out_all.append([])
+            continue
+        ys = np.array([lo + (j + 0.5) / sub_rows for j in range(sub_rows)])
+        a_x, a_y, b_x, b_y = xa[pick, None], ya[pick, None], xb[pick, None], yb[pick, None]
+        cross = (a_y <= ys) != (b_y <= ys)
+        ei, jj = np.nonzero(cross)
+        if not len(ei):
+            out_all.append([])
+            continue
+        y = ys[jj]
+        x = a_x[ei, 0] + (b_x[ei, 0] - a_x[ei, 0]) * (y - a_y[ei, 0]) / (b_y[ei, 0] - a_y[ei, 0])
+        d = dirs[pick][ei]
+        o = np.lexsort((d, x, jj))  # (each line's crossings by x, then -1 before +1: Python's tuple sort)
+        x, d, jj = x[o], d[o], jj[o]
+        w = np.cumsum(d)
+        first = np.ones(len(jj), bool)
+        first[1:] = jj[1:] != jj[:-1]
+        base = np.maximum.accumulate(np.where(first, w - d, np.iinfo(np.int64).min))
+        w = w - base
+        before = w - d
+        st = np.flatnonzero((before == 0) & (w != 0))
+        en = np.flatnonzero((before != 0) & (w == 0))
+        # (starts and ends take turns on a line; a start left open at a line's end makes nothing)
+        ns = np.bincount(jj[st], minlength=sub_rows)
+        ne = np.bincount(jj[en], minlength=sub_rows)
+        rank = np.arange(len(st)) - np.repeat(np.cumsum(ns) - ns, ns)
+        st = st[rank < ne[jj[st]]]
+        if not len(st):
+            out_all.append([])
+            continue
+        ev_x = np.concatenate([x[st], x[en]])
+        ev_d = np.concatenate([np.ones(len(st), np.int64), -np.ones(len(en), np.int64)])
+        o = np.lexsort((ev_d, ev_x))
+        ev_x, ev_d = ev_x[o], ev_d[o]
+        count = np.cumsum(ev_d)
+        before = count - ev_d
+        on = (before < need) & (need <= count)
+        off = (count < need) & (need <= before)
+        out, start = [], None
+        for k in np.flatnonzero(on | off).tolist():
+            xk = float(ev_x[k])
+            if on[k]:
+                start = xk
+            elif out and start - out[-1][1] < 1e-12:
+                out[-1][1] = xk
+            elif xk > start:
+                out.append([start, xk])
+        out_all.append(out)
+    return out_all

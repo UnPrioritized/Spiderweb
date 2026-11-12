@@ -1353,7 +1353,10 @@ def inside_spans(sh, ppq):
     """[(pitch, start tick, end tick)] for every stretch of every key inside the shape. Text: the nonzero rule and
     its threshold (text.py). Gaps in the outline are closed with straight lines (fill_plan). Remembered: a shape
     with many corners takes a while, and it's asked for again and again (note counts, every change of the gate)."""
-    key = (json.dumps([sh["strokes"], sh["pts"], sh.get("text")]), bool(sh.get("union")), ppq)
+    from notes.text import strokes_token
+    token = strokes_token(sh["strokes"])  # (a text's strokes: their fingerprint, not every point written out)
+    key = (json.dumps([sh["strokes"] if token is None else "fp:" + str(token), sh["pts"], sh.get("text")]),
+           bool(sh.get("union")), ppq)
     got = _spans.get(key)
     if got is None:
         if len(_spans) > 100:
@@ -1376,8 +1379,14 @@ def find_spans(sh, ppq):
     if not tx and not walled:
         return rows_spans(edges, q0, q1, ppq)
     out = []
+    rows = None
+    if tx:
+        from notes import text as T
+        if T.BATCH:  # (all keys' lines together: the same spans, notes/textfast.py)
+            rows = textfast.threshold_rows(polys, q0, q1, tx["threshold"], T.SUB_ROWS)
     for q in range(q0, q1 + 1):
         row = [(math.floor(a * ppq + 0.5), math.floor(b * ppq + 0.5)) for a, b, *_ in (
+            rows[q - q0] if rows is not None else
             threshold_spans(polys, q, tx["threshold"]) if tx else row_pieces(edges, q, walled, as_normal))]
         # a bit under a tick only if the row has nothing else (like find_area_spans): two shapes sharing a stretch
         # of the same side made a column of 1-tick notes along it where they overlap
@@ -3453,14 +3462,22 @@ def edge_parts(notes):
 
 def cut_out(spans, others):
     """(start, end, key) stretches with the time the others cover on the same key taken out."""
+    import bisect
     ks, ss, es = merged_by_key(others)
-    by_key = {}
+    by_key, ends_of = {}, {}
     for k, s, e in zip(ks.tolist(), ss.tolist(), es.tolist()):
         by_key.setdefault(k, []).append((s, e))
+        ends_of.setdefault(k, []).append(e)
     out = []
     for s, e, k in spans.tolist():
-        for os_, oe in by_key.get(k, ()):
-            if oe <= s or os_ >= e:
+        row = by_key.get(k, ())
+        # (the others on a key are sorted and don't overlap: start at the first one ending past s, stop at the first
+        # starting at or past e; every span with every other on its key grew with the square on long rows)
+        for j in range(bisect.bisect_right(ends_of[k], s) if row else 0, len(row)):
+            os_, oe = row[j]
+            if os_ >= e:
+                break
+            if oe <= s:
                 continue
             if os_ > s:
                 out.append((s, os_, k))

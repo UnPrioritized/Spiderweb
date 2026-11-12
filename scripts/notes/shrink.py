@@ -148,10 +148,19 @@ def near_rows(seg, ys, r):
 
 
 def minus(spans, cuts):
+    """spans with the cuts taken out. Both sorted + merged (inside_at, near_rows), so each span only looks at the
+    cuts from the first one still reaching it up to the first past its end (every span with every cut grew with
+    the square: a 400-letter text line with an outline gate took 1.2 s)."""
     out = []
+    k, n = 0, len(cuts)
     for a, b in spans:
-        for c, d in cuts:
-            if d <= a or c >= b:
+        while k < n and cuts[k][1] <= a:  # (left of this span, so of every later one too)
+            k += 1
+        for j in range(k, n):
+            c, d = cuts[j]
+            if c >= b:  # (and every later cut)
+                break
+            if d <= a:
                 continue
             if c > a:
                 out.append((a, c))

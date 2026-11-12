@@ -1077,7 +1077,7 @@ _em = {}  # (Strokes token, bbox) -> the strokes cut into steps in em units (tex
 def text_polys(sh):
     """The letters' outlines as closed polygons in beats / pitch, grown / shrunk by the grow setting."""
     tx = sh["text"]
-    if BATCH and not tx.get("grow", 0.0) and len(sh["strokes"]) >= BATCH_FROM:
+    if BATCH and len(sh["strokes"]) >= BATCH_FROM:
         return _batch_polys(sh)
     x0, y0, x1, y1 = tx["bbox"]
     w, h = x1 - x0, y1 - y0
@@ -1125,6 +1125,11 @@ def _batch_polys(sh):
     O, X, Y = text_axes(sh)
     bx = O[0] + em[:, 0] * X[0] + em[:, 1] * Y[0]
     by = O[1] + em[:, 0] * X[1] + em[:, 1] * Y[1]
+    grow = tx.get("grow", 0.0)
+    if grow:  # (offset, every outline at once)
+        holes = set(tx.get("holes", ()))
+        bx, by, counts = textfast.grow_many(bx, by, counts, [-grow if i in holes else grow
+                                                             for i in range(len(counts))], tx.get("k", 1.0))
     ppq = tx.get("ppq")
     bx = (np.floor(bx * ppq * TICK_STEPS + 0.5) / TICK_STEPS + TICK_LIFT) / ppq if ppq else textfast.round9(bx)
     return textfast.polys_of(bx, textfast.round9(by), counts)
