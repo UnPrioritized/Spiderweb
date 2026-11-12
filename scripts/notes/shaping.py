@@ -198,7 +198,7 @@ def shape_line(font, line, track=0.0, context=("", "")):
     Each character's font: the line's font, or the backup font that has it (fonts.backup_font); marks follow the
     letter before them. A run = characters with the same direction level, font and script, shaped together
     (with the whole line around it, so letters join across a font change). Tracking goes between letter shapes,
-    but not inside a run of one joining script (it would cut the joins). context = (letters before, after) the line
+    but not between two that join (the same test as the joined pieces: it would cut the joins). context = (letters before, after) the line
     that its letters join to without being drawn (a split letter group in another font)."""
     from notes.fonts import backup_font, no_width
     n = len(line)
@@ -254,8 +254,6 @@ def shape_line(font, line, track=0.0, context=("", "")):
                      for info, pos in zip(buf.glyph_infos, buf.glyph_positions)]
         flags = [it[6] for it in items]
         for k, (c, adv, conts, dx, dy, gid, _) in enumerate(items):
-            if prev is not None and c != prev and not (kinds[c] == kinds[prev] != "L"):
-                x += track
             joined = False
             if k and c == items[k - 1][0]:
                 joined = True  # (one letter group: always together)
@@ -263,6 +261,8 @@ def shape_line(font, line, track=0.0, context=("", "")):
                 joined = bool(flags[k - 1] if rtl else flags[k])  # before it: on its right in a right-to-left run)
             elif k and kinds[c] in _HEADLINE:  # (a word on its headline: letters up to a space / sign)
                 joined = _word(line[c]) and _word(line[items[k - 1][0]])
+            if prev is not None and c != prev and not joined:  # (tracking: never between two shapes that join;
+                x += track  # Hebrew, Thai, spaces, numbers, signs spread like Latin, user 2026-11-12)
             src.append((f, gid, dx, dy))
             joins.append(joined)
             run_at.append(r)
