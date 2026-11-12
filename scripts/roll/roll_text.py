@@ -18,7 +18,8 @@ BLINK_MS = 530
 IME_MS = 40  # how often the typing helper is asked for a half-typed letter while typing (Windows)
 IME_WAIT = 1  # a change shows after it held this many more asks (~40 ms; 2 = 80 ms didn't help the flashing: that
 # was IME_KEY presses dropping the half-typed letter)
-IME_KEY = 229  # Windows' key code for a key the typing helper takes (VK_PROCESSKEY); Tk passes it on as a key press
+IME_ROOM, IME_WIDE = 28, 120  # px the typing helper's own box takes (about), kept inside the piano roll
+IME_KEY = 229 # Windows' key code for a key the typing helper takes (VK_PROCESSKEY); Tk passes it on as a key press
 
 
 class TextTyping:
@@ -526,9 +527,22 @@ class TextTyping:
         # where the caret is, for the system's typing helper: its own box (Korean / Japanese / Chinese input) and its
         # list of choices (Japanese kanji, Korean Hanja) open there, not in the window's top-left corner (user
         # 2026-11-12: a black box by the File menu; Japanese choices up there)
+        # JUST UNDER THE WHOLE TEXT (the dashed box), at the caret's x: the helper asks where the instant a key is
+        # pressed, before the next ask draws the new letter, so at the caret itself its list opened where the caret
+        # had been and covered the letters (user's pictures); a line grows sideways, so "under the text" holds
         (ax, ay), (bx, by) = xy(*a), xy(*b)
+        corners = [xy(*p) for p in ((x0, y0), (x1, y0), (x1, y1), (x0, y1))]
+        box = (min(x for x, _ in corners), min(y for _, y in corners), max(x for x, _ in corners),
+               max(y for _, y in corners))
+        # (always under the text, at most down to the piano roll's bottom edge: under a text reaching past it the box
+        # went off the window; ABOVE the text was tried, but the helper opens its list downward over the text anyway,
+        # user 2026-11-12)
+        w, h, room = self.winfo_width(), self.winfo_height(), IME_ROOM * self.scale
+        spot_y = max(0, min(box[3] + 2, h - room))
+        spot_x = max(0, min(min(ax, bx), w - IME_WIDE * self.scale))
         try:
-            self.tk.call("tk", "caret", self._w, "-x", int(round(min(ax, bx))), "-y", int(round(min(ay, by))),
+            self.tk.call("tk", "caret", self._w, "-x", int(round(spot_x)), "-y", int(round(spot_y)),
                          "-height", max(1, int(round(abs(by - ay)))))
         except Exception:  # (a Tk without "tk caret": the helper keeps its own place)
             pass
+        system.ime_choices_beside(self, spot_x, spot_y, box)  # (and never over the text)

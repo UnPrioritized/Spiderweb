@@ -75,6 +75,47 @@ def ime_composing():
         return None
 
 
+class _CandidateForm(ctypes.Structure):
+    _fields_ = [("dwIndex", wintypes.DWORD), ("dwStyle", wintypes.DWORD), ("ptCurrentPos", wintypes.POINT),
+                ("rcArea", wintypes.RECT)]
+
+
+def ime_choices_beside(widget, x, y, box):
+    """Where a typing helper's list of choices (Japanese kanji, Korean Hanja) opens: near (x, y) but never over
+    box (x0, y0, x1, y1), all in widget's pixels (the text being typed: the list covered it). Windows only;
+    elsewhere nothing (the helper places it itself)."""
+    if not WINDOWS:
+        return
+    try:
+        user32, imm = ctypes.windll.user32, ctypes.windll.imm32
+        user32.GetFocus.restype = wintypes.HWND
+        imm.ImmGetContext.restype = wintypes.HANDLE
+        imm.ImmGetContext.argtypes = [wintypes.HWND]
+        imm.ImmReleaseContext.argtypes = [wintypes.HWND, wintypes.HANDLE]
+        imm.ImmSetCandidateWindow.argtypes = [wintypes.HANDLE, ctypes.c_void_p]
+        user32.ScreenToClient.argtypes = [wintypes.HWND, ctypes.c_void_p]
+        hwnd = user32.GetFocus()
+        if not hwnd:
+            return
+        rx, ry = widget.winfo_rootx(), widget.winfo_rooty()
+
+        def client(px, py):  # (the helper counts from the focused window's corner, not the widget's)
+            pt = wintypes.POINT(int(round(rx + px)), int(round(ry + py)))
+            user32.ScreenToClient(hwnd, ctypes.byref(pt))
+            return pt
+        himc = imm.ImmGetContext(hwnd)
+        if not himc:
+            return
+        try:
+            at, (a, b) = client(x, y), (client(box[0], box[1]), client(box[2], box[3]))
+            form = _CandidateForm(0, 0x0080, at, wintypes.RECT(a.x, a.y, b.x, b.y))  # (CFS_EXCLUDE: not over rcArea)
+            imm.ImmSetCandidateWindow(himc, ctypes.byref(form))
+        finally:
+            imm.ImmReleaseContext(hwnd, himc)
+    except (AttributeError, OSError, ValueError):
+        pass
+
+
 def ime_cancel():
     """Throws away what ime_composing shows (the caret left the text: the typing helper must not finish it later)."""
     if not WINDOWS:
