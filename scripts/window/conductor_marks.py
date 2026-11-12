@@ -338,6 +338,7 @@ class ConductorMarks:
             text += " " + trn("conductor.rebar_plain", n, n=n)
         self.app.status.config(text=text)
         self.request_redraw()
+        self.app.tips.show("rebar", wait=True)  # (the first time: what it did)
 
     def edit_time_sig(self, beat):
         """Add / change the time signature on the bar line at or before beat (asked in a small box)."""
