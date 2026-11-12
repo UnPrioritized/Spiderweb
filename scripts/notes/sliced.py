@@ -524,7 +524,8 @@ def piece_notes(sh, ppq, keys, make):
         if start0 is not None:  # (a note a cut shortened reads the line where it STARTED, like a line piece's: its
             # line keeps the part before its start (u < 0); sweep 492780640, the right half read it at the cut)
             was_cut = start0 < notes[:, 0]
-            frac = np.where(was_cut, np.minimum((start0 - t.min()) / span, 1), frac)
+            pos = drawn_spots(sh, start0, notes[:, 0], float(t.min()) * 1.0, float(t.min()) + span)
+            frac = np.where(was_cut, np.minimum((pos - t.min()) / span, 1), frac)
         made = notes[:, 3]
         if plain_vel:  # (made from the whole as it was when cut already)
             notes[:, 3] = own_velocities(sh, made, frac)
@@ -1350,6 +1351,39 @@ def moved_mark(m, d):
     return out
 
 
+DRAWN_MOST = 64  # (velocity lines remembered on a piece: drawn_spots)
+
+
+def note_drawn(sh, u0, u1):
+    """A velocity line drawn on piece sh over u0..u1 of its own time: remembered (cut["drawn"], newest last)."""
+    cut = sh.get("cut")
+    if isinstance(cut, dict):
+        cut["drawn"] = (cut.get("drawn") or [])[-(DRAWN_MOST - 1):] + [[float(min(u0, u1)), float(max(u0, u1))]]
+
+
+def drawn_spots(sh, at, shown, t_lo, t_hi):
+    """Where a piece's notes read its velocity line (ticks): at (where each started, before a cut went through it),
+    except a cut half whose own shown start a velocity line drawn on the piece covers LATER than any line over where
+    it started (user 2026-11-13: a line drawn over only the right half sets it; the halves keep one velocity
+    until then). shown: each note's start now; t_lo..t_hi: the piece's own time (u = 0..1)."""
+    drawn = (sh.get("cut") or {}).get("drawn") if isinstance(sh.get("cut"), dict) else None
+    at = np.asarray(at)
+    if not drawn or not len(at) or t_hi <= t_lo:
+        return at
+    shown = np.asarray(shown)
+    cut = at < shown
+    if not cut.any():
+        return at
+    span = t_hi - t_lo
+    us, uo = (shown - t_lo) / span, (at - t_lo) / span
+    last_s = np.full(len(at), -1)
+    last_o = np.full(len(at), -1)
+    for k, (a, b) in enumerate(drawn):
+        last_s = np.where((us >= a - 1e-9) & (us <= b + 1e-9), k, last_s)
+        last_o = np.where((uo >= a - 1e-9) & (uo <= b + 1e-9), k, last_o)
+    return np.where(cut & (last_s > last_o), shown, at)
+
+
 def keep_velocity(sh):
     """After a new piece got its velocities (joined.piece_velocity): they're the whole's, so its notes take the
     whole's own (exact) until they're changed (source)."""
@@ -1457,6 +1491,13 @@ def clean_cut(c):
             return None
     if c.get("own_vel"):
         out["own_vel"] = True
+    if isinstance(c.get("drawn"), list):  # (velocity lines drawn on it since: drawn_spots)
+        try:
+            got = [[float(a), float(b)] for a, b in c["drawn"][-DRAWN_MOST:]]
+        except (TypeError, ValueError):
+            got = []
+        if got:
+            out["drawn"] = got
     if isinstance(c.get("id"), str) and c["id"]:  # (its cut's key: keyed_pieces)
         out["id"] = c["id"][:32]
     if whole["kind"] != "custom" and isinstance(c.get("from"), list):  # (cut_through's floor)

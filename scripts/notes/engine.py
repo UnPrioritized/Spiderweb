@@ -62,7 +62,7 @@ from notes.passengers import check_cc
 from notes.strips import clean_strips
 from notes.mould import clip_to, mould_cut, piece_loops
 from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, made_at_cut, moved, moved_by,
-                          own_velocities, with_whole_velocity,
+                          own_velocities, with_whole_velocity, drawn_spots,
                           piece_knives, piece_notes, run_origins, snap_piece, source, spotted_notes, steps_kept,
                           whole_made)
 from notes.smooth import clean_level, smooth_path
@@ -2518,13 +2518,16 @@ def _kind_notes_tracks(sh, ppq, keys):
     if made is not None and len(made) == len(raw):  # (a piece of a shape with pages, with a velocity of its own)
         # (read where each note started: a note the cut went through keeps its velocity in both halves, sweep 11-06)
         at = from0_starts(sh, raw, vel_at if vel_at is not None and len(vel_at) == len(raw) else raw[:, 0], ppq)
+        at = drawn_spots(vel_sh, at, raw[:, 0], t_lo, t_hi)  # (a line drawn over only a cut half's start since)
         frac = np.clip((at - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(raw))
         vel = own_velocities(vel_sh, made, frac)
     else:
         carried = vel_at is not None and len(vel_at) == len(raw)
         # (a cut note's start before a piece's own time: read on the line kept from before it, joined.piece_velocity)
-        vel = env_velocities(env, from0_starts(sh, raw, vel_at if carried else raw[:, 0], ppq), t_lo, t_hi,
-                             min(0.0, float(env[0][0])) if carried and not same_vel else 0.0)
+        at = from0_starts(sh, raw, vel_at if carried else raw[:, 0], ppq)
+        if carried and piece and not same_vel:  # (a line drawn over only a cut half's start since: there)
+            at = drawn_spots(vel_sh, at, raw[:, 0], t_lo, t_hi)
+        vel = env_velocities(env, at, t_lo, t_hi, min(0.0, float(env[0][0])) if carried and not same_vel else 0.0)
     if sh["kind"] in HZ_KINDS and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
         got = velocity_parts(sh, ppq, raw[:, 0], raw[:, 2])
         if got is not None:  # (a note with a loudness line drawn: its own velocity instead of the shape's)

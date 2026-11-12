@@ -17,6 +17,7 @@ from notes.fx import pages, with_velocity
 from notes.gateflip import is_pasted_flipped, mirrored_runs
 from notes.pattern import loop_points
 from notes.ripples import free_span, grows_free
+from notes.sliced import note_drawn
 from roll.roll_shared import (ALT, CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, SELECTED_COLOR, SLOT_COLORS,
                               bind_double_right, box_kind, cached_path, draw_boxes, fade, grab_while_panning, note_colours, ruler_boxes,
                               set_cursor, slot_colours)
@@ -589,14 +590,21 @@ class VelocityPane(KeepsItems, tk.Canvas):
             fx = had[4] if had else sh.get("fx")
             lo, hi = time_span(sh, app.ppq)
             merged = bool(sh.get("merge")) and "notes" in sh
-            if pages(fx) or merged:
+            # (a piece whose WHOLE has the pages (user 2026-11-13): its notes are the whole's paged notes, shown where
+            # the pages put them, so the same velocity step after them; read off its own line, a note a Strum moved
+            # before the drawing read the line where the drawing starts, sweep 306594237)
+            # (drawn pieces only: a line piece reads the whole's paged notes at their own starts already, and a step of
+            # its own made it a piece with pages of its own (Gate subtract done on it alone again, case 73407007))
+            whole_paged = sh["kind"] == "custom" and isinstance(sh.get("cut"), dict) and not pages(fx) and pages(
+                ((sh["cut"].get("whole") or {}).get("fx")))
+            if pages(fx) or merged or whole_paged:
                 # note tool pages: only a velocity step after them, on the notes as they show (user 2026-11-02: a
                 # Chop piece past the line kept its velocity; the notes under the pages are left as they are); a
                 # merged shape too (its notes are made again from its parts when flipped / reshaped: a line written
                 # into them was lost, overlap hunt 2026-11-08)
                 pts = [[(b - lo) / (hi - lo), v] for b, v in drawn] if hi > lo else \
                     [[0.0, env_at(drawn, dus, lo)], [1.0, env_at(drawn, dus, lo)]]
-                sh["fx"] = with_velocity(fx, pts, always=merged)
+                sh["fx"] = with_velocity(fx, pts, always=merged or whole_paged)
                 done[i] = (sh, sh["fx"], None, (lo, hi), fx)
                 continue
             if sh.get("own_vel") and "notes" in sh:
@@ -614,6 +622,10 @@ class VelocityPane(KeepsItems, tk.Canvas):
                 env = [[0.0, float(max(1, min(127, round(env_at(drawn, dus, lo)))))]]  # every note is at the start
                 pts = [[0.0, env[0][1]], [1.0, env[0][1]]]
             sh["vel_env"] = env
+            if isinstance(sh.get("cut"), dict) and hi > lo:  # (a piece: where it was drawn, for its cut halves:
+                if had and sh["cut"].get("drawn"):           # sliced.drawn_spots; bent again = the same line)
+                    sh["cut"]["drawn"] = sh["cut"]["drawn"][:-1]
+                note_drawn(sh, pts[0][0], pts[-1][0])
             us = [u for u, _ in env]
             sh["vel0"], sh["vel1"] = (max(1, min(127, round(env_at(env, us, u)))) for u in (0.0, 1.0))
             if fx:
