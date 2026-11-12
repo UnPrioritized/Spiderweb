@@ -1745,9 +1745,13 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
         wt, pick = (np.zeros(len(w0), np.int64) if wt0 is None else np.asarray(wt0, np.int64)), pt
     # (where to look: the piece's stretch of time, or its notes' own)
     lo, hi = piece_ticks(src, part, ppq)[1:] if timed else (int(mine[:, 0].min()), int(mine[:, 1].max()))
-    rows = _owned_rows(w0, wt, mine, pick, lo, hi)
-    if rows is None:
+    # (a note not found in the whole (glued on the piece since, say): that note alone made as on the piece by itself,
+    # every other one as the whole's; all of them fell back to the piece alone and a note cut at the piece's end
+    # grew past it, sweep 392782245)
+    rows = _owned_rows(w0, wt, mine, pick, lo, hi, partial=not gate)
+    if rows is None or (rows < 0).all():
         return None
+    lost = rows < 0
     # (Gate subtract on a whole reading its own line: notes whose start moved read it where they show now, as the
     # uncut shape does (shown_subtracted); a piece with the whole's velocities does the same; sweep 388596266)
     shown = src if step == "subtract" and same_vel and not runner else None
@@ -1755,8 +1759,8 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
     if step == "gate_flip":  # (runs mirrored across the cut: the knife cuts the notes where they are now)
         keep = (w1[:, 0] < hi) & (w1[:, 1] > lo)
         return _clipped(w1[keep], lo, hi), None if tracks is None else wt[keep]
-    w1 = w1[rows]
-    w = w0[rows]
+    w1 = w1[np.maximum(rows, 0)]
+    w = w0[np.maximum(rows, 0)]
     out = w1.copy()  # (each of its notes as the whole's finished note, still cut where it was cut)
     out[:, 0] = np.where(mine[:, 0] > w[:, 0], np.maximum(w1[:, 0], mine[:, 0]), w1[:, 0])
     out[:, 1] = np.where(mine[:, 1] < w[:, 1], np.minimum(w1[:, 1], mine[:, 1]), w1[:, 1])
@@ -1764,6 +1768,9 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
     # now: that one, unless the piece's note was cut after its start (a cut half keeps its velocity))
     out[:, 3] = mine[:, 3] if shown is None else np.where(
         (w1[:, 3] != w[:, 3]) & (mine[:, 0] == w[:, 0]), w1[:, 3], mine[:, 3])
+    if lost.any():  # (as the piece alone would make them: extended / subtracted keep the rows in order)
+        alone = extended(mine, cfg, ppq) if step == "extend" else subtracted(mine, cfg, ppq)
+        out[lost] = np.asarray(alone, np.int64)[lost]
     keep = out[:, 1] > out[:, 0]
     return out[keep], None if tracks is None else pt[keep]
 
@@ -1792,10 +1799,10 @@ def _stepped_whole(made, w0, step, cfg, ppq, own_vel, shown=None):
     return w1
 
 
-def _owned_rows(w0, wt, mine, pt, lo, hi):
+def _owned_rows(w0, wt, mine, pt, lo, hi, partial=False):
     """Which of the whole's notes w0 (colours wt) each of a piece's notes mine (colours pt) is, or a part of (same
     key, velocity and colour, inside it), each whole note taken once; None: one of them isn't any (not simply cut
-    out of the whole: stepped_piece makes it alone)."""
+    out of the whole: stepped_piece makes it alone). partial: those get -1 instead."""
     near = np.flatnonzero((w0[:, 0] <= hi) & (w0[:, 1] >= lo))
     exact = {}
     for i, row, t in zip(near.tolist(), w0[near].tolist(), wt[near].tolist()):
@@ -1818,6 +1825,8 @@ def _owned_rows(w0, wt, mine, pt, lo, hi):
             # was made alone and Gate subtract shortened its cut end again)
             free = sorted((i for i in hit.tolist() if i not in used), key=lambda i: int(w0[i, 3]) != v)
             if not free:
+                if partial:
+                    continue
                 return None
             rows[j] = free[0]
             used.add(free[0])
