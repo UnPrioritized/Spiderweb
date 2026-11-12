@@ -71,7 +71,43 @@ def scaled(sh, f):
     bh = sh.get("before_hz")
     if isinstance(bh, dict):
         scaled(bh, f)
+    for st in sh.get("fx") or ():  # (note tool pages: their lengths in beats)
+        _times(st.get("cfg"), PAGE_KEYS.get(st.get("tool"), ()), f)
+        if st.get("tool") == "chop" and isinstance(st.get("cfg"), dict):
+            st["cfg"]["snap"] = ""  # (picked as a note length: no longer that length)
+        if st.get("tool") == "path" and isinstance(st.get("cfg"), dict):
+            _path(st["cfg"], f)
+        if st.get("tool") == "turn" and isinstance(st.get("r"), (int, float)):
+            st["r"] = st["r"] * f  # (beats per key on screen then: the same look stretched)
+    _times(sh.get("sustain"), ("gap", "most", "every", "from"), f)
+    for k in ("subtract", "extend"):
+        g = sh.get(k)
+        if isinstance(g, dict) and not (k == "extend" and g.get("unit") == "pct"):
+            _times(g, ("by", "to"), f)
+            _times(g.get("start"), ("by", "to"), f)
     return sh
+
+
+PAGE_KEYS = {"chop": ("len",), "claw": ("period",), "strum": ("time", "end_time"), "trim": ("length",),
+             "path": ("every", "k")}  # (each page's settings in beats)
+
+
+def _times(d, keys, f):
+    if not isinstance(d, dict):
+        return
+    for k in keys:
+        v = d.get(k)
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            d[k] = v * f
+
+
+def _path(c, f):
+    """Copy along a path's points / middle points / group box: their beats stretched."""
+    c["pts"] = [[b * f, k] for b, k in c.get("pts") or ()]
+    c["mids"] = [None if m is None else [m[0] * f, m[1]] for m in c.get("mids") or ()]
+    g = c.get("grp")
+    if isinstance(g, list) and len(g) == 4:
+        c["grp"] = [g[0] * f, g[1] * f, g[2], g[3]]
 
 
 def stretched(app, sh, pl, k):
@@ -210,6 +246,13 @@ def apply(app, pl, name):
     ppq = app.ppq
     old_r = np.array(app.rendered[:, :6], np.int64)
     olds = rows_by_owner(old_r)
+    for i, k in kinds.items():  # (a shape after the bars whose notes hang on a grid from the song's start (spam
+        if k == "after":         # Aligned, Chop "from the song's start", a Hz bass without tones...) and change when
+            sh = app.shapes[i]   # moved: plain notes, moved, so it keeps its sound)
+            was = np.asarray(app.notes_of(sh), np.int64).reshape(-1, 4)
+            if len(was) and not same_notes(was, np.asarray(app.notes_of(moved(sh, pl["shift"])), np.int64)
+                                           .reshape(-1, 4), pl, ppq):
+                kinds[i] = "cut"
     loose = [i for i, k in kinds.items() if k == "cut" or isinstance(k, tuple)]
     plains = app.plain_copies(set(loose)) if loose else {}  # (as they sound now: the cut pieces + the net's way back)
     bases = {i: base_of(app, i, plains.get(i), pl) for i in loose}
