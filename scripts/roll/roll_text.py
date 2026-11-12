@@ -76,10 +76,7 @@ class TextTyping:
         if not self.typing or self.text_at(e.x, e.y) != self.typing["i"] or self.typing["i"] is None:
             return self.on_press(e)
         text, c = self.typing_state()[0]["text"], self.caret_at(e)
-        marks = line_stops(text, c, self.typing_down())[0] is not None  # (joined lines: marks are part of a word)
-        # (joined lines: the zero-width joiner / non-joiner are inside words too, Persian types them mid-word)
-        word = lambda ch: (ch.isalnum() or ch == "_"
-                           or (marks and (unicodedata.category(ch)[0] == "M" or ch in "‌‍")))
+        word = self.word_test(text, c)
         kind = word(text[c]) if c < len(text) else word(text[c - 1]) if c else False
         a = c
         while a > 0 and text[a - 1] != "\n" and word(text[a - 1]) == kind:
@@ -89,6 +86,41 @@ class TextTyping:
             b += 1
         self.typing["anchor"], self.typing["caret"] = a, b
         self.show_caret()
+
+    def word_test(self, text, c):
+        """ch -> True when ch is part of a word (double-click, Ctrl+Backspace / Ctrl+Delete)."""
+        marks = line_stops(text, c, self.typing_down())[0] is not None  # (joined lines: marks are part of a word)
+        # (joined lines: the zero-width joiner / non-joiner are inside words too, Persian types them mid-word)
+        return lambda ch: (ch.isalnum() or ch == "_"
+                           or (marks and (unicodedata.category(ch)[0] == "M" or ch in "‌‍")))
+
+    def word_end(self, text, c, forward):
+        """Where Ctrl+Delete (forward) / Ctrl+Backspace (back) erase up to, as in Windows' boxes: back = over the
+        spaces / signs before the caret, then the word before them; forward = the word (or signs) after the caret,
+        then the spaces after it. A line break next to the caret is erased alone."""
+        word = self.word_test(text, c)
+        if forward:
+            if c >= len(text):
+                return c
+            if text[c] == "\n":
+                return c + 1
+            kind = word(text[c])
+            while c < len(text) and text[c] not in " \n" and word(text[c]) == kind:
+                c += 1
+            while c < len(text) and text[c] == " ":
+                c += 1
+            return c
+        if c <= 0:
+            return c
+        if text[c - 1] == "\n":
+            return c - 1
+        while c > 0 and text[c - 1] == " ":
+            c -= 1
+        if c > 0 and text[c - 1] != "\n":
+            kind = word(text[c - 1])
+            while c > 0 and text[c - 1] not in " \n" and word(text[c - 1]) == kind:
+                c -= 1
+        return c
 
     def typing_down(self):
         """The text being typed has Direction Down (never joined: its caret moves as for Latin)."""
@@ -138,7 +170,15 @@ class TextTyping:
                 self.end_typing()
                 app.undo() if low == "z" and not e.state & SHIFT else app.redo()  # (Ctrl+Shift+Z = redo too)
                 return "break"
-            if low == "a":  # all of this text, not every shape
+            if k in ("BackSpace", "Delete"):  # a whole word (a selection: just that, as without Ctrl)
+                if s0 != s1:
+                    self.insert_text("")
+                elif k == "Delete":
+                    self.set_text(text[:c] + text[self.word_end(text, c, True):], c)
+                else:
+                    a = self.word_end(text, c, False)
+                    self.set_text(text[:a] + text[c:], a)
+            elif low == "a":  # all of this text, not every shape
                 ty["anchor"], ty["caret"] = 0, len(text)
             elif low in ("c", "x"):
                 if s0 == s1:
