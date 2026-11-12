@@ -24,6 +24,13 @@ WHY = ("catch", "keep", "limit", "empty")  # (refusal codes: a catch-up / Keep t
 #                                            what a file holds, nothing to change)
 
 
+def heard(tempo, base, ppq, end):
+    """tempo_file.heard_tempo, never None: a song with no tempo points plays the start BPM all through (its
+    None crashed the change on a plain one-tempo song, user 2026-11-12)."""
+    from notes.tempo_file import heard_tempo
+    return heard_tempo(tempo, base, ppq, end) or [(0, round(60_000_000 / base))]
+
+
 def grow(sigs, lo, hi):
     """(a, b) beats: lo..hi grown out to whole bars (a box not on bar lines takes the bars it touches; an empty
     box = the bar it is in)."""
@@ -240,7 +247,7 @@ def nudge(old, new, base, ppq, pl):
     bars gained / lost; the part after the bars up to the next point (a glide cut at the end restarts its steps) is
     nudged too, so nothing after drifts. Within a quarter tick: untouched (a held tempo usually is). Every part
     worked out together once a round (a part's time only hangs on its own points). Returns how many were nudged."""
-    from notes.tempo_file import heard_tempo, seconds_at
+    from notes.tempo_file import seconds_at
     pts = new["points"]
     shift_t = round(pl["new_b"] * ppq) - round(pl["b"] * ppq)
     # parts: (old end tick, new start tick, new end tick, first, last point index scaled)
@@ -287,14 +294,14 @@ def nudge(old, new, base, ppq, pl):
             spans.append((int(math.floor(p[4])), int(math.ceil(p[0]))))
     pl["sound_spans"] = spans
     end_o, end_n = int(max(p[0] for p in parts)) + 2, max(p[2] for p in parts) + 1
-    ro = heard_tempo(old, base, ppq, end_o)
+    ro = heard(old, base, ppq, end_o)
     want = seconds_at(ro, ppq, np.array([p[0] for p in parts], float)).tolist()  # (when each part must end: the
     # old music's second at exactly that place, between two old ticks too)
     n0s = np.array([p[1] for p in parts], np.int64)
     n1s = np.array([p[2] for p in parts], np.int64)
     nudged, last_worst = set(), math.inf
     for _ in range(NUDGE_ROUNDS):  # (every piece at once a round, in order: each makes up only what the pieces
-        rn = heard_tempo(new, base, ppq, end_n)  # before it leave once they're fixed too; a piece's points go up /
+        rn = heard(new, base, ppq, end_n)  # before it leave once they're fixed too; a piece's points go up /
         s0, s1, s1b, s1a = (seconds_at(rn, ppq, x).tolist() for x in (n0s, n1s, n1s - 1, n1s + 1))  # down alike)
         tick = min(min(a - b, c - a) for a, b, c in zip(s1, s1b, s1a))  # (the shortest tick at any piece's end:
         moves, gained = [], 0.0                                          # the music after must not drift)
@@ -537,7 +544,7 @@ def dense_fix(old, new, base, ppq, pl, ticks):
     to the next note (or tempo point / the bars' end) takes the rest, so that note and everything after sound when
     they did. In place on new; pl["dense_map"] = (old ticks, new ticks) for map_ticks. A spot with no room (the next
     note too close) is left rounded. How many notes got their own tick."""
-    from notes.tempo_file import heard_tempo, seconds_at
+    from notes.tempo_file import seconds_at
     groups = dense_spots(pl, ticks, ppq)
     if not groups:
         pl["dense_map"] = None
@@ -546,8 +553,8 @@ def dense_fix(old, new, base, ppq, pl, ticks):
     pts = new["points"]
     pt_ticks = sorted(T.beat_tick(p[0], ppq) for p in pts)
     b_t = round(pl["new_b"] * ppq)
-    ro = heard_tempo(old, base, ppq, int(allt.max()) + 2)
-    rn = heard_tempo(new, base, ppq, int(map_ticks(pl, int(allt.max()), ppq)) + ppq)
+    ro = heard(old, base, ppq, int(allt.max()) + 2)
+    rn = heard(new, base, ppq, int(map_ticks(pl, int(allt.max()), ppq)) + ppq)
     keys, vals, puts, done = [], [], [], 0
     firsts = map_ticks(pl, np.array([g[0] for g in groups], np.int64), ppq)  # (every spot's reads at once:
     nexts = np.searchsorted(allt, [g[-1] for g in groups], "right")           # one read per spot was slow)
@@ -661,10 +668,9 @@ def _sound_map(old, new, base, ppq, pl):
     if not spans:
         pl.pop("sound", None)
         return
-    from notes.tempo_file import heard_tempo
     end_o = max(b for _, b in spans) + 1
-    pl["sound"] = (heard_tempo(old, base, ppq, end_o),
-                   heard_tempo(new, base, ppq, map_ticks(dict(pl, sound=None), end_o, ppq) + ppq))
+    pl["sound"] = (heard(old, base, ppq, end_o),
+                   heard(new, base, ppq, map_ticks(dict(pl, sound=None), end_o, ppq) + ppq))
 
 def sigs_of(tempo, pl):
     """The new time signatures: the picked one at the stretch's start, the one in effect at its old end back after
