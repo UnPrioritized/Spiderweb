@@ -127,6 +127,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     fonts_hb.py      the same on a Mac (font files read by uharfbuzz; untested)
     shaping.py       joined letters + right-to-left order for the Text tool (optional uharfbuzz + python-bidi)
     poly_union.py    one outline of polygons laid over each other (Turn into custom shape: joined letters)
+    textfast.py      a text's letters -> notes for all letters at once (the same notes as one by one, faster)
     funnel.py        funnels: curves, note grid, gates
     bezier.py        Bezier curves (anchors + handles) for curves and funnel curves, symmetry, fitting to points
     arc.py           arcs: pieces of a perfect circle through three points

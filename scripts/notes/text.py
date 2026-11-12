@@ -14,8 +14,12 @@ beats per key then).
 """
 
 import copy
+import hashlib
 import itertools
 import math
+import os
+import weakref
+from collections import deque
 
 import numpy as np
 
@@ -420,9 +424,10 @@ def winding(poly, x, y):
     return w
 
 
-def find_holes(contours):
-    """Which contours are holes (inside an odd number of the same letter's other contours), e.g. the middle of O."""
-    flat = [flatten(c) for _, c in contours]
+def find_holes(contours, flat=None):
+    """Which contours are holes (inside an odd number of the same letter's other contours), e.g. the middle of O.
+    flat: each contour cut into steps (flatten) already."""
+    flat = [flatten(c) for _, c in contours] if flat is None else flat
     same = {}  # (each letter's contours: only those are looked at, not every contour of the text)
     for i, (g, _) in enumerate(contours):
         same.setdefault(g, []).append(i)
@@ -480,28 +485,130 @@ def from_roll(axes, b, p):
     return ((db * Y[1] - dp * Y[0]) / det, (X[0] * dp - X[1] * db) / det)
 
 
+class Strokes(list):
+    """A text's strokes as build made them, with .fp = a fingerprint of their points (a hash of the very numbers):
+    engine.shape_key / _keyed use it instead of writing out every point (~38,000 points = ~28 ms, ~5 times a key
+    typed). Only while it's still true (strokes_token): the same stroke dicts holding the same pts lists of the same
+    length, nothing added / removed / set on the list itself (those drop the fingerprint). RULE: never change a
+    text's points in place (a value inside a pts list): replace the strokes. A deepcopy (undo, Ctrl+D) keeps the
+    fingerprint; slices, `+`, copy.copy, pickle, a file give a plain list (written out in full, as before)."""
+
+    def __init__(self, items=(), fp=None):
+        super().__init__(items)
+        self.fp = fp
+        self.guard = [(st, st.get("pts"), len(st.get("pts") or ())) for st in self]
+
+    def __deepcopy__(self, memo):
+        new = Strokes([copy.deepcopy(st, memo) for st in self], self.fp if self.valid() else None)
+        memo[id(self)] = new
+        return new
+
+    def __reduce__(self):  # (pickle / copy.copy: a plain list, no fingerprint)
+        return list, (list(self),)
+
+    def valid(self):
+        if self.fp is None or len(self.guard) != len(self):
+            return False
+        for st, (s0, p0, n0) in zip(self, self.guard):
+            if st is not s0 or type(st) is not dict or len(st) != 2 or st.get("kind") != "curve":
+                return False
+            p = st.get("pts")
+            if p is not p0 or len(p) != n0:
+                return False
+        return True
+
+
+def _changed(name):
+    def method(self, *a, **k):
+        self.fp = None  # (changed as a list: the fingerprint no longer says what's in it)
+        return getattr(list, name)(self, *a, **k)
+    return method
+
+
+for _name in ("append", "extend", "insert", "remove", "pop", "clear", "sort", "reverse", "__setitem__",
+              "__delitem__", "__iadd__", "__imul__"):
+    setattr(Strokes, _name, _changed(_name))
+
+_live = weakref.WeakValueDictionary()  # fingerprint -> the Strokes it stands for (engine.from_key puts them back)
+_kept = deque(maxlen=4)  # (and the last few held for sure: from_key right after shape_key always finds them)
+
+
+def fingerprint(P, off):
+    """A fingerprint of curves' points: P (N, 2) all of them, off where each curve starts (textfast.points_of)."""
+    return hashlib.blake2b(np.ascontiguousarray(P, float).tobytes() + np.asarray(off, np.int64).tobytes(),
+                           digest_size=16).hexdigest()
+
+
+def tagged(strokes):
+    """A text's strokes (curves) as Strokes with their fingerprint (a project opened: keys cheap from the start).
+    Strokes that aren't all plain curves stay as they are."""
+    if type(strokes) is Strokes or not strokes or any(type(st) is not dict or len(st) != 2 or
+                                                      st.get("kind") != "curve" for st in strokes):
+        return strokes
+    from notes import textfast
+    try:
+        return Strokes(strokes, fingerprint(*textfast.points_of([st["pts"] for st in strokes])))
+    except (TypeError, ValueError):
+        return strokes
+
+
+def tag_texts(shapes):
+    """Every text's strokes tagged (tagged), a project just opened."""
+    for sh in shapes:
+        if isinstance(sh.get("text"), dict) and isinstance(sh.get("strokes"), list):
+            sh["strokes"] = tagged(sh["strokes"])
+
+
+def strokes_token(strokes):
+    """The fingerprint of strokes still as build made them (Strokes.valid), else None."""
+    if type(strokes) is Strokes and strokes.valid():
+        if _live.get(strokes.fp) is not strokes:
+            _live[strokes.fp] = strokes
+            _kept.append(strokes)
+        return strokes.fp
+    return None
+
+
+def strokes_of(fp):
+    """The Strokes a fingerprint stands for (strokes_token gave it out), or None if they're gone."""
+    return _live.get(fp)
+
+
 def build(sh, tx, axes, ppq=None):
     """Lay out tx at axes into shape sh (its strokes, box and sh["text"]). False (sh unchanged) if there's
     nothing to see (no text, or only spaces). ppq: the lines start on whole ticks (with_grid); none = tx's own."""
+    from notes import textfast
     if ppq:
         tx = with_grid(tx, axes, ppq)
     info = {}
     contours, _ = layout(tx, info)
     if not contours:
         return False
-    pts = [p for _, c in contours for p in flatten(c)]
-    x0, x1 = min(x for x, _ in pts), max(x for x, _ in pts)
-    y0, y1 = min(y for _, y in pts), max(y for _, y in pts)
+    P, off = textfast.points_of([c for _, c in contours])
+    if BATCH:
+        flat, counts = textfast.flatten_many(P, off, 0.004)
+        x0, x1 = float(flat[:, 0].min()), float(flat[:, 0].max())
+        y0, y1 = float(flat[:, 1].min()), float(flat[:, 1].max())
+        flat = textfast.split_points(flat, counts)
+    else:
+        flat = [flatten(c) for _, c in contours]
+        pts = [p for f in flat for p in f]
+        x0, x1 = min(x for x, _ in pts), max(x for x, _ in pts)
+        y0, y1 = min(y for _, y in pts), max(y for _, y in pts)
     if x1 - x0 < 1e-6:
         x0, x1 = x0 - 0.01, x1 + 0.01
     if y1 - y0 < 1e-6:
         y0, y1 = y0 - 0.01, y1 + 0.01
     w, h = x1 - x0, y1 - y0
     # (not rounded: text_polys rounds where the letters land, the same for a split letter as in the whole text)
-    sh["strokes"] = [{"kind": "curve", "pts": [[(x - x0) / w, (y - y0) / h] for x, y in c]} for _, c in contours]
+    U = np.empty_like(P)
+    U[:, 0] = (P[:, 0] - x0) / w
+    U[:, 1] = (P[:, 1] - y0) / h
+    sh["strokes"] = Strokes(({"kind": "curve", "pts": pts} for pts in textfast.split_points(U, np.diff(off))),
+                            fingerprint(U, off))
     sh["pts"] = [list(to_roll(axes, x0, y0)), list(to_roll(axes, x1, y0)), list(to_roll(axes, x0, y1))]
     font = text_font(tx)
-    sh["text"] = dict(tx, bbox=[x0, y0, x1, y1], cap=font.cap, holes=find_holes(contours))
+    sh["text"] = dict(tx, bbox=[x0, y0, x1, y1], cap=font.cap, holes=find_holes(contours, flat))
     sh["text"].pop("joined", None)
     if info.get("joined"):  # (an old text, saved before joined letters, has none: rejoin_old)
         sh["text"]["joined"] = True
@@ -779,6 +886,7 @@ def to_custom(sh):
     from notes.custom import refit, stroke_points
     from notes.hzbass import left_edge, shifted_hz
     left = left_edge(sh)  # (a Hz bass's tones count from here, Grow included: they stay on their beats)
+    sh["strokes"] = list(sh["strokes"])  # (a plain custom shape now: its strokes get edited, no Strokes tag)
     tx = sh.pop("text")
     x0, y0, x1, y1 = tx["bbox"]
     info = {}
@@ -961,9 +1069,16 @@ def text_name(text):
 
 # ---------------------------------------------------------------- outlines -> notes
 
+BATCH = os.environ.get("SPIDERWEB_TEXT_BATCH", "1") != "0"  # (textfast: all letters in one pass; off = one by one)
+BATCH_FROM = 2  # (one outline: one by one, ~0.1 ms quicker; 2+ already quicker all at once, 10 letters 4.3 -> 1.7 ms)
+_em = {}  # (Strokes token, bbox) -> the strokes cut into steps in em units (textfast), for the last few texts
+
+
 def text_polys(sh):
     """The letters' outlines as closed polygons in beats / pitch, grown / shrunk by the grow setting."""
     tx = sh["text"]
+    if BATCH and not tx.get("grow", 0.0) and len(sh["strokes"]) >= BATCH_FROM:
+        return _batch_polys(sh)
     x0, y0, x1, y1 = tx["bbox"]
     w, h = x1 - x0, y1 - y0
     O, X, Y = text_axes(sh)
@@ -983,6 +1098,36 @@ def text_polys(sh):
     if ppq:  # (laid out since 2026-11-12: on the ticks themselves, the same wherever the text is moved by whole ticks)
         return [[(tick_round(b, ppq), round(p, 9)) for b, p in poly] for poly in polys]
     return [[(round(b, 9), round(p, 9)) for b, p in poly] for poly in polys]
+
+
+def _batch_polys(sh):
+    """text_polys (no grow) for all letters at once (textfast), the very same numbers. The steps in em units are
+    kept for a text whose strokes are still as build made them (strokes_token): the anchor's second making and
+    every move only place them again."""
+    from notes import textfast
+    tx = sh["text"]
+    x0, y0, x1, y1 = tx["bbox"]
+    w, h = x1 - x0, y1 - y0
+    tok = strokes_token(sh["strokes"])
+    key = (tok, x0, y0, x1, y1)
+    got = _em.get(key) if tok else None
+    if got is None:
+        P, off = textfast.points_of([st["pts"] for st in sh["strokes"]])
+        E = np.empty_like(P)
+        E[:, 0] = x0 + P[:, 0] * w
+        E[:, 1] = y0 + P[:, 1] * h
+        got = textfast.flatten_many(E, off, 0.001)
+        if tok:
+            if len(_em) >= 4:
+                _em.pop(next(iter(_em)))
+            _em[key] = got
+    em, counts = got
+    O, X, Y = text_axes(sh)
+    bx = O[0] + em[:, 0] * X[0] + em[:, 1] * Y[0]
+    by = O[1] + em[:, 0] * X[1] + em[:, 1] * Y[1]
+    ppq = tx.get("ppq")
+    bx = (np.floor(bx * ppq * TICK_STEPS + 0.5) / TICK_STEPS + TICK_LIFT) / ppq if ppq else textfast.round9(bx)
+    return textfast.polys_of(bx, textfast.round9(by), counts)
 
 
 def offset(poly, d):

@@ -67,7 +67,7 @@ from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_c
                           whole_made)
 from notes.smooth import clean_level, smooth_path
 from notes.steps import RUNNER, expanded, whole_steps
-from notes.text import clean_text
+from notes.text import clean_text, strokes_of, strokes_token
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
 
 KINDS = {"line": tr("engine.line"), "poly": tr("engine.polyline"), "free": tr("engine.freehand"),
@@ -681,8 +681,17 @@ def _cached(sh):
     return _keyed(sh)
 
 
+STROKES_MARK = "\0strokes:"  # (a text's strokes in a key: their fingerprint, text.strokes_token)
+
+
+def strokes_text(strokes):
+    """A shape's strokes in a key: a text's still-true fingerprint (text.Strokes), else their JSON."""
+    tok = strokes_token(strokes)
+    return STROKES_MARK + tok if tok else json.dumps(strokes)
+
+
 def _keyed(sh):
-    key = (sh["kind"], tuple(map(tuple, sh["pts"])), json.dumps(sh.get("strokes")),
+    key = (sh["kind"], tuple(map(tuple, sh["pts"])), strokes_text(sh.get("strokes")),
            json.dumps([text_unanchored(sh[k]) if k == "text" and isinstance(sh.get(k), dict) else sh.get(k)
                        for k in SHAPE_KEYS]),
            json.dumps([sh["cut"].get("knife"), sh["cut"]["was"], sh.get("fx"), sh.get("_m"), sh["cut"].get("mould")])
@@ -1039,6 +1048,9 @@ def shape_key(sh):
         sh = dict(sh, text=text_unanchored(sh["text"]))
     texts = []
     out = without_big(sh, texts)
+    tok = strokes_token(out.get("strokes"))
+    if tok:  # (a text's strokes as their fingerprint: ~38,000 points not written out at every key)
+        out["strokes"] = STROKES_MARK + tok
     return json.dumps(out, sort_keys=True) if not texts else (json.dumps(out, sort_keys=True), tuple(texts))
 
 
@@ -1080,8 +1092,16 @@ def with_big(sh, texts):
 
 
 def from_key(key):
-    """A copy of the shape shape_key was made from (big texts shared: a string never changes)."""
-    return json.loads(key) if isinstance(key, str) else with_big(json.loads(key[0]), key[1])
+    """A copy of the shape shape_key was made from (big texts shared: a string never changes; a text's strokes
+    shared too: never changed in place, text.Strokes)."""
+    sh = json.loads(key) if isinstance(key, str) else with_big(json.loads(key[0]), key[1])
+    st = sh.get("strokes")
+    if isinstance(st, str) and st.startswith(STROKES_MARK):
+        got = strokes_of(st[len(STROKES_MARK):])
+        if got is None:  # (can't happen: asked right after shape_key, while the shape holds them)
+            raise LookupError("a text's strokes are gone")
+        sh["strokes"] = got
+    return sh
 
 
 def pasted_notes(sh):

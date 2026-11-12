@@ -42,7 +42,7 @@ from notes.gliss import clean_gliss, for_new
 from notes.tempo import clamp_bpm, clean_tempo, empty as empty_tempo, has_tempo
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
 from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts
-from notes.text import TEXT_DEFAULTS, clean_text, rejoin_old
+from notes.text import TEXT_DEFAULTS, clean_text, rejoin_old, tag_texts
 from notes import engine  # (engine.edo_lanes: 31-EDO "Overlaps keep their pitch")
 from files import clipboard, notes_clip
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
@@ -561,6 +561,7 @@ class ProjectFiles:
             self.track_list.forget()
         # (texts saved before joined letters: Arabic / Hindi ... laid out joined now, user 2026-11-12)
         rejoin_old(self.shapes, self.notes_of, self.ppq)
+        tag_texts(self.shapes)  # (their strokes' fingerprints: keys cheap from the first edit)
         try:
             self.on_project_change()
         except Exception as e:  # (its notes couldn't be made: the project as it was, its undo steps too)

@@ -29,6 +29,7 @@ from notes.hzbass import (HZ_DEFAULTS, KeyGrid, even_squares, heard_layers, left
 from notes.shrink import (SAMPLES, inner_lines, inner_rows, merge as shrink_merge, minus as shrink_minus,
                           near_lines as shrink_near, proportion as shrink_proportion,
                           segments as shrink_segments)  # (the outline gate's even band)
+from notes import textfast
 from notes.text import text_polys, threshold_spans
 
 # Custom shapes: how the inside is filled, and the gate of "spam" in beats (1/64 = 60 ticks at PPQ 960).
@@ -1137,6 +1138,10 @@ def outline_notes(sh, ppq, only=None, paths=None):
     """(start, end, pitch) notes along every stroke of a custom shape (only: just these stroke numbers), like
     lines. Fill lines make none. paths: custom_strokes(sh) worked out already."""
     paths = custom_strokes(sh) if paths is None else paths
+    if only is None and sh.get("text"):
+        got = textfast.outline(paths, ppq)  # (a text's letters all at once: the same notes)
+        if got is not None:
+            return got
     ks = range(len(paths)) if only is None else only
     if not sh.get("text"):
         ks = [k for k in ks if role_of(sh["strokes"][k]) != "cut"]
