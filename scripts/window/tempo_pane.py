@@ -3313,13 +3313,13 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         a tick apart, {kind: sorted beats} (REBAR_KINDS), shown like Keep timing's limit texts on the changed bars
         a..b until the next step (an edit or undo)."""
         self._rebar = {"spots": {k: sorted(set(v)) for k, v in spots.items()}, "a": a, "b": b,
-                       "step": len(self.app.undo_stack)}
+                       "step": self.app.last_step()}  # (the step itself: a full History keeps the count at 300)
         self.request_redraw()
 
     def rebar_now(self):
         """rebar_marks' while no other step was made since (an edit or undo drops them), else None."""
         got = getattr(self, "_rebar", None)
-        if got is not None and got["step"] != len(self.app.undo_stack):
+        if got is not None and got["step"] is not self.app.last_step():
             got = self._rebar = None
         return got
 
