@@ -507,14 +507,24 @@ def piece_notes(sh, ppq, keys, make):
         if len(_wholes) > 8:
             _wholes.clear()
         whole = _wholes[key] = make(src, ppq, keys)
-    notes, tracks = whole_cut(whole, halves, moved_by(sh), ppq)  # (the cuts went along with it)
+    start0 = None  # (with its own velocities: where each note started before the knives cut it)
+    if same_vel or sh["cut"].get("mould") or not len(whole[0]):
+        notes, tracks = whole_cut(whole, halves, moved_by(sh), ppq)  # (the cuts went along with it)
+    else:
+        notes, tracks = whole_cut(_with_starts(whole), halves, moved_by(sh), ppq)
+        notes, start0 = np.ascontiguousarray(notes[:, :4]), notes[:, 4]
     if sh["cut"].get("mould"):  # (cut with a shape, mould.py)
         from notes.mould import mould_cut
         notes, tracks = mould_cut(notes, tracks, sh["cut"]["mould"], moved_by(sh), ppq)
     if not same_vel and len(notes):  # (its own velocities: over its own time, as a shape of its own)
         from notes.engine import cached_arrays
         t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
-        frac = np.clip((notes[:, 0] - t.min()) / max(t.max() - t.min(), 1e-9), 0, 1)
+        span = max(t.max() - t.min(), 1e-9)
+        frac = np.clip((notes[:, 0] - t.min()) / span, 0, 1)
+        if start0 is not None:  # (a note a cut shortened reads the line where it STARTED, like a line piece's: its
+            # line keeps the part before its start (u < 0); sweep 492780640, the right half read it at the cut)
+            was_cut = start0 < notes[:, 0]
+            frac = np.where(was_cut, np.minimum((start0 - t.min()) / span, 1), frac)
         made = notes[:, 3]
         if plain_vel:  # (made from the whole as it was when cut already)
             notes[:, 3] = own_velocities(sh, made, frac)
@@ -538,6 +548,19 @@ def piece_notes(sh, ppq, keys, make):
 
 
 _wholes = {}  # the whole shape's notes, shared by its pieces
+_starts = {}  # id(a whole's notes) -> (them, (them + their starts as a 5th column, tracks)): _with_starts'
+
+
+def _with_starts(whole):
+    """A whole's (notes, tracks) with each note's start copied into a last column (knife_cut keeps other columns), kept
+    once a whole so whole_cut's sorted-by-start window is kept for it too."""
+    notes, tracks = whole
+    got = _starts.get(id(notes))
+    if got is None or got[0] is not notes:
+        if len(_starts) > 8:
+            _starts.clear()
+        got = _starts[id(notes)] = (notes, (np.column_stack([notes[:, :4], notes[:, 0]]), tracks))
+    return got[1]
 # (settings that use a note's velocity after it's made: a piece with these makes its whole with its own line)
 VELOCITY_LATE = ("fx", "glue", "hz", "sustain", "subtract", "extend", "strips", "recolour")
 _by_start = {}  # id(a whole's notes) -> (them, order by start, starts in that order, longest note, lowest, top key)

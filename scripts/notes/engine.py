@@ -1721,7 +1721,7 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
     got = source(sh)
     if got is None:
         return None
-    src, part, _ = got
+    src, part, same_vel = got
     timed = (sh["kind"] in LINE_KINDS and isinstance(part[0], (int, float)) and not src.get("glue")
              and not src.get("fx"))  # (cut where the line's time reaches the cut: the piece = a stretch of time)
     if gate and not timed:
@@ -1748,7 +1748,10 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
     rows = _owned_rows(w0, wt, mine, pick, lo, hi)
     if rows is None:
         return None
-    w1 = _stepped_whole(made, w0, step, cfg, ppq, bool(sh.get("own_vel")))
+    # (Gate subtract on a whole reading its own line: notes whose start moved read it where they show now, as the
+    # uncut shape does (shown_subtracted); a piece with the whole's velocities does the same; sweep 388596266)
+    shown = src if step == "subtract" and same_vel and not runner else None
+    w1 = _stepped_whole(made, w0, step, cfg, ppq, bool(sh.get("own_vel")), shown)
     if step == "gate_flip":  # (runs mirrored across the cut: the knife cuts the notes where they are now)
         keep = (w1[:, 0] < hi) & (w1[:, 1] > lo)
         return _clipped(w1[keep], lo, hi), None if tracks is None else wt[keep]
@@ -1757,7 +1760,10 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
     out = w1.copy()  # (each of its notes as the whole's finished note, still cut where it was cut)
     out[:, 0] = np.where(mine[:, 0] > w[:, 0], np.maximum(w1[:, 0], mine[:, 0]), w1[:, 0])
     out[:, 1] = np.where(mine[:, 1] < w[:, 1], np.minimum(w1[:, 1], mine[:, 1]), w1[:, 1])
-    out[:, 3] = mine[:, 3]  # (its own velocity: a velocity line on the piece keeps it)
+    # (its own velocity: a velocity line on the piece keeps it; one the whole's step read again where the note shows
+    # now: that one, unless the piece's note was cut after its start (a cut half keeps its velocity))
+    out[:, 3] = mine[:, 3] if shown is None else np.where(
+        (w1[:, 3] != w[:, 3]) & (mine[:, 0] == w[:, 0]), w1[:, 3], mine[:, 3])
     keep = out[:, 1] > out[:, 0]
     return out[keep], None if tracks is None else pt[keep]
 
@@ -1765,10 +1771,11 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
 _stepped_wholes = {}  # (id(whole's notes), step, settings, ppq, own_vel) -> (them, the step done): stepped_piece's
 
 
-def _stepped_whole(made, w0, step, cfg, ppq, own_vel):
+def _stepped_whole(made, w0, step, cfg, ppq, own_vel, shown=None):
     """The whole's notes w0 (made: the array they came from, remembered by the caller) after step, worked out once
-    for all its pieces (a line cut into 180 pieces did it 180 times)."""
-    key = (id(made), step, json.dumps(cfg, sort_keys=True), ppq, own_vel)
+    for all its pieces (a line cut into 180 pieces did it 180 times). shown: the whole shape, Gate subtract's moved
+    starts reading its line where they show (shown_subtracted)."""
+    key = (id(made), step, json.dumps(cfg, sort_keys=True), ppq, own_vel, shown is not None)
     was = _stepped_wholes.get(key)
     if was is not None and was[0] is made:
         return was[1]
@@ -1776,8 +1783,10 @@ def _stepped_whole(made, w0, step, cfg, ppq, own_vel):
         _stepped_wholes.clear()
     if step == "gate_flip":
         w1 = mirrored_runs(w0, None, own_vel)[0]
+    elif step == "extend":
+        w1 = extended(w0, cfg, ppq)
     else:
-        w1 = extended(w0, cfg, ppq) if step == "extend" else subtracted(w0, cfg, ppq)
+        w1 = subtracted(w0, cfg, ppq) if shown is None else shown_subtracted(w0, cfg, shown, ppq)
     w1 = np.asarray(w1, np.int64)
     _stepped_wholes[key] = (made, w1)
     return w1
