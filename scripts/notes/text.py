@@ -452,9 +452,11 @@ def build(sh, tx, axes):
 
 
 def needs_rejoin(tx):
-    """A text saved before joined letters (1.7.2) that has lines needing them, and the packages load here."""
+    """A text saved before joined letters (1.7.2) that has lines needing them, the packages load here and its font
+    is installed here (user 2026-11-12: one whose font is missing stays as saved, like any text in a missing font;
+    it's joined when edited, after the usual missing-font question)."""
     return (tx.get("direction", "roll") != "down" and not tx.get("joined") and not tx.get("form")
-            and any(joined(line) for line in tx["text"].split("\n")))
+            and any(joined(line) for line in tx["text"].split("\n")) and text_font(tx).found)
 
 
 def rejoin_old(shapes, notes_of, ppq):
