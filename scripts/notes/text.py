@@ -132,6 +132,10 @@ def layout(tx):
     contours, places = [], []
     g = 0
     for n, line in enumerate(lines):
+        if way != "down" and joined(line):  # (joined letters / right to left: shaping.py; "down" stacks the
+            g = _joined_line(font, line, n, step, track, mid, desc, asc, (a, b, c, d), way, tx["align"],  # letters
+                             contours, places, g)  # one by one, as typed)
+            continue
         xs, x, prev = [], 0.0, None
         for ch in line:
             if prev is not None:
@@ -166,6 +170,59 @@ def layout(tx):
                     contours.append((g, [list(put(px, py)) for px, py in cont]))
                 g += 1
     return contours, places
+
+
+def joined(line):
+    """This line is laid out with joined letters / right to left (shaping.py): it has such letters and both
+    packages load. Every other line keeps the letter-by-letter layout exactly."""
+    from notes import shaping
+    return shaping.needs_shaping(line) and shaping.available()
+
+
+def no_joining(text):
+    """The text has letters that join / read right to left but the packages aren't here (drawn one by one)."""
+    from notes import shaping
+    return any(shaping.needs_shaping(line) for line in text.split("\n")) and not shaping.available()
+
+
+def _joined_line(font, line, n, step, track, mid, desc, asc, m, way, align, contours, places, g):
+    """layout's line n with joined letters: its letter shapes into contours, one place per character (+ the line's
+    end) into places, as layout's own lines ("roll" / "across"; a place also says "rtl": the character reads right
+    to left, its caret on its right side). Returns the next glyph number."""
+    from notes import shaping
+    a, b, c, d = m
+    turn = lambda x, y: (a * x + b * y, c * x + d * y)
+    sl = shaping.shape_line(font, line, track)
+    shift = {"left": 0.0, "center": -sl["width"] / 2, "right": -sl["width"]}[align]
+
+    def origin(pos, adv):  # (where a letter's own (0, 0) goes, as layout does it)
+        cx, cy = turn(adv / 2, mid)
+        if way == "across":
+            return (-n * step + mid - cx, pos + adv / 2 - cy)
+        if m == (1.0, 0.0, 0.0, 1.0):
+            return (pos, -n * step)
+        return (pos + adv / 2 - cx, -n * step + mid - cy)
+
+    def putter(o):
+        return lambda x, y: (o[0] + a * x + b * y, o[1] + c * x + d * y)
+
+    for x0, x1, rtl in sl["cells"]:
+        adv = x1 - x0
+        o = origin(x0 + shift, adv)
+        put = putter(o)
+        side = adv if rtl else 0.0
+        places.append({"o": o, "cell": [put(x, y) for x, y in ((0, -desc), (adv, -desc), (adv, asc), (0, asc))],
+                       "caret": [put(side, -desc), put(side, asc)], "rtl": rtl})
+    o = origin((0.0 if sl["rtl"] else sl["width"]) + shift, 0.0)
+    put = putter(o)
+    places.append({"o": o, "cell": [put(0, -desc), put(0, -desc), put(0, asc), put(0, asc)],
+                   "caret": [put(0, -desc), put(0, asc)], "rtl": sl["rtl"]})
+    for gx, adv, conts, _ in sl["glyphs"]:
+        put = putter(origin(gx + shift, adv))
+        for cont in conts:
+            contours.append((g, [list(put(px, py)) for px, py in cont]))
+        g += 1
+    return g
 
 
 def flatten(pts, tol=0.004):

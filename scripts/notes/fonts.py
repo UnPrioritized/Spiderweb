@@ -27,6 +27,7 @@ BACKUPS = ("Segoe UI", "Segoe UI Emoji", "Segoe UI Symbol", "Yu Gothic", "Meiryo
            "Cambria Math", "Arial Unicode MS")
 GGO_GLYPH_INDEX, GGI_MARK_NONEXISTING_GLYPHS, SYMBOL_CHARSET = 0x80, 1, 2
 CMAP = struct.unpack("<I", b"cmap")[0]  # (GetFontData's table name)
+SKIP_TABLES = {b"CBDT", b"CBLC", b"sbix", b"SVG ", b"EBDT", b"EBLC", b"EBSC", b"DSIG"}  # (Font.sfnt: not needed)
 
 
 def no_width(ch):
@@ -143,7 +144,7 @@ class Font:
 
     def __init__(self, family, weight=400, italic=False):
         self.family, self.weight, self.italic = family, weight, italic
-        self._glyphs = {}
+        self._glyphs, self._by_index = {}, {}
         gdi = self._gdi = _gdi()
         self._dc = gdi.CreateCompatibleDC(None)
         self._font = gdi.CreateFontW(-EM, 0, 0, 0, int(weight), 1 if italic else 0, 0, 0, 1, 4, 0, 4, 0, family)
@@ -235,11 +236,52 @@ class Font:
             other = backup_font(self, ch)
             if other is not None:
                 return other.glyph(ch)
-        gdi, gm = self._gdi, _GLYPHMETRICS()
         code, by_index = ord(ch), 0
         if code > 0xFFFF:  # (Windows only finds these by the font's own glyph number)
             gi = self._wide_glyph(code)
             code, by_index = (ord("?"), 0) if gi is None else (gi, GGO_GLYPH_INDEX)
+        return self._outline(code, by_index)
+
+    def glyph_at(self, gid):
+        """The contours of the font's own glyph number gid (joined letters: shaping.py), kept for next time."""
+        g = self._by_index.get(gid)
+        if g is None:
+            g = self._by_index[gid] = self._outline(gid, GGO_GLYPH_INDEX)[1]
+        return g
+
+    def hb_blob(self):
+        """(font file bytes, which font in it) for the joining package (shaping.py): one font file made from the
+        tables Windows hands out (a font inside a collection file comes out on its own; bitmap / colour picture
+        tables left out), or b"" when there are none."""
+        gdi, dc = self._gdi, self._dc
+
+        def data(tag, off, n=None):
+            t = 0 if tag is None else struct.unpack("<I", tag)[0]
+            if n is None:
+                n = gdi.GetFontData(dc, t, 0, None, 0)
+                if n in (0, GDI_ERROR):
+                    return b""
+            buf = ctypes.create_string_buffer(n)
+            got = gdi.GetFontData(dc, t, off, buf, n)
+            return b"" if got == GDI_ERROR else buf.raw[:got]
+
+        head = data(None, 0, 12)
+        if len(head) < 12:
+            return b"", 0
+        num = struct.unpack(">H", head[4:6])[0]
+        dirs = data(None, 12, 16 * num)
+        tables = [(t, data(t, 0)) for t in (dirs[16 * i:16 * i + 4] for i in range(len(dirs) // 16))
+                  if t not in SKIP_TABLES]
+        tables = [(t, d) for t, d in tables if d]
+        out = bytearray(head[:4] + struct.pack(">HHHH", len(tables), 0, 0, 0))
+        body, start = bytearray(), 12 + 16 * len(tables)
+        for t, d in tables:
+            out += t + struct.pack(">III", 0, start + len(body), len(d))
+            body += d + b"\0" * (-len(d) % 4)
+        return bytes(out + body), 0
+
+    def _outline(self, code, by_index):
+        gdi, gm = self._gdi, _GLYPHMETRICS()
         fmt = GGO_BEZIER | GGO_UNHINTED | by_index
         size = gdi.GetGlyphOutlineW(self._dc, code, fmt, ctypes.byref(gm), 0, None, ctypes.byref(_IDENTITY))
         if size == GDI_ERROR:

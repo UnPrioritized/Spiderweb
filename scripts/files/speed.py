@@ -65,8 +65,22 @@ def _load():
     report = os.environ.get("SPIDERWEB_SPEED_REPORT")  # (the exe test asks how it went)
     if report:
         with open(report, "w", encoding="utf-8") as f:
-            f.write(how + "\nOwn loops: " + own + "\nPillow: " + ("yes" if pillow() else "no") + "\n")
+            f.write(how + "\nOwn loops: " + own + "\nPillow: " + ("yes" if pillow() else "no") + "\nJoined text: "
+                    + _joined_check() + "\n")
     _drop_numba_saved()
+
+
+def _joined_check():
+    """For the exe test only: whether the text tool's joining packages load and join an Arabic word."""
+    try:
+        from notes import shaping
+        from notes.fonts import DEFAULT_FONT, get_font
+        if not shaping.available():
+            return "no (packages missing)"
+        sl = shaping.shape_line(get_font(DEFAULT_FONT), "سلام")
+        return f"yes ({len(sl['glyphs'])} shapes for 4 letters, right to left: {sl['rtl']})"
+    except Exception as e:  # noqa: BLE001 (a report line, never a crash)
+        return "failed: " + repr(e)
 
 
 def _numba_loops():

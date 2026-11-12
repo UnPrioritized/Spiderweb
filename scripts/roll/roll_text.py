@@ -5,8 +5,8 @@ import math
 
 from files.lang import tr
 from notes.custom import custom_settings
-from notes.text import (anchor_spot, build, from_roll, layout, letter_matrix, missing_letters, new_axes, onto_anchor,
-                        rebuild, restyle, text_axes, text_font, with_arial)
+from notes.text import (anchor_spot, build, from_roll, layout, letter_matrix, missing_letters, new_axes, no_joining,
+                        onto_anchor, rebuild, restyle, text_axes, text_font, with_arial)
 from roll.roll_shared import CTRL, SHIFT
 from window import look
 
@@ -248,6 +248,8 @@ class TextTyping:
         gone = missing_letters(tx)
         if gone:
             self.app.status.config(text=tr("roll_text.no_font_has", letters=gone[:20]))
+        elif tx.get("direction") != "down" and no_joining(tx["text"]):
+            self.app.status.config(text=tr("roll_text.no_joining"))
 
     def name_typing_step(self):
         """The History name of this typing's undo step follows the text (it was named after the first letter)."""

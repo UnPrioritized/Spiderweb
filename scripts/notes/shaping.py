@@ -1,10 +1,35 @@
 """Joined letters + right-to-left order for the text tool (Arabic, Persian, Urdu, Hebrew; Hindi, Thai... joined).
 Two optional packages: uharfbuzz (joins letters, reads font files) and python-bidi (Unicode's right-to-left rules).
 Without them the text tool draws as before: letters one by one, left to right (available() is False).
-Loaded only when first asked for (never at start)."""
+Loaded only when first asked for (never at start).
+
+Only lines that need it go through here (needs_shaping): a line of Latin / Chinese / Japanese / emoji keeps the
+text tool's own letter-by-letter layout, exactly as before."""
+import bisect
 import re
+import unicodedata
 
 _state = {}
+
+# Scripts whose letters join, reorder or stack (each its own run for the joining package: it guesses the script
+# from the run). (first, last, name); right-to-left ones are found by their direction too.
+_SCRIPTS = sorted([
+    (0x0590, 0x05FF, "Hebr"), (0xFB1D, 0xFB4F, "Hebr"), (0x0600, 0x06FF, "Arab"), (0x0750, 0x077F, "Arab"),
+    (0x0870, 0x08FF, "Arab"), (0xFB50, 0xFDFF, "Arab"), (0xFE70, 0xFEFF, "Arab"), (0x0700, 0x074F, "Syrc"),
+    (0x0860, 0x086F, "Syrc"), (0x0780, 0x07BF, "Thaa"), (0x07C0, 0x07FF, "Nkoo"), (0x0800, 0x083F, "Samr"),
+    (0x0840, 0x085F, "Mand"), (0x0900, 0x097F, "Deva"), (0xA8E0, 0xA8FF, "Deva"), (0x0980, 0x09FF, "Beng"),
+    (0x0A00, 0x0A7F, "Guru"), (0x0A80, 0x0AFF, "Gujr"), (0x0B00, 0x0B7F, "Orya"), (0x0B80, 0x0BFF, "Taml"),
+    (0x0C00, 0x0C7F, "Telu"), (0x0C80, 0x0CFF, "Knda"), (0x0D00, 0x0D7F, "Mlym"), (0x0D80, 0x0DFF, "Sinh"),
+    (0x0E00, 0x0E7F, "Thai"), (0x0E80, 0x0EFF, "Laoo"), (0x0F00, 0x0FFF, "Tibt"), (0x1000, 0x109F, "Mymr"),
+    (0xA9E0, 0xA9FF, "Mymr"), (0xAA60, 0xAA7F, "Mymr"), (0x1780, 0x17FF, "Khmr"), (0x19E0, 0x19FF, "Khmr"),
+    (0x1800, 0x18AF, "Mong"), (0x1900, 0x194F, "Limb"), (0x1950, 0x197F, "Tale"), (0x1980, 0x19DF, "Talu"),
+    (0x1A00, 0x1A1F, "Bugi"), (0x1A20, 0x1AAF, "Lana"), (0x1B00, 0x1B7F, "Bali"), (0x1B80, 0x1BBF, "Sund"),
+    (0x1BC0, 0x1BFF, "Batk"), (0x1C00, 0x1C4F, "Lepc"), (0xA800, 0xA82F, "Sylo"), (0xA840, 0xA87F, "Phag"),
+    (0xA880, 0xA8DF, "Saur"), (0xA900, 0xA92F, "Kali"), (0xA930, 0xA95F, "Rjng"), (0xA980, 0xA9DF, "Java"),
+    (0xAA00, 0xAA5F, "Cham"), (0xAA80, 0xAADF, "Tavt"), (0xAAE0, 0xAAFF, "Mtei"), (0xABC0, 0xABFF, "Mtei"),
+    (0x10A00, 0x10A5F, "Khar"), (0x11000, 0x11FFF, "Brah"), (0x1E900, 0x1E95F, "Adlm")])
+_FIRSTS = [s[0] for s in _SCRIPTS]
+_RTL = {"R", "AL", "AN"}
 
 
 def _load():
@@ -79,3 +104,142 @@ def visual_order(lv):
             order[i:j] = order[i:j][::-1]
             i = j
     return order
+
+
+def script_of(ch):
+    """The joining / reordering script ch belongs to (_SCRIPTS' name), or None."""
+    o = ord(ch)
+    i = bisect.bisect_right(_FIRSTS, o) - 1
+    return _SCRIPTS[i][2] if i >= 0 and o <= _SCRIPTS[i][1] else None
+
+
+def needs_shaping(line):
+    """True if the line has a right-to-left letter or one of a script whose letters join / reorder / stack. Only
+    such lines are laid out here, and only when both packages load."""
+    return any(unicodedata.bidirectional(ch) in _RTL or script_of(ch) for ch in line)
+
+
+def line_rtl(line):
+    """The line's own direction is right to left (its first strong letter is), like Unicode's paragraph rule."""
+    for ch in line:
+        b = unicodedata.bidirectional(ch)
+        if b == "L":
+            return False
+        if b in ("R", "AL"):
+            return True
+    return False
+
+
+def _hb_font(font):
+    """The joining package's font for a text-tool Font (kept on it), or None when its file can't be read."""
+    hf = getattr(font, "_hb", 0)
+    if hf == 0:
+        hf = None
+        try:
+            blob, index = font.hb_blob()
+            if blob:
+                hb = _state["hb"]
+                face = hb.Face(blob, index)
+                hf = hb.Font(face)
+                if "fvar" in face.table_tags:  # (a font with a weight dial: the weight asked for)
+                    hf.set_variations({"wght": float(font.weight)})
+                hf = (hf, face.upem)
+        except Exception:  # (a font the package can't read: letter by letter, as before)
+            hf = None
+        font._hb = hf
+    return hf
+
+
+def _kind(ch):
+    """Which run a character's script puts it in: a script name, "L" (any other letter), None (marks, spaces,
+    numbers, signs: go with the letters around them)."""
+    s = script_of(ch)
+    if s:
+        return s
+    if unicodedata.category(ch)[0] == "M":
+        return None
+    return "L" if unicodedata.bidirectional(ch) in ("L", "R", "AL") else None
+
+
+def shape_line(font, line, track=0.0):
+    """One line laid out with joined letters, in em units from x = 0 (left) to "width":
+    {"glyphs": [(x, advance, contours, cluster)] left to right, "cells": [(x0, x1, rtl)] one per character in
+    typed order (the room it takes; characters joined into one shape share its room evenly, in reading order),
+    "width", "rtl" (the line's own direction is right to left)}.
+    Each character's font: the line's font, or the backup font that has it (fonts.backup_font); marks follow the
+    letter before them. A run = characters with the same direction level, font and script, shaped together
+    (with the whole line around it, so letters join across a font change). Tracking goes between letter shapes,
+    but not inside a run of one joining script (it would cut the joins)."""
+    from notes.fonts import backup_font, no_width
+    n = len(line)
+    base = "R" if line_rtl(line) else "L"
+    lv = levels(line, base)
+    fonts, kinds = [], []
+    for i, ch in enumerate(line):
+        if i and (unicodedata.category(ch)[0] == "M" or no_width(ch)):
+            f = fonts[-1]
+        elif font.symbol or ch.isspace() or no_width(ch) or font.has(ch):
+            f = font
+        else:
+            f = backup_font(font, ch) or font
+        fonts.append(f)
+        kinds.append(_kind(ch))
+    first = next((k for k in kinds if k), "L")
+    for i in range(n):  # (marks / spaces / numbers: the kind before them; the first ones the first kind after)
+        kinds[i] = kinds[i] or (kinds[i - 1] if i else first)
+    runs, start = [], 0
+    for i in range(1, n + 1):
+        if i == n or (lv[i], fonts[i], kinds[i]) != (lv[start], fonts[start], kinds[start]):
+            runs.append((start, i))
+            start = i
+    run_of = [0] * n
+    for r, (a, b) in enumerate(runs):
+        run_of[a:b] = [r] * (b - a)
+    shown = []
+    for i in visual_order(lv):
+        if not shown or shown[-1] != run_of[i]:
+            shown.append(run_of[i])
+    hb = _state["hb"]
+    cps = [ord(ch) for ch in line]
+    glyphs, x, prev = [], 0.0, None  # (prev = the last shape's character: tracking between clusters)
+    for r in shown:
+        a, b = runs[r]
+        f, rtl = fonts[a], lv[a] % 2 == 1
+        hf = _hb_font(f)
+        if hf is None:  # (letter by letter, in the order they show)
+            items = [(i, f.glyph(line[i])[0], f.glyph(line[i])[1], 0.0, 0.0) for i in
+                     (range(b - 1, a - 1, -1) if rtl else range(a, b))]
+        else:
+            buf = hb.Buffer()
+            buf.add_codepoints(cps, a, b - a)
+            buf.guess_segment_properties()
+            buf.direction = "rtl" if rtl else "ltr"
+            hb.shape(hf[0], buf)
+            u = hf[1]
+            items = [(info.cluster, pos.x_advance / u, f.glyph_at(info.codepoint), pos.x_offset / u,
+                      pos.y_offset / u) for info, pos in zip(buf.glyph_infos, buf.glyph_positions)]
+        for c, adv, conts, dx, dy in items:
+            if prev is not None and c != prev and not (kinds[c] == kinds[prev] != "L"):
+                x += track
+            if dx or dy:
+                conts = [[[px + dx, py + dy] for px, py in cont] for cont in conts]
+            glyphs.append((x, adv, conts, c))
+            x += adv
+            prev = c
+    room = {}  # (each cluster's room, shared by its characters)
+    for gx, adv, _, c in glyphs:
+        lo, hi = room.get(c, (gx, gx))
+        room[c] = (min(lo, gx), max(hi, gx + adv))
+    starts = sorted(room)
+    cells = [None] * n
+    for k, c in enumerate(starts):
+        end = starts[k + 1] if k + 1 < len(starts) else n
+        x0, x1 = room[c]
+        m = end - c
+        for j in range(m):
+            p0, p1 = x0 + (x1 - x0) * j / m, x0 + (x1 - x0) * (j + 1) / m
+            cells[c + j] = (x0 + x1 - p1, x0 + x1 - p0, True) if lv[c] % 2 else (p0, p1, False)
+    for i in range(n):  # (none left: every character is in a cluster from 0 on; kept safe anyway)
+        if cells[i] is None:
+            cells[i] = (0.0, 0.0, lv[i] % 2 == 1)
+    return {"glyphs": glyphs, "cells": cells, "width": x, "rtl": base == "R"}

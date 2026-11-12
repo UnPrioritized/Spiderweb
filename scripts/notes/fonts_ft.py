@@ -181,7 +181,7 @@ class FtFont:
 
     def __init__(self, family, weight=400, italic=False):
         self.family, self.weight, self.italic = family, weight, italic
-        self._glyphs, self._names, self._missing = {}, None, {}
+        self._glyphs, self._names, self._missing, self._by_index = {}, None, {}, {}
         self._ft, fc, lib = _load()
         pat = _pattern(fc, family, weight, italic)
         res = c_int()
@@ -204,6 +204,7 @@ class FtFont:
         finally:
             fc.FcPatternDestroy(m)
         self.face = self._names_here[0] if self._names_here else family
+        self._file, self._index = file, index.value
         self._face = POINTER(_Face)()
         if self._ft.FT_New_Face(lib, file, index.value, byref(self._face)):
             raise OSError(f"FreeType couldn't open {file!r}")
@@ -283,8 +284,26 @@ class FtFont:
             other = backup_font(self, ch)
             if other is not None:
                 return other.glyph(ch)
+        return self._outline(self.index(ch))
+
+    def glyph_at(self, gid):
+        """The contours of the font's own glyph number gid (joined letters: shaping.py), kept for next time."""
+        g = self._by_index.get(gid)
+        if g is None:
+            g = self._by_index[gid] = self._outline(gid)[1]
+        return g
+
+    def hb_blob(self):
+        """(font file bytes, which font in it) for the joining package (shaping.py), or (b"", 0)."""
+        try:
+            with open(self._file, "rb") as f:
+                return f.read(), self._index
+        except (OSError, TypeError):
+            return b"", 0
+
+    def _outline(self, gid):
         ft = self._ft
-        if ft.FT_Load_Glyph(self._face, self.index(ch), LOAD_NO_HINTING | LOAD_NO_BITMAP):
+        if ft.FT_Load_Glyph(self._face, gid, LOAD_NO_HINTING | LOAD_NO_BITMAP):
             return 0.0, []
         slot = self._face.contents.glyph.contents
         advance = slot.advance.x
