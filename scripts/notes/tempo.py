@@ -162,6 +162,17 @@ def clean_tempo(data):
     every = data.get("every", EVERY)
     out["every"] = every if isinstance(every, int) and not isinstance(every, bool) and 1 <= every <= 65535 else EVERY
     out["bars"] = data.get("bars", True) is not False
+    own = []  # (curved parts' own Intervals, own_every; saved only when there are any)
+    for e in data.get("every_at") or () if isinstance(data.get("every_at"), list) else ():
+        if (isinstance(e, list) and len(e) in (2, 3) and isinstance(e[0], (int, float)) and not isinstance(e[0], bool)
+                and math.isfinite(e[0]) and 0 <= e[0] <= FAR and isinstance(e[1], int) and not isinstance(e[1], bool)
+                and 1 <= e[1] <= 65535):
+            got = [float(e[0]), e[1]]
+            if len(e) == 3 and isinstance(e[2], int) and not isinstance(e[2], bool) and abs(e[2]) <= FAR * 65535:
+                got.append(e[2])  # (where its steps are counted from, a tick: the old ramp's own)
+            own.append(got)
+    if own:
+        out["every_at"] = sorted(own)
     seen = set()
     for c in data.get("catch", []) if isinstance(data.get("catch"), list) else []:
         if not isinstance(c, list):
@@ -730,6 +741,7 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
     # (every held part's BPM read at once: one read per part made a loaded MIDI with 35,000 tempo changes hang)
     arrays = point_arrays(near["points"]) if near["points"] else None
     held_bpm = drawn_bpm(near, base, np.maximum(edges[:-1], t0) / ppq, arrays).tolist()
+    own, every_all = own_every(tempo), tempo.get("every", EVERY)
     for j in range(len(edges) - 1):
         k = k0 + j
         a, b = max(edges[j], t0), min(edges[j + 1], t1)
@@ -741,8 +753,9 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
             bpm = held_bpm[j]
             out.append((a, b, base_u if bpm == base else held_us(bpm)))
         else:  # (a new value every "every" ticks from the part's first tick; the first step the start point's
-            # BPM, the last the end point's: step_shares)
-            every = tempo.get("every", EVERY)
+            # BPM, the last the end point's: step_shares; a part's own Interval: own_every)
+            every, origin = own.get(round(pts[i][0], 9), (every_all, None))
+            origin = edges[j] if origin is None else origin
             part = (edges[j], edges[j + 1])
             jump = to_jump(pts, i)
 
@@ -751,7 +764,7 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
                     return part_bpm(tempo, i, step_shares(*part, starts, every))
                 return drawn_bpm(near, base, np.asarray(starts) / ppq, arrays)
             if every >= BLOCKS_FROM:  # (one entry per step, not per tick: long songs at a high PPQ stay quick)
-                starts = np.arange(edges[j] + (a - edges[j]) // every * every, b, every)
+                starts = np.arange(origin + (a - origin) // every * every, b, every)
                 bpm = read(starts)
                 us = nearest_safe(6e7 / bpm)
                 us[bpm == base] = base_u
@@ -763,7 +776,7 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
                         out.append((lo, hi, u))
                 continue
             ticks = np.arange(a, b)
-            bpm = read(edges[j] + (ticks - edges[j]) // every * every)
+            bpm = read(origin + (ticks - origin) // every * every)
             us = nearest_safe(6e7 / bpm)
             us[bpm == base] = base_u  # (the project's own tempo, exactly as the file starts)
             out.append((a, b, us))
@@ -1078,7 +1091,7 @@ def layout(tempo, base, ppq):
         return _put_many(segs, puts)
 
     worked = []
-    pts, every = tempo["points"], tempo.get("every", EVERY)
+    pts, every = tempo["points"], [tempo.get("every", EVERY), tempo.get("every_at")]  # (own Intervals too)
     for n, st in enumerate(sts):
         st = dict(st, base_u=bases[n], base=60_000_000 / bases[n])
         pk = _plan_key(st, pts, ppq, base, every, keeps_out, lines) if ordered else None
@@ -1257,18 +1270,39 @@ def step_edges(tempo, worked, ppq):
     pts = tempo["points"]
     key = (tempo_key(tempo), ppq)
     got = _edges.get(key)
+    every = tempo.get("every", EVERY)
     if got is None:
         first = _first_ticks([p[0] for p in pts], ppq)
-        got = [(first[i], first[i + 1], pts[i][0], pts[i + 1][0], to_jump(pts, i)) for i in range(len(pts) - 1)
+        own = own_every(tempo)
+        got = [(first[i], first[i + 1], pts[i][0], pts[i + 1][0], to_jump(pts, i),
+                *own.get(round(pts[i][0], 9), (every, None)))
+               for i in range(len(pts) - 1)
                if pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1] and first[i + 1] > first[i]]
         if len(_edges) > 4:
             _edges.clear()
         _edges[key] = got
-    return got + [(beat_tick(st["line"], ppq), beat_tick(st["end"], ppq), None, None, False) for st, plan in worked
-                  if plan["ok"] and st["shape"] != "flat"]
+    return got + [(beat_tick(st["line"], ppq), beat_tick(st["end"], ppq), None, None, False, every, None)
+                  for st, plan in worked if plan["ok"] and st["shape"] != "flat"]
 
 
 _edges = {}
+
+
+def own_every(tempo):
+    """{part's start beat (9 places): (its own Interval in ticks, the tick its steps count from or None = its first
+    tick)} (tempo["every_at"] [[beat, ticks(, from)]]: a ramp stretched by Change visual time signature keeps its old
+    staircase stretched, user 2026-11-12: 24 ticks x 1.5 = 36, a piece of it on the old steps); the other curved
+    parts step every tempo["every"] from their first tick. {} when none."""
+    got = tempo.get("every_at")
+    if not got:
+        return {}
+    key = (id(got), len(got), got[0][0], got[-1][0])  # (remembered: every read of the line asks, thousands a change)
+    if _own.get("key") != key or _own.get("list") is not got:
+        _own.update(key=key, list=got, map={round(e[0], 9): (e[1], e[2] if len(e) > 2 else None) for e in got})
+    return _own["map"]
+
+
+_own = {}
 
 
 def step_shares(a, b, starts, every):
@@ -1391,12 +1425,12 @@ def stepped(tempo, beats, ppq, edges):
     """beats moved to where their interval step reads the line inside the curved stretches (step_edges): the
     value the file has there."""
     beats = np.asarray(beats, float)
-    every = tempo.get("every", EVERY)
     out = beats.copy()
     tick = np.floor(beats * ppq + 1e-9)
-    for a, b, b0, b1, jump in edges:
+    for a, b, b0, b1, jump, every, origin in edges:
         on = (tick >= a) & (tick < b)
-        starts = a + (tick[on] - a) // every * every
+        o = a if origin is None else origin
+        starts = o + (tick[on] - o) // every * every
         if jump:  # (spread to its end; the last step a hair before its end beat: the jump's second point is ON it)
             out[on] = np.minimum(b0 + (b1 - b0) * step_shares(a, b, starts, every), b1 - 1e-9 * max(1.0, b1))
         elif every > 1:  # (each step reads the line at its own start; a catch-up's too)

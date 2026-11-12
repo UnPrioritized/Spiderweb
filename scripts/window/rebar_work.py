@@ -264,21 +264,30 @@ def rows_by_owner(r):
 
 
 def same_notes(old, new, pl, ppq, f=1.0):
-    """Do new rows (start, end, key, velocity) sound as old ones moved by the change? Each start / end within
-    rounding (half the factor + a tick), the same count, keys and velocities."""
+    """Do new rows (start, end, key, velocity) sound as old ones moved by the change? Each start / end within ONE
+    tick of where it exactly belongs now (user 2026-11-12: every note within a tick of when it sounded; the exact
+    place, not the rounded one, else a shape's own rounding added another tick), the same count, keys, velocities."""
     if len(old) != len(new):
         return False
     if not len(old):
         return True
-    m = old[:, :4].copy()
-    m[:, 0] = R.map_ticks(pl, old[:, 0], ppq)
-    m[:, 1] = R.map_ticks(pl, old[:, 1], ppq)
+    m = old[:, :4].astype(float)
+    for c in (0, 1):
+        exact = R.map_beats(pl, old[:, c] / ppq) * ppq
+        if pl.get("sound"):  # (ramps placed by when they sound: there the sound's own nearest tick)
+            snd = np.zeros(len(old), bool)
+            for lo, hi in pl["sound_spans"]:
+                snd |= (old[:, c] >= lo) & (old[:, c] < hi)
+            if snd.any():
+                from notes.tempo_file import seconds_at, ticks_at
+                ro, rn = pl["sound"]
+                exact[snd] = ticks_at(rn, ppq, seconds_at(ro, ppq, old[snd, c].astype(float)))
+        m[:, c] = exact
     a = m[np.lexsort((m[:, 3], m[:, 0], m[:, 2]))]
     n = np.asarray(new[:, :4], np.int64)
     b = n[np.lexsort((n[:, 3], n[:, 0], n[:, 2]))]
-    tol = math.ceil(f / 2) + 1
     return bool((a[:, 2] == b[:, 2]).all() and (a[:, 3] == b[:, 3]).all()
-                and (np.abs(a[:, :2] - b[:, :2]) <= tol).all())
+                and (np.abs(a[:, :2] - b[:, :2]) <= 1.0 + 1e-6).all())
 
 
 def kept_sound(sh, old, new, pl, ppq, f):
