@@ -683,7 +683,8 @@ def _cached(sh):
 
 def _keyed(sh):
     key = (sh["kind"], tuple(map(tuple, sh["pts"])), json.dumps(sh.get("strokes")),
-           json.dumps([sh.get(k) for k in SHAPE_KEYS]),
+           json.dumps([text_unanchored(sh[k]) if k == "text" and isinstance(sh.get(k), dict) else sh.get(k)
+                       for k in SHAPE_KEYS]),
            json.dumps([sh["cut"].get("knife"), sh["cut"]["was"], sh.get("fx"), sh.get("_m"), sh["cut"].get("mould")])
            if sh.get("cut") and (sh["kind"] == "funnel" or sh["cut"].get("mould") or snap_piece(sh)) else None)
     got = _paths.get(key)
@@ -1034,9 +1035,18 @@ def shape_key(sh):
         sh = {k: v for k, v in sh.items() if k != "strips"}
     if (sh.get("hz") or {}).get("layer"):
         sh = dict(sh, hz=with_layers(sh["hz"], layers_of(sh["hz"]), 0))
+    if isinstance(sh.get("text"), dict) and "anchor" in sh["text"]:
+        sh = dict(sh, text=text_unanchored(sh["text"]))
     texts = []
     out = without_big(sh, texts)
     return json.dumps(out, sort_keys=True) if not texts else (json.dumps(out, sort_keys=True), tuple(texts))
+
+
+def text_unanchored(tx):
+    """A text's settings without its anchor (text.keep_anchor): where the text is kept when it's laid out again,
+    never read by the notes. Out of the notes' keys, so moving the anchor (every rebuild on it) makes nothing again
+    (it made a long text's notes twice per key typed / box changed)."""
+    return {k: v for k, v in tx.items() if k not in ("anchor", "anchor_way")}
 
 
 BIG_MARK = "\0big:"  # (a big text's place in shape_key's JSON: no saved text holds this character)
