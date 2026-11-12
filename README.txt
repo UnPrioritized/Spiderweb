@@ -180,7 +180,9 @@ just slower. It offers to install it once; to do it yourself later, type
 Two more are optional for the Text tool: uharfbuzz and python-bidi (letters
 joined, and right-to-left writing, for Arabic, Persian, Hebrew, Hindi, Thai
 and more). Spiderweb offers them once too; by hand:
-  pip install uharfbuzz python-bidi
+  pip install uharfbuzz "python-bidi>=0.6,<0.7"
+(python-bidi stays on its 0.6 line: Spiderweb reads a part of it that
+newer versions may change.)
 On a Mac, or a Linux too old for the included fast code,
   pip install numba
 gets you that speed back (the first start then takes a minute while it
@@ -196,9 +198,10 @@ the same either way, only the speed differs):
 With PyNaCl installed (pip install pynacl), the update popup can also
 download the new source zip and check its signature for you.
 
-Tested with Python 3.14.7, NumPy 2.5.3 and Pillow 12.3.0. If something
-misbehaves with other versions, these are known to work:
-  pip install numpy==2.5.3 pillow==12.3.0
+Tested with Python 3.14.7, NumPy 2.5.3, Pillow 12.3.0, uharfbuzz 0.57.0,
+python-bidi 0.6.12 and Numba 0.68.0. If something misbehaves with other
+versions, these are known to work:
+  pip install numpy==2.5.3 pillow==12.3.0 uharfbuzz==0.57.0 python-bidi==0.6.12
 
 Playback goes to the MIDI out picked in Settings → Sound: Windows' MIDI
 output, Built-in BASSMIDI (Spiderweb's own synth, with a soundfont you pick;

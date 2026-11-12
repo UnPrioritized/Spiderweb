@@ -283,7 +283,8 @@ def run_pip(root, packages):
 
         def work():
             try:
-                done = subprocess.run([sys.executable, "-m", "pip", "install", pip], capture_output=True, text=True,
+                done = subprocess.run([sys.executable, "-m", "pip", "install", PIP_SPEC.get(pip, pip)],
+                                      capture_output=True, text=True,
                                       errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 got["ok"], got["out"] = done.returncode == 0, ((done.stdout or "") + (done.stderr or "")).strip()
             except Exception as e:  # (no pip, can't start it...)
@@ -307,6 +308,10 @@ EXTRAS = (("numba", "numba", "extras.numba"), ("PIL", "pillow", "extras.pillow")
           ("uharfbuzz", "uharfbuzz", "extras.uharfbuzz"), ("bidi", "python-bidi", "extras.bidi"))  # (module, pip, text)
 SHOWN = {"numba": "Numba", "pillow": "Pillow", "uharfbuzz": "uharfbuzz",
          "python-bidi": "python-bidi"}  # (their names while they're installed)
+# Versions asked of pip. python-bidi is pinned to the tested 0.6 line: shaping.levels reads its Rust part's debug
+# text, which it never promised to keep (test bidi_levels catches a change). The rest only get a lowest version:
+# an upper limit would leave a brand-new Python without a ready-made build to install.
+PIP_SPEC = {"uharfbuzz": "uharfbuzz>=0.57", "python-bidi": "python-bidi>=0.6,<0.7"}
 
 
 def own_loops_work():
@@ -349,7 +354,7 @@ def offer_extras():
     from files.safefile import write_text
     root = tk.Tk()
     root.withdraw()
-    names = " ".join(pip for pip, _ in missing)
+    names = " ".join(f'"{PIP_SPEC[pip]}"' if pip in PIP_SPEC else pip for pip, _ in missing)
     command = f'"{sys.executable.replace("pythonw", "python")}" -m pip install {names}'
     failed = []
     if messagebox.askyesno("Spiderweb", trn("extras.ask", len(missing),

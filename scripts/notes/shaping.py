@@ -58,6 +58,12 @@ def levels(text, base=None):
     there; if that text ever changes shape, the package's older Python rules give them (no bracket pairs)."""
     if not text or not _load():
         return [0] * len(text)
+    out = rust_levels(text, base)
+    return out if out is not None else _python_levels(text, base)
+
+
+def rust_levels(text, base=None):
+    """levels() read from python-bidi's debug text, or None when that text's shape changed (test bidi_levels)."""
     try:
         info = _state["display"](text, base, True)
         part = info[info.index("levels:"):info.index("paragraphs:")]
@@ -66,11 +72,9 @@ def levels(text, base=None):
         for ch in text:
             out.append(per_byte[at])
             at += len(ch.encode("utf-8"))
-        if at == len(per_byte):
-            return out
-    except (ValueError, IndexError):
-        pass
-    return _python_levels(text, base)
+        return out if at == len(per_byte) else None
+    except (ValueError, IndexError, TypeError):
+        return None
 
 
 def _python_levels(text, base):
