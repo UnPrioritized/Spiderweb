@@ -2,11 +2,13 @@
 retype it. The text is a custom shape with sh["text"] (notes/text.py); it's rebuilt on every key."""
 
 import math
+import unicodedata
 
 from files.lang import tr
 from notes.custom import custom_settings
-from notes.text import (anchor_spot, build, from_roll, layout, letter_matrix, missing_letters, new_axes, no_joining,
-                        onto_anchor, rebuild, restyle, text_axes, text_font, with_arial)
+from notes.text import (anchor_spot, build, caret_line, caret_snap, caret_step, from_roll, layout, letter_matrix,
+                        line_stops, missing_letters, new_axes, no_joining, onto_anchor, rebuild, restyle, text_axes,
+                        text_font, with_arial)
 from roll.roll_shared import CTRL, SHIFT
 from window import look
 
@@ -74,7 +76,8 @@ class TextTyping:
         if not self.typing or self.text_at(e.x, e.y) != self.typing["i"] or self.typing["i"] is None:
             return self.on_press(e)
         text, c = self.typing_state()[0]["text"], self.caret_at(e)
-        word = lambda ch: ch.isalnum() or ch == "_"
+        marks = line_stops(text, c)[0] is not None  # (joined lines: a letter's marks are part of its word)
+        word = lambda ch: ch.isalnum() or ch == "_" or (marks and unicodedata.category(ch)[0] == "M")
         kind = word(text[c]) if c < len(text) else word(text[c - 1]) if c else False
         a = c
         while a > 0 and text[a - 1] != "\n" and word(text[a - 1]) == kind:
@@ -156,25 +159,21 @@ class TextTyping:
         elif k == "BackSpace":
             if c:
                 self.set_text(text[:c - 1] + text[c:], c - 1)
-        elif k == "Delete":
+        elif k == "Delete":  # (a joined line: the whole letter group, as Windows does; Backspace = one character)
             if c < len(text):
-                self.set_text(text[:c] + text[c + 1:], c)
+                self.set_text(text[:c] + text[caret_step(text, c, True):], c)
         elif k in ("Left", "Right", "Home", "End", "Up", "Down"):
+            # (a right-to-left line, as Windows' boxes: Left = on in the typed text (reading order), Right = back)
+            forward = (k == "Right") != line_stops(text, c)[1]
             if k in ("Left", "Right") and s0 != s1 and not e.state & SHIFT:
-                c = s0 if k == "Left" else s1  # a selection: to its start / end
+                c = s1 if forward else s0  # a selection: to its end / start
             elif k in ("Left", "Right"):
-                c = max(0, min(len(text), c + (1 if k == "Right" else -1)))
+                c = caret_step(text, c, forward)
             elif k in ("Home", "End"):
-                start = text.rfind("\n", 0, c) + 1
-                end = text.find("\n", c)
-                c = start if k == "Home" else len(text) if end < 0 else end
+                start, end = caret_line(text, c)
+                c = start if k == "Home" else end
             else:
-                lines = text.split("\n")
-                n = text.count("\n", 0, c)
-                col = c - (text.rfind("\n", 0, c) + 1)
-                m = n + (1 if k == "Down" else -1)
-                if 0 <= m < len(lines):
-                    c = sum(len(l) + 1 for l in lines[:m]) + min(col, len(lines[m]))
+                c = self.caret_line_jump(text, c, 1 if k == "Down" else -1)
             ty["caret"] = c
             if not e.state & SHIFT:  # Shift = select up to there
                 ty["anchor"] = c
@@ -182,6 +181,26 @@ class TextTyping:
             self.insert_text(e.char)
         self.show_caret()
         return "break"
+
+    def caret_line_jump(self, text, c, way):
+        """Up / Down (way -1 / +1): the same column on the line above / below, as before; when either line is
+        joined (right to left / joined letters) the caret stop nearest the same spot along the line instead."""
+        lines = text.split("\n")
+        n = text.count("\n", 0, c)
+        m = n + way
+        if not 0 <= m < len(lines):
+            return c
+        start = sum(len(l) + 1 for l in lines[:m])
+        if line_stops(text, c)[0] is None and line_stops(text, start)[0] is None:
+            col = c - (text.rfind("\n", 0, c) + 1)
+            return start + min(col, len(lines[m]))
+        tx = self.typing_state()[0]
+        places = layout(tx)[1]
+        along = 1 if tx.get("direction", "roll") == "across" else 0  # (the letters run along x, or up the keys)
+        spot = lambda j: (places[j]["caret"][0][along] + places[j]["caret"][1][along]) / 2
+        here = spot(c)
+        stops = line_stops(text, start)[0] or range(start, start + len(lines[m]) + 1)
+        return min(stops, key=lambda j: (abs(spot(j) - here), j))
 
     def insert_text(self, s):
         """Types s at the caret, in place of the selected characters."""
@@ -290,13 +309,27 @@ class TextTyping:
         if em is None:
             return len(tx["text"])
         places = layout(tx)[1]
+        text = tx["text"]
+        for j, pl in enumerate(places):  # (joined lines: inside a letter, the half clicked picks its side)
+            if "rtl" not in pl or j >= len(text) or text[j] == "\n":
+                continue
+            p0, p1, _, p3 = pl["cell"]
+            ux, uy, vx, vy = p1[0] - p0[0], p1[1] - p0[1], p3[0] - p0[0], p3[1] - p0[1]
+            det = ux * vy - uy * vx
+            if abs(det) < 1e-12:
+                continue
+            dx, dy = em[0] - p0[0], em[1] - p0[1]
+            u, v = (dx * vy - dy * vx) / det, (ux * dy - uy * dx) / det  # (where in the letter's room, 0..1)
+            if 0 <= u <= 1 and 0 <= v <= 1:
+                return caret_snap(text, j if (u < 0.5) != pl["rtl"] else j + 1)
 
         def away(j):  # (from the caret line there)
             (xa, ya), (xb, yb) = places[j]["caret"]
             dx, dy = xb - xa, yb - ya
             t = max(0.0, min(1.0, ((em[0] - xa) * dx + (em[1] - ya) * dy) / (dx * dx + dy * dy or 1.0)))
             return math.hypot(em[0] - xa - t * dx, em[1] - ya - t * dy)
-        return min(range(len(places)), key=away)
+        near = min(range(len(places)), key=away)
+        return caret_snap(text, near) if "rtl" in places[near] else near
 
     def show_caret(self, on=True):
         """Draw the caret (on) and keep it blinking."""

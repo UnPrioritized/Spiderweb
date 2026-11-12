@@ -185,6 +185,42 @@ def no_joining(text):
     return any(shaping.needs_shaping(line) for line in text.split("\n")) and not shaping.available()
 
 
+# ---------------------------------------------------------------- the caret in joined lines (as Windows' own boxes)
+
+def caret_line(text, c):
+    """(start, end) of the line the typed position c is in."""
+    end = text.find("\n", c)
+    return text.rfind("\n", 0, c) + 1, len(text) if end < 0 else end
+
+
+def line_stops(text, c):
+    """(stops, rtl) of c's line: a joined line gives where its caret may stop (typed positions, shaping.caret_stops)
+    and whether it reads right to left; any other line None, False (every position, as before)."""
+    s, e = caret_line(text, c)
+    line = text[s:e]
+    if not joined(line):
+        return None, False
+    from notes import shaping
+    return [s + k for k in shaping.caret_stops(line)], shaping.line_rtl(line)
+
+
+def caret_step(text, c, forward):
+    """The typed position one step on (forward) or back from c. Joined lines step by their caret stops; past a
+    line's end / start the caret goes to the next / last line, one character, as before."""
+    stops, _ = line_stops(text, c)
+    if stops:
+        nxt = [k for k in stops if k > c] if forward else [k for k in stops if k < c]
+        if nxt:
+            return nxt[0] if forward else nxt[-1]
+    return max(0, min(len(text), c + (1 if forward else -1)))
+
+
+def caret_snap(text, c):
+    """c moved onto the nearest caret stop of its line (a click inside a joined letter group)."""
+    stops, _ = line_stops(text, c)
+    return min(stops, key=lambda k: (abs(k - c), k)) if stops else c
+
+
 def _joined_line(font, line, n, step, track, mid, desc, asc, m, way, align, contours, places, g):
     """layout's line n with joined letters: its letter shapes into contours, one place per character (+ the line's
     end) into places, as layout's own lines ("roll" / "across"; a place also says "rtl": the character reads right
@@ -213,7 +249,14 @@ def _joined_line(font, line, n, step, track, mid, desc, asc, m, way, align, cont
         side = adv if rtl else 0.0
         places.append({"o": o, "cell": [put(x, y) for x, y in ((0, -desc), (adv, -desc), (adv, asc), (0, asc))],
                        "caret": [put(side, -desc), put(side, asc)], "rtl": rtl})
-    o = origin((0.0 if sl["rtl"] else sl["width"]) + shift, 0.0)
+    # (the line's end: on the last typed letter's far side, as Windows' boxes put it: "سلام abc" ends after the c,
+    # in the middle; one-direction lines at their left / right end)
+    if sl["cells"]:
+        x0, x1, rtl = sl["cells"][-1]
+        end = x0 if rtl else x1
+    else:
+        end = 0.0 if sl["rtl"] else sl["width"]
+    o = origin(end + shift, 0.0)
     put = putter(o)
     places.append({"o": o, "cell": [put(0, -desc), put(0, -desc), put(0, asc), put(0, asc)],
                    "caret": [put(0, -desc), put(0, asc)], "rtl": sl["rtl"]})
@@ -261,10 +304,13 @@ def winding(poly, x, y):
 def find_holes(contours):
     """Which contours are holes (inside an odd number of the same letter's other contours), e.g. the middle of O."""
     flat = [flatten(c) for _, c in contours]
+    same = {}  # (each letter's contours: only those are looked at, not every contour of the text)
+    for i, (g, _) in enumerate(contours):
+        same.setdefault(g, []).append(i)
     holes = []
     for i, (g, _) in enumerate(contours):
         x, y = flat[i][0]
-        depth = sum(1 for j, (h, _) in enumerate(contours) if j != i and h == g and winding(flat[j], x, y))
+        depth = sum(1 for j in same[g] if j != i and winding(flat[j], x, y))
         if depth % 2:
             holes.append(i)
     return holes

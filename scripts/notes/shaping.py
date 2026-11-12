@@ -123,6 +123,25 @@ def needs_shaping(line):
     return any(unicodedata.bidirectional(ch) in _RTL or script_of(ch) for ch in line)
 
 
+def caret_stops(line):
+    """Where the caret may stop in a joined line (0 .. len), as Windows' own text boxes do (measured with a RichEdit
+    box, dev/scratch/rtl_richedit.py): never before a mark (a base letter + its marks = one step), nor inside a
+    conjunct (a virama joins the next letter of its script: Hindi "स्ते" = one step), an emoji skin tone or a
+    joiner (ZWJ) sequence. Joined shapes of whole letters (lam-alef) keep a stop between their letters."""
+    out = [0]
+    for i in range(1, len(line)):
+        ch, before = line[i], line[i - 1]
+        if (unicodedata.category(ch)[0] == "M" or ch == "‍" or before == "‍"
+                or 0x1F3FB <= ord(ch) <= 0x1F3FF
+                or (unicodedata.combining(before) == 9 and unicodedata.category(ch) == "Lo"
+                    and script_of(ch) is not None and script_of(ch) == script_of(before))):
+            continue
+        out.append(i)
+    if line:
+        out.append(len(line))
+    return out
+
+
 def line_rtl(line):
     """The line's own direction is right to left (its first strong letter is), like Unicode's paragraph rule."""
     for ch in line:
