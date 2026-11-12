@@ -570,13 +570,43 @@ def letter_notes(sh, notes_of):
     return notes_of({k: v for k, v in sh.items() if k not in ("hz", "fx", "range", "sustain", "subtract", "extend", "gate_flip")})
 
 
+def whole_letter_notes(sh, notes_of, ppq):
+    """letter_notes as if nothing were cut at beat 0 / key 0 (notes there aren't made): a box near those edges is
+    measured moved later / higher by whole ticks / keys (the notes move exactly), then moved back."""
+    bs, ps = zip(*box_corners(sh["pts"]))
+    ns = letter_notes(sh, notes_of)
+    if min(bs) >= 0 and min(ps) >= -0.5 and (not len(ns) or (ns[:, 0].min() > 0 and ns[:, 2].min() > 0)):
+        return ns  # (clear of the edges: nothing cut, measured where it is)
+    pad_b, pad_p = max(1.0, max(bs) - min(bs)), max(2.0, max(ps) - min(ps))  # (turned letters reach past the box)
+    st = math.ceil((pad_b - min(bs)) * ppq) if min(bs) < pad_b else 0
+    sk = math.ceil(pad_p - min(ps)) if min(ps) < pad_p else 0
+    if not st and not sk:
+        return letter_notes(sh, notes_of)
+    pts = sh["pts"]
+    sh["pts"] = [[b + st / ppq, p + sk] for b, p in pts]
+    try:
+        ns = np.array(letter_notes(sh, notes_of), dtype=np.int64)
+    finally:
+        sh["pts"] = pts
+    if len(ns):
+        ns[:, 0] -= st
+        ns[:, 1] -= st
+        ns[:, 2] -= sk
+    return ns
+
+
+def box_corners(pts):
+    (b0, p0), (b1, p1), (b2, p2) = pts
+    return [tuple(pts[0]), tuple(pts[1]), tuple(pts[2]), (b1 + b2 - b0, p1 + p2 - p0)]
+
+
 def anchor_spot(sh, notes_of, ppq):
     """The anchor to keep the text on while it's rebuilt, or None. Turned / flipped / skewed since it was put
     there: where the text sits now instead (the letters don't line up on the old anchor any more: it jumped)."""
     at = anchor_at(sh)
     way = sh["text"].get("anchor_way")
     if at and way and frame_way(sh["pts"]) != way:
-        ns = letter_notes(sh, notes_of)
+        ns = whole_letter_notes(sh, notes_of, ppq)
         if len(ns):
             t, k = anchor_ref(sh["text"], ns)
             at = (t / ppq, k)
@@ -611,7 +641,7 @@ def anchor_ref(tx, ns):
     return t0 + math.floor((t1 - t0) * ft), k0 + math.floor((k1 - k0) * fk)
 
 
-def onto_anchor(sh, at, notes_of, ppq):
+def onto_anchor(sh, at, notes_of, ppq, past=(False, False)):
     """Slide the text so the part Align picks (align_parts) sits on the anchor `at` (beat, pitch): Left = its first
     note starts there and its lowest note is on the anchor's key (a "g" tail too: the other letters sit higher), and
     keep the anchor in it. Whole ticks and whole keys only, so the notes move exactly."""
@@ -623,16 +653,19 @@ def onto_anchor(sh, at, notes_of, ppq):
     (b0, p0), (b1, p1), (b2, p2) = sh["pts"]
     corners = sh["pts"] + [[b1 + b2 - b0, p1 + p2 - p0]]
     bs, ps = [b for b, _ in corners], [p for _, p in corners]
-    left = max(0.0, at[0] - ft * (max(bs) - min(bs)))
-    bottom = max(-0.5, round(at[1]) - 0.5 - fk * (max(ps) - min(ps)))
+    # (past = dragged before beat 0 / under key 0 already: kept there, no edge on that side)
+    left = at[0] - ft * (max(bs) - min(bs))
+    bottom = round(at[1]) - 0.5 - fk * (max(ps) - min(ps))
+    left, bottom = left if past[0] else max(0.0, left), bottom if past[1] else max(-0.5, bottom)
     # (whole ticks / keys here too: a box moved by part of a tick can land its edges on other ticks)
     db, dp = round((left - min(bs)) * ppq) / ppq, round(bottom - min(ps))
-    moved = abs(db * ppq) > 1.5 or dp or min(bs) < 0 or min(ps) < -0.5  # (a tick or less: measured where it is)
+    moved = (abs(db * ppq) > 1.5 or dp or (min(bs) < 0 and not past[0])  # (a tick or less: measured where it is)
+             or (min(ps) < -0.5 and not past[1]))
     if moved:
         sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
     tries = 0
     while tries < 4:  # (looked at again: an edge exactly half way between two ticks rounds either way, so a
-        ns = letter_notes(sh, notes_of)  # second try also moves it a quarter tick off that half way)
+        ns = whole_letter_notes(sh, notes_of, ppq)  # second try also moves it a quarter tick off that half way)
         if not len(ns) and not moved:  # (none seen where it is, e.g. past the keys: the rough move after all)
             moved = True
             sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
@@ -641,6 +674,10 @@ def onto_anchor(sh, at, notes_of, ppq):
             break
         t, k = anchor_ref(sh["text"], ns)
         dt, dk = round(at[0] * ppq) - t, round(at[1]) - k
+        # typing never cuts letters (user 2026-11-12, picked A): a text that would reach before beat 0 / under key 0
+        # stops there and grows the other way (measured whole, so Centre's middle isn't taken from what's left)
+        dt = dt if past[0] else max(dt, -int(ns[:, 0].min()))
+        dk = dk if past[1] else max(dk, -int(ns[:, 2].min()))
         if not dt and not dk:
             break
         nudge = 0.25 if tries == 1 and dt else 0.0
@@ -652,11 +689,29 @@ def onto_anchor(sh, at, notes_of, ppq):
 def rebuild(sh, tx, axes, notes_of, ppq):
     """build, keeping the text on its anchor (if it has one)."""
     at = anchor_spot(sh, notes_of, ppq)
+    past = past_edges(sh, notes_of, ppq) if at else (False, False)
+    if past[0] or past[1]:  # (kept where it sits on that side, not where it was clicked: a text stopped at beat 0
+        ns = whole_letter_notes(sh, notes_of, ppq)  # then dragged mustn't jump onto its old click)
+        if len(ns):
+            t, k = anchor_ref(sh["text"], ns)
+            at = (t / ppq if past[0] else at[0], k if past[1] else at[1])
     if not build(sh, tx, axes, ppq):
         return False
     if at:
-        onto_anchor(sh, at, notes_of, ppq)
+        onto_anchor(sh, at, notes_of, ppq, past)
     return True
+
+
+def past_edges(sh, notes_of, ppq):
+    """(before beat 0, under key 0): the text already reaches there (dragged there with the piano roll's space past
+    the edges): it stays where it was put, typing on never pulls it back (user 2026-11-12)."""
+    bs, ps = zip(*box_corners(sh["pts"]))
+    if min(bs) >= 0 and min(ps) >= -0.5:
+        return False, False
+    ns = whole_letter_notes(sh, notes_of, ppq)
+    if not len(ns):
+        return min(bs) < 0, min(ps) < -0.5
+    return int(ns[:, 0].min()) < 0, int(ns[:, 2].min()) < 0
 
 
 def set_anchor(sh, notes_of, ppq):
