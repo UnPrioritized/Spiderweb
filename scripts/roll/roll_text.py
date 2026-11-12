@@ -188,7 +188,15 @@ class TextTyping:
         ty = self.typing
         comp = ty.get("comp")
         if got == (comp[3] if comp else ""):
+            ty.pop("next", None)
             return
+        # (a change shows on the NEXT ask, if it still holds: the helper finishes a syllable and starts the next one
+        # at once, but the finished letter's key reaches the text a moment later; acting at once showed the text
+        # without it, then with it again: Korean flashed in and out, user 2026-11-12)
+        if ty.get("next") != got:
+            ty["next"] = got
+            return
+        ty.pop("next", None)
         if comp:
             real, s0, s1 = comp[:3]
         else:
@@ -236,7 +244,12 @@ class TextTyping:
                 self.end_typing()
                 app.undo() if low == "z" and not e.state & SHIFT else app.redo()  # (Ctrl+Shift+Z = redo too)
                 return "break"
-            if k in ("BackSpace", "Delete"):  # a whole word (a selection: just that, as without Ctrl)
+            if k in ("Left", "Right"):  # a word on (the caret is in the text: only selected, Ctrl+arrows turn it)
+                forward = (k == "Right") != line_stops(text, c, down)[1]  # (right to left lines: swapped)
+                ty["caret"] = self.word_end(text, c, forward)
+                if not e.state & SHIFT:
+                    ty["anchor"] = ty["caret"]
+            elif k in ("BackSpace", "Delete"):  # a whole word (a selection: just that, as without Ctrl)
                 if s0 != s1:
                     self.insert_text("")
                 elif k == "Delete":
