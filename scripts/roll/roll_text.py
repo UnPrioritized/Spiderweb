@@ -520,6 +520,15 @@ class TextTyping:
                 ux, uy = letter_matrix(tx)[0] * 0.25, letter_matrix(tx)[2] * 0.25
                 cell = [(ax, ay), (ax + ux, ay + uy), (bx + ux, by + uy), (bx, by)]
             poly(cell, fill=look.TEXT_BOX, outline="", stipple="gray50")
+        a, b = places[min(self.typing["caret"], len(places) - 1)]["caret"]
         if caret and s0 == s1:
-            a, b = places[min(self.typing["caret"], len(places) - 1)]["caret"]
             self.create_line(*xy(*a), *xy(*b), fill=look.TEXT_CARET, width=max(2, round(2 * self.scale)), tags="caret")
+        # where the caret is, for the system's typing helper: its own box (Korean / Japanese / Chinese input) and its
+        # list of choices (Japanese kanji, Korean Hanja) open there, not in the window's top-left corner (user
+        # 2026-11-12: a black box by the File menu; Japanese choices up there)
+        (ax, ay), (bx, by) = xy(*a), xy(*b)
+        try:
+            self.tk.call("tk", "caret", self._w, "-x", int(round(min(ax, bx))), "-y", int(round(min(ay, by))),
+                         "-height", max(1, int(round(abs(by - ay)))))
+        except Exception:  # (a Tk without "tk caret": the helper keeps its own place)
+            pass
