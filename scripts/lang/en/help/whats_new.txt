@@ -35,6 +35,20 @@ What's new:
 
 • The Text tool writes Arabic, Persian, Urdu and Hebrew right to left with joined letters, and joins Hindi, Thai and similar scripts too. See Help → Text.
 
+• The Text tool is much quicker on long texts: typing a letter in an 800-letter text takes about 0.3 s instead of 1 to 1.5 s, and Size, Letter spacing and Letter turn about 0.2 s instead of 2 to 3 s. Fill, Spam, Grow and the outline gate on a text got quicker too, with the very same notes as before.
+
+• Typing Korean, Chinese or Japanese in the Text tool shows the letter you're still putting together (ㄱ, then 가, then 각) right in the text, not only once it's finished. Windows only.
+
+• Text tool keys like in other programs: Ctrl+Backspace and Ctrl+Delete erase a whole word, Ctrl+Left and Ctrl+Right jump a word (Shift selects). A text that's only selected, not being typed in, still turns with Ctrl+Left / Right.
+
+• Changed: Turn into custom shape makes the letters from the text's own outlines instead of the font's curves, so the notes stay exactly as the text had them, and a long text turns in about a second instead of many seconds (800 letters: 14 s before). The letters' curve handles are gone: the new shape is many short straight lines.
+
+• Fixed: letters already typed could move a tick or a key as you typed further (every second letter with Align left, every letter with Centre or Right). They now stay where they are; Centre and Right move the whole text by whole ticks only.
+
+• Fixed: a centred or right-aligned text typed near the start of the song lost its first letters before beat 0 (and an Across text under the lowest key). It now stops at the edge and grows the other way. A text you drag past the edge yourself (with the space past the edges in Settings) stays where you put it.
+
+• Fixed: Turn into custom shape on a long text in a font whose letters are drawn from overlapping parts (like Bahnschrift's A, K and X) could use gigabytes of memory and take minutes.
+
 • Gate extend has "Same amount for every note (from the average length)" (with %): every note of the shape ends the same number of ticks later, worked out from its average note length, so a slanted line's ends stay as even as its starts. See Help → Gate extend.
 
 • Changed: Repeated colours get new channels: a stripe bent by Stir, Warp or Liquify now stays on one track (no more colour cuts in other MIDI programs). Colours in Spiderweb stay the same; projects using a bend with this tick may put some notes on other tracks when exported.
