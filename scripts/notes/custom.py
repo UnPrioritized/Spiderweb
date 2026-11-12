@@ -1353,10 +1353,12 @@ def inside_spans(sh, ppq):
     """[(pitch, start tick, end tick)] for every stretch of every key inside the shape. Text: the nonzero rule and
     its threshold (text.py). Gaps in the outline are closed with straight lines (fill_plan). Remembered: a shape
     with many corners takes a while, and it's asked for again and again (note counts, every change of the gate)."""
+    from notes.engine import text_unanchored
     from notes.text import strokes_token
     token = strokes_token(sh["strokes"])  # (a text's strokes: their fingerprint, not every point written out)
-    key = (json.dumps([sh["strokes"] if token is None else "fp:" + str(token), sh["pts"], sh.get("text")]),
-           bool(sh.get("union")), ppq)
+    tx = sh.get("text")  # (its anchor never changes the notes: setting it after a rebuild made them all again)
+    key = (json.dumps([sh["strokes"] if token is None else "fp:" + str(token), sh["pts"],
+                       text_unanchored(tx) if tx else tx]), bool(sh.get("union")), ppq)
     got = _spans.get(key)
     if got is None:
         if len(_spans) > 100:
