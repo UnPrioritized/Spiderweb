@@ -4,6 +4,14 @@ What changed in each version, newest first. This page opens by itself the first 
 
 What's new:
 
+• Hz bass wobbles in the Sketch tool can do much more: Random and Pluck shapes, Phase ◀ ▶ to slide the wave along, a depth line with its own points and five ready shapes (Full, Fade In, Decay, Triangle, Swell), a speed line to make a wobble speed up or slow down (with a padlock to keep either end's speed), one wobble running over several pieces of a bend, end posts to start it later, and changing several selected notes' wobbles together (Same cycles or Same speed). See Help → Sketch tool (Hz bass).
+• LFO window (right-click a Hz bass note → LFO…, or Ctrl+L): design a wobble in one place with a live preview: shape buttons, a wave editor to draw your own wave and save it in your shape bank, depth and speed lines, Cycles and Phase. Apply keeps it changeable, Bake turns it into points.
+• Bézier handles in the Sketch tool: Alt+click a point for two handles that bend the line smoothly through it.
+• A box with 8 squares round the selected Hz bass notes in the Sketch tool stretches them in time and pitch, bends and wobbles included.
+• Simplify points… (right-click a Hz bass note → Bend, or the Loudness pane): thins out a line with many points with a slider, keeping its biggest moves.
+• Quick detune got a rail: after pulling the copies apart, shape how far they spread over time, so they can start together, fan out and close back in.
+• Hz bass notes with many curves and handles are quicker to change.
+
 • Change visual time signature… (right-click inside a Select box in the Conductor pane): other bar lines, the same sound. Type 6/4 over bars of 4/4 and each bar becomes one bar of 6/4, the notes stretched and the tempo sped up by the same amount (100 BPM becomes 150), so every note still plays at the same moment; the old signature and tempo come back after them. Shapes stretch with the bars (note tool pages and Hz basses too, in tune); the box tells you which shapes will become plain notes before you press OK. See Help → Change visual time signature.
 
 • Each tempo ramp in the Conductor pane keeps the Interval it was drawn with: changing the Interval box only changes the ramps you draw after. Pick a ramp (or several) and the box shows and changes only theirs. See Help → Conductor pane.

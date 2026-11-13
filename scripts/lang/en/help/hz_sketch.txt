@@ -3,6 +3,8 @@ The Sketch tool (S) in the Hz bass window draws each note as a thick line where 
 Each line has a dot at its start and end, and one at every point you add. A small > sits just after its end. The red line shows the pitch the Hz bass really plays: it can only change once per repeat, so on low notes it lags a little behind sharp turns.
 [clip:hz_sketch-lines]
 
+## Notes and points
+
 Drawing notes: press on empty space and drag to the right. The note starts on the grid and ends where you let go (Shift = free). A click without dragging makes a note as long as the last one. Ctrl+drag selects with a box.
 
 Points: double-click the line to add a point there, double-click a point to remove it (the first and last stay: they're the note's start and end). Drag a point up or down to bend the note there; points snap to the grid and to whole keys (Shift = free), and a label shows the key. Two points on the same spot at different pitches make a jump.
@@ -11,18 +13,51 @@ Pieces: the line between two points is a piece. Drag a piece up or down to move 
 
 Length: drag the > to make the note longer or shorter. Points stay on their beats: a longer note keeps a point at its old end and goes on flat from there.
 
-Curves: Alt+drag a piece to curve it (if Alt+drag moves the window on your system, use Ctrl+Shift+drag). Curved pieces show a small square; hold Alt to see the squares on every piece. Right-click a square for Single curve, Double curve (S) or Straight. Double-click a square to add a point there.
+## Curves and handles
 
-Wobble: click a piece to pick it. An orange line shows above it. Drag the line up to give the piece a wobble, as deep as you drag (0.1 key steps, Shift = finer); drag it back down to remove it. Drag the square at either end of the orange line to make the wobble fade in or out.
+Curves: Alt+drag a piece to curve it (if Alt+drag moves the window on your system, use Ctrl+Shift instead of Alt everywhere on this page). Curved pieces show a small square; hold Alt to see the squares on every piece. Right-click a square for Single curve, Double curve (S) or Straight. Double-click a square to add a point there.
+
+Handles: Alt+click a point to give it two handles, pointing the way the line goes through it. Drag a handle and the other side follows like a mirror, so the line runs smoothly through the point; Alt+drag a handle to move that side alone. Click a handle (or right-click it) to make that side straight again, and Alt+click the point once more to take its handles away. Handles show on selected notes only. Alt+dragging a piece next to a handle curves it the old way instead and drops that piece's handles. Adding a point inside a curve with handles leaves the curve exactly as it was.
+[clip:hz_sketch-handles]
+
+## Stretching notes
+
+With two or more notes selected (or after holding one note still for a moment), a dashed box with 8 squares shows round them. Drag a square to stretch the notes from the opposite side: the side squares stretch in time or in pitch, the corners both. Bends, handles and wobble depths stretch along; a wobble keeps its number of waves. Time snaps to the grid (Shift = free); each note lands on a whole row and keeps its own tune (Ctrl = exact pitches). The smallest box is 1/4 beat by 1 key. Esc while dragging puts everything back.
+[clip:hz_sketch-box]
+
+## Wobble
+
+Click a piece to pick it. An orange line shows above it. Drag the line up to give the piece a wobble, as deep as you drag (0.1 key steps, Shift = finer); drag it back down to remove it.
 [clip:hz_sketch-wobble]
 
-The wobble starts at 4 waves a beat, and follows the tempo. Drag the small post in the middle of the orange line sideways for the speed: right is faster, left slower, and the label shows the speed and how many waves fit on the piece. The speed always fits whole half waves on the piece, so the wobble ends back on the line; it is nudged to fit again when the piece gets longer or shorter. Ctrl+drag sets any speed, kept exactly as it is.
+A wobble runs from one point to another and rides the bend underneath. Clicking any piece of it picks the whole wobble. Shift+click the next piece (or right-click the orange line → Over the whole note) to make it cover more pieces. The dots under the ends of the orange line are its end posts: drag one sideways to move that point in time. At the note's own start or end this leaves a new point instead, so the wobble starts later (a delay) or stops sooner. Adding a point inside a wobble keeps it whole.
 
-Right-click the orange line for the wave's shape (Sine, Triangle, Saw, Square) and Upside down (going down first).
+Depth line: the orange line can have points of its own. Double-click it to add one (it stays held until you let go), drag points up and down (middle ones also sideways), right-click a middle point to remove it, and Alt+drag between two points to curve that part. Dragging the line itself grows or shrinks the whole shape. The five small buttons above the wobble (Full, Fade In, Decay, Triangle, Swell) give the depth line a ready shape, keeping its deepest depth.
+
+Speed: the wobble starts at 4 waves a beat, and follows the tempo. Drag the small post on the orange line sideways for the speed: right is faster, left slower, and the label shows the speed and how many waves fit. The speed always fits whole half waves, so the wobble ends back on the line; it is fitted again when the note gets longer or shorter. Ctrl+drag sets any speed, kept exactly as it is.
+
+Speed line: click the post (without dragging) to open a blue strip above the wobble. Its top is full speed, its bottom is stopped: drag its ends or add points (double-click; right-click removes, Alt curves) to make the wobble speed up or slow down along the way. The padlock at each end keeps that end's speed while you change the rest. Right-click the orange line → Even speed (or Delete while holding the strip) makes it even again.
+
+Shape: right-click the orange line for the wave's shape (Sine, Triangle, Saw, Square, Random, Pluck, and waves you saved in the LFO window), Upside down (going down first), and Phase ◀ / ▶ to slide the wave along by an eighth. Random glides to a new height every wave, the same on every play; Pluck kicks up at the start of each wave and eases back.
 [clip:hz_sketch-shapes]
 
-A wobble stays a setting until you bake it: right-click the orange line → Bake into points turns it into ordinary points, one at every quarter wave, which you can then move one by one. It sounds the same. Remove wobble takes it away. Adding a point inside a wobbling piece splits the wobble in two, and removing a point between two pieces joins them, keeping the first one's wobble.
+Several notes: with more notes selected, changing one note's wobble changes theirs alike. By default each note gets the same number of waves; tick Same speed on several notes (in the orange line's right-click menu) to give them the same waves per beat instead, so long and short notes wobble at the same pace.
+
+A wobble stays a setting until you bake it: right-click the orange line → Bake into points turns it into ordinary points you can then move one by one. It sounds the same. Remove wobble takes it away.
 
 Fast wobbles can only be heard as fast as the Hz bass repeats: low notes can't follow a quick wobble, high notes can.
 
-Everything the Sketch tool makes is the note's own bend line, the same one the Bend tool edits, so slides, the arpeggio, export and right-click → Bend (Copy bend, Paste bend, Clear bend) all work with it. Copy bend takes the wobbles along. Every change is one undo step; Ctrl+Z or Esc while dragging puts it back.
+## LFO window
+
+Right-click a note → LFO… (or the orange line's menu, or Ctrl+L) opens a window to design a wobble with everything in one place. It works on the piece or wobble you picked in Sketch, otherwise on the whole note, and on the other selected notes too (with Same cycles / Same speed). Every change shows on the notes at once.
+
+In it: the shape buttons and Upside down; a wave editor showing one wave, where you can draw your own (click to add a point, drag it, right-click to remove it, Alt+drag to curve; points snap, Shift = free); Depth (keys each way) and Cycles (waves over the stretch); the depth line with the five presets; the speed line with Lock and Even speed; and Phase ◀ ▶ (an eighth; Shift = 1/64, Ctrl = a quarter).
+[clip:hz_sketch-lfo]
+
+Save… keeps a drawn wave in your shape bank under a name; pick it again from the box next to it, or from the orange line's right-click menu, and Delete removes it from the bank. A note keeps its own copy of the wave, so projects open fine without the bank.
+
+Apply keeps the wobble live (you can change it later in Sketch or here), Bake turns it into points, Delete takes the wobble away (the bend stays), and Cancel leaves the notes as they were.
+
+## Works with everything
+
+Everything the Sketch tool makes is the note's own bend line, the same one the Bend tool edits, so slides, the arpeggio, export and right-click → Bend (Copy bend, Paste bend, Clear bend, Simplify points…) all work with it. Copy bend takes the wobbles along. Every change is one undo step; Ctrl+Z or Esc while dragging puts it back. More note tools (Set Pitch, Join, Quick detune, Simplify points): [page:hz_slides].
