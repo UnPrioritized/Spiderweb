@@ -157,6 +157,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     subtract.py      gate subtract: every note ends a few ticks earlier (start kept), done after Sustain
     strips.py        separate strips: each strip of a pasted track guessed key by key, its own channels
     tempo.py         the project's tempo line: curves, catch-ups, exact Domino-safe tempo changes for the MIDI
+    tempo_safe.py    Domino-safe tempo values: which ones survive Domino's save, whole values adding up exactly
     loaded.py        a loaded MIDI file (Load MIDI): the loading pass's results, run on several cores
     tempo_file.py    the tempo line in a MIDI file: Keep timing moves notes exactly, bar lines fitted, warnings
     melody.py        Fill with tempo jumps: where the jumps go (melody note starts, rests, snap steps)

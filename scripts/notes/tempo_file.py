@@ -21,9 +21,10 @@ import numpy as np
 
 from files import speed
 from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of
-from notes.tempo import (EVERY, PAIR_REACH, SAFE_REACH, _fit_blocks, _fit_exact, _flat_pair, _put_all, _put_many, _runs, base_us, beat_tick, domino_safe,
+from notes.tempo import (EVERY, _put_all, _put_many, base_us, beat_tick,
                          typed_bpms, step_of,
                          file_segments, has_tempo, keep_heard, layout, tempo_text)
+from notes.tempo_safe import PAIR_REACH, SAFE_REACH, _fit_blocks, _fit_exact, _flat_pair, _runs, domino_safe
 
 MAX_US = 0xFFFFFF  # the slowest tempo a file holds, in microseconds per beat
 PAIR_CACHE = 4096  # gaps up to this many ticks have their tempo pair remembered (black MIDI repeats the same gaps)
