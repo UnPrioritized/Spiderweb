@@ -322,8 +322,15 @@ def made_at_cut(sh, ppq, keys, make):
     room = max(keys, math.ceil(float(ks.max()) + 1e-9) + up + 1)
     if abs(d[0] - later) < 1e-9 and abs(d[1] - up) < 1e-9:  # (lifted already: made as it is)
         return None
+    here = moved(sh, (-d[0] + later, -d[1] + up))
+    # (a note across the beat 0 it shows at reads its velocity there, engine.from0_starts: where that beat 0 is in the
+    # frame it's made in, not the frame it shows in)
+    at0 = sh.get("_from0", 0.0) - d[0] + later
+    here.pop("_from0", None)
+    if at0 > 1e-9:
+        here["_from0"] = at0
     with rows_up_to(room - 1):
-        notes, tracks = make(moved(sh, (-d[0] + later, -d[1] + up)), ppq, room)
+        notes, tracks = make(here, ppq, room)
     notes = notes.copy()
     notes[:, :2] += round((d[0] - later) * ppq)
     notes[:, 2] += round(d[1]) - up

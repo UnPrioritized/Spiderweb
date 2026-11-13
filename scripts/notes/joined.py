@@ -11,6 +11,7 @@ when every piece is one whole shape and they all had the same tumours (or none) 
 (each piece gets its own row of bumps anyway). Changing any tumour setting of the joined curve gives it one
 setting for all (tumour_window.py drops "tumours" / "splits"): then the bumps run on across the joints."""
 
+import bisect
 import heapq
 import json
 import math
@@ -461,16 +462,24 @@ def join_velocity(new, olds, spans, new_span):
     """Give `new` (olds joined) the velocities its parts had: one envelope over its time span made of each old
     shape's own, over the time that shape covered (spans: (earliest, latest) beat of each). Where shapes cover the
     same time, the one listed first wins; in time between shapes the velocity goes straight from one to the next."""
-    from notes.envelope import env_values, velocity_env
+    from notes.envelope import env_at, env_values, velocity_env
     import numpy as np
     envs = [velocity_env(sh) for sh in olds]
+    eus = [[p[0] for p in env] for env in envs]
     t0, t1 = new_span
     if t1 - t0 < 1e-12:
         return
 
-    def value(i, t):
+    def value(i, t, left=False):
         a, b = spans[i]
         u = 0.0 if b - a < 1e-12 else (t - a) / (b - a)
+        # (t came from a point's u and back: a hair off it would miss a jump in the line, two points on one u, so
+        # a point this close counts as on it; then both sides of a jump are read: the value before t / after it)
+        k = bisect.bisect_left(eus[i], u - 1e-9)
+        if k < len(eus[i]) and abs(eus[i][k] - u) <= 1e-9:
+            u = eus[i][k]
+        if left:
+            return float(env_at(envs[i], eus[i], u, left=True))
         return float(env_values(envs[i], np.array([u]))[0])
     times = sorted({t for a, b in spans for t in (a, b)} |
                    {a + (b - a) * u for (a, b), env in zip(spans, envs) for u, _ in env})
@@ -489,8 +498,8 @@ def join_velocity(new, olds, spans, new_span):
         owner = live[0] if live else None
         if owner is None:  # (no shape here: straight on to the next one)
             continue
-        for t in (ta, tb):
-            p = [(t - t0) / (t1 - t0), value(owner, t)]
+        for t, left in ((ta, False), (tb, True)):
+            p = [(t - t0) / (t1 - t0), value(owner, t, left)]
             if not pts or p != pts[-1]:
                 pts.append(p)
     if not pts:
@@ -506,9 +515,17 @@ def join_velocity(new, olds, spans, new_span):
         keep.append([1.0, keep[-1][1]])
     new.pop("vel_env", None)
     new["vel0"], new["vel1"] = int(round(keep[0][1])), int(round(keep[-1][1]))
-    straight = len(keep) == 2 and all(abs(v - round(v)) < 1e-9 for _, v in keep)
+    # (the shape that starts the joined one keeps its line from before its start too (u < 0): a piece with a velocity
+    # of its own reads a cut note's velocity where the note started, before the cut, see piece_velocity)
+    first = min(range(len(olds)), key=lambda i: (spans[i][0], i))
+    fa, fb = spans[first]
+    lead = []
+    if fb - fa >= 1e-12 and abs(fa - t0) <= 1e-9:
+        lead = [[(fa + (fb - fa) * u - t0) / (t1 - t0), float(v)] for u, v in envs[first] if u < -1e-12]
+    lead = [p for p in lead if p[0] < -1e-12]
+    straight = not lead and len(keep) == 2 and all(abs(v - round(v)) < 1e-9 for _, v in keep)
     if not straight:
-        new["vel_env"] = keep
+        new["vel_env"] = lead + keep
 
 
 def custom_groups(sh):
