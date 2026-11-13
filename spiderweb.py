@@ -28,6 +28,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     history.py       undo / redo and the History list (named undo steps; docked in the side panel or its own window)
     graph_window.py  a tumour setting's graph (the number changing along the line)
     join_split.py    Join (shapes -> one curve) and Split (cut in two, pieces -> separate shapes)
+    join_merge.py    Join / Split's Gate sensitive merge (two shapes' touching notes made one)
+    join_lines.py    Join / Split's line tools: Flip each line, Split pieces, plain copies
     panel_freehand.py  the panel's Straighten setting for freehand strokes
     panel_gliss.py   the panel's Glissando settings: grids, step, thickness, note length, picked keys
     panel_text.py    the panel's text settings (font, size, spacing, threshold, grow)

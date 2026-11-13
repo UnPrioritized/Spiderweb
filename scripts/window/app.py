@@ -93,6 +93,8 @@ from files.kestrel import BLOCKS as KESTREL_BLOCKS, KESTREL_DEFAULTS
 from window.panel_tumour import TumourPanel
 from notes.joined import all_tumours, is_joined
 from window.join_split import JoinSplit
+from window.join_merge import JoinMerge
+from window.join_lines import JoinLines
 from window.between_window import BetweenGroups
 from notes.between import (copied as between_copied, keep_pushes, push_sizes, sync_groups, turns as between_turns,
                            whole_groups)
@@ -224,7 +226,7 @@ SPLIT_TIP = (
 )
 
 
-class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, RecolourPanel, SnapPanel, MaskPanel, PolygonPanel, FreehandPanel, GlissPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
+class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, RecolourPanel, SnapPanel, MaskPanel, PolygonPanel, FreehandPanel, GlissPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, JoinMerge, JoinLines, BetweenGroups,
           Playback, KestrelSetup, Pictures, AppClip, AppTransform, AppOffrange, AppKeys, HistoryPanel, ScrollingSide, tk.Tk):
     _bg_notes = False  # the notes are being made in the background after an edit (shapes_changed, notes_wait.py)
     _recolour_owed = False  # the panel's Recolour row waits for those notes (panel_recolour.sync_recolour)
