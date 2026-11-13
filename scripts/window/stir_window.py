@@ -123,6 +123,34 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         # (cut with "…" + the whole name in a tip: a long name never makes the window wider, hunt 11-05 7)
         self.what = ShortLabel(box, text="", foreground=look.HINT)
         self.what.pack(anchor="w", fill="x")
+        self._build_tabs(box)
+        self._build_draw_bar(box)
+        # (PLAN A, user 2026-11-05: ONE grid, so labels, boxes and buttons line up with the rows above and below;
+        # Area and Flip and reverse fold away, a grey line then says what they're set to. The columns keep the width
+        # they need with everything shown (fix_columns), so opening or folding a part never moves anything sideways.
+        # Columns: 0 = a part's arrow, 1 = the row's name (ticks start here too), 2 / 3 / 4 = its controls.)
+        form = self.form = ttk.Frame(box)
+        form.pack(anchor="w", fill="x", pady=(8, 0))
+        self.grid_row, self.parts, self.gap = 0, {}, int(8 * app.scale)
+        self._build_knobs(form)
+        self._build_centre(form)
+        self._build_bends(form)
+        self._build_area(form)
+        self._build_flips(form)
+        self._build_bottom(box)
+        self.bind("<Escape>", lambda e: self.close())
+        self.protocol("WM_DELETE_WINDOW", self.close)
+        self.fix_columns()
+        self.sync()
+        centre_over(self, app)
+        remember_place(self, "stir")
+        app.centre_first = "stir"  # (its dots win over Clumps' on one spot: roll_centre.centre_boxes)
+        self.bind("<FocusIn>", lambda e: setattr(app, "centre_first", "stir"), add="+")
+        self.deiconify()
+
+    def _build_tabs(self, box):
+        """The Stir n tabs row with its "+" (and a × per tab, sync)."""
+        app = self.app
         # STACKED STIRS (BMC tester 11-03): a tab per stir, in order; "+" shows a new one (saved once a setting
         # changes, like the note tool pages), × takes the shown one away. The tabs scroll sideways under a thin bar
         # once they don't fit, like Claw / Strum's (the window never grows with them, hunt 11-05 7)
@@ -146,6 +174,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         Tooltip(self.tab_add, tr("stir.add_tip", most=MOST_STIRS))
         # (each tab has its own × right after it, like Claw / Strum's pages, user 11-05; was one × at the right end)
         self.tab_drops, self.drop_live = [], False
+
+    def _build_draw_bar(self, box):
+        """The bar shown while an area is being drawn on the piano roll."""
+        app = self.app
         # (Area "Draw one…", PLAN C3: shown while an area is being drawn on the piano roll)
         self.drawing = None
         self.draw_bar = ttk.Frame(box)
@@ -164,13 +196,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         w = ttk.Button(row, text=tr("stir.draw_cancel"), command=self.end_draw)
         w.pack(side="left", padx=(6, 0))
         Tooltip(w, tr("stir.draw_cancel_tip"))
-        # (PLAN A, user 2026-11-05: ONE grid, so labels, boxes and buttons line up with the rows above and below;
-        # Area and Flip and reverse fold away, a grey line then says what they're set to. The columns keep the width
-        # they need with everything shown (fix_columns), so opening or folding a part never moves anything sideways.
-        # Columns: 0 = a part's arrow, 1 = the row's name (ticks start here too), 2 / 3 / 4 = its controls.)
-        form = self.form = ttk.Frame(box)
-        form.pack(anchor="w", fill="x", pady=(8, 0))
-        self.grid_row, self.parts, self.gap = 0, {}, int(8 * app.scale)
+
+    def _build_knobs(self, form):
+        """Turn / Twist / Bulge knobs with their boxes, and At the edges + Bend's Smooth corners beside them."""
+        app = self.app
         knobs = ttk.Frame(form)
         # (Bulge, BMC tester 11-07: a third knob, -BULGE_KNOB..BULGE_KNOB across its turn, the box up to
         # MOST_BULGE like Twist's; user picked the Area as its reach instead of size boxes of its own)
@@ -209,6 +238,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self._cell(cell, "bend_smooth", 0, MOST_SMOOTH, "stir.bend_smooth", "stir.bend_smooth_tip",
                    "%").pack(anchor="w", pady=(4, 0))
         self._put(None, (1, knobs, 4), pady=0)
+
+    def _build_centre(self, form):
+        """The Centre point row (+ Middle), the squeeze tick and the Colour sets row."""
         word = ttk.Label(form, text=tr("stir.centre"))
         Tooltip(word, tr("stir.centre_tip"))
         self.middle = ttk.Button(form, text=tr("stir.middle"), command=self.on_middle)  # (BMC tester 11-04)
@@ -225,6 +257,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         word = ttk.Label(form, text=tr("stir.sets"))
         self.sets_row = [word, self._pick(form, "sets", STIR_SETS, word)]
         self._put(None, (1, word), (2, self.sets_row[1], 3), pady=6)
+
+    def _build_bends(self, form):
+        """The More bends fold."""
         # ---- More bends (user 11-07, picked a fold of its own: every bend usable in one tab; recolour.bent)
         self._part("bends")
         word = ttk.Label(form, text=tr("stir.polar"))
@@ -256,6 +291,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         word.pack(side="left")
         self._pick(cell, "round_edge", ROUND_EDGES, word).pack(side="left", padx=(6, 0))
         self._put("bends", (1, cell, 4))
+
+    def _build_area(self, form):
+        """The Area fold."""
         # ---- Area (BMC tester 11-03 + the user's own idea 11-04: the stir only inside a circle / square / diamond /
         # a drawing round the Centre point; Size = its width in % of the box; Whole shape = no area)
         self._part("area")
@@ -332,6 +370,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.to_shape = ttk.Button(form, text=tr("stir.to_shape"), command=self.on_to_shape)  # (user 11-04)
         Tooltip(self.to_shape, tr("stir.to_shape_tip"))
         self._put("area", (1, self.match), (2, self.to_shape, 3))
+
+    def _build_flips(self, form):
+        """The Flip and reverse fold."""
         # ---- Flip and reverse (colour flips at this stir's step, BMC tester 11-04: notes stay, colours mirrored)
         self._part("flips")
         word = ttk.Label(form, text=tr("stir.flip"))
@@ -362,7 +403,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 ttk.Label(cell, text="%").pack(side="left")
                 self._put("flips", (1, word), (2, cell))
         self._put("flips", (1, self._area_tick(form, "reverse", False, tr("stir.reverse_tip")), 4))
-        self.hint = ttk.Label(box, text=tr("stir.hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
+
+    def _build_bottom(self, box):
+        """The hint, the warning line, the edit line and the Reset / Close row."""
+        app = self.app
+        self.hint =ttk.Label(box, text=tr("stir.hint"), foreground=look.HINT, wraplength=int(300 * app.scale),
                               justify="left")
         self.hint.pack(anchor="w", fill="x", pady=(8, 0))
         # (why a stir shows nothing: Channels not Multi channel / one colour; shown only then, hunt 2026-11-02)
@@ -374,15 +419,6 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.reset = ttk.Button(row, text=tr("stir.reset"), command=self.on_reset)
         self.reset.pack(side="left")
         Tooltip(self.reset, tr("stir.reset_tip"))
-        self.bind("<Escape>", lambda e: self.close())
-        self.protocol("WM_DELETE_WINDOW", self.close)
-        self.fix_columns()
-        self.sync()
-        centre_over(self, app)
-        remember_place(self, "stir")
-        app.centre_first = "stir"  # (its dots win over Clumps' on one spot: roll_centre.centre_boxes)
-        self.bind("<FocusIn>", lambda e: setattr(app, "centre_first", "stir"), add="+")
-        self.deiconify()
 
     # (what picking an area on a whole-shape stir brings back, hunt 11-04: the last one shown, EACH TAB ITS OWN
     # (hunt 11-06: tab 1's slant showed up on tab 2); forgotten = a plain area: Size 50, no stretch / angle / slant)
