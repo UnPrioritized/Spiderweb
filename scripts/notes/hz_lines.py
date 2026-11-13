@@ -7,7 +7,8 @@ import math
 import numpy as np
 
 from notes.envelope import env_values
-from notes.hz_settings import FAST, LOOP, LOOP_SHAPES, SHARE_MOST, WOBBLE_RATE_MOST, WOBBLE_SEED_STEP, keep_forward
+from notes.hz_settings import (FAST, LOOP, LOOP_SHAPES, SHARE_MOST, WAVE_DRAWN, WOBBLE_RATE_MOST, WOBBLE_SEED_STEP,
+                               keep_forward)
 
 
 def bent_part(u, bend):
@@ -221,12 +222,15 @@ def random_heights(j):
     return np.where(j % WOBBLE_SEED_STEP == 0, 0.0, h)
 
 
-def wave_of(shape, c, seed=0):
+def wave_of(shape, c, seed=0, wave=None):
     """A wobble's wave (-1..1) at c cycles from its start (an array): starts at 0 going up (a square: up first),
     WOBBLE_SHAPES. Random (user 2026-11-13: smooth) = an eased glide to a new height (random_heights, from `seed`)
-    each wave; Pluck (user 2026-11-13) = each wave kicks to the top, then curves back to the middle."""
+    each wave; Pluck (user 2026-11-13) = each wave kicks to the top, then curves back to the middle. WAVE_DRAWN = the
+    drawn `wave` (the LFO window's, stage I: [[x 0..1, y -1..1(, curve)], ...]) read along each wave."""
     c = np.asarray(c, float)
     f = c % 1.0
+    if shape == WAVE_DRAWN and wave:
+        return line_at(wave, f)
     if shape == "triangle":
         return np.where(f < 0.25, 4.0 * f, np.where(f < 0.75, 2.0 - 4.0 * f, 4.0 * f - 4.0))
     if shape == "saw":
@@ -446,7 +450,7 @@ def wobble_keys(runs, u, span):
         # rounding makes of it; user's picture 2026-10-28, a square ending in a dip)
         end = wave_end(w, span)
         wave = wave_of(w.get("shape"), np.minimum(wave_start(w) + run_waves(w, u, span), end - WAVE_GAP),
-                       w.get("seed", 0))
+                       w.get("seed", 0), w.get("wave"))
         # (up to its end, not on it: the piece after takes over there, user's picture 2026-10-28: a square's last
         # instant added to the next piece's wobble; the note's own end too: its ">" sits on its end point, user)
         inside = (u >= u0 - U_NEAR) & (u < u1 - U_NEAR)  # (a beat turned into u may land a hair off: rounding)
@@ -474,14 +478,22 @@ def wobble_edges(n, most, lo=-math.inf, hi=math.inf):
             if not w.get("speed"):
                 return phase + w["rate"] * (beat - b0)
             return phase + float(run_waves(w, np.array([u0 + (beat - b0) / max(span, 1e-12)]), span)[0])
-        first = math.floor(gone(a) * 4) + 1
-        last = math.ceil((wave_end(w, span) if b >= b1 else gone(b)) * 4)
-        if len(out) + last - first > most:
+        g0, g1 = gone(a), (wave_end(w, span) if b >= b1 else gone(b))
+        first, last = math.floor(g0 * 4) + 1, math.ceil(g1 * 4)
+        spots = [k / 4 for k in range(first, last)]
+        if w.get("shape") == WAVE_DRAWN and w.get("wave"):  # (a drawn wave: its own points' corners and jumps too)
+            xs = sorted({p[0] % 1.0 for p in w["wave"]})
+            if (math.ceil(g1) - math.floor(g0) + 1) * len(xs) > most:
+                return []
+            spots += [k + x for k in range(math.floor(g0), math.ceil(g1) + 1) for x in xs if g0 < k + x < g1]
+        if len(out) + len(spots) > most:
             return []
+        if not spots:
+            continue
         if not w.get("speed"):
-            out += [b0 + (k / 4 - phase) / w["rate"] for k in range(first, last)]
-        elif last > first:
-            out += (t + waves_spot(w, np.arange(first, last) / 4 - phase, span) * span).tolist()
+            out += [b0 + (g - phase) / w["rate"] for g in spots]
+        else:
+            out += (t + waves_spot(w, np.array(spots) - phase, span) * span).tolist()
     return out
 
 

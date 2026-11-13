@@ -421,6 +421,32 @@ def clean_speed(pts):
 
 
 SPEED_LOCKS = ("start", "end", "both")  # a wobble's "lock": which end of its speed line keeps its speed (stage C)
+WAVE_DRAWN = "drawn"  # a wobble's "shape" when its wave is one drawn by hand (the LFO window, stage I): its "wave"
+WAVE_POINTS_MOST = 128  # ... the most points a drawn wave keeps
+
+
+def clean_wave(pts):
+    """A drawn wobble wave checked (a wobble's "wave", the LFO window's wave editor, stage I 2026-11-13): [[x 0..1 of
+    one wave, y -1..1(, curve -SLIDE_BEND..SLIDE_BEND)], ...] in order (two at one x = a jump), first at 0, last at 1,
+    at most WAVE_POINTS_MOST; None when it's no good."""
+    out = []
+    try:
+        for p in pts or ():
+            x, y = float(p[0]), float(p[1])
+            curve = float(p[2]) if len(p) > 2 else 0.0
+            if math.isfinite(x) and math.isfinite(y) and math.isfinite(curve):
+                got = [round(min(1.0, max(0.0, x)), 6), round(min(1.0, max(-1.0, y)), 6)]
+                if curve:
+                    got.append(round(min(SLIDE_BEND, max(-SLIDE_BEND, curve)), 4))
+                out.append(got)
+    except (TypeError, ValueError, IndexError):
+        return None
+    out.sort(key=lambda p: p[0])  # (stable: a jump's two points keep their order)
+    if len(out) < 2 or len(out) > WAVE_POINTS_MOST:
+        return None
+    out[0][0], out[-1][0] = 0.0, 1.0
+    del out[-1][2:]
+    return out
 
 
 def clean_wobble(runs):
@@ -429,7 +455,8 @@ def clean_wobble(runs):
     WOBBLE_SHAPES but sine, "flip": True = going down first, "phase": waves gone before u0, "free": True = speed set
     with Ctrl, "nudge": waves the user moved its wave on (0..1, the Phase menu items), "seed": a Random wave's
     heights (a whole number, WOBBLE_SEED_STEP), "env": the depth line's own points (clean_env; "depth" = its ends),
-    "speed": its speed line (clean_speed), "lock": SPEED_LOCKS)}]
+    "speed": its speed line (clean_speed), "lock": SPEED_LOCKS, "wave": a drawn wave (clean_wave) with "shape"
+    WAVE_DRAWN)}]
     in order; runs with no length or depth left out; None when none is left."""
     out = []
     for w in runs or ():
@@ -453,6 +480,8 @@ def clean_wobble(runs):
             run["env"] = env
         if w.get("shape") in WOBBLE_SHAPES[1:]:
             run["shape"] = w["shape"]
+        elif w.get("shape") == WAVE_DRAWN and clean_wave(w.get("wave")):  # (a drawn wave: kept IN the wobble, so a
+            run["shape"], run["wave"] = WAVE_DRAWN, clean_wave(w["wave"])  # project opens without the shape bank)
         if w.get("flip") is True:
             run["flip"] = True
         if w.get("free") is True:  # (its speed set freely with Ctrl: hz_lines.fit_wobbles leaves it alone)

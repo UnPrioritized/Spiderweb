@@ -55,6 +55,7 @@ from window.hz_bend import HzBend
 from window.hz_sketch import HzSketch
 from window.hz_note_tools import HzNoteTools
 from window.hz_simplify import HzSimplify
+from window.hz_lfo import HzLfo
 from window.hz_box import HzBox
 
 POS = r"\d+x\d+\+-?\d+\+-?\d+"  # a remembered size and place
@@ -71,7 +72,7 @@ def open_hz(app):
     w.after_idle(lambda: w.winfo_exists() and w.canvas.focus_force())
 
 
-class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
+class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzLfo, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -283,6 +284,8 @@ class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzMouse
             for k in (k, k.upper()):  # keys: Quick Ramp, Align Note-On, Join; hz_bend.py / hz_note_tools.py)
                 c.bind(f"<KeyPress-{k}>", lambda e, fn=fn: None if e.state & CTRL else
                        "break" if self.drag or self.loudness.held() else fn() or "break")
+        for k in ("<Control-l>", "<Control-L>"):  # (the plugin's LFO… key; plain L stays the Line tool: hz_lfo.py)
+            c.bind(k, lambda e: (self.drag or self.loudness.held() or self.open_lfo(), "break")[1])
         for k, step in (("<Up>", 1), ("<Down>", -1)):  # (a Quick detune pulled: one voice more / fewer)
             c.bind(k, lambda e, step=step: "break" if self.detune_count(step) else None)
         for k in ("Alt_L", "Alt_R"):  # (Sketch: every piece's curve square shown while Alt is held, hz_sketch.py)

@@ -520,6 +520,8 @@ class HzBend:
                             command=lambda kind=kind: self.set_bends(picked, kind, tr("hz.step_note_bend_shape")))
         menu.add_cascade(label=tr("hz.bend_menu"), menu=sub)
         menu.bend_sub = sub  # (kept while the menu shows)
+        menu.add_command(label=tr("hz.lfo_menu"), accelerator=tr("hz.lfo_key"),  # (stage I: hz_lfo.py)
+                         command=lambda: self.after_idle(lambda: self.open_lfo(i)))
 
     def copy_bend(self, i):
         """Note i's bend line and wobbles kept in app.hz_bend_clip ({"bend", "wobble"}: both stretch to a note

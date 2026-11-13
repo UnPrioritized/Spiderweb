@@ -21,7 +21,7 @@ from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOB
                           WOBBLE_SEED_STEP, bend_part, bends, bent_part, clean_speed, depth_at, depth_most, depth_pts,
                           fit_speed, fit_wobbles, line_at, pitch, run_copy, set_depth, speed_mean, split_wobbles, wave_end,
                           wave_start, waves_spot, wobble_keys, wobble_part, bez_piece, handles, piece_curved, side_handles,
-                          split_bez, with_handles)
+                          split_bez, with_handles, WAVE_DRAWN)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
 from window.hz_bend import BEND, LINE_NEAR, NEAR, drop_point, follow_wobble, set_curve, tidy_bend
@@ -54,6 +54,7 @@ LOCK_SIZE, LOCK_GAP = 10, 4  # px: a speed lock's size, its room from the strip'
 EVEN_SPEED = [[0.0, 1.0], [1.0, 1.0]]  # a wobble with no speed line: full speed all along
 POST_DROP = 9  # px: a wobble's end post's dot this far under its depth line's depth-0 height (stage D)
 POST_ROOM = 12  # px: the speed post stands this far beside a depth point it would be on (user 2026-11-13)
+BANK_IN_MENU = 30  # the wobble menu lists this many of the shape bank's drawn waves (newest first; stage I)
 
 
 def curve_to(pts, j, bend, shift):
@@ -168,14 +169,22 @@ def bake_wobble(n, run):
               or abs(pts[j1][1] - pts[j][1]) > 1e-9)
     q = (2 if run.get("shape") in ("saw", "square") else 4) * (2 if run.get("speed") or sloped else 1)
     first, last = math.floor(phase * q) + 1, math.ceil(wave_end(run, span) * q)
+    gs = np.arange(first, last) / q  # (where, in waves from the run's start, the baked points go)
+    if run.get("shape") == WAVE_DRAWN and run.get("wave"):  # (a drawn wave, stage I: a point at each of its own
+        end = wave_end(run, span)                             # points every wave, its corners + jumps on the spot)
+        xs = sorted({p[0] % 1.0 for p in run["wave"]})
+        got = [k + x for k in range(math.floor(phase), math.ceil(end) + 1) for x in xs if phase < k + x < end]
+        if run.get("speed") or sloped:
+            got += (np.arange(math.floor(phase * 8) + 1, math.ceil(end * 8)) / 8).tolist()
+        gs = np.unique(np.array(got, float))
     if run.get("speed"):  # (a speed line: each eighth wave where its waves get there (a changing pace bends a quarter
         # wave out of shape), + where its pace turns)
-        breaks = waves_spot(run, np.arange(first, last) / q - phase, span)
+        breaks = waves_spot(run, gs - phase, span)
         more = [u0 + p[0] * (u1 - u0) for p in run["speed"][1:-1]]
         breaks = np.unique(np.concatenate([breaks, [u for u in more if u0 < u < u1]]))
         breaks = breaks[(breaks > u0 + 1e-9) & (breaks < u1 - 1e-9)]
     else:
-        breaks = u0 + (np.arange(first, last) / q - phase) / (rate * span)
+        breaks = u0 + (gs - phase) / (rate * span)
     inner = [p[0] for p in pts[j + 1:j1] if u0 + 1e-9 < p[0] < u1 - 1e-9]  # (the bend's own points under it: its
     if inner:                                                            # corners / jumps on the spot)
         breaks = np.unique(np.concatenate([breaks, inner]))
@@ -880,12 +889,24 @@ class HzSketch:
         run = self.wobble_run(self.tones[i], u0, u1)
         if not run:
             return False
-        shape = tk.StringVar(self, value=run.get("shape", "sine"))
+        from window.hz_lfo import load_bank
+        bank = list(reversed(load_bank()))[:BANK_IN_MENU]  # (the shape bank's drawn waves, newest first: stage I)
+        now = run.get("shape", "sine")
+        if now == WAVE_DRAWN:  # (a drawn wave: ticked when it's one of the bank's)
+            now = next((f"bank{k}" for k, t in enumerate(bank) if t["points"] == run.get("wave")), WAVE_DRAWN)
+        shape = tk.StringVar(self, value=now)
         flip = tk.BooleanVar(self, value=bool(run.get("flip")))
         menu = tk.Menu(self, tearoff=0)
         for kind in WOBBLE_SHAPES:
             menu.add_radiobutton(label=tr(f"hz.wobble_{kind}"), variable=shape, value=kind,
                                  command=lambda kind=kind: self.wobble_edit(i, u0, u1, "shape", kind))
+        if bank or now == WAVE_DRAWN:
+            menu.add_separator()
+        if now == WAVE_DRAWN:  # (drawn in the LFO window, not saved: shown ticked, nothing to pick)
+            menu.add_radiobutton(label=tr("hz.wobble_drawn"), variable=shape, value=WAVE_DRAWN, state="disabled")
+        for k, t in enumerate(bank):
+            menu.add_radiobutton(label=t["name"], variable=shape, value=f"bank{k}",
+                                 command=lambda t=t: self.wobble_edit(i, u0, u1, "wave", t["points"]))
         menu.add_checkbutton(label=tr("hz.wobble_flip"), variable=flip,
                              command=lambda: self.wobble_edit(i, u0, u1, "flip", flip.get()))
         menu.add_separator()
@@ -900,6 +921,8 @@ class HzSketch:
         menu.add_checkbutton(label=tr("hz.wobble_same_speed"), variable=same,
                              command=lambda: setattr(self, "wobble_same", "speed" if same.get() else "cycles"))
         menu.add_separator()
+        menu.add_command(label=tr("hz.lfo_menu"), accelerator=tr("hz.lfo_key"),  # (stage I: the LFO window on it)
+                         command=lambda: self.after_idle(lambda: self.open_lfo(i)))
         menu.add_command(label=tr("hz.wobble_bake"), command=lambda: self.wobble_edit(i, u0, u1, "bake", None))
         menu.add_command(label=tr("hz.wobble_remove"), command=lambda: self.wobble_edit(i, u0, u1, "remove", None))
         menu.vars = (shape, flip, same)  # (kept while the menu shows)
@@ -959,10 +982,17 @@ class HzSketch:
             if not run["nudge"]:
                 del run["nudge"]
             name = "hz.step_wobble_phase"
+        elif what == "wave":  # (a drawn wave from the shape bank, stage I: kept in the wobble itself)
+            run.update(shape=WAVE_DRAWN, wave=copy.deepcopy(value))
         elif what == "shape" and value == "sine":
             run.pop("shape", None)
+            run.pop("wave", None)
         elif what == "shape" and value == "random" and "seed" not in run:
+            run.pop("wave", None)
             run.update(shape="random", seed=random.randrange(1, 1 << 14) * WOBBLE_SEED_STEP)
+        elif what == "shape":
+            run.pop("wave", None)
+            run["shape"] = value
         elif what == "flip" and not value:
             run.pop("flip", None)
         else:
