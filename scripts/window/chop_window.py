@@ -20,7 +20,7 @@ from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pie
 from window import look
 from window.snap_picker import SnapPicker
 from window.tool_window import ORANGE, ToolWindow, page_place_added
-from window.widgets import Scrub, Tooltip, bad, good
+from window.widgets import Scrub, Tooltip, bad, good, read_number
 
 RHYTHMS_FILE = os.path.join(USER, "rhythms.json")
 CELLS = (1, 2, 3, 4, 6, 8)  # the strip's grid: cells per step
@@ -388,11 +388,8 @@ class ChopWindow(ToolWindow):
         """Ticks typed for one step: 1 = "off" (1 tick at any PPQ), a list snap's length = that snap, else kept as
         typed (the picker shows "Typed")."""
         ppq = self.app.ppq
-        try:
-            v = float(calc(self.ticks_var.get()))
-            if not (1 <= v <= MAX_TICKS and v == int(v) and v / ppq <= 10 ** 4):
-                raise ValueError
-        except (ValueError, ZeroDivisionError, OverflowError):
+        v = read_number(self.ticks_var.get(), 1, MAX_TICKS)
+        if v is None or v != int(v) or v / ppq > 10 ** 4:
             bad(self.ticks_entry)
             return
         good(self.ticks_entry)
@@ -424,11 +421,8 @@ class ChopWindow(ToolWindow):
             self.put("fixed", fixed)
 
     def on_vel(self, done=True):
-        try:
-            v = float(calc(self.vel_var.get()))
-            if not 0 <= v <= 100:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        v = read_number(self.vel_var.get(), 0, 100)
+        if v is None:
             bad(self.vel_entry)
             return
         good(self.vel_entry)

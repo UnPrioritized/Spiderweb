@@ -12,11 +12,11 @@ from tkinter import ttk
 import numpy as np
 
 from files.lang import tr
-from files.mathexpr import calc, fmt
+from files.mathexpr import fmt
 from notes.hzbass import NOTE_BEND_MOST, TUNE, handles, pitch, side_handles
 from roll.roll_shared import CTRL, SHIFT, note_name
 from window import look
-from window.widgets import REDO_KEYS, UNDO_KEYS, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, read_number, remember_place
 
 LOWEST, HIGHEST = 0, 127  # the keys a Hz bass note can sit on (the Hz window's rows)
 LETTERS = {"c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11}
@@ -30,11 +30,8 @@ def read_key(text):
     if m:
         key = LETTERS[m.group(1).lower()] + {"#": 1, "b": -1, "": 0}[m.group(2)] + (int(m.group(3)) + 1) * 12
     else:
-        try:
-            v = float(calc(text))
-        except (ValueError, ZeroDivisionError, TypeError, OverflowError):
-            return None
-        if v != round(v):
+        v = read_number(text)
+        if v is None or v != round(v):
             return None
         key = int(v)
     return key if LOWEST <= key <= HIGHEST else None
@@ -63,10 +60,7 @@ def ask_pitch(win, key, cents):
 
     def ok(e=None):
         k = read_key(kv.get())
-        try:
-            c = float(calc(cv.get()))
-        except (ValueError, ZeroDivisionError, TypeError, OverflowError):
-            c = None
+        c = read_number(cv.get())
         if k is None:
             why.config(text=tr("hz.pitch_bad_key", lo=note_name(LOWEST), hi=note_name(HIGHEST)))
             ke.focus_set()

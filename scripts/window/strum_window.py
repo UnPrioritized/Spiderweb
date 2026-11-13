@@ -14,7 +14,7 @@ from files.mathexpr import calc, fmt
 from notes.strum import EDGES, END_KNOB, KEYS_MAX, LIMITS, STRUM_DEFAULTS, TIME_KNOB, VEL_KNOB, clean_strum
 from window import look
 from window.tool_window import GREEN, ORANGE, Knob, ToolWindow
-from window.widgets import Scrub, Tooltip, bad, good
+from window.widgets import Scrub, Tooltip, bad, good, read_number
 
 TIMES = ("time", "end_time")  # kept in beats, shown in ticks
 TENSIONS = ("tension", "vel_tension", "end_tension")
@@ -97,11 +97,8 @@ class StrumWindow(ToolWindow):
         """A Keys box typed / scrubbed. The first box moves the second along while they're the same number (one
         number = groups of that many), so typing 4 gives groups of 4, not a 4 .. 1 range."""
         e, var = self.entries[key], self.vars[key]
-        try:
-            v = float(calc(var.get()))
-            if not (1 <= v <= KEYS_MAX and v == int(v)):
-                raise ValueError
-        except (ValueError, ZeroDivisionError, OverflowError):
+        v = read_number(var.get(), 1, KEYS_MAX)
+        if v is None or v != int(v):
             e.good_text = str(self.cfg[key])
             bad(e)
             return
@@ -181,11 +178,8 @@ class StrumWindow(ToolWindow):
     def on_entry(self, key, done=True):
         e, var = self.entries[key], self.vars[key]
         lo, hi = self.limits(key)
-        try:
-            v = float(calc(var.get()))
-            if not lo <= v <= hi:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        v = read_number(var.get(), lo, hi)
+        if v is None:
             e.good_text = fmt(self.shown(key))  # (back to what is in use: the knob may have moved since)
             bad(e)
             return

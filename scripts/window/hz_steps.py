@@ -7,10 +7,9 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
-from files.mathexpr import calc
 from notes.hzbass import START_COUNT, START_STEPS, STEP, STEPS
 from window.synth_look import DIM, EDGE, ENTRY, GRID, MID, PIC, mix
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, read_number
 
 LANES = ("note", "octave", "level", "length")
 CELL = 20  # a step's width
@@ -135,11 +134,8 @@ class StepEditor:
 
     def on_count(self):
         """The Steps box typed / stepped: how many steps play (those past it kept, as a synth's: hunt)."""
-        try:
-            n = int(round(float(calc(self.count_var.get()))))
-            if not 1 <= n <= STEPS:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        n = read_number(self.count_var.get(), 1, STEPS, whole=True)
+        if n is None:
             n = self.count
         self.count_var.set(str(n))
         if n != self.count:

@@ -121,7 +121,8 @@ from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.side_panel import ScrollingSide
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, StatusLine, Tooltip, bad, click_first,
-                            fit_dropdowns, good, grid_shown, mac_buttons, no_focus, set_glide, label_column, remember_good, watch_bad, ShortLabel, WrapRow)
+                            fit_dropdowns, good, grid_shown, mac_buttons, no_focus, set_glide, label_column, read_number,
+                            remember_good, watch_bad, ShortLabel, WrapRow)
 
 
 VEL_KEYS = ("vel0", "vel1")
@@ -1955,14 +1956,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # settings widen it as far as the mouse goes)
         t_lo, p_lo, p_hi = self.point_limits()
         for var, entry, lo, hi in ((tv, te, t_lo, BEATS_FAR * self.ppq), (pv, pe, p_lo, p_hi)):
-            try:
-                value = float(calc(var.get()))
-                if not lo <= value <= hi:
-                    raise ValueError
+            value = read_number(var.get(), lo, hi)
+            if value is None:
+                bad(entry, typing=True)
+            else:
                 values.append(value)
                 good(entry)
-            except ValueError:
-                bad(entry, typing=True)
         if len(values) < 2:
             return
         sh = self.selected()

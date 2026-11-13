@@ -22,7 +22,7 @@ from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
 from notes.hzbass import RING_MOST, has_cc
 from notes.tempo_file import heard_tempo
 from window.hz_preview import VOICES, font_list
-from window.widgets import bad, good
+from window.widgets import bad, good, read_number
 
 RING_KEYS = (24, 36, 48, 60, 72, 84)  # keys whose ring is measured for Auto's CC run-on (the longest counts)
 SLOW_START_S = 15.0  # Kestrel still starting after this: "Use Built-in BASSMIDI" / "Keep waiting" (user 2026-10-28:
@@ -1444,11 +1444,8 @@ class Playback:
 
     def on_play_voices(self, left=False):
         e = self.voices_entry  # (in Settings → Sound)
-        try:
-            v = int(round(float(calc(self.voices_var.get()))))
-            if not VOICES[0] <= v <= VOICES[1]:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        v = read_number(self.voices_var.get(), VOICES[0], VOICES[1], whole=True)
+        if v is None:
             if e is not None and e.winfo_exists():
                 bad(e)
             return
@@ -1471,11 +1468,8 @@ class Playback:
     def on_loaded_synths(self):
         """Synths for a loaded MIDI typed (Settings → Sound): heard from the next Play."""
         e = self.synths_entry
-        try:
-            v = int(round(float(calc(self.synths_var.get()))))
-            if not 1 <= v <= GROUP_MOST:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        v = read_number(self.synths_var.get(), 1, GROUP_MOST, whole=True)
+        if v is None:
             if e is not None and e.winfo_exists():
                 bad(e)
             return
@@ -1650,11 +1644,8 @@ class Playback:
         elif key in RANGES:  # (13g number boxes: whole numbers in their range, else back to the one in use)
             e = getattr(self, "kestrel_entries", {}).get(key)
             lo, hi = RANGES[key]
-            try:
-                v = int(round(float(calc(var.get()))))
-                if not lo <= v <= hi:
-                    raise ValueError
-            except (ValueError, ZeroDivisionError, OverflowError):
+            v = read_number(var.get(), lo, hi, whole=True)
+            if v is None:
                 if e is not None and e.winfo_exists():
                     bad(e)
                 return

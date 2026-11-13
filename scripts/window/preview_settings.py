@@ -14,7 +14,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr, trn
-from files.mathexpr import calc, fmt
+from files.mathexpr import fmt
 from notes.hz_cc import RING, ring_of, typed_ring
 from notes.hzbass import AUTO_MOST, RING_MOST
 from window import look
@@ -22,7 +22,7 @@ from window.font_list import FontList
 from window.hz_gates import GATE_MODES
 from window.hz_preview import ENGINES, LIVE_MB, VOICES, WORKERS
 from window.hz_trace import open_trace
-from window.widgets import Scrub, Tooltip, bad, good, no_spaces, remember_place, unit_word
+from window.widgets import Scrub, Tooltip, bad, good, no_spaces, read_number, remember_place, unit_word
 
 ORANGE = look.WARN
 
@@ -329,11 +329,8 @@ class PreviewSettings(tk.Toplevel):
         if self.ring_auto.get():
             self.show_ring(self.win.length_target())
             return
-        try:
-            v = float(calc(self.ring_var.get()))
-            if not 0.0 <= v <= RING_MOST:
-                raise ValueError
-        except (ValueError, ZeroDivisionError, OverflowError):
+        v = read_number(self.ring_var.get(), 0.0, RING_MOST)
+        if v is None:
             self.show_ring(self.win.length_target())  # (a wrong number: back to the last good one)
             return
         good(self.ring_entry)
@@ -342,11 +339,8 @@ class PreviewSettings(tk.Toplevel):
         self.win.put_lengths(tr("hz.step_ring"), ring=v)
 
     def on_voices(self):
-        try:
-            v = int(round(float(calc(self.voices.get()))))
-            if not VOICES[0] <= v <= VOICES[1]:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        v = read_number(self.voices.get(), VOICES[0], VOICES[1], whole=True)
+        if v is None:
             bad(self.voices_entry)
             return
         good(self.voices_entry)
@@ -359,11 +353,8 @@ class PreviewSettings(tk.Toplevel):
             self.remake()
 
     def on_live_mb(self):
-        try:
-            v = int(round(float(calc(self.live_mb.get()))))
-            if not LIVE_MB[0] <= v <= LIVE_MB[1]:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        v = read_number(self.live_mb.get(), LIVE_MB[0], LIVE_MB[1], whole=True)
+        if v is None:
             bad(self.live_entry)
             return
         good(self.live_entry)

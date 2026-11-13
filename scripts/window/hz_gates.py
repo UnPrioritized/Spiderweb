@@ -15,7 +15,7 @@ from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, FULL_LENGTH, HZ_DEFAULTS, LEN
 from window import look
 from window.history import load_state
 from window.hz_effects import AMOUNT
-from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, bad, good, remember_place, unit_word
+from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, bad, good, read_number, remember_place, unit_word
 
 
 GATE_MODES = ("auto", "mixed", "fixed")  # the Gates dropdown's choices, in order
@@ -61,11 +61,7 @@ def ask_live(win, app, prompt, value, lo, hi, steps, on_change):
     got = {"value": None}
 
     def read():
-        try:
-            v = float(calc(var.get()))
-        except (ValueError, ZeroDivisionError):
-            return None
-        return v if lo <= v <= hi else None
+        return read_number(var.get(), lo, hi)
 
     def changed(*_):
         v = read()
@@ -261,13 +257,10 @@ class HzGates:
     def auto_limit(self):
         """The threshold box's cents (a wrong value: back to its last good one), or None when there's none."""
         for again in (False, True):
-            try:
-                limit = float(calc(self.auto_var.get()))
-                if 0 <= limit <= AUTO_MOST:
-                    good(self.auto_row.entry)
-                    return limit
-            except (ValueError, ZeroDivisionError):
-                pass
+            limit = read_number(self.auto_var.get(), 0, AUTO_MOST)
+            if limit is not None:
+                good(self.auto_row.entry)
+                return limit
             if not again:
                 bad(self.auto_row.entry)
         return None
@@ -546,13 +539,10 @@ class HzGates:
     def pitch(self):
         """The Pitch box in cents (a wrong value, not -1200 to 1200: back to its last good one), or None."""
         for again in (False, True):
-            try:
-                cents = float(calc(self.pitch_var.get()))
-                if abs(cents) <= 1200:
-                    good(self.pitch_entry)
-                    return cents
-            except (ValueError, ZeroDivisionError):
-                pass
+            cents = read_number(self.pitch_var.get(), -1200, 1200)
+            if cents is not None:
+                good(self.pitch_entry)
+                return cents
             if not again:
                 bad(self.pitch_entry)
         return None

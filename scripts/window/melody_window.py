@@ -25,7 +25,7 @@ from window import look
 from window.jump_areas import JumpChain
 from window.jump_graph import JumpGraph, graph_pts
 from window.load_extract import boxes_now
-from window.widgets import Scrub, remember_place, unhighlight
+from window.widgets import Scrub, read_number, remember_place, unhighlight
 
 WATCH_MS = 250
 # the words round the two BPM boxes, by shape (None = one box: the second hidden)
@@ -379,13 +379,7 @@ class MelodyWindow(tk.Toplevel):
 
     def number(self, var, lo=None, hi=None):
         """A box's number, None when it can't be read or is outside lo..hi."""
-        try:
-            v = float(calc(var.get().strip()))
-        except (ValueError, ZeroDivisionError, TypeError, OverflowError):
-            return None
-        if v != v or (lo is not None and v < lo) or (hi is not None and v > hi):
-            return None
-        return v
+        return read_number(var.get().strip(), lo, hi)
 
     def beats_of(self, var, fallback):
         """A rule box's length in beats (a note length or ticks), None when it can't be read."""
@@ -395,11 +389,8 @@ class MelodyWindow(tk.Toplevel):
             return snap_name_beats(name)
         if not text:
             return fallback
-        try:
-            v = float(calc(text))
-        except (ValueError, ZeroDivisionError, TypeError, OverflowError):
-            return None
-        return v / max(1, self.app.ppq) if v >= 0 else None
+        v = read_number(text, 0)
+        return None if v is None else v / max(1, self.app.ppq)
 
     # ------------------------------------------------------------ what it follows
 

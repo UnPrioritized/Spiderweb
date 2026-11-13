@@ -31,7 +31,8 @@ from window.join_split import without10
 from window.pattern_dialog import load_patterns, saved_pattern
 from window.speed_graph import SpeedGraph, start_curve
 from window.tool_window import ToolWindow
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown, name_index, name_list, set_names, unit_word
+from window.widgets import (Scrub, Tooltip, bad, good, grid_shown, name_index, name_list, read_number, set_names,
+                            unit_word)
 
 LENGTHS = [s for s, _ in SNAP_LIST if s != "off"]  # "one copy every" choices (the snap list's note lengths)
 CHOICES = {"kind": KINDS, "speed": SPEEDS, "colours": COLOURS, "flip": FLIPS, "way": WAYS, "top": TOPS}
@@ -758,9 +759,8 @@ class PathWindow(ToolWindow):
 
     def on_entry(self, key, done=True):
         e, var = self.entries[key], self.vars[key]
-        try:
-            v = float(calc(var.get()))
-        except (ValueError, ZeroDivisionError):
+        v = read_number(var.get())
+        if v is None:
             bad(e)
             return
         ppq = self.app.ppq

@@ -4,12 +4,12 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from files.lang import tr
-from files.mathexpr import calc, fmt
+from files.mathexpr import fmt
 from notes.fonts import DEFAULT_FONT, WEIGHTS
 from notes.text import TEXT_DEFAULTS, rebuild, restyle, shown_size, text_axes, text_font, with_arial
 from window import look
 from window.font_dialog import FontDialog
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, unit_word
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, read_number, unit_word
 
 # number boxes: setting -> (label, unit, smallest, largest)
 ENTRIES = {"size": (tr("panel_text.size"), "", 0.01, 2000),  # (units: text keys)
@@ -250,11 +250,8 @@ class TextPanel:
                 self.roll.focus_set()
             return
         _, _, lo, hi = ENTRIES[key]
-        try:
-            value = float(calc(var.get()))
-            if not lo <= value <= hi:
-                raise ValueError
-        except ValueError:
+        value = read_number(var.get(), lo, hi)
+        if value is None:
             bad(entry)
             return
         good(entry)

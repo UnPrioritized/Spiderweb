@@ -29,7 +29,7 @@ from notes.recolour import (KEEP, MODES, PAGE, clean_recolour, edited_step, new_
 from window import look
 from window.edit_line import names_line, tag_name
 from window.settings_window import ScrollPage
-from window.widgets import ListTip, ShortLabel, Tooltip, bad, good, leave_box, remember_place, unchanged
+from window.widgets import ListTip, ShortLabel, Tooltip, bad, good, leave_box, read_number, remember_place, unchanged
 
 LIST_CHARS = 22  # the shape list's width in letters (longer names: cut, the whole name in a tip)
 SHORT_CHARS = 32  # a folded basics group's grey line asks this many letters' room (the window a bit wider: user 2026-11-12 OK)
@@ -1033,11 +1033,8 @@ class PropertiesWindow(tk.Toplevel):
     def number_in(self, key, lo, hi):
         """The number typed in basics box key, or None (wrong: back to the last good one)."""
         var, e = self.vars[key], self.entries[key]
-        try:
-            v = float(calc(var.get()))
-            if not lo <= v <= hi:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        v = read_number(var.get(), lo, hi)
+        if v is None:
             bad(e)
             return None
         good(e)

@@ -45,7 +45,7 @@ from window.hz_effects import AMOUNT, FX_COLOR
 from window.hz_steps import StepEditor
 from window.synth_look import (DIM, EDGE, ENTRY, GRID, MID, PANEL, PIC, TEXT, Box, bright, dark_list, mix)
 from window.tool_window import Knob
-from window.widgets import Scrub, Tooltip, grid_shown, unit_word, wheel_ready
+from window.widgets import Scrub, Tooltip, grid_shown, read_number, unit_word, wheel_ready
 
 KNOB_BODY, KNOB_RIM, KNOB_TRACK, KNOB_FOCUS = "#474d57", "#5c636e", "#1a1d22", "#9aa3ae"
 TIME_KNOB = 4.0  # beats a time knob goes to (along a curve: fine near 0)
@@ -1114,11 +1114,8 @@ class SynthKnobs:
         lo, hi = KINDS[kind][1:3]
         if var.get() == self.box_text.get(key):  # (nothing typed: the box shows the sound as it is)
             return e.config(style=ENTRY)
-        try:
-            v = float(calc(var.get()))
-            if not lo <= v <= hi:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):  # (not a number, or out of range: back to the last good value, user)
+        v = read_number(var.get(), lo, hi)
+        if v is None:  # (not a number, or out of range: back to the last good value, user)
             var.set(self.box_text.get(key, ""))
             e.config(style=ENTRY)
             return

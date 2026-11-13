@@ -508,6 +508,22 @@ def box_text(e):
     return str(e.tk.globalgetvar(name)) if name else e.get()
 
 
+def read_number(text, lo=None, hi=None, whole=False):
+    """The number typed in a box as a float (simple math works: 960*4, calc), or None when it isn't one or is
+    outside lo..hi. whole: rounded to the nearest whole number (an int) BEFORE the lo..hi check. Only the reading:
+    what a wrong number does (back to the last good one, a message...) stays with each box. calc never gives an
+    endless number (inf / nan)."""
+    try:
+        v = float(calc(text))
+    except (ValueError, ZeroDivisionError, OverflowError):
+        return None
+    if whole:
+        v = int(round(v))
+    if lo is not None and not lo <= v or hi is not None and not v <= hi:
+        return None
+    return v
+
+
 def no_spaces(var):
     """A box's spaces taken out (Space types one there, user; numbers have none) when the box is left."""
     if " " in var.get():

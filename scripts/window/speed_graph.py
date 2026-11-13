@@ -6,17 +6,16 @@ copies never walk back. Stored as the page's "curve" (notes/copypath.py curve_at
 window's own undo too, and Ctrl+Z / Ctrl+Y in this window step through its own changes."""
 
 import json
-import math
 import tkinter as tk
 from tkinter import ttk
 
 import numpy as np
 
 from files.lang import tr
-from files.mathexpr import calc, fmt
+from files.mathexpr import fmt
 from notes.copypath import BEND_LIMITS, CURVE_POINTS, SPEED_CURVES, curve_at
 from window import look
-from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, chart_edges, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, chart_edges, read_number, remember_place
 
 PRESETS = [(tr("path.even"), SPEED_CURVES["even"]), (tr("path.up"), SPEED_CURVES["up"]),
            (tr("path.down"), SPEED_CURVES["down"]),
@@ -435,11 +434,9 @@ class PointDialog(tk.Toplevel):
         self.boxes["p"].select_range(0, "end")
 
     def ok(self):
-        try:
-            u, p = (float(calc(self.vars[k].get())) / 100 for k in ("u", "p"))
-            if not (math.isfinite(u) and math.isfinite(p)):
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        u, p = (read_number(self.vars[k].get()) for k in ("u", "p"))
+        if u is None or p is None:
             return self.bell()
+        u, p = u / 100, p / 100
         self.destroy()
         self.gw.set_point(self.i, u, p)

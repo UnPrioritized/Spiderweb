@@ -6,7 +6,7 @@ from tkinter import ttk
 import numpy as np
 
 from files.lang import tr, trn
-from files.mathexpr import calc, fmt
+from files.mathexpr import fmt
 from notes.custom import notes_shape
 from notes.engine import OWN0, SHAPE_DEFAULTS, clean_shape, keeps_laps, own_id
 from notes.sustain import is_sustained, sustain_on
@@ -15,7 +15,8 @@ from notes.mask import (GROUP_KEYS, MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THIC
                         is_solid, loops_of, mask_units, new_group_id, slot_pal, slot_rule, tidy_groups, unit_of,
                         unmasked, worked_now)
 from window import look
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged, unit_word
+from window.widgets import (Scrub, Tooltip, bad, good, leave_box, read_number, same_or_blank, show_mixed, unchanged,
+                            unit_word)
 
 SHOW_CHOICES = [(v, tr("mask.show_" + v)) for v in SHOWS]
 MODE_CHOICES = [(v, tr("mask.mode_" + v)) for v in MODES]
@@ -182,11 +183,8 @@ class MaskPanel:
         """The % box typed / stepped: the hidden parts drawn again that faint (0 = not drawn: the notes made again)."""
         from roll import roll_draw
         e = self.mask_fade_entry
-        try:
-            v = int(round(float(calc(self.mask_fade_var.get()))))
-            if not 0 <= v <= 100:
-                raise ValueError
-        except (ValueError, ZeroDivisionError, OverflowError):
+        v = read_number(self.mask_fade_var.get(), 0, 100, whole=True)
+        if v is None:
             return bad(e)
         if str(v) != self.mask_fade_var.get():
             self.mask_fade_var.set(str(v))
@@ -247,12 +245,8 @@ class MaskPanel:
             e, var = self.mask_size_entry, self.mask_size_var
             if not var.get().strip() and getattr(e, "blank_from", None):  # (Mixed, still empty)
                 return
-            try:
-                v = float(calc(var.get()))
-                ok = 0 <= v <= MOST_SIZE
-            except ValueError:
-                ok = False
-            if not ok:
+            v = read_number(var.get(), 0, MOST_SIZE)
+            if v is None:
                 return bad(e)
             good(e)
             new = [dict(m, size=v) for m in masks]

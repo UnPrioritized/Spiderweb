@@ -11,14 +11,14 @@ from tkinter import ttk
 import numpy as np
 
 from files.lang import tr
-from files.mathexpr import calc, formula, fmt
+from files.mathexpr import formula, fmt
 from files.system import work_area
 from notes.joined import shown_tumour
 from notes.tumour import GRAPH_LIMIT, TUMOUR_DEFAULTS
 from window import look
 from window.panel_custom import GAP_COLOR
-from window.widgets import (REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, chart_edges, fit_screen, placed, remember_place,
-                            unit_text, unit_word)
+from window.widgets import (REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, chart_edges, fit_screen, placed, read_number,
+                            remember_place, unit_text, unit_word)
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
 PRESETS = [(tr("graph_window.flat_off"), FLAT), (tr("graph_window.rise"), [[0.0, 0.0], [1.0, 1.0]]),
@@ -295,11 +295,8 @@ class GraphWindow(tk.Toplevel):
 
     def on_range(self, side):
         """A number typed in From / to (the other end moves along when they'd cross)."""
-        try:
-            value = float(calc(self.range_vars[side].get()))
-            if not math.isfinite(value):
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        value = read_number(self.range_vars[side].get())
+        if value is None:
             return self.set_view(self.lo, self.hi)
         value = min(LIMIT, max(-LIMIT, round(value, 4)))
         lo, hi = (value, self.hi) if side == "lo" else (self.lo, value)
@@ -556,23 +553,20 @@ class PointDialog(tk.Toplevel):
         """% and the number it makes follow each other."""
         if self._linking:
             return
-        try:
-            value = float(calc(self.vars[src].get())) * factor
-        except (ValueError, ZeroDivisionError):
+        value = read_number(self.vars[src].get())
+        if value is None:
             return
+        value *= factor
         self._linking = True
         self.vars[dst].set(fmt(round(value, 4)))
         self._linking = False
 
     def ok(self):
         gw, i = self.gw, self.i
-        try:
-            along = float(calc(self.vars["along"].get())) / 100
-            value = float(calc(self.vars["value"].get())) / 100
-            if not (math.isfinite(along) and math.isfinite(value)):
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        along, value = read_number(self.vars["along"].get()), read_number(self.vars["value"].get())
+        if along is None or value is None:
             return self.bell()
+        along, value = along / 100, value / 100
         pts = gw.pts
         if self.end:
             along = pts[i][0]

@@ -41,7 +41,7 @@ from roll.tiles import see_through
 from window import look
 from window.notes_wait import stale_ok
 from window.track_windows import AddTracksBox, PropertiesBox
-from window.widgets import Scrub, Tooltip, bad, good, remember_place
+from window.widgets import Scrub, Tooltip, bad, good, read_number, remember_place
 
 NAME_W = 150    # the names' column (x scale)
 RULER_H = 28    # the ruler: signatures on top, bar numbers under them
@@ -711,11 +711,8 @@ class TrackList(tk.Canvas):
 
     def on_faint(self, e):
         """The Faint % box typed / stepped: the tracks behind drawn again that faint (0 = not drawn)."""
-        try:
-            v = int(round(float(calc(self.faint_var.get()))))
-            if not 0 <= v <= 100:
-                raise ValueError
-        except (ValueError, ZeroDivisionError, OverflowError):
+        v = read_number(self.faint_var.get(), 0, 100, whole=True)
+        if v is None:
             return bad(e)
         if str(v) != self.faint_var.get():
             self.faint_var.set(str(v))

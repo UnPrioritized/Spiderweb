@@ -24,7 +24,7 @@ from window.hz_knobs import (BYPASS, KINDS, KNOBS, PERCENTS, UPDOWN, Dial, knob_
 from window.hz_effects import AMOUNT
 from window.hz_macros import LINK_AMOUNT, REST_MS, inside
 from window.synth_look import ENTRY, GRID, HEAD_FONT, MID, PANEL, PIC, Box, dark_list, dark_menu, mix
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, read_number
 
 # the knobs a source can move: knob -> the effect line it makes (hzbass.MOD_LINES; "wave" = the picked waveform's),
 # or itself: a knob that makes no line, read by the engine where it's used (hzbass.MOD_SETTINGS)
@@ -264,11 +264,8 @@ class SynthMod:
         e.config(style=ENTRY)
         if var.get() == self.mod_amount_text.get(i):
             return
-        try:
-            v = float(calc(var.get()))
-            if not -100 <= v <= 100:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):  # (back to the last good value)
+        v = read_number(var.get(), -100, 100)
+        if v is None:  # (back to the last good value)
             var.set(self.mod_amount_text.get(i, "0"))
             return
         self.mod_amount_text[i] = var.get()
@@ -424,11 +421,8 @@ class SynthMod:
         if var.get() == self.mod_text.get((src, key)):
             return
         lo, hi = KINDS[kind][1:3]
-        try:
-            v = float(calc(var.get()))
-            if not lo <= v <= hi:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):  # (back to the last good value, as the other knobs' boxes)
+        v = read_number(var.get(), lo, hi)
+        if v is None:  # (back to the last good value, as the other knobs' boxes)
             var.set(self.mod_text.get((src, key), ""))
             return
         self.mod_text[(src, key)] = var.get()

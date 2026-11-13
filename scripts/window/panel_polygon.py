@@ -3,14 +3,13 @@ star's inner size and a crossing star's skip. They change the selected polygons,
 gets. The shape of the sides and the pattern along them are formulas (right-click ▸ Formula: formula_host.py's
 PolygonHost; their numbers show in the formula part of the panel)."""
 
-import math
 import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
-from files.mathexpr import calc, fmt
+from files.mathexpr import fmt
 from notes.polygon import MAX_POINTS, STYLES, update_polygon
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, read_number, unchanged
 
 STYLE_NAMES = [tr("panel_polygon.style_" + s) for s in STYLES]
 # name: (lowest, highest, steps (step, Shift step, Ctrl step), whole numbers only)
@@ -117,11 +116,8 @@ class PolygonPanel:
         if self._loading or str(e.cget("state")) == "disabled" or left and unchanged(e):
             return
         lo, hi, _, whole = NUMBERS[name]
-        try:
-            value = float(calc(self.polygon_vars[name].get()))
-            if not math.isfinite(value) or not lo <= value <= hi or whole and value != int(value):
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        value = read_number(self.polygon_vars[name].get(), lo, hi)
+        if value is None or whole and value != int(value):
             bad(e)
             return
         good(e)

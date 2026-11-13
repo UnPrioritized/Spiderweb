@@ -12,7 +12,7 @@ from notes.claw import (CLAW_DEFAULTS, COUNTS, MAX_COUNT, MAX_PERIOD, MAX_SLICES
                         clean_period)
 from window import look
 from window.tool_window import Knob, ToolWindow
-from window.widgets import Scrub, Tooltip, bad, good, grid_shown, unit_word, wheel_ready, wheel_turns
+from window.widgets import Scrub, Tooltip, bad, good, grid_shown, read_number, unit_word, wheel_ready, wheel_turns
 
 MODES = [("time", tr("claw.by_time")), ("notes", tr("claw.by_notes")), ("keys", tr("claw.by_keys")),
          ("chords", tr("claw.by_chords")), ("random", tr("claw.random"))]
@@ -166,11 +166,8 @@ class ClawWindow(ToolWindow):
             return
         lo, hi = {"keep": (1, MAX_COUNT), "skip": (0, MAX_COUNT), "pct": (0, 100), "cut": (1, 99),
                   "dist": (-100, 100), "period": (1 / self.app.ppq, MAX_PERIOD)}[key]
-        try:
-            v = float(calc(text))
-            if not lo - 1e-9 <= v <= hi or key in ("keep", "skip") and v != int(v):
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        v = read_number(text, lo - 1e-9, hi)
+        if v is None or key in ("keep", "skip") and v != int(v):
             e.good_text = self.shown_text(key)  # (back to what is in use: the knob may have moved since)
             bad(e)
             return
@@ -287,11 +284,8 @@ class ClawWindow(ToolWindow):
         """A Trash every box typed / dragged: slice k of n (k never past n)."""
         e, var = self.trash_entries[which], self.trash_vars[which]
         k, n = self.claw["trash"] or [1, 4]
-        try:
-            v = float(calc(var.get()))
-            if not 1 <= v <= MAX_SLICES or v != int(v):
-                raise ValueError
-        except (ValueError, ZeroDivisionError):
+        v = read_number(var.get(), 1, MAX_SLICES)
+        if v is None or v != int(v):
             e.good_text = str(k if which == "k" else n)
             bad(e)
             return

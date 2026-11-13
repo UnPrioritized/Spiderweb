@@ -15,7 +15,7 @@ from files.mathexpr import calc, fmt
 from notes.hzbass import MACROS, RACK
 from window.hz_knobs import KINDS, KNOBS, PERCENTS, UPDOWN, Dial, knob_of, text_key, value_of
 from window.synth_look import ENTRY, HEAD_FONT, MID, PANEL, Box, TEXT, dark_menu
-from window.widgets import Scrub, Tooltip
+from window.widgets import Scrub, Tooltip, read_number
 
 MACRO_COLOURS = ("#f0b43c", "#4fd1c5", "#c084fc", "#f472b6")
 LINK_AMOUNT = 0.5  # how far a new link moves its knob (of its turn, the macro all the way)
@@ -261,11 +261,8 @@ class SynthMacros:
         e.config(style=ENTRY)
         if var.get() == self.macro_text[i]:
             return
-        try:
-            v = float(calc(var.get()))
-            if not 0 <= v <= 100:
-                raise ValueError
-        except (ValueError, ZeroDivisionError):  # (back to the last good value, as the other knobs' boxes)
+        v = read_number(var.get(), 0, 100)
+        if v is None:  # (back to the last good value, as the other knobs' boxes)
             var.set(self.macro_text[i] or "0")
             return
         self.macro_text[i] = var.get()
