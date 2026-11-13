@@ -1339,6 +1339,18 @@ def heard_kind(sh, ppq, keys):
     return moved_rows(n, None, T0, K0, 4), tr.astype(np.int64)
 
 
+def colours_first(sh):
+    """A sliced piece whose WHOLE (its pages / Glue now in the piece's cut) ran its colour steps before its pages
+    (Recolour order names "page" after a colour step): the whole's pages see the colours, so a Glue only joins notes of
+    one colour (engine.fx_notes, sliced.source; sweep 219222248)."""
+    r = sh.get("recolour")
+    o = r.get("order") if isinstance(r, dict) else None
+    if not isinstance(o, list) or PAGE not in o or o.index(PAGE) == 0 or sh.get("fx"):
+        return False
+    whole = (sh.get("cut") or {}).get("whole") or {}
+    return bool(whole.get("glue") or whole.get("fx"))
+
+
 def colour_split(sh):
     """recolour.page_split for shape sh (a Recolour on): its colour steps that run before one of its note tool pages,
     or None (all after them: no "page" in its saved order, or every page entry first)."""
@@ -1427,8 +1439,9 @@ def fx_notes(sh, ppq, keys, get):
                 and (sh.get("cut") or sh.get("colour_cut"))
                 and not (rule.get("frame") or (1, 0))[1]):  # (turned: notes made anew)
             base = without_recolour(sh)
-            if sh.get("cut") and sh.get("_order_was"):  # (the whole ran its colour steps between its pages: its
-                base["_whole_colours"] = sh["recolour"]  # pages after them see the colours; sliced.source)
+            if sh.get("cut") and (sh.get("_order_was") or colours_first(sh)):  # (the whole ran its colour steps
+                base["_whole_colours"] = sh["recolour"]  # between its pages: its pages after them see the colours;
+                # sliced.source)
             notes, tracks = get(base)
             got = stirred_piece(sh, notes, tracks, held_, get, gate, rule)
             if got is not None:
