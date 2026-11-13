@@ -9,10 +9,12 @@ import re
 import tkinter as tk
 from tkinter import ttk
 
+import numpy as np
+
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.hzbass import NOTE_BEND_MOST, TUNE, pitch
-from roll.roll_shared import CTRL, note_name
+from roll.roll_shared import CTRL, SHIFT, note_name
 from window import look
 from window.widgets import REDO_KEYS, UNDO_KEYS, remember_place
 
@@ -175,14 +177,35 @@ RAIL_LIFT = 6  # px: the depth rail sits this far above the top copy's row (at t
 RAIL_NEAR = 6  # px: a press this near a rail point grabs it; this near its line (double-click) adds one
 
 
+RAIL_SAMPLES = 17  # a curved piece of the rail is drawn / followed in this many spots
+
+
 def rail_value(pts, u):
-    """The rail's spread (cents) at u (0..1 along the note): straight between its points."""
+    """The rail's spread (cents) at u (0..1 along the note): between its points straight, or curved (a point's 3rd
+    number = its piece's curve, bend_of's number like the wobble's depth line; user 2026-11-13: Alt+drag)."""
     if u <= pts[0][0]:
         return pts[0][1]
-    for (u0, s0), (u1, s1) in zip(pts, pts[1:]):
+    for a, b in zip(pts, pts[1:]):
+        (u0, s0), (u1, s1) = a[:2], b[:2]
         if u <= u1:
-            return s1 if u1 <= u0 else s0 + (s1 - s0) * (u - u0) / (u1 - u0)
+            if u1 <= u0:
+                return s1
+            t = (u - u0) / (u1 - u0)
+            if len(a) > 2 and a[2]:
+                from notes.hz_lines import bent_part
+                t = float(bent_part(np.array([t]), np.array([float(a[2])]))[0])
+            return s0 + (s1 - s0) * t
     return pts[-1][1]
+
+
+def rail_spots(pts):
+    """Where a rail's line is read / drawn (0..1 along the note): its points + RAIL_SAMPLES spots in every curved
+    piece."""
+    spots = {p[0] for p in pts}
+    for a, b in zip(pts, pts[1:]):
+        if len(a) > 2 and a[2] and b[0] > a[0]:
+            spots |= {a[0] + (b[0] - a[0]) * k / (RAIL_SAMPLES - 1) for k in range(RAIL_SAMPLES)}
+    return sorted(spots)
 
 
 def railed(n, pts, count, ids):
@@ -196,7 +219,7 @@ def railed(n, pts, count, ids):
         return copies
     own = [list(p) for p in n.get("bend") or ([0.0, 0.0], [1.0, 0.0])]
     curved = any(len(p) > 2 for p in own)
-    spots = sorted({p[0] for p in pts} | ({k / 32 for k in range(33)} if curved else set()))
+    spots = sorted(set(rail_spots(pts)) | ({k / 32 for k in range(33)} if curved else set()))
     for m in copies:
         f = max(-1.0, min(1.0, (pitch(m) - pitch(n)) * 100.0 / most))
         if abs(f) < 1e-9:
@@ -347,10 +370,21 @@ class HzNoteTools:
 
     def rail_xy(self, r):
         n = r["base"]
-        return [(self.x_of(n["t"] + u * n["len"]), self.rail_y(r, s)) for u, s in r["pts"]]
+        return [(self.x_of(n["t"] + p[0] * n["len"]), self.rail_y(r, p[1])) for p in r["pts"]]
+
+    def rail_path(self, r, spread=None):
+        """The rail's line as drawn: [(x, y, piece number), ...] (curved pieces in RAIL_SAMPLES spots); spread =
+        the y of a spread (default: the top edge's rail_y)."""
+        n, pts = r["base"], r["pts"]
+        y_of = spread or (lambda s: self.rail_y(r, s))
+        out = []
+        for u in rail_spots(pts):
+            j = max(0, min(len(pts) - 2, sum(p[0] <= u for p in pts) - 1))
+            out.append((self.x_of(n["t"] + u * n["len"]), y_of(rail_value(pts, u)), j))
+        return out
 
     def rail_hit(self, x, y):
-        """("pt", j) a rail point, ("line", u) on its line between two points, or None."""
+        """("pt", j) a rail point, ("line", u, j) on its line in piece j, or None."""
         r = self.rail_live()
         if r is None or self.drag:
             return None
@@ -359,10 +393,11 @@ class HzNoteTools:
         for j, (px, py) in enumerate(xy):
             if abs(x - px) <= near and abs(y - py) <= near:
                 return "pt", j
-        for (x0, y0), (x1, y1) in zip(xy, xy[1:]):
+        path = self.rail_path(r)
+        for (x0, y0, j), (x1, y1, _) in zip(path, path[1:]):
             if x0 <= x <= x1 and x1 > x0 and abs(y - (y0 + (y1 - y0) * (x - x0) / (x1 - x0))) <= near:
                 n = r["base"]
-                return "line", (self.beat_at(x) - n["t"]) / max(n["len"], 1e-12)
+                return "line", (self.beat_at(x) - n["t"]) / max(n["len"], 1e-12), j
         return None
 
     def rail_remade(self, r):
@@ -389,7 +424,14 @@ class HzNoteTools:
         hit = self.rail_hit(e.x, e.y)
         if not hit:
             return False
-        if hit[0] == "line":  # (a press on its line does nothing: a double-click there adds a point, rail_double)
+        if hit[0] == "line":
+            # (Alt+drag on a piece = its curve, like the wobble's depth / speed lines (user 2026-11-13); a plain press
+            # on its line does nothing: a double-click there adds a point, rail_double)
+            if self.curving(e.state):
+                self.rail_hold(e, self.rail, hit[2])
+                self.drag["curve"] = True
+                self.drag["bend0"] = float(self.rail["pts"][hit[2]][2]) if len(self.rail["pts"][hit[2]]) > 2 else 0.0
+                return True
             self.drop_drag()
             return True
         return self.rail_hold(e, self.rail, hit[1])
@@ -409,7 +451,18 @@ class HzNoteTools:
             u = hit[1]
         j = sum(p[0] <= u for p in pts)
         pts0 = copy.deepcopy(pts)
-        pts.insert(j, [u, rail_value(pts, u)])
+        new = [u, rail_value(pts, u)]
+        a, b = pts[j - 1], pts[j]
+        if len(a) > 2 and a[2]:  # (a point in a curved piece: both halves keep the curve's shape, nearest)
+            from window.hz_sketch import split_curve
+            parts = split_curve(float(a[2]), (u - a[0]) / max(b[0] - a[0], 1e-12))
+            del a[2:]
+            if parts:
+                if abs(parts[0]) > 1e-6:
+                    a.append(round(parts[0], 4))
+                if abs(parts[1]) > 1e-6:
+                    new.append(round(parts[1], 4))
+        pts.insert(j, new)
         self.rail_hold(e, r, j, moved=True)
         self.drag["pts0"] = pts0
         return True
@@ -423,6 +476,14 @@ class HzNoteTools:
         d["moved"] = True
         r, j = self.rail, d["j"]
         pts, n = r["pts"], r["base"]
+        if d.get("curve"):  # (Alt+drag a piece: its curve, as the wobble's depth line: up = towards the higher end)
+            from window.hz_sketch import DEPTH_CURVE_PX, curve_to
+            bend = (d["y"] - e.y) / (DEPTH_CURVE_PX * self.s) * (1.0 if pts[j + 1][1] > pts[j][1] else -1.0)
+            curve_to(pts, j, bend + d["bend0"], e.state & SHIFT)
+            self.rail_remade(r)
+            self.redraw()
+            self.show_status(e)
+            return True
         lift = self.sy / 2 + RAIL_LIFT * self.s
         s = max(0.0, min(DETUNE_MOST, (self.pitch_at(e.y + lift) - pitch(n)) * 100.0))
         s = float(round(s)) if e.state & CTRL else round(s / DETUNE_STEP) * DETUNE_STEP
@@ -465,7 +526,7 @@ class HzNoteTools:
     def rail_delete_dragged(self):
         """Delete while a rail point is held: a middle one goes (one step); an end: the drag is called off."""
         d, r = self.drag, self.rail
-        if not 0 < d["j"] < len(r["pts"]) - 1 or not self.rail_can_drop(r, d["j"], d["pts0"]):
+        if d.get("curve") or not 0 < d["j"] < len(r["pts"]) - 1 or not self.rail_can_drop(r, d["j"], d["pts0"]):
             return self.cancel_drag()
         self.end_drag()
         del r["pts"][d["j"]]
@@ -544,10 +605,9 @@ class HzNoteTools:
         xy = self.rail_xy(r)
         width = max(2, round(2 * s))
         base = pitch(r["base"])
-        low = [(x, self.pitch_y(base - sv / 100.0) + self.sy / 2 + RAIL_LIFT * s) for (x, _), (_, sv) in
-               zip(xy, r["pts"])]
-        c.create_line(*[v for p in low for v in p], fill=look.HZ_RAIL, width=1, dash=(3, 3))
-        c.create_line(*[v for p in xy for v in p], fill=look.HZ_RAIL, width=width)
+        low = self.rail_path(r, lambda sv: self.pitch_y(base - sv / 100.0) + self.sy / 2 + RAIL_LIFT * s)
+        c.create_line(*[v for p in low for v in p[:2]], fill=look.HZ_RAIL, width=1, dash=(3, 3))
+        c.create_line(*[v for p in self.rail_path(r) for v in p[:2]], fill=look.HZ_RAIL, width=width)
         q = 3.5 * s
         held = self.drag["j"] if self.drag and self.drag["kind"] == "railpt" else -1
         for j, (x, y) in enumerate(xy):

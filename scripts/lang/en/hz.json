@@ -111,7 +111,7 @@
  "hz.step_detune_rail": "Hz bass: quick detune spread",
  "hz.step_detune_off": "Hz bass: quick detune called off",
  "hz.rail_held": "Spread here: {cents} cents each way (Ctrl: any cent, Shift: any tick, Delete: point goes, Esc: cancel)",
- "hz.rail_hint": "Teal rail: drag its points to change the spread over time, double-click it to add a point, right-click a point to remove it. Enter: done, Esc: back to one note",
+ "hz.rail_hint": "Teal rail: drag its points to change the spread over time, double-click it to add a point, Alt+drag between two points to curve it, right-click a point to remove it. Enter: done, Esc: back to one note",
  "hz.bend_menu": "Bend",
  "hz.bend_copy": "Copy bend",
  "hz.bend_paste": "Paste bend",
