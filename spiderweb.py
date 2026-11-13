@@ -27,7 +27,10 @@ Files (the scripts live in scripts/, one subfolder per group):
     panel_gliss.py   the panel's Glissando settings: grids, step, thickness, note length, picked keys
     panel_text.py    the panel's text settings (font, size, spacing, threshold, grow)
     font_dialog.py   the font window (type a font's name or pick one)
-    widgets.py       tooltips
+    widgets.py       small shared widgets: number boxes, dropdowns, lists (and every name from the three below)
+    widgets_place.py where windows open: kept on the screen, remembered places, centred over the main window
+    widgets_wheel.py the mouse wheel rules: click first, Linux / Mac wheel and buttons
+    widgets_tips.py  tooltips and list tips
     side_panel.py    the side panel of the main window and the drawer
     snap_picker.py   the Snap dropdown (note pictures) and the Customised snap window
     tool_picker.py   the drawing tools' button: the tool picked last, its list and pinned tools
