@@ -93,6 +93,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     format_window.py the colour list format editor (live output, tags, codes, the user's formats)
     paste_window.py  Paste colours: colours read out of a player's settings text into the picture
     chop_window.py   the Chop window (rhythm list, a strip to draw rhythms, saved rhythms) + quick chop (Ctrl+U)
+    props_text.py    the Properties window's words and numbers (what each of its lines shows)
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse editing
     roll_draw.py     painting the grid, notes, handles, keyboard, ruler
