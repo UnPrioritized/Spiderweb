@@ -48,7 +48,7 @@ Windows, nothing to install. Linux and Windows users can also [run it from sourc
 
 | Every key a line crosses gets a note | Nested fill: copies inside copies | Hz bass synth window |
 |---|---|---|
-| ![A straight line and a curve turning into stairs of notes](pictures/lines.png) | ![A circle filled with rings of notes in four colours](pictures/nested.png) | ![The Hz bass synth window with knobs, tabs and a keyboard](pictures/synth.png) |
+| ![A straight line and a curve turning into stairs of notes](pictures/lines.png) | ![A circle filled with rings of notes in four colours, beside a star filled with tiles](pictures/nested.png) | ![The Hz bass synth window with knobs, tabs and a keyboard](pictures/synth.png) |
 
 | Stir: the colours you drew, swirled | Draw on Domino: Spiderweb's tools on Domino's piano roll |
 |---|---|

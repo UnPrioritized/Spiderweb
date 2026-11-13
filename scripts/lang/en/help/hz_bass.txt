@@ -1,4 +1,4 @@
-Spam so fast that the repeats sound like a tone. It is best heard after the MIDI is rendered to an audio file; the Preview button in its window gives a quick idea of it without leaving Spiderweb.
+Spam so fast that the repeats sound like a tone. It is best heard after the MIDI is rendered to an audio file; the [page:hz_preview|Preview] button in its window gives a quick idea of it without leaving Spiderweb.
 
 Drag up or down on the piano roll where it should start: the red mark shows the keys it will repeat (more keys = a thicker tone, not a different one). You can also click, move the mouse and click again.
 
@@ -8,10 +8,10 @@ To change the keys it repeats later, drag the top or bottom side of its box on t
 
 The notes count from the shape's start: drag its left side and every note moves with it, keeping its length (nothing is stretched). Moving only the end leaves the notes where they are.
 
-With short gates the tone wobbles (Alternating) or is off (Fixed): an orange line in the panel says so. A higher PPQ fixes it. The tone follows the tempo under the shape, glides and jumps too (Conductor pane). When that tempo changes later, or the shape moves onto another tempo, the tone is off: an orange line says so, and Update Hz bass makes it right again.
+With short gates the tone wobbles (Alternating) or is off (Fixed): an orange line in the panel says so. A higher PPQ fixes it. The tone follows the tempo under the shape, glides and jumps too ([page:conductor|Conductor pane]). When that tempo changes later, or the shape moves onto another tempo, the tone is off: an orange line says so, and Update Hz bass makes it right again.
 
-Any custom shape with Spam or Outline spam can have Hz bass too: tick Hz bass in the panel for one tone, or press Notes… to place notes for it. The shape keeps its length (notes past its end aren't used) unless Shape length follows the notes is ticked in the window's Hz settings….
+Any [page:custom|custom shape] with Spam or Outline spam can have Hz bass too: tick Hz bass in the panel for one tone, or press Notes… to place notes for it. The shape keeps its length (notes past its end aren't used) unless Shape length follows the notes is ticked in the window's Hz settings….
 
 Spam text can have one too: one tone for all the letters, and the text keeps its own length. Funnels too: see [page:funnel|Funnel].
 
-The rest is in the Hz bass section of this Help: placing notes, the tone, slides, the preview, effects and the synth window.
+The rest is in the Hz bass section of this Help: [page:hz_notes|placing notes], [page:hz_tone|the tone], [page:hz_slides|slides], the preview, [page:hz_effects|effects] and the synth window.

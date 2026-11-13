@@ -1,4 +1,4 @@
-Tools: V Select, K Slice, J Lasso, L Line, P Polyline, F Freehand, C Curve, A Arc, S Custom shape, O Circle, Q Polygon, N Funnel, X Text, H Hz bass, I Image. G = Live shape on / off. M = Mask on / off.
+Tools: V [page:select|Select], K [page:slice|Slice], J [page:lasso|Lasso], L [page:line|Line], P [page:poly|Polyline], F [page:free|Freehand], C [page:curve|Curve], A [page:arc|Arc], S [page:custom|Custom shape], O [page:box|Circle], Q Polygon, N [page:funnel|Funnel], X [page:text|Text], H [page:hz_bass|Hz bass], I [page:picture|Image]. G = [page:live|Live shape] on / off. M = [page:masks|Mask] on / off.
 
 Drawing: Shift = don't snap. Ctrl = perfect (circle, equal-sided polygon or star, proportions). Esc = cancel what's half drawn. Enter, double-click or right-click = finish a polyline (right-click drops an unfinished arc or a shape started with a click).
 
@@ -8,7 +8,7 @@ Select: click a selected shape again = the next shape under it. Ctrl+drag after 
 
 Wheel = scroll, Shift+wheel = sideways, Ctrl+wheel = next / previous track, Ctrl+Alt+wheel = zoom, Ctrl+Shift+wheel = zoom time, Alt+wheel = zoom pitch.
 
-Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) undo / redo (see History), Ctrl+A select all, Ctrl+C / Ctrl+X / Ctrl+V copy / cut / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Ctrl+G join into one curve, Ctrl+Shift+G split into separate shapes, Ctrl+R turn into live shape, Alt+W claw machine, Alt+S strum, Alt+U chop, Ctrl+U quick chop, Alt+Enter Properties, Esc clear highlight / unpick a stroke. With a stroke of a live shape picked, the copy / paste / flip / turn keys work on that stroke.
+Editing: Del delete, Ctrl+D duplicate, Ctrl+Z / Ctrl+Y (or Ctrl+Shift+Z) [page:undo|undo / redo] (see [page:history|History]), Ctrl+A select all, Ctrl+C / Ctrl+X / Ctrl+V copy / cut / paste, Ctrl+H / Ctrl+J flip, Ctrl+Left / Ctrl+Right turn 90°, Ctrl+G [page:join|join into one curve], Ctrl+Shift+G split into separate shapes, Ctrl+R [page:turn_live|turn into live shape], Alt+W [page:claw|claw machine], Alt+S [page:strum|strum], Alt+U [page:chop|chop], Ctrl+U quick chop, Alt+Enter [page:properties|Properties], Esc clear highlight / unpick a stroke. With a stroke of a live shape picked, the copy / paste / flip / turn keys work on that stroke.
 
 Hold W = see the piano roll as it will be exported (with Keep notes made there and Wrap them around on; see [page:offrange|Notes past the keys]).
 
@@ -16,12 +16,12 @@ Playing: Space play / stop. Click the bar numbers = move the play line. Drag alo
 
 Curves: Alt+drag a handle = sharp corner, Alt+drag an anchor = new handles, Ctrl = change only this curve (linked funnel curves).
 
-Number boxes: drag the name, Up / Down, wheel after a click; Shift = big steps, Ctrl = small.
+[page:numbers|Number boxes]: drag the name, Up / Down, wheel after a click; Shift = big steps, Ctrl = small.
 
 Tab = the piano roll ↔ the track list (see [page:tracks|Track list]).
 
 Typing a text: Ctrl+Left / Ctrl+Right jump a word, Ctrl+Backspace / Ctrl+Delete erase one (see [page:text|Text]).
 
-F1 = Help. Ctrl+S = save. Ctrl+, = Settings. Ctrl+Shift+C = Copy to Domino (notes copied in Domino paste with Ctrl+V).
+F1 = Help. Ctrl+S = save. Ctrl+, = [page:settings|Settings]. Ctrl+Shift+C = [page:domino|Copy to Domino] (notes copied in Domino paste with Ctrl+V).
 
-The drawer and the Hz bass window have keys of their own: see their pages.
+The [page:drawer|drawer] and the Hz bass window have keys of their own: see their pages.

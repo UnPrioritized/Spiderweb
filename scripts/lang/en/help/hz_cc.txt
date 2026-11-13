@@ -1,4 +1,4 @@
-The lines under the "MIDI CC" row in the Effects pane make no notes. They go into the MIDI as messages, and the player changes the sound with them:
+The lines under the "MIDI CC" row in the [page:hz_effects|Effects pane] make no notes. They go into the MIDI as messages, and the player changes the sound with them:
 
 Cutoff (CC 74): darker, like a synth's filter (64 = as it is; most players only make it darker, not brighter). The soundfont does the filtering, and some soundfonts don't react to it.
 
@@ -10,11 +10,11 @@ Pan (CC 10): left or right.
 
 Pitch wheel: bends every note up or down, up to 12 keys each way.
 
-They work like every other line: repeats, Plays once per note, sustain points, MOD tab links, presets.
+They work like every other line: repeats, [page:hz_envelope|Plays once per note], sustain points, MOD tab links, presets.
 
 ## Filter box
 
-The synth window's Filter box (MIDI CC) draws the Cutoff line for you: Cutoff, plus Amount and its own Attack, Decay, Sustain and Release, so the Cutoff moves at each note like a synth's filter. Drawing the line by hand on the Draw tab works too.
+The synth window's Filter box (MIDI CC) draws the Cutoff line for you: Cutoff, plus Amount and its own Attack, Decay, Sustain and Release, so the Cutoff moves at each note like a synth's filter. Drawing the line by hand on the [page:hz_fx|Draw tab] works too.
 
 The MOD tab's LFOs and envelopes can move every Filter knob. Amount and the envelope's knobs only move while the line is as the box made it (not drawn by hand).
 
@@ -28,7 +28,7 @@ The tremolo keeps waving while the last notes ring out. The Volume never fades f
 
 When you've drawn an Expression line too, the boost moves on top of it, like a second fader. Right-click Tremolo or Volume in the Effects pane → Boost with CC switches it on and off.
 
-With one channel, a chord's notes share one boost that follows the newest note. Voice box → CC → Own channel per note gives each note its own.
+With one channel, a chord's notes share one boost that follows the newest note. [page:hz_voice|Voice box] → CC → Own channel per note gives each note its own.
 
 ## The whole channel hears them
 
@@ -36,17 +36,17 @@ A MIDI message changes everything on its channel, so other shapes on the same ch
 
 When you play in Spiderweb, a Hz bass with CC lines is played on a channel of its own, as long as one is free. Built-in BASSMIDI has up to 90 channels; other MIDI outs have only 16.
 
-A MIDI file you export and Export to Domino keep the channels as they are. To keep other shapes out of it, pick Multi channel. There, a Hz bass with CC lines has its channel to itself for as long as its lines are sent, from just before its first note to the end of their run-on (see below), whichever Split is picked: no other shape gets that channel then, on any key. Before and after that, other shapes may use the channel again. Some shapes' colours may change because of it. Images and Apply mask copies keep their own channels, so they can still share it.
+A MIDI file you export and [page:domino|Export to Domino] keep the channels as they are. To keep other shapes out of it, pick [page:channels|Multi channel]. There, a Hz bass with CC lines has its channel to itself for as long as its lines are sent, from just before its first note to the end of their run-on (see below), whichever Split is picked: no other shape gets that channel then, on any key. Before and after that, other shapes may use the channel again. Some shapes' colours may change because of it. Images and Apply mask copies keep their own channels, so they can still share it.
 
-The Hz bass window says so in orange when the CC lines change other shapes: "CC also changes 2 other shapes" (in the MIDI file), or "CC reaches other notes while playing" (a MIDI out with only 16 channels, or Built-in BASSMIDI with all 90 in use). Point at it to see which shapes, numbered by their place in the Shapes list.
+The Hz bass window says so in orange when the CC lines change other shapes: "CC also changes 2 other shapes" (in the MIDI file), or "CC reaches other notes while playing" (a MIDI out with only 16 channels, or Built-in BASSMIDI with all 90 in use). Point at it to see which shapes, numbered by their place in the [page:shapes|Shapes list].
 
-The lines run on after the sound ends, then every value goes back to where players start, so shapes later on the channel aren't changed. How long they run on is the "CC run-on" in Settings… of the Hz bass window. With Auto ticked, it's as long as the soundfont's sound rings after a note (measured once the preview or Built-in BASSMIDI has opened the soundfont; 3 seconds until then). Untick Auto to type your own time, for example when the people who play your file use a soundfont with a longer release.
+The lines run on after the sound ends, then every value goes back to where players start, so shapes later on the channel aren't changed. How long they run on is the "CC run-on" in Settings… of the Hz bass window. With Auto ticked, it's as long as the soundfont's sound rings after a note (measured once the [page:hz_preview|preview] or Built-in BASSMIDI has opened the soundfont; 3 seconds until then). Untick Auto to type your own time, for example when the people who play your file use a soundfont with a longer release.
 
 ## Own channel per note
 
 With one channel (the start), every note of the Hz bass shares one set of lines: a line that plays once per note follows the newest note, and a chord's notes all hear the same values.
 
-Voice box → CC → Own channel per note gives each note its own channel and its own lines. A note joined to others by slides, Legato or Glide counts as one note. It needs Multi channel, and changes nothing while every CC line is switched off.
+Voice box → CC → Own channel per note gives each note its own channel and its own lines. A note joined to others by [page:hz_slides|slides], Legato or Glide counts as one note. It needs Multi channel, and changes nothing while every CC line is switched off.
 
 With the Arpeggio on, each step plays on the channel of the note you hold, like a synth's arpeggiator: 3 notes held use 3 channels, and each step starts its lines again.
 
@@ -56,7 +56,7 @@ Past 15 channels, every track of the MIDI file gets a port (A, B, C…), up to 2
 
 ## Live keys
 
-The live keys in the synth window play the CC lines too, as a quick copy: Cutoff, Pan and the Pitch wheel in small steps, each note keeping the value it started with.
+The [page:hz_live|live keys] in the synth window play the CC lines too, as a quick copy: Cutoff, Pan and the Pitch wheel in small steps, each note keeping the value it started with.
 
 ## Pitch wheel in Domino
 

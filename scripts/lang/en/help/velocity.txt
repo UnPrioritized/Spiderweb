@@ -1,4 +1,4 @@
-Tick Velocity pane (top) to show or hide it. The pane under the piano roll shows every note's velocity. Draw over the bars with Linear, Curve, Pencil or Formula. With a shape selected, only its notes change (the others fade); with nothing selected, every note under the drag.
+Tick Velocity pane (top) to show or hide it. The pane under the piano roll shows every note's velocity. Draw over the bars with Linear, Curve, Pencil or [page:formulas|Formula]. With a shape selected, only its notes change (the others fade); with nothing selected, every note under the drag.
 
 Select (the first button): drag across the pane to pick the shapes in that time, like dragging along the bar numbers. Drag inside the box to move them in time (Ctrl = copy, Shift = free); a click outside drops it. Double right-click switches between Select and the tool you used last.
 

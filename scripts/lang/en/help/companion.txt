@@ -1,6 +1,6 @@
 Draw on Domino (Project, beside Export MIDI) puts Spiderweb's drawing tools right on Domino's piano roll. Spiderweb's window hides and a small bar floats over Domino instead. What you draw lands on Domino's own grid and goes into Domino as real notes. If Domino isn't running, Spiderweb starts it (the first time it asks where Domino.exe is).
 
-It's experimental. Spiderweb works with Domino from the outside, following its window and putting notes in through Domino's own commands and clipboard. It has been tested, but not every song, setting and order of actions can be, so something could still go wrong: notes in the wrong place or missing, a step Ctrl+Z doesn't take back, or Domino closing. Save your song in Domino first and keep backups of songs that matter. The safe way always works: draw in Spiderweb, then Copy to Domino (Ctrl+Shift+C) and paste in Domino. Each start asks first, until you tick "Don't show this again".
+It's experimental. Spiderweb works with Domino from the outside, following its window and putting notes in through Domino's own commands and clipboard. It has been tested, but not every song, setting and order of actions can be, so something could still go wrong: notes in the wrong place or missing, a step Ctrl+Z doesn't take back, or Domino closing. Save your song in Domino first and keep backups of songs that matter. The safe way always works: draw in Spiderweb, then [page:domino|Copy to Domino] (Ctrl+Shift+C) and paste in Domino. Each start asks first, until you tick "Don't show this again".
 
 It works on Windows only. On Linux and macOS, and when Spiderweb or Domino runs through a layer that runs Windows programs on another system, the button isn't there; Copy to Domino and pasting work as usual.
 
@@ -14,7 +14,7 @@ It works on Windows only. On Linux and macOS, and when Spiderweb or Domino runs 
 
 • The tool button (Line, Curve, Funnel, Custom shape...): draw on Domino's piano roll with that tool, exactly like in Spiderweb. The tool you used last is picked again next time.
 
-• Take / Send / Bake: see below. ↔ and ↕ flip the shapes selected on Domino's piano roll; with none selected there, they flip the notes selected in Domino, in one click. Stir… and Sustain… open those windows for the selected shapes.
+• Take / Send / Bake: see below. ↔ and ↕ flip the shapes selected on Domino's piano roll; with none selected there, they flip the notes selected in Domino, in one click. [page:stir|Stir…] and [page:sustain|Sustain…] open those windows for the selected shapes.
 
 • Spiderweb: stop drawing on Domino and bring Spiderweb's window back.
 
@@ -26,11 +26,11 @@ The mouse wheel scrolls and zooms Domino as if you turned it over Domino itself 
 
 A shape you draw stays on Spiderweb's layer until you're done with it, so you can still change it (drag its points, a curve's handles...). It goes into Domino's current track, at the spot where you drew it, when you draw the next shape, go back to Domino's mouse, press Enter or Send, or press one of Domino's keys. Then it leaves Spiderweb's layer.
 
-Glissando: while the Glissando tool is in use, or a run is selected, Domino's piano keys on the left pick the run's keys, just like Spiderweb's own piano keys: click a key to hear it and pick that note in every octave, Ctrl+click for just that key. Picked keys light up blue over Domino's keys. With any other tool, or Domino's mouse, a click there is Domino's again.
+[page:gliss|Glissando]: while the Glissando tool is in use, or a run is selected, Domino's piano keys on the left pick the run's keys, just like Spiderweb's own piano keys: click a key to hear it and pick that note in every octave, Ctrl+click for just that key. Picked keys light up blue over Domino's keys. With any other tool, or Domino's mouse, a click there is Domino's again.
 
 Keys: while drawing, Esc, Enter, Ctrl+Z / Ctrl+Y for what you did here, Delete for selected shapes and the drawing tools' letters are Spiderweb's. Every other key (Space, Ctrl+S, the arrows...) goes on to Domino.
 
-Your project's own shapes are hidden while you draw on Domino, and come back when you go back to Spiderweb. With Single channel, overlapping notes on a key are fixed the way Single channel always does it (cut and stretched, or split around with "Split around instead of stretching"), together with the notes already in that Domino track; Domino's notes elsewhere in the track stay as they are. With Multi channel, each channel goes on its own track, from the current one down, with the channels those tracks already have; with Remove overlaps ticked, the overlaps are fixed against the notes already in those tracks too, the track order deciding which note wins; when the track list runs out, Spiderweb adds new tracks at the bottom with Domino's own Add Track (channel 10 is skipped unless "Use channel 10" is ticked). Ctrl+Z right after takes the notes out of Domino again and gives you the shape back to change; press Send to put it in again. Once you work in Domino itself, Domino's own Ctrl+Z takes over.
+Your project's own shapes are hidden while you draw on Domino, and come back when you go back to Spiderweb. With [page:channels|Single channel], overlapping notes on a key are fixed the way Single channel always does it (cut and stretched, or split around with "Split around instead of stretching"), together with the notes already in that Domino track; Domino's notes elsewhere in the track stay as they are. With Multi channel, each channel goes on its own track, from the current one down, with the channels those tracks already have; with Remove overlaps ticked, the overlaps are fixed against the notes already in those tracks too, the track order deciding which note wins; when the track list runs out, Spiderweb adds new tracks at the bottom with Domino's own Add Track (channel 10 is skipped unless "Use channel 10" is ticked). Ctrl+Z right after takes the notes out of Domino again and gives you the shape back to change; press Send to put it in again. Once you work in Domino itself, Domino's own Ctrl+Z takes over.
 
 ## Changing Domino's notes
 

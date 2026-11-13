@@ -1,4 +1,4 @@
-Curves (the Curve tool, funnel curves, curve strokes in the drawer and in live shapes) work like a pen tool.
+Curves (the [page:curve|Curve tool], [page:funnel_curves|funnel curves], curve strokes in the [page:drawer|drawer] and in [page:live|live shapes]) work like a pen tool.
 
 Handles: drag the dot at the end of a blue handle line to steer the curve (its direction) and set how strongly it pulls (its length). On a smooth anchor both handles turn together. Handles can be dragged with any tool.
 [clip:curves_pen-drag-handles]

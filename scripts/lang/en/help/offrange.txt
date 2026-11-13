@@ -1,4 +1,4 @@
-Settings → Piano roll → Keep notes made there: shapes keep the notes they make in the darker space past the keys (below the lowest key, above the highest one) and before bar 1, instead of losing them. Turn on Space past the keys or Space before the start first (the tick stays grey until then).
+[page:settings|Settings] → Piano roll → Keep notes made there: shapes keep the notes they make in the darker space past the keys (below the lowest key, above the highest one) and before bar 1, instead of losing them. Turn on Space past the keys or Space before the start first (the tick stays grey until then).
 
 ## How they look
 
@@ -6,13 +6,13 @@ Kept notes are drawn see-through in their own colours. Opacity (1 to 100 %) sets
 
 ## Working with them
 
-Every tool works on them like on other notes: select them (click or box), move, flip, Slice, Lasso, Gate sensitive merge, velocity lines, Fold tracks, Turn into plain notes, copy and paste, undo. Drag a shape back inside the keys and its notes are ordinary notes again. Gate sensitive merge can pull a shape hanging past the top key down into the gaps of a shape below it.
+Every tool works on them like on other notes: select them (click or box), move, flip, [page:slice|Slice], [page:lasso|Lasso], [page:merge|Gate sensitive merge], velocity lines, [page:fold|Fold tracks], Turn into plain notes, copy and paste, undo. Drag a shape back inside the keys and its notes are ordinary notes again. Gate sensitive merge can pull a shape hanging past the top key down into the gaps of a shape below it.
 
 They're saved with the project. They're not exported, played or copied out of Spiderweb, unless Wrap them around is ticked.
 
 ## Wrap them around
 
-With "Wrap them around in exports and Domino copies" ticked, the kept notes past the keys are put back onto the keys for Export MIDI, Export to Domino, Copy to Domino, Ctrl+C, playback and listening with a right-drag: one key above the highest key lands on the lowest key, one key below the lowest key lands on the highest one (by the project's Keys: 128 or 256). Notes before bar 1 are always left out. Wrapped notes count like any other note: in Single channel, a wrapped note on top of one already there shortens it, as overlapping notes always do.
+With "Wrap them around in exports and Domino copies" ticked, the kept notes past the keys are put back onto the keys for [page:files|Export MIDI], [page:domino|Export to Domino, Copy to Domino], Ctrl+C, playback and listening with a right-drag: one key above the highest key lands on the lowest key, one key below the lowest key lands on the highest one (by the project's Keys: 128 or 256). Notes before bar 1 are always left out. Wrapped notes count like any other note: in Single channel, a wrapped note on top of one already there shortens it, as overlapping notes always do.
 
 Show wrapped notes picks where you see them land, drawn faintly under your notes: Selected shapes (only the shapes you selected, with a dashed box round where they land), Always (every shape) or Off. Red marks show where a wrapped note lands on a note that's already there.
 

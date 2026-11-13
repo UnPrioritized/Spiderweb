@@ -32,18 +32,18 @@ Changes show on the piano roll at once, and the piano roll can still be used whi
 
 With several shapes selected, each keeps its own settings until you change them; a half-ticked box means they differ. A graph is the first shape's until you change something about it, then every shape takes it.
 
-The menu item has a tick while a selected shape has a side in use, and the Shapes list says (Subtracted). Untick Subtract from gates in the window to take it off.
+The menu item has a tick while a selected shape has a side in use, and the [page:shapes|Shapes list] says (Subtracted). Untick Subtract from gates in the window to take it off.
 
 ## With other features
 
-Gate subtract comes after everything else that makes the notes: the outline gate, Colours, Gate aware flip, glue, the Claw machine / Strum / Chop / Copy along a path pages and Sustain. Only Recolour comes after it (it only changes colours). They all work on the notes at full length, so Gate subtract never changes what they do. That's the order at first: [page:properties|Properties] can move it anywhere, and the steps after it then work on the shorter notes.
+Gate subtract comes after everything else that makes the notes: the outline gate, Colours, [page:gate_flip|Gate aware flip], [page:glue|glue], the [page:claw|Claw machine] / [page:strum|Strum] / [page:chop|Chop] / [page:path|Copy along a path] pages and [page:sustain|Sustain]. Only [page:recolour|Recolour] comes after it (it only changes colours). They all work on the notes at full length, so Gate subtract never changes what they do. That's the order at first: [page:properties|Properties] can move it anywhere, and the steps after it then work on the shorter notes.
 
 Flipping the shape sideways swaps the two sides: a note end becomes a note start, so a flipped copy is the mirror image of the original, gaps included. Switching Gate aware flip on or off swaps them too. A graph turns round with the shape when it runs across that way.
 
-Slicing and splitting keep it on every piece, and a graph across the shape is cut so every note keeps its gap. Pasted notes cut by Slice or the Lasso become plain notes as they sound: their gaps stay, but Gate subtract is no longer a setting on the pieces. With "Only notes that touch", notes that touched a note now in the other piece keep their gap, even when the pieces are moved apart. Join, Turn into live shape and Gate sensitive merge keep it when all the shapes have the same settings. An Add between group gets it step by step when both ends have it, and a step can have its own.
+Slicing and splitting keep it on every piece, and a graph across the shape is cut so every note keeps its gap. Pasted notes cut by [page:slice|Slice] or the [page:lasso|Lasso] become plain notes as they sound: their gaps stay, but Gate subtract is no longer a setting on the pieces. With "Only notes that touch", notes that touched a note now in the other piece keep their gap, even when the pieces are moved apart. [page:join|Join], [page:turn_live|Turn into live shape] and [page:merge|Gate sensitive merge] keep it when all the shapes have the same settings. An [page:between|Add between] group gets it step by step when both ends have it, and a step can have its own.
 
 Turn into plain notes, Apply mask copies and mask areas are made without it.
 
-A Hz bass and an image can't have it: a Hz bass has its own note lengths, and an image's notes are its picture.
+A [page:hz_bass|Hz bass] and an image can't have it: a Hz bass has its own note lengths, and an image's notes are its picture.
 
-On a shape with Recolour (Stir, Shuffle, Per chord, Clumps...), Warp or Liquify, this can also change the colours of notes elsewhere in the shape, because those colours depend on the notes around them. In Single channel that can also change where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
+On a shape with Recolour ([page:stir|Stir], Shuffle, Per chord, Clumps...), [page:warp|Warp] or [page:liquify|Liquify], this can also change the colours of notes elsewhere in the shape, because those colours depend on the notes around them. In Single channel that can also change where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.

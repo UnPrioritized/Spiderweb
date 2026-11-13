@@ -1,6 +1,6 @@
-Ripples is an Inside fill for custom shapes. Rings grow out from the shapes you draw inside the outline, each ring a bigger copy of the shape it grows from. Pick it under Inside in the side panel, like Fill, Spam, Nested and Tiles.
+Ripples is an [page:fill|Inside fill] for custom shapes. Rings grow out from the shapes you draw inside the outline, each ring a bigger copy of the shape it grows from. Pick it under Inside in the side panel, like Fill, Spam, [page:nested_tiles|Nested and Tiles].
 
-Each ring gets a colour of its own, so set Channels to Multi channel to see them.
+Each ring gets a colour of its own, so set [page:channels|Channels] to Multi channel to see them.
 
 ## How to draw it
 
@@ -33,7 +33,7 @@ Overlaps cancel out: on, sources that cross each other cut holes where they over
 
 Grow to: how big the biggest ring is, compared with the source as drawn. With Auto ticked the biggest ring grows just far enough to fill the whole frame.
 
-Cut at the outline: the rings stop at the frame. Untick it to let them grow past it, as far as Grow to says. You can cut them by hand afterwards with the Slice tool.
+Cut at the outline: the rings stop at the frame. Untick it to let them grow past it, as far as Grow to says. You can cut them by hand afterwards with the [page:slice|Slice] tool.
 
 No frame: when no closed shape holds the others, every shape you drew is a source, and the rings grow out freely to Grow to.
 [clip:ripples-free]

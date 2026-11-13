@@ -1,7 +1,7 @@
-Join: select two or more lines, polylines, freehand strokes, curves or arcs, then press Ctrl+G (or right-click one of them → Join shapes into one curve). They become one Curve shape: ends that touch are joined (with a corner there), and the curve's anchors and handles can be edited like any curve. Freehand strokes are turned into a smooth curve that follows them closely.
+Join: select two or more lines, polylines, freehand strokes, curves or arcs, then press Ctrl+G (or right-click one of them → Join shapes into one curve). They become one Curve shape: ends that touch are joined (with a corner there), and the curve's [page:curves_pen|anchors and handles] can be edited like any curve. Freehand strokes are turned into a smooth curve that follows them closely.
 [clip:join-touching]
 
-Shapes that don't touch stay separate pieces of the same curve: nothing is drawn between them and they make no notes there, but they're selected, moved, flipped and copied together. Each piece works like a shape of its own (its own row of tumours, range, graphs and last note). The squares at a piece's ends can't be removed.
+Shapes that don't touch stay separate pieces of the same curve: nothing is drawn between them and they make no notes there, but they're selected, moved, flipped and copied together. Each piece works like a shape of its own (its own row of [page:tumours|tumours], range, graphs and last note). The squares at a piece's ends can't be removed.
 [clip:join-pieces]
 
 Tumours: each shape keeps its own tumours after joining (even when they're the same), so no bump moves. The first time you change any tumour setting of the joined curve, the whole curve gets the settings shown in the tumour window, and the bumps run on across the joints. So set up each shape's tumours first, then join.
@@ -9,7 +9,7 @@ Tumours: each shape keeps its own tumours after joining (even when they're the s
 
 Each shape keeps its velocities (where shapes play at the same time, the first selected one's win). Last note: on or off, whichever keeps the most last notes where they were.
 
-Glue (on the whole shape; glue in a box is always dropped), Colours, Sustain, Gate subtract, Gate extend, Gate aware flip, a mask and the note tool pages (Claw machine, Strum, Chop, Copy along a path) are kept only when all the shapes have the same ones. If something would be dropped, or some last notes would move, Spiderweb asks first.
+[page:glue|Glue] (on the whole shape; glue in a box is always dropped), Colours, [page:sustain|Sustain], [page:subtract|Gate subtract], [page:extend|Gate extend], [page:gate_flip|Gate aware flip], a [page:masks|mask] and the note tool pages ([page:claw|Claw machine], [page:strum|Strum], [page:chop|Chop], [page:path|Copy along a path]) are kept only when all the shapes have the same ones. If something would be dropped, or some last notes would move, Spiderweb asks first.
 
 Split here: right-click a line, polyline, freehand stroke, curve or arc where you want to cut it → Split here. On an anchor or a polyline point it's cut there; anywhere else a point is added there first.
 
@@ -18,9 +18,9 @@ An arc becomes two arcs of the same circle; a freehand stroke is cut at its near
 Each half keeps the velocities it had, and its tumours stay where they were: each half gets its part of the Range and graphs (Fit is turned off, keeping the distance it had worked out). Only a bump across the cut is cut off, random sides are picked again and Lead in starts again at the cut.
 [clip:join-split-here]
 
-A piece cut off with Split here or the Slice tool keeps the notes it had as part of the whole shape. Right-click it → Turn into a complete shape: its notes follow its own line from then on (Ctrl+Z undoes it).
+A piece cut off with Split here or the [page:slice|Slice] tool keeps the notes it had as part of the whole shape. Right-click it → Turn into a complete shape: its notes follow its own line from then on (Ctrl+Z undoes it).
 
-Split into separate shapes (Ctrl+Shift+G, or right-click): a joined curve goes back to one curve per piece (and per shape that kept its own tumours). A custom shape, like one drawn with Live shape, splits into one shape per group of strokes that touch each other. A live shape made with Turn into live shape and not changed since shows Split back into the old shapes instead: it gives the old shapes back. Each part keeps the velocities it had.
+Split into separate shapes (Ctrl+Shift+G, or right-click): a joined curve goes back to one curve per piece (and per shape that kept its own tumours). A custom shape, like one drawn with [page:live|Live shape], splits into one shape per group of strokes that touch each other. A live shape made with [page:turn_live|Turn into live shape] and not changed since shows Split back into the old shapes instead: it gives the old shapes back. Each part keeps the velocities it had.
 [clip:join-split-shapes]
 
 Notes: a joined curve plays like one curve, so where two lines meet it doesn't start a new note the way two separate lines would.

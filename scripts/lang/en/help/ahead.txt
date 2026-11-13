@@ -1,4 +1,4 @@
-Rendered ahead (in the MIDI out list) makes the sound into audio a little ahead of the play line, in small pieces, and plays it from there. Since nothing has to sound at the very moment it's played, every note can ring, even in the densest walls, and the sound never breaks up or gets "Overloaded". Pick it in Settings (File menu) → Sound → MIDI out. It plays your soundfonts: the same stacked list as Built-in BASSMIDI (see [page:playback|Playing and listening]).
+Rendered ahead (in the MIDI out list) makes the sound into audio a little ahead of the play line, in small pieces, and plays it from there. Since nothing has to sound at the very moment it's played, every note can ring, even in the densest walls, and the sound never breaks up or gets "Overloaded". Pick it in [page:settings|Settings] (File menu) → Sound → MIDI out. It plays your soundfonts: the same stacked list as Built-in BASSMIDI (see [page:playback|Playing and listening]).
 
 ## Playing
 
@@ -12,7 +12,7 @@ Playing stops once the sound has died away, not a beat after the last note.
 
 While stopped, the sound is made from the play line too (Make ahead while stopped, on at first): once the play line rests half a second, making starts there, up to Render ahead seconds, with the faint grey over what's not made yet. So a heavy song can be waited out: when the grey is gone, Play starts at once. Moving the play line makes from the new place; what was already made elsewhere is kept for a while, so going back plays at once too.
 
-A loaded MIDI plays too, with your own shapes on top (muted tracks are left out). Changing it while playing (muting a track, Track Properties, Remove track, Extract, the Conductor pane) makes everything again from the play line; playing goes on. If the MIDI file itself changes on disk, playing stops and says so (load it again). Starting or jumping into the ring right after a heavy wall takes longer the first time (up to a minute): the notes still ringing there are worked out from the wall before it, so they sound as they should. Once made, going back there plays at once.
+A loaded MIDI plays too, with your own shapes on top (muted tracks are left out). Changing it while playing (muting a track, Track Properties, Remove track, Extract, the [page:conductor|Conductor pane]) makes everything again from the play line; playing goes on. If the MIDI file itself changes on disk, playing stops and says so (load it again). Starting or jumping into the ring right after a heavy wall takes longer the first time (up to a minute): the notes still ringing there are worked out from the wall before it, so they sound as they should. Once made, going back there plays at once.
 
 Right-drag listening, piano keys and the Hz bass window's keys can't be made ahead (the mouse decides them as you go): they sound through Built-in BASSMIDI, with the same soundfonts.
 
@@ -58,6 +58,6 @@ Render ahead, Slow down to keep up and Lower it by itself work at once, even whi
 
 31-EDO Audio plays through Rendered ahead too (see [page:edo31|31-EDO]).
 
-The Hz bass preview has an Engine choice of its own (Hz settings… → Preview): with Merlin or Kestrel picked there, it uses Rendered ahead's settings.
+The [page:hz_preview|Hz bass preview] has an Engine choice of its own (Hz settings… → Preview): with Merlin or Kestrel picked there, it uses Rendered ahead's settings.
 
 Merlin is part of Kestrel 1.4.0, by thtstickyboi (see [page:kestrel|Kestrel (GPU) playback]).

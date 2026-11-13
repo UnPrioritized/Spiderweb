@@ -1,6 +1,6 @@
-Tick Conductor pane (top, or View) to show or hide it. The pane under the piano roll (below the velocity pane) holds what the MIDI's conductor track holds: the tempo line, time signatures and key signatures. Drag the bar above it to resize it.
+Tick Conductor pane (top, or View) to show or hide it. The pane under the piano roll (below the [page:velocity|velocity pane]) holds what the MIDI's conductor track holds: the tempo line, time signatures and key signatures. Drag the bar above it to resize it.
 
-With no tempo points the song plays at 120 BPM, the MIDI standard. The tempo at the start is the point at bar 1: click there with the Line tool and type its BPM in the box below the tools. Projects saved with another BPM open with a point at bar 1 at that BPM.
+With no tempo points the song plays at 120 BPM, the MIDI standard. The tempo at the start is the point at bar 1: click there with the [page:line|Line tool] and type its BPM in the box below the tools. Projects saved with another BPM open with a point at bar 1 at that BPM.
 
 ## Drawing the tempo
 
@@ -83,7 +83,7 @@ Above, Keep the visual with Heard tempo picked: the file keeps showing 120 BPM (
 
 Turning Keep timing on puts a point at the part's end at the heard tempo's BPM there, so the sound goes on smoothly. It follows the heard line's end until you change it.
 
-A Keep timing part drawn faster than the tempo before it gives the MIDI file more ticks a second than the piano roll has. Tick Finer gates in Keep timing parts in the Hz bass window's Settings… and that Hz bass is made on those finer ticks there, so it buzzes less, most of all on high notes. Only the exported file changes: the piano roll and playback stay on the project's ticks.
+A Keep timing part drawn faster than the tempo before it gives the MIDI file more ticks a second than the piano roll has. Tick Finer gates in Keep timing parts in the [page:hz_bass|Hz bass] window's Settings… and that Hz bass is made on those finer ticks there, so it buzzes less, most of all on high notes. Only the exported file changes: the piano roll and playback stay on the project's ticks.
 
 Fit bar lines (top row, on at first): when Keep timing moves notes, the export adds time signatures so the bar lines in MIDI programs still sit on the bars you hear.
 
@@ -101,7 +101,7 @@ A MIDI file only has whole ticks, so Keep timing has limits. The pane marks each
 
 • Inside a catch-up's yellow area Keep timing is off: the catch-up needs the real tempo there.
 
-• Paste from Domino and Load MIDI bring in only the tempo the file shows; the heard line starts flat.
+• [page:domino|Paste from Domino] and [page:load_midi|Load MIDI] bring in only the tempo the file shows; the heard line starts flat.
 
 ## Time and key signatures
 
@@ -116,7 +116,7 @@ To change the bar lines without changing the sound (6/4 instead of 4/4, notes an
 
 ## Export and Domino
 
-Export MIDI, Copy to Domino and Export to Domino write the tempo line and the signatures, using only tempo values Domino keeps exactly. Copy to Domino takes them only after Ctrl+A (everything picked), or from the track list with a band on the bar numbers or a box reaching over its Conductor row; then they come first, so pick the Conductor track in Domino before pasting. To copy only the tempo: draw a box on the track list's Conductor row, or click this pane and pick what to copy, and press Copy to Domino (or Ctrl+C with "Ctrl+C also copies for Domino" ticked), then paste it on Domino's Conductor track. Built-in playback follows the tempo line too.
+[page:files|Export MIDI], [page:domino|Copy to Domino and Export to Domino] write the tempo line and the signatures, using only tempo values Domino keeps exactly. Copy to Domino takes them only after Ctrl+A (everything picked), or from the [page:tracks|track list] with a band on the bar numbers or a box reaching over its Conductor row; then they come first, so pick the Conductor track in Domino before pasting. To copy only the tempo: draw a box on the track list's Conductor row, or click this pane and pick what to copy, and press Copy to Domino (or Ctrl+C with "Ctrl+C also copies for Domino" ticked), then paste it on Domino's Conductor track. Built-in playback follows the tempo line too.
 
 Paste from Domino brings in the tempo and signatures of the copied Conductor track. When the pane already has its own, Spiderweb asks: Replace that stretch, Add among them, or Notes only.
 

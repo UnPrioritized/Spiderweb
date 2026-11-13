@@ -1,4 +1,5 @@
 Select two or more shapes, right-click one of them → Gate sensitive merge… and a small window opens: pick a way (Up, Left, Right or Down), tick "Keep shapes separate" or not, then press Merge. Where you right-click doesn't matter. The window stays open and follows the selection, so you can try another way right away (Ctrl+Z takes a merge back). It says which shape will move, or why it can't merge.
+[clip:merge-ways]
 
 ## Left and right
 
@@ -12,9 +13,9 @@ Up: the shape with the lowest note moves up. Down: the shape with the highest no
 
 ## One shape
 
-Without "Keep shapes separate", both become one shape ("Merged notes" in the Shapes list). Only two shapes can be merged this way.
+Without "Keep shapes separate", both become one shape ("Merged notes" in the [page:shapes|Shapes list]). Only two shapes can be merged this way.
 
-It can be moved, turned, slanted and stretched like a custom shape, and the custom panel's settings go into both parts. Each part keeps its own colours. When both shapes are sustained with the same settings, the merged shape is sustained too; the same for Gate subtract. A shape merged up or down is turned and slanted as it looks, like a turned picture. Split back into the old shapes (Ctrl+Shift+G, or right-click) gives the two parts back.
+It can be moved, turned, slanted and stretched like a [page:custom|custom shape], and the custom panel's settings go into both parts. Each part keeps its own colours. When both shapes are sustained with the same settings, the merged shape is sustained too; the same for Gate subtract. A shape merged up or down is turned and slanted as it looks, like a turned picture. Split back into the old shapes (Ctrl+Shift+G, or right-click) gives the two parts back.
 
 ## Keep shapes separate
 

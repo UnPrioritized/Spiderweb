@@ -1,11 +1,11 @@
 The line stops at the end of each note, and the tone jumps at the next note. To make it slide instead, select two notes (the second one starting at or after the end of the first), right-click and pick Slide between the selected notes; or middle-click a note where the slide should start and another note where it should end. Right-click works too: a note → Start a slide here, then right-click the other note.
 [clip:hz_slides-slide]
 
-Two dots show (only while Red line is ticked at the top of the window; middle-click and Start a slide here need it too): drag them to change the slide. Middle-click a dot (or right-click it → Delete this slide) to remove the slide.
+Two dots show (only while [page:hz_tone|Red line] is ticked at the top of the window; middle-click and Start a slide here need it too): drag them to change the slide. Middle-click a dot (or right-click it → Delete this slide) to remove the slide.
 
 A small square sits on the slide: drag it up or down to bend the slide. It sticks where the slide is straight (Shift = free). Right-click a dot or the square to pick Single curve (one arc) or Double curve (an S: drag one way for slow ends, the other way for quick ends).
 
-A hollow square follows the Glide curve knob while Glide is on (else it's straight); a filled one has its own bend. Double-click the square to make it follow the knob again.
+A hollow square follows the [page:hz_voice|Glide curve] knob while Glide is on (else it's straight); a filled one has its own bend. Double-click the square to make it follow the knob again.
 
 A slide belongs to its two notes: notes added later don't change it.
 
@@ -35,6 +35,6 @@ Quick detune: with the Select tool and one note selected, drag the top or bottom
 When you let go, a teal rail shows over the copies: it follows the top of the fan, and its height is the spread at that moment. Drag its end squares up or down (half-key steps, Ctrl = any cent) to make the copies start together and fan out, or close back in. Double-click the rail to add a point, drag middle points both ways (on the grid, Shift = free), right-click one to remove it, and Alt+drag between two points to curve that part. The copies bend to follow the rail. Enter (or clicking elsewhere) keeps the copies as they are; Esc puts the single note back.
 [clip:hz_slides-rail]
 
-Right-click a note → Bend → Simplify points… thins out a bend line with many points: drag the Points slider (it starts at all points, so nothing changes until you move it) and the notes show the result as you go, "14 points → 5". Fewer points keep only the biggest moves: holds and turning points stay, the rest become smooth curves. Round to semitones puts the kept points on whole keys from the note's own pitch. Points a wobble starts or ends on always stay. With several notes selected, each keeps the same share of its points. The Loudness pane's right-click has Simplify points… too, for loudness lines.
+Right-click a note → Bend → Simplify points… thins out a bend line with many points: drag the Points slider (it starts at all points, so nothing changes until you move it) and the notes show the result as you go, "14 points → 5". Fewer points keep only the biggest moves: holds and turning points stay, the rest become smooth curves. Round to semitones puts the kept points on whole keys from the note's own pitch. Points a wobble starts or ends on always stay. With several notes selected, each keeps the same share of its points. The [page:hz_layers|Loudness pane]'s right-click has Simplify points… too, for loudness lines.
 
 The Sketch tool (S) shapes the same bend line by hand, with curves, handles, wobbles, a box to stretch notes and the LFO window: see [page:hz_sketch|Sketch tool].

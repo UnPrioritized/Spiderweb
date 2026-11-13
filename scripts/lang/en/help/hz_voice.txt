@@ -1,4 +1,4 @@
-Voice (in the OSC tab of the synth window):
+Voice (in the [page:hz_osc|OSC tab] of the synth window):
 Voices = how many copies of the sound play together.
 Detune = how far out of tune they are with each other (in cents, 100 = one key).
 Blend = how loud the middle copies are next to the outer ones (50 % = all as loud).
@@ -8,7 +8,7 @@ Voices on = whether the keys take turns playing them (Split keys, no extra notes
 
 Glide = each note slides in from the tone of the note before it, taking that long (the Only notes that touch tick beside it: only when it starts right where that note ends). Curve = how it slides: middle = straight, right = fast first then settling (the classic bass slide), left = slow first.
 
-Legato (the tick under Only notes that touch) = a note that starts right where another ends carries on from it as one long note: no new Attack, and no Release until the last one ends (the effects that play once per note go on too). It works on the Arpeggio's notes as well: at Gate 100 % the whole run gets one envelope, under 100 % each note starts over.
+Legato (the tick under Only notes that touch) = a note that starts right where another ends carries on from it as one long note: no new Attack, and no Release until the last one ends (the effects that [page:hz_envelope|play once per note] go on too). It works on the Arpeggio's notes as well: at Gate 100 % the whole run gets one envelope, under 100 % each note starts over.
 
 The picture shows which copies eight keys play and a glide. Voice is a setting of its own, not a line.
 
@@ -35,4 +35,4 @@ Tie (at the top) = the note lasts on through the next step.
 
 The Steps box beside it = how many steps play (1 to 16); the ones past it are kept, greyed, for when you make it bigger again. With Octaves above 1, the steps are played again one octave higher each time round.
 
-Each note of the run is a note of its own, so the Volume envelope and Glide work on each. Slides you made are left out while it's on. Like Voice, it's a setting of its own, not a line.
+Each note of the run is a note of its own, so the Volume envelope and Glide work on each. [page:hz_slides|Slides] you made are left out while it's on. Like Voice, it's a setting of its own, not a line.

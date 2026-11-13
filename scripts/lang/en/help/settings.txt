@@ -2,7 +2,7 @@ File → Settings… (the menu bar at the top) or Ctrl+, opens Settings: how Spi
 
 General: how often to look for a new version (and Check now), tips on or off, Show all tips again, and Open .spwb files with Spiderweb (double-clicking a project opens it; press it again if you move the Spiderweb folder).
 
-Piano roll: Space past the keys / Space before the start (room to scroll and put shapes past the keys and before the first beat; see Help → View). Keep notes made there: shapes keep the notes they make in that space, drawn see-through (Opacity: how strongly, 1 to 100 %). They're kept only in the project file, unless Wrap them around puts them back onto the keys in exports, Domino copies and playback; Show wrapped notes shows where they land. See Help → [page:offrange|Notes past the keys].
+Piano roll: Space past the keys / Space before the start (room to scroll and put shapes past the keys and before the first beat; see Help → [page:view|View]). Keep notes made there: shapes keep the notes they make in that space, drawn see-through (Opacity: how strongly, 1 to 100 %). They're kept only in the project file, unless Wrap them around puts them back onto the keys in exports, Domino copies and playback; Show wrapped notes shows where they land. See Help → [page:offrange|Notes past the keys].
 
 Look:
 
@@ -20,7 +20,7 @@ Note colours:
 
 • Click a colour to change it (changing Default makes a copy first). Random picks soft colours, Gradient… blends from a first to a last colour.
 
-• Stacked notes → On top: where notes lie on top of each other on one key, which one shows. Later track on top (the track lower in the track list, like many MIDI programs), Louder note on top (handy in dense MIDIs, where quiet notes covering the keys hide the music), or Later shape on top. It works for every note in the piano roll, drawn, pasted or loaded. Selected shapes always show on top, and a highlighted track shows over the faint ones.
+• Stacked notes → On top: where notes lie on top of each other on one key, which one shows. Later track on top (the track lower in the [page:tracks|track list], like many MIDI programs), Louder note on top (handy in dense MIDIs, where quiet notes covering the keys hide the music), or Later shape on top. It works for every note in the piano roll, drawn, pasted or loaded. Selected shapes always show on top, and a highlighted track shows over the faint ones.
 
 • Show hidden note starts / ends (off at first): your own notes get a little darker where a note hidden under them starts or ends. A loaded MIDI's notes always show this.
 
@@ -28,8 +28,8 @@ Note colours:
 
 Sound: the MIDI out used for playback, and with Built-in BASSMIDI its soundfonts (several can be stacked, each overriding the ones above it: see [page:playback|Playback]), voice limit, lowering it by itself when it can't keep up, slowing down to keep up, and Use OmniMIDI Limiter. For 31-EDO projects: "31-EDO tuning" (C pinned, or A = a Hz you type) and "31-EDO: play channel 10 as piano" (see [page:edo31|31-EDO]). With Kestrel (GPU, Experimental) picked: the same soundfonts list, Max voices, Lower it by itself, Slow down to keep up, Block size, Limiter, DC blocker, Graphics card, Interpolation and Velocity threshold (see [page:kestrel|Kestrel (GPU) playback]). With Rendered ahead picked: its engine and settings (see [page:ahead|Rendered ahead playback]). With Maestro (API) picked: a button that opens Maestro's own settings for Spiderweb (see [page:playback|Playing and listening]).
 
-Copying: what Ctrl+C puts on the clipboard besides Spiderweb's own copy (a copy for Domino, Spiderweb Notes), and Domino's 256 keys (Experimental): Copy, Paste and Export to Domino keep notes above key 127; only the 256 keys mod of Domino can open them.
+Copying: what Ctrl+C puts on the clipboard besides Spiderweb's own copy (a copy for Domino, Spiderweb Notes), and Domino's 256 keys (Experimental): [page:domino|Copy, Paste and Export to Domino] keep notes above key 127; only the 256 keys mod of Domino can open them.
 
-Loaded MIDI: the saved indexes Load MIDI keeps so a big MIDI opens faster the next time, each with its size and a Delete button.
+Loaded MIDI: the saved indexes [page:load_midi|Load MIDI] keeps so a big MIDI opens faster the next time, each with its size and a Delete button.
 
 Language: the language of every text, shown after a restart. Start a translation saves a copy of the English texts to fill in.

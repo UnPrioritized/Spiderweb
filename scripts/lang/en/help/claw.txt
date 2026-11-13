@@ -3,7 +3,7 @@ Select one or more shapes, then right-click one: Claw machine… (or press Alt+W
 
 Pages: each time you open the window it starts on +, a new page. Change a setting and the page goes on top of the shape's other pages, working on the notes they left, so the same tool can be used again and again.
 
-The row at the top has a tab for each page this shape has (numbered by its place among all its Claw machine, Strum, Chop, Gate trim and Copy along a path pages; the tab's tooltip shows the whole order). Click a tab to change that page, untick On to switch it off for now, or click the small × beside its tab to take it off (right-clicking a tab does both too).
+The row at the top has a tab for each page this shape has (numbered by its place among all its Claw machine, [page:strum|Strum], [page:chop|Chop], [page:trim|Gate trim] and [page:path|Copy along a path] pages; the tab's tooltip shows the whole order). Click a tab to change that page, untick On to switch it off for now, or click the small × beside its tab to take it off (right-clicking a tab does both too).
 
 You can keep working in the main window while it's open. It follows the selection: select other shapes to work on them. When you select other shapes or change something in the main window, the claw tried so far is kept (as its own Ctrl+Z step).
 
@@ -11,7 +11,7 @@ The pages are kept with the shape: the outline stays as you drew it, and moving,
 
 Flipping or turning the shape (Turn 90°, or dragging just outside a custom shape's corner) flips or turns what they made, where it is. Turned, each note becomes short notes on the key rows it crosses (a column of them for 90°), so there are more notes.
 
-Images take no note tools: Claw machine, Strum, Chop, glue, Sustain and Gate subtract skip them.
+Images take no note tools: Claw machine, Strum, Chop, [page:glue|glue], [page:sustain|Sustain] and [page:subtract|Gate subtract] skip them.
 
 Velocities drawn or typed afterwards replace theirs; a page added after that works on the new velocities.
 [clip:claw-time]
@@ -37,4 +37,4 @@ Random: keeps about that many notes in every hundred. New random picks other not
 Shorten instead of remove (not in By time): the notes picked to go stay, only shorter: this much of their length.
 [clip:claw-count]
 
-On a shape with Recolour (Stir, Shuffle, Per chord, Clumps...), Warp or Liquify, this can also change the colours of notes elsewhere in the shape, because those colours depend on the notes around them. In Single channel that can also change where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
+On a shape with [page:recolour|Recolour] ([page:stir|Stir], Shuffle, Per chord, Clumps...), [page:warp|Warp] or [page:liquify|Liquify], this can also change the colours of notes elsewhere in the shape, because those colours depend on the notes around them. In Single channel that can also change where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.

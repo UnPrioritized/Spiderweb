@@ -8,12 +8,12 @@ Drag along the bar numbers (with any tool) to select every key in that time: the
 
 Ctrl+click picks several, Ctrl+A all; Delete removes the selected notes. Double-click a note to delete it.
 
-Drawing tools (the button after Bend, ▾ for the list): Line (L), Polyline (Y), Freehand (F), Curve (C) and Arc (A) draw a path that becomes notes joined by slides, so the tone follows it. Faint notes show what it will make, and its points can still be dragged.
+Drawing tools (the button after Bend, ▾ for the list): Line (L), Polyline (Y), Freehand (F), Curve (C) and Arc (A) draw a path that becomes notes joined by [page:hz_slides|slides], so the tone follows it. Faint notes show what it will make, and its points can still be dragged.
 
 Enter, right-click or another tool makes the notes; Esc throws the path away. Points snap to the grid and to whole keys (Shift = free).
 
-Ctrl+C copies the selected notes, Ctrl+X cuts them (copies, then deletes) and Ctrl+V pastes them at the play line (the preview's, or the main window's when the preview is off); with Select, double-click empty space to paste them there. With the preview on, a click on empty space with Select moves the play line there.
+Ctrl+C copies the selected notes, Ctrl+X cuts them (copies, then deletes) and Ctrl+V pastes them at the play line (the [page:hz_preview|preview]'s, or the main window's when the preview is off); with Select, double-click empty space to paste them there. With the preview on, a click on empty space with Select moves the play line there.
 
-Notes copied in Domino after that paste the same way (untested on Linux): each copied track goes into its own layer, the first into the picked layer and the next ones into the layers under it (new layers are added as needed). A note's velocity becomes its own loudness line. Ticks are taken as they are: use the same PPQ.
+Notes copied in [page:domino|Domino] after that paste the same way (untested on Linux): each copied track goes into its own [page:hz_layers|layer], the first into the picked layer and the next ones into the layers under it (new layers are added as needed). A note's velocity becomes its own loudness line. Ticks are taken as they are: use the same PPQ.
 
 The window has its own Snap (Shift = no snap). The mouse wheel scrolls, Shift+wheel goes sideways, Ctrl+wheel zooms, the middle button drags the view. Fit view (top of the window) shows every note of every layer.

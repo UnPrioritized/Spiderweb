@@ -4,7 +4,7 @@ Changing just one: hold Ctrl while dragging (or middle-clicking to add an anchor
 
 Linking curves yourself (any curves of one funnel, also on different lines):
 
-1. Select the funnel, then with the Select tool click one of its curves: it's highlighted (purple), with the curves already linked to it (teal).
+1. Select the funnel, then with the [page:select|Select tool] click one of its curves: it's highlighted (purple), with the curves already linked to it (teal).
 
 2. Ctrl+click more curves to add them (Ctrl+click a highlighted one to leave it out).
 

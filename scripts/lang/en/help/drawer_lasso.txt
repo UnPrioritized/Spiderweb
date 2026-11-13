@@ -2,7 +2,7 @@ Draw a loop round part of your drawing and press Enter: every stroke the loop cr
 
 The ▾ next to the Lasso button picks Lasso (drag round and let go: the loop closes straight back to the start and is smoothed into curves; Alt = straight lines) or Polygonal (click its corners; they stick to points and lines like when drawing, Shift = free; click the first point, double-click, right-click or press Enter to close; Backspace = last point off).
 
-Closed strokes are cut too wherever the loop goes in and out of them. With strokes picked (Select tool), only those are cut; otherwise every stroke the loop crosses. Hidden and locked layers are never cut. With Mirror on, the mirrored loop cuts too.
+Closed strokes are cut too wherever the loop goes in and out of them. With strokes picked ([page:drawer_select|Select tool]), only those are cut; otherwise every stroke the loop crosses. Hidden and locked layers are never cut. With Mirror on, the mirrored loop cuts too.
 
 While the loop waits you can change it. Ctrl+Z undoes those changes one at a time, then throws the loop away.
 
@@ -20,4 +20,4 @@ While the loop waits you can change it. Ctrl+Z undoes those changes one at a tim
 
 The piano roll's [page:lasso|Lasso] works the same way; its Help page has pictures.
 
-The pieces stay where they were, in the same layer and group. Curves, arcs and polylines stay curves, arcs and polylines; circles, freehand strokes and strokes with a Formula become polylines. Ctrl+Z undoes a cut.
+The pieces stay where they were, in the same layer and group. Curves, arcs and polylines stay curves, arcs and polylines; circles, freehand strokes and strokes with a [page:formulas|Formula] become polylines. Ctrl+Z undoes a cut.

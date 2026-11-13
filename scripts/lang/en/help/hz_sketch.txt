@@ -1,4 +1,4 @@
-The Sketch tool (S) in the Hz bass window draws each note as a thick line where its pitch goes, so you can shape the pitch by hand: bends, curves, jumps and wobbles. The other tools work as before; Sketch only changes how notes look and what the mouse does while it's picked.
+The Sketch tool (S) in the [page:hz_bass|Hz bass] window draws each note as a thick line where its pitch goes, so you can shape the pitch by hand: bends, curves, jumps and wobbles. The other tools work as before; Sketch only changes how notes look and what the mouse does while it's picked.
 
 Each line has a dot at its start and end, and one at every point you add. A small > sits just after its end. The red line shows the pitch the Hz bass really plays: it can only change once per repeat, so on low notes it lags a little behind sharp turns.
 [clip:hz_sketch-lines]
@@ -60,4 +60,4 @@ Apply keeps the wobble live (you can change it later in Sketch or here), Bake tu
 
 ## Works with everything
 
-Everything the Sketch tool makes is the note's own bend line, the same one the Bend tool edits, so slides, the arpeggio, export and right-click → Bend (Copy bend, Paste bend, Clear bend, Simplify points…) all work with it. Copy bend takes the wobbles along. Every change is one undo step; Ctrl+Z or Esc while dragging puts it back. More note tools (Set Pitch, Join, Quick detune, Simplify points): [page:hz_slides].
+Everything the Sketch tool makes is the note's own bend line, the same one the Bend tool edits, so slides, the [page:hz_voice|arpeggio], export and right-click → Bend (Copy bend, Paste bend, Clear bend, Simplify points…) all work with it. Copy bend takes the wobbles along. Every change is one undo step; Ctrl+Z or Esc while dragging puts it back. More note tools (Set Pitch, Join, Quick detune, Simplify points): [page:hz_slides].

@@ -19,8 +19,8 @@ Its place in the list counts: before Echo or Reverb look-alike it leaves their r
 
 The FX tab's effects are settings, not lines: they don't show in the Hz bass window's effects pane.
 
-The lines on the Draw tab are the Hz bass window's own: drag points, add them and right-click them just like in its effects pane, and both change. An effect you put on there goes with each note, as in a synth: it plays once per note, and a repeating shape starts over at each note.
+The lines on the Draw tab are the Hz bass window's own: drag points, add them and right-click them just like in its effects pane, and both change. An effect you put on there goes with each note, as in a synth: it [page:hz_envelope|plays once per note], and a repeating shape starts over at each note.
 
 The note is drawn held for the longest line that plays once per note; its falls start at the "Let go" mark. While a key sounds, a dot runs along each line: it stops at the sustain point while you hold the key and runs down the fall when you let go.
 
-The Hz bass window's effects pane shows the dots too, on the first note in view, and while the preview plays, a dot where the play line crosses each line.
+The Hz bass window's [page:hz_effects|effects pane] shows the dots too, on the first note in view, and while the preview plays, a dot where the play line crosses each line.

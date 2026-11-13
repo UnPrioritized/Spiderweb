@@ -1,6 +1,6 @@
-Two Inside fills build a pattern out of your own shapes. Pick them under Inside in the side panel, like Fill and Spam. Their settings (and Ripples') are kept when you pick another Inside fill, and come back when you pick them again.
+Two [page:fill|Inside fills] build a pattern out of your own shapes. Pick them under Inside in the side panel, like Fill and Spam. Their settings (and [page:ripples|Ripples]') are kept when you pick another Inside fill, and come back when you pick them again.
 
-Both of them give each part its own colour, so set Channels to Multi channel to see them (a shape can have at most 15 colours, the outline and its own colour count too).
+Both of them give each part its own colour, so set [page:channels|Channels] to Multi channel to see them (a shape can have at most 15 colours, the outline and its own colour count too).
 
 Notes: Fill makes one long note per key in each part. Spam chops the whole inside into notes of the spam gate, and each note takes the colour of the part its middle is in. The Spam rows (Gate, Ends, Start, Range…) work as usual.
 

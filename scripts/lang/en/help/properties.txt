@@ -1,20 +1,20 @@
-Select a shape, then right-click it → Properties… (the last item), or press Alt+Enter. The Properties window shows everything about the shape and everything done to its notes, in the order it happens. It stays open beside the piano roll and follows the selection: click another shape and it shows that one. The Properties… button in the Stir, Warp, Liquify and Shares windows opens it too.
+Select a shape, then right-click it → Properties… (the last item), or press Alt+Enter. The Properties window shows everything about the shape and everything done to its notes, in the order it happens. It stays open beside the piano roll and follows the selection: click another shape and it shows that one. The Properties… button in the [page:stir|Stir], [page:warp|Warp], [page:liquify|Liquify] and Shares windows opens it too.
 
 ## The basics
 
 The basics come in four groups, folded shut at first so the window stays short: each shows one grey line of what it holds. Click a group's name to open or shut it; Spiderweb remembers which ones you keep open.
 
-At the top: what kind of shape it is, its name, and "Made by" when a command made it from another shape (Turn into plain notes, Fill gaps, Fold tracks, Flip each line, Split into pieces, Apply mask). It was made once: changing that other shape now doesn't change this one.
+At the top: what kind of shape it is, its name, and "Made by" when a command made it from another shape (Turn into plain notes, [page:fill_gaps|Fill gaps], [page:fold|Fold tracks], [page:lines|Flip each line, Split into pieces], [page:masks|Apply mask]). It was made once: changing that other shape now doesn't change this one.
 
 Place and size: Start, Length, Lowest key and Highest key, worked out from the notes as they come out. Type another number to move the shape (Start, Lowest key) or to stretch or squeeze it (Length from its start, Highest key from its lowest key). Each change is one undo step.
 
-Gate and velocity: the gate of a spam shape and the velocity at the start and at the end. Velocity drawn in the velocity pane says so; typing a number puts a straight line back.
+Gate and velocity: the gate of a spam shape and the velocity at the start and at the end. Velocity drawn in the [page:velocity|velocity pane] says so; typing a number puts a straight line back.
 
 Colours and channel show how its notes take turns over channels and what decides its channels. Change those in the side panel.
 
 ## The steps
 
-Under the basics is one list of every step done to the notes after they're made, the top one first, each working on what the one above it left: note tool pages (Claw machine, Strum, Chop, Gate trim, Copy along a path), glue, Sustain, Gate aware flip, Gate extend, Gate subtract and the colour effects (Shuffle or Split, each Stir tab, Warp, Liquify, Reverse track order). A flip, turn or velocity line done after a note tool page is a step too.
+Under the basics is one list of every step done to the notes after they're made, the top one first, each working on what the one above it left: note tool pages ([page:claw|Claw machine], [page:strum|Strum], [page:chop|Chop], [page:trim|Gate trim], [page:path|Copy along a path]), [page:glue|glue], [page:sustain|Sustain], [page:gate_flip|Gate aware flip], [page:extend|Gate extend], [page:subtract|Gate subtract] and the colour effects (Shuffle or Split, each Stir tab, Warp, Liquify, Reverse track order). A flip, turn or velocity line done after a note tool page is a step too.
 
 The greyed lines at the top can't move: "The notes as drawn" (the drawing, its fill, Colours and velocity: every step works on them) and, in Single channel, "Overlaps fixed", so the steps work on the notes as you hear them.
 

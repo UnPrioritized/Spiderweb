@@ -29,10 +29,10 @@ A line is rarely a whole number of steps long, so the last step can't both be fu
 
 ## Working with it
 
-Last note does nothing while Notes by snap is on (it's greyed). Colours By step gives each step its own colour.
+Last note does nothing while Notes by snap is on (it's greyed). [page:channels|Colours] By step gives each step its own colour.
 
-Slicing: the Slice tool cuts through the notes, like a knife through the staircase. Each row is cut where the knife crosses it, slanted or not, and each piece keeps the part of the line on its side. Split here (right-click) cuts along the line itself: a stack of keys goes by key, a key held on its own is cut in two.
+Slicing: the [page:slice|Slice tool] cuts through the notes, like a knife through the staircase. Each row is cut where the knife crosses it, slanted or not, and each piece keeps the part of the line on its side. Split here (right-click) cuts along the line itself: a stack of keys goes by key, a key held on its own is cut in two.
 
-Join keeps Notes by snap when every line has the same settings. Add between changes the step bit by bit from one end to the other. Turn into live shape (Ctrl+R) turns it off: a custom shape can't step.
+[page:join|Join] keeps Notes by snap when every line has the same settings. [page:between|Add between] changes the step bit by bit from one end to the other. [page:turn_live|Turn into live shape] (Ctrl+R) turns it off: a custom shape can't step.
 
 A tiny step on a long line can make millions of notes: Spiderweb asks first, like other settings that make a lot of notes.

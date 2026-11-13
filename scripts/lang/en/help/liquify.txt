@@ -1,6 +1,7 @@
-Liquify… (in the Recolour row, beside Stir…) is a brush you paint with on the piano roll. It pushes the colours inside a shape around, like a finger through wet paint, the way the Liquify tool of photo editing programs bends a picture. The notes themselves never move or change length: only which colour (channel) each note has changes. No colour is added or blended: every note takes the colour of the note the brush pulled into its place.
+Liquify… (in the [page:recolour|Recolour] row, beside [page:stir|Stir…]) is a brush you paint with on the piano roll. It pushes the colours inside a shape around, like a finger through wet paint, the way the Liquify tool of photo editing programs bends a picture. The notes themselves never move or change length: only which colour (channel) each note has changes. No colour is added or blended: every note takes the colour of the note the brush pulled into its place.
+[clip:liquify-brush]
 
-The bends are kept with the shape and worked out again after every change. Change the colours underneath (Recolour, Stir, Colours) and they flow along the same bends; move or stretch the shape and the bends go with it. Colour settings work in the order they were added: a Liquify added after a Stir or a Warp bends their colours, one added before them is bent by them.
+The bends are kept with the shape and worked out again after every change. Change the colours underneath (Recolour, Stir, Colours) and they flow along the same bends; move or stretch the shape and the bends go with it. Colour settings work in the order they were added: a Liquify added after a Stir or a [page:warp|Warp] bends their colours, one added before them is bent by them.
 
 ## Brushing
 
@@ -52,4 +53,4 @@ On shapes with millions of notes, a shape's first stroke takes a moment (its col
 
 ## Edits that change notes
 
-Some colours depend on the other notes in the shape: Stir, Warp and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes (Glue, Chop, Claw machine, Strum, Gate trim, Gate subtract, Gate extend, Sustain, Fill gaps...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
+Some colours depend on the other notes in the shape: Stir, Warp and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes ([page:glue|Glue], [page:chop|Chop], [page:claw|Claw machine], [page:strum|Strum], [page:trim|Gate trim], [page:subtract|Gate subtract], [page:extend|Gate extend], [page:sustain|Sustain], [page:fill_gaps|Fill gaps]...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.

@@ -15,7 +15,7 @@ Looping: the tracks are dealt out in turn. With 16 tracks, tracks 1, 17, 33 … 
 
 ## The ticks
 
-Remove overlaps (on at first): notes on the same key that now overlap in one track are fixed the way Single channel fixes them. The earlier note is cut where the later one starts, and notes starting together become one. The line at the bottom says how many notes changed. Untick it to keep both notes.
+Remove overlaps (on at first): notes on the same key that now overlap in one track are fixed the way [page:channels|Single channel] fixes them. The earlier note is cut where the later one starts, and notes starting together become one. The line at the bottom says how many notes changed. Untick it to keep both notes.
 
 Even groups (In a row only): every new track gets about the same number of old tracks. Unticked, the groups are full and the last one is left short, so 300 tracks in groups of 19 make 16 tracks with 15 in the last. When full groups can't make the number you typed, the line at the bottom says so.
 

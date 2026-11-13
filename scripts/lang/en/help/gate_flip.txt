@@ -1,15 +1,16 @@
 Select one or more spam shapes, then right-click one: Gate aware flip. Only the way the gates are laid out is flipped sideways: every key row comes out exactly reversed, its gates and colours too. A row coloured red, green, blue, white reads white, blue, green, red. The drawing stays where it is.
+[clip:gate_flip-before-after]
 
-With a gate Range, the long and short gates swap sides, and the edge where every row starts cleanly moves to the right. This isn't the same as drawing the Range's graph the other way round: that still lays every row from its left end, so the right edge comes out jagged.
+With a [page:fill|gate Range], the long and short gates swap sides, and the edge where every row starts cleanly moves to the right. This isn't the same as drawing the Range's graph the other way round: that still lays every row from its left end, so the right edge comes out jagged.
 
-Colours turn round with the gates, so the colour at the left edge is now at the right edge, on the same channel it had there. Velocities turn round too, like a normal flip. Drawing them again in the velocity pane works as usual.
+Colours turn round with the gates, so the colour at the left edge is now at the right edge, on the same channel it had there. Velocities turn round too, like a normal flip. Drawing them again in the [page:velocity|velocity pane] works as usual.
 
-Nothing moves: every key row starts and ends on the same ticks as before. A row with a gap in it, like a ring's hole, flips each side of the gap by itself, so the gap stays put. A gap counts when it's longer than the usual gap between the notes, like Sustain's Auto. To keep the notes inside the drawing as well, pick Ends "Stretch to the edges" in the Range window.
+Nothing moves: every key row starts and ends on the same ticks as before. A row with a gap in it, like a ring's hole, flips each side of the gap by itself, so the gap stays put. A gap counts when it's longer than the usual gap between the notes, like [page:sustain|Sustain]'s Auto. To keep the notes inside the drawing as well, pick Ends "Stretch to the edges" in the Range window.
 
 Pasted notes flip the same way.
 
-Gate sensitive merge: the merged shape flips as one, each key row across both shapes, so the place where they meet moves too. Merging two flipped shapes gives a flipped merged shape, and Split gives them back flipped.
+[page:merge|Gate sensitive merge]: the merged shape flips as one, each key row across both shapes, so the place where they meet moves too. Merging two flipped shapes gives a flipped merged shape, and Split gives them back flipped.
 
-The menu item has a tick while it's on; click it again to switch it off. The Shapes list says (Gates flipped). It's greyed when there's nothing to flip: (one gate) when every key row has one note, or pasted runs that read the same both ways; (no gates) for shapes without spam, like Fill or lines.
+The menu item has a tick while it's on; click it again to switch it off. The [page:shapes|Shapes list] says (Gates flipped). It's greyed when there's nothing to flip: (one gate) when every key row has one note, or pasted runs that read the same both ways; (no gates) for shapes without spam, like Fill or lines.
 
-At first it comes after the Claw machine, Strum, Chop and Copy along a path pages, so what they made turns round too: a Claw machine's short-to-long spacing comes out long-to-short. It comes before Sustain and Gate subtract, so they work on the flipped notes as usual. [page:properties|Properties] can move it anywhere. Switching it on or off swaps Gate subtract's Note end and Note start, so the gaps flip with the rows. A normal flip or a turn keeps it on. A Hz bass, a funnel and an image don't have it.
+At first it comes after the [page:claw|Claw machine], [page:strum|Strum], [page:chop|Chop] and [page:path|Copy along a path] pages, so what they made turns round too: a Claw machine's short-to-long spacing comes out long-to-short. It comes before Sustain and [page:subtract|Gate subtract], so they work on the flipped notes as usual. [page:properties|Properties] can move it anywhere. Switching it on or off swaps Gate subtract's Note end and Note start, so the gaps flip with the rows. A normal flip or a turn keeps it on. A [page:hz_bass|Hz bass], a [page:funnel|funnel] and an image don't have it.

@@ -4,12 +4,12 @@ Click on the piano roll where the path ends: that's B. Until you click, the copi
 
 Add point puts another point after the last one: it follows the mouse until you click. Right-click a point to remove it. Reset takes every point away: click on the piano roll again to place B. The boxes under the settings show the picked point as bar, beat, tick and key: type there to put it exactly. Shift while dragging = off the grid. While the window is open, Ctrl+Z / Ctrl+Y on the piano roll take back or bring back its changes one at a time, like inside the window.
 
-Like the Claw machine's settings, the path is saved with the shape: moving or reshaping the shape moves the path and every copy along with it. Several selected shapes travel together as one group. Opening it from the menu on a shape that has a path shows its last path; click + on top for another one, a tab to change one the shape has, or the small × beside a tab to take it off.
+Like the [page:claw|Claw machine]'s settings, the path is saved with the shape: moving or reshaping the shape moves the path and every copy along with it. Several selected shapes travel together as one group. Opening it from the menu on a shape that has a path shows its last path; click + on top for another one, a tab to change one the shape has, or the small × beside a tab to take it off.
 
 Path: Straight, Curve (a bend through the round middle point) or Arc (a piece of a circle through it). Dragging a middle point on a straight path makes it a curve. Below, left to right: Straight, Curve and Arc, with the same middle point.
 [clip:path-kind]
 
-Formula: a pattern laid along the whole path, like a curve's Formula (Wave, Zigzag, Curls…, or your own saved ones). Loops = how many times it repeats from A to the last point; the other boxes are the numbers in its formula, like height. Custom… opens the formula window to pick, change, draw or type one. Below: a Wave with 2 loops on a straight path.
+Formula: a pattern laid along the whole path, like a curve's [page:formulas|Formula] (Wave, Zigzag, Curls…, or your own saved ones). Loops = how many times it repeats from A to the last point; the other boxes are the numbers in its formula, like height. Custom… opens the formula window to pick, change, draw or type one. Below: a Wave with 2 loops on a straight path.
 [clip:path-formula]
 
 Spacing:
@@ -47,6 +47,6 @@ Range: Keep inside keeps only the notes from the lowest key to the highest key, 
 
 Turn into plain shapes: every copy becomes a shape of its own notes, in the colours it showed, so you can move, cut or change each one by hand. With Mirror at the peak, a copy and its mirror image are two shapes.
 
-Anything done to the shape after its path (a flip, a turn, Claw machine, Strum, Sustain…) is already in the copies' notes. The shape itself stays as drawn, without this path. The window closes; one Ctrl+Z takes it back.
+Anything done to the shape after its path (a flip, a turn, Claw machine, [page:strum|Strum], [page:sustain|Sustain]…) is already in the copies' notes. The shape itself stays as drawn, without this path. The window closes; one Ctrl+Z takes it back.
 
 Notes past the lowest or highest key, or before the song's start, are cut off.

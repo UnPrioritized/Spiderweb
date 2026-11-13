@@ -16,4 +16,4 @@ View → Side panel shuts and opens it too. The width, and whether the panel is 
 
 ## The drawer
 
-The drawer's side panel can be made wider or narrower the same way, and double-clicked to fit. It doesn't shut.
+The [page:drawer|drawer]'s side panel can be made wider or narrower the same way, and double-clicked to fit. It doesn't shut.

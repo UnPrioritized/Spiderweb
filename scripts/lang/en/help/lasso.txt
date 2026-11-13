@@ -19,7 +19,7 @@ Magnetic (clings to the notes): click once, then just move the mouse round the n
 
 ## Changing the loop before it cuts
 
-While the loop waits, its points and their curve handles work like the Curve tool's: pull handles out of a point to bend the loop round the notes, add points, take them away (see the keys below). Ctrl+Z undoes these changes one at a time (Ctrl+Y redoes them), and once there's nothing left to undo it throws the loop away. Drawing at or past the piano roll's edge scrolls the view.
+While the loop waits, its points and their curve handles work like the [page:curve|Curve] tool's: pull handles out of a point to bend the loop round the notes, add points, take them away (see the keys below). Ctrl+Z undoes these changes one at a time (Ctrl+Y redoes them), and once there's nothing left to undo it throws the loop away. Drawing at or past the piano roll's edge scrolls the view.
 
 ## Keys and mouse
 
@@ -63,12 +63,12 @@ While the loop waits:
 
 • Lift a part out: after Enter, drag the selected piece somewhere else, or copy it (Ctrl+C) and paste it at the play line (Ctrl+V).
 
-• Cut only what you mean to: draw a Select box first, so a loop that strays over other shapes leaves them alone.
+• Cut only what you mean to: draw a [page:select|Select] box first, so a loop that strays over other shapes leaves them alone.
 
 • Keep a pattern's notes whole: Magnetic never cuts a note, so the piece takes whole notes only.
 
 ## What it cuts
 
-Pasted notes and lines (line, polyline, curve, arc, freehand) are cut as they are, and lines stay lines you can edit. Any other shape the loop takes notes in (drawn shapes, text, merged shapes, Hz bass) has to become plain notes first: the lasso asks once, then turns them into plain notes and cuts them in the same step. Answer No and the loop stays. Pictures and masks are never cut. A shape wholly inside the loop isn't cut, just selected.
+Pasted notes and lines (line, polyline, curve, arc, freehand) are cut as they are, and lines stay lines you can edit. Any other shape the loop takes notes in (drawn shapes, text, merged shapes, [page:hz_bass|Hz bass]) has to become plain notes first: the lasso asks once, then turns them into plain notes and cuts them in the same step. Answer No and the loop stays. Pictures and masks are never cut. A shape wholly inside the loop isn't cut, just selected.
 
 Only some shapes: draw a Select box (or several, with Ctrl) first, then pick Lasso. Only the shapes the boxes selected are cut, and only inside the boxes.

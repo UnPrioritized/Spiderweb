@@ -1,4 +1,5 @@
 Select one or more shapes, then right-click one: Sustain… On each key, every note is held on until the last note of its group ends, so the notes pile up on top of each other. Made for lagging out MIDI players: far more notes sound at once, while the shape looks the same.
+[clip:sustain-before-after]
 
 A group is the notes on one key with no real gap between them. Small gaps, like the spacing between a spam shape's notes, are held over. Bigger gaps are holes in the shape (the inside of a ring, the space between letters) and stay empty, so the shape keeps its look.
 
@@ -20,16 +21,16 @@ Changes show on the piano roll at once, and the piano roll can still be used whi
 
 With several shapes selected, each keeps its own settings until you change that row; a half-ticked box means they differ.
 
-The menu item has a tick while a selected shape is sustained, and the Shapes list says (Sustained). Untick Sustain notes in the window to take it off.
+The menu item has a tick while a selected shape is sustained, and the [page:shapes|Shapes list] says (Sustained). Untick Sustain notes in the window to take it off.
 
-At first Sustain comes after the outline gate, Colours, Gate aware flip, glue and the Claw machine / Strum / Chop / Copy along a path pages: it only makes notes longer. Only Gate subtract and Recolour come after it. [page:properties|Properties] can move it anywhere: before a Claw machine page, the page then works on the held notes.
+At first Sustain comes after the outline gate, Colours, [page:gate_flip|Gate aware flip], [page:glue|glue] and the [page:claw|Claw machine] / [page:strum|Strum] / [page:chop|Chop] / [page:path|Copy along a path] pages: it only makes notes longer. Only [page:subtract|Gate subtract] and [page:recolour|Recolour] come after it. [page:properties|Properties] can move it anywhere: before a Claw machine page, the page then works on the held notes.
 
-Channels: a sustained shape keeps its overlaps in every Channels mode, even Single channel. Other shapes still fix their own overlaps, and their notes end where a sustained note on the same key starts.
+[page:channels|Channels]: a sustained shape keeps its overlaps in every Channels mode, even Single channel. Other shapes still fix their own overlaps, and their notes end where a sustained note on the same key starts.
 
 Colours don't split a group: with Colours taking turns along a key, the whole row is still held, the colours piling up on top of each other.
 
-A Hz bass and an image can't be sustained: holding a Hz bass's repeats would ruin the sound, and an image's notes are its picture.
+A [page:hz_bass|Hz bass] and an image can't be sustained: holding a Hz bass's repeats would ruin the sound, and an image's notes are its picture.
 
-Spiderweb's own playback can lower the voice limit when it can't keep up (if "Lower it by itself when overloaded" is ticked in Settings (File menu) → Sound), so it can sound lighter than the lag other players get from the MIDI file.
+Spiderweb's own playback can lower the voice limit when it can't keep up (if "Lower it by itself when overloaded" is ticked in [page:settings|Settings] (File menu) → Sound), so it can sound lighter than the lag other players get from the MIDI file.
 
-On a shape with Recolour (Stir, Shuffle, Per chord, Clumps...), Warp or Liquify, this can also change the colours of notes elsewhere in the shape, because those colours depend on the notes around them. In Single channel that can also change where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
+On a shape with [page:recolour|Recolour] ([page:stir|Stir], Shuffle, Per chord, Clumps...), [page:warp|Warp] or [page:liquify|Liquify], this can also change the colours of notes elsewhere in the shape, because those colours depend on the notes around them. In Single channel that can also change where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.

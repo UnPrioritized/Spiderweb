@@ -1,4 +1,4 @@
-Recolour changes which colour each note of a shape has. The notes never move: every note keeps its key, its start and its gate, only its colour changes. Select a shape and pick a Recolour mode in the side panel, under Colours. It needs Channels: Multi channel (in one channel every note has the same colour anyway), except on notes pasted from Domino, which keep their tracks in every mode.
+Recolour changes which colour each note of a shape has. The notes never move: every note keeps its key, its start and its gate, only its colour changes. Select a shape and pick a Recolour mode in the side panel, under Colours. It needs [page:channels|Channels]: Multi channel (in one channel every note has the same colour anyway), except on notes pasted from Domino, which keep their tracks in every mode.
 
 It works on every kind of shape except a Hz bass: drawn shapes, pasted notes and the shapes made with Extract loaded notes, so note art made elsewhere can be recoloured too.
 
@@ -52,11 +52,11 @@ Push bunches the areas toward one side, a step per click; the dot in the middle 
 
 ## Stir
 
-Stir… (beside the Recolour dropdown) bends the colours the notes have now with Turn and Twist round a Centre point, on the whole shape or only inside an area, without adding or taking away any colour. It has a page of its own: Help → Stir.
+[page:stir|Stir…] (beside the Recolour dropdown) bends the colours the notes have now with Turn and Twist round a Centre point, on the whole shape or only inside an area, without adding or taking away any colour. It has a page of its own: Help → Stir.
 
 ## The order of the colour effects
 
-A shape's colour effects (Shuffle or Split, each Stir tab, Warp, Liquify, Reverse track order) run in the order you added them, each on the colours the one before left. A Stir and then Split: Scattered puts specks on a clean swirl; Split: Scattered and then a Stir bends the specks too.
+A shape's colour effects (Shuffle or Split, each Stir tab, [page:warp|Warp], [page:liquify|Liquify], Reverse track order) run in the order you added them, each on the colours the one before left. A Stir and then Split: Scattered puts specks on a clean swirl; Split: Scattered and then a Stir bends the specks too.
 
 Properties… (in the Stir, Warp, Liquify and Shares windows, by the line under the hint, and the last item on the shape's right-click menu; Alt+Enter) lists every step done to the shape from top (runs first) to bottom, the colour effects among them: drag a line to change the order, untick it to switch it off, click a name to open it, × takes it away. See [page:properties|Properties].
 
@@ -70,18 +70,18 @@ A Stir turned back to nothing (Reset, or every knob at 0) keeps its place in the
 
 Shapes from files made before keep their look: their effects load in the order they always ran.
 
-The list shows the shape's note tool pages too (Claw, Strum, Chop, Gate trim, Copy along a path). A colour effect above a page colours the notes before that page: a Stir above Copy along a path is copied like a painted stamp, every copy the same; below it, one swirl goes across all the copies. A page you add goes at the end. Pages can be dragged into any order (their tabs follow), and while you change a colour effect above a page, that page is switched off too.
+The list shows the shape's note tool pages too ([page:claw|Claw], [page:strum|Strum], [page:chop|Chop], [page:trim|Gate trim], [page:path|Copy along a path]). A colour effect above a page colours the notes before that page: a Stir above Copy along a path is copied like a painted stamp, every copy the same; below it, one swirl goes across all the copies. A page you add goes at the end. Pages can be dragged into any order (their tabs follow), and while you change a colour effect above a page, that page is switched off too.
 
 ## With the rest of Spiderweb
 
 Two notes on the same key that sound together always keep different colours, so they never cut each other off. With "Repeated colours get new channels", Shuffle and Split keep each note on the channels of the repeat it was in before. Stir, Warp and Liquify move a note to the repeat its new colour came from, so a bent stripe stays on one track however far it bends (no colour cuts in players that colour by track).
 
-Recolour comes last, after everything else (Sustain and Gate subtract too): it only changes colours. Colour effects you put above a note tool page are the exception: they run before that page.
+Recolour comes last, after everything else ([page:sustain|Sustain] and [page:subtract|Gate subtract] too): it only changes colours. Colour effects you put above a note tool page are the exception: they run before that page.
 
-Flip and Turn 90° take the colours along: a flipped shape shows its colours mirrored. Gate aware flip reverses every key row exactly, colours included. After a flip or turn, the Clumps numbers stay as you set them (the window says so), while the areas move with the shape. After a turn, Shuffle and Split: Scattered pick new colours.
+Flip and Turn 90° take the colours along: a flipped shape shows its colours mirrored. [page:gate_flip|Gate aware flip] reverses every key row exactly, colours included. After a flip or turn, the Clumps numbers stay as you set them (the window says so), while the areas move with the shape. After a turn, Shuffle and Split: Scattered pick new colours.
 
-Slicing a drawn shape keeps each piece's colours, and the pieces keep Recolour, wherever you move them. (A spam piece that you flip lays its spam again from its new start, so its notes move a little and get new colours.) Slicing pasted notes (Slice or Lasso) turns the pieces into plain notes with the colours you saw, without Recolour. Add between blends Recolour step by step when both shapes use the same mode. When the two shapes have their effects in different orders, each step takes the order of the nearer shape: effects both have blend, an effect only one has fades in or out, and the order switches halfway.
+Slicing a drawn shape keeps each piece's colours, and the pieces keep Recolour, wherever you move them. (A spam piece that you flip lays its spam again from its new start, so its notes move a little and get new colours.) Slicing pasted notes ([page:slice|Slice] or [page:lasso|Lasso]) turns the pieces into plain notes with the colours you saw, without Recolour. [page:between|Add between] blends Recolour step by step when both shapes use the same mode. When the two shapes have their effects in different orders, each step takes the order of the nearer shape: effects both have blend, an effect only one has fades in or out, and the order switches halfway.
 
-Turn into plain notes, Gate sensitive merge, Copy to Domino and Export MIDI all keep the colours you see.
+Turn into plain notes, [page:merge|Gate sensitive merge], [page:domino|Copy to Domino] and [page:files|Export MIDI] all keep the colours you see.
 
-Some colours depend on the other notes in the shape: Stir, Warp and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes (Glue, Chop, Claw machine, Strum, Gate trim, Gate subtract, Gate extend, Sustain, Fill gaps...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
+Some colours depend on the other notes in the shape: Stir, Warp and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes ([page:glue|Glue], Chop, Claw machine, Strum, Gate trim, Gate subtract, [page:extend|Gate extend], Sustain, [page:fill_gaps|Fill gaps]...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
