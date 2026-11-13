@@ -94,6 +94,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     paste_window.py  Paste colours: colours read out of a player's settings text into the picture
     chop_window.py   the Chop window (rhythm list, a strip to draw rhythms, saved rhythms) + quick chop (Ctrl+U)
     props_text.py    the Properties window's words and numbers (what each of its lines shows)
+    track_pictures.py the track list's pictures: a loaded MIDI's rows painted, the strip under the list, its picker
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse editing
     roll_draw.py     painting the grid, notes, handles, keyboard, ruler

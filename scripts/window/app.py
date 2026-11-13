@@ -115,7 +115,8 @@ from window import palettes
 from window.settings_window import open_settings
 from window.tool_picker import ToolPicker
 from window.tempo_pane import TempoBox
-from window.track_list import TrackList, build_onion, build_strip, sync_onion
+from window.track_list import TrackList
+from window.track_pictures import build_onion, build_strip, sync_onion
 from window.load_extract import sync_channels, sync_extract
 from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
