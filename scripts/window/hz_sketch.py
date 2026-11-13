@@ -1095,6 +1095,8 @@ class HzSketch:
         self.drag = {"kind": "note", "i": d["i"], "before": d["before"], "beat": self.beat_at(d["x"]),
                      "key": self.key_at(d["y"]), "orig": copy.deepcopy(self.tones), "x": d["x"], "y": d["y"],
                      "moved": False, "slide": None, "whole": False, "name": tr("hz.step_move"), "grabbed": True}
+        # (the 8-handle box shows round the note(s) held from now on, while they stay the selection: hz_box.py)
+        self.box8_held = frozenset(self.tones[i]["id"] for i in self.sel if i < len(self.tones))
         self.canvas.config(cursor="fleur")
         self.redraw()
 
@@ -1256,6 +1258,7 @@ class HzSketch:
                 c.create_oval(x - r, y - r, x + r, y + r, fill=BEND, outline=BEND)
             x, y, a = x1 + END_GAP * s, ys[-1], 3 * s  # (">": the end, where a drag makes it longer / shorter)
             c.create_line(x - a / 2, y - a, x + a / 2, y, x - a / 2, y + a, fill=BEND, width=max(1, round(1.5 * s)))
+        self.draw_box8(c, s)  # (the 8-handle box round the selected notes: hz_box.py)
         got = self.depth_line()
         if got:  # (the picked piece's wobble depth: a line above it through its points (a handle each); dashed =
             x0, _, x1, _, base = got  # depth 0)

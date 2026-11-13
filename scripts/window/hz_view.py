@@ -578,7 +578,7 @@ class HzView:
                                  hz=f"{hz_of(k, cents):.2f}")
         if self.drag and self.drag["kind"] == "tune":
             text += "     " + trnum("hz.tune", "cents", f"{self.tones[self.drag['i']]['cents']:+g}")
-        text += self.bend_status() + self.detune_status() + self.rail_status()
+        text += self.bend_status() + self.detune_status() + self.rail_status() + self.box8_status(e)
         if e is not None and not self.drag and self.detune_edge(e.x, e.y):  # (Quick detune: hz_note_tools.py)
             text += "     " + tr("hz.detune_hint")
         if e is not None and not self.drag:  # (Sketch: a wobble's depth preset button)

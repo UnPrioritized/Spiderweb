@@ -55,6 +55,7 @@ from window.hz_bend import HzBend
 from window.hz_sketch import HzSketch
 from window.hz_note_tools import HzNoteTools
 from window.hz_simplify import HzSimplify
+from window.hz_box import HzBox
 
 POS = r"\d+x\d+\+-?\d+\+-?\d+"  # a remembered size and place
 
@@ -70,7 +71,7 @@ def open_hz(app):
     w.after_idle(lambda: w.winfo_exists() and w.canvas.focus_force())
 
 
-class HzWindow(HzDraw, HzSketch, HzBend, HzNoteTools, HzSimplify, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
+class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzMouse, HzGates, HzSound, HzView, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
