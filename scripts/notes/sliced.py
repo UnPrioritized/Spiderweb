@@ -1015,7 +1015,10 @@ def cut_through(whole, raw, spots, tracks, part, ppq, came=None, floor=None):
             ks = (spots[late] // BIG).astype(np.int64)
             rs = spots[late] - ks * BIG
             exact = np.array([float(beat_on(paths[kk], rr)) for kk, rr in zip(ks.tolist(), rs.tolist())]) * ppq
-            late = late[exact < t - 1e-9]  # (an upright part: its keys start right on it, they stay)
+            # (an upright part: its keys start right on it, they stay; a note starting at the cut's own spot, a
+            # slanted line cut where its note begins, is not before the cut at all: it goes after; triage
+            # 2026-11-13: a float hair under the cut's spot left a 1-tick sliver before it and lost the rest)
+            late = late[(exact < t - 1e-9) | (c - spots[late] < 1e-6)]
             if len(late):
                 spots = spots.copy()
                 spots[late] = c
