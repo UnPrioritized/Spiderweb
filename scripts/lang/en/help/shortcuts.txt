@@ -22,6 +22,6 @@ Tab = the piano roll ↔ the track list (see [page:tracks|Track list]).
 
 Typing a text: Ctrl+Left / Ctrl+Right jump a word, Ctrl+Backspace / Ctrl+Delete erase one (see [page:text|Text]).
 
-F1 = Help. Ctrl+S = save. Ctrl+, = [page:settings|Settings]. Ctrl+Shift+C = [page:domino|Copy to Domino] (notes copied in Domino paste with Ctrl+V).
+F1 = Help (in it: Alt+Left / Alt+Right or the mouse's back / forward buttons = Back / Forward). Ctrl+S = save. Ctrl+, = [page:settings|Settings]. Ctrl+Shift+C = [page:domino|Copy to Domino] (notes copied in Domino paste with Ctrl+V).
 
 The [page:drawer|drawer] and the Hz bass window have keys of their own: see their pages.

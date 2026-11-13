@@ -15,7 +15,7 @@ from files.about import BANNER, BUILT, FULL_VERSION, HERE, LICENSE, VERSION, WEB
 from files import system
 from files.system import open_path
 from window import look
-from window.widgets import WrapRow, placed, remember_place, set_least
+from window.widgets import Tooltip, WrapRow, placed, remember_place, set_least
 from window.help_texts import (BY_ID, DRAWER_TOOL_TOPICS, NEXT, PAGE_LINK, SECTION_NAMES, SECTIONS, SEE,
                                TOOL_TOPICS, TOPICS, link_words)
 
@@ -330,9 +330,25 @@ class HelpWindow(tk.Toplevel):
         self.drawn = None  # (topic, search) on the page now: the same again isn't drawn twice
         self.clips = []  # the Clip objects playing in the shown topic
         self.pictures = {}  # clips/<name>.png read once while the window is open
+        # Back / Forward (user 2026-11-14): pages left behind as (topic, its top line shown); a search's own picks
+        # aren't kept (typing would fill the list), only pages opened by a click / link
+        self.back, self.forward = [], []
+        self.auto_pick = None  # (the topic the search picked by itself: showing it isn't a step)
 
         left = ttk.Frame(self, padding=(8, 8, 4, 8))
         left.pack(side="left", fill="y")
+        steps = ttk.Frame(left)
+        steps.pack(fill="x", pady=(0, 6))
+        self.back_button = ttk.Button(steps, text=tr("help.go_back"), takefocus=False, command=lambda: self.go(-1))
+        self.back_button.pack(side="left")
+        self.forward_button = ttk.Button(steps, text=tr("help.go_forward"), takefocus=False,
+                                         command=lambda: self.go(1))
+        self.forward_button.pack(side="left", padx=(6, 0))
+        Tooltip(self.back_button, tr("help.go_back_tip"))
+        Tooltip(self.forward_button, tr("help.go_forward_tip"))
+        # Alt+arrows and the mouse's back / forward buttons (Tk 8.7+ gives them the numbers 8 / 9 everywhere)
+        for seq, step in (("<Alt-Left>", -1), ("<Alt-Right>", 1), ("<Button-8>", -1), ("<Button-9>", 1)):
+            self.bind(seq, lambda e, step=step: self.go(step) or "break")
         self.query = tk.StringVar()
         search = ttk.Entry(left, textvariable=self.query, width=30)
         search.pack(fill="x")
@@ -396,7 +412,13 @@ class HelpWindow(tk.Toplevel):
             self.bind(key, lambda e: (search.focus_set(), search.select_range(0, "end"), search.icursor("end"),
                                       "break")[-1])
         self.bind("<Key>", lambda e: self.type_to_search(e, search))
+        # (also on the list, search box and page themselves: their own Left / Right keys would fold a section or
+        # move the cursor first)
+        for w in (self.tree, search, self.text):
+            for seq, step in (("<Alt-Left>", -1), ("<Alt-Right>", 1)):
+                w.bind(seq, lambda e, step=step: self.go(step) or "break")
         self.fill_list()
+        self.sync_steps()
         search.focus_set()
         # (never narrower than the bottom row's tick, button and version beside the topic list: cut off in a wider
         # font or a longer translation otherwise)
@@ -453,6 +475,7 @@ class HelpWindow(tk.Toplevel):
     def pick_first(self):
         first = next((c for s in self.tree.get_children() for c in self.tree.get_children(s)), None)
         if first:
+            self.auto_pick = first
             self.tree.selection_set(first)
             self.tree.see(first)
 
@@ -466,9 +489,46 @@ class HelpWindow(tk.Toplevel):
             if kids:
                 self.tree.selection_set(kids[0])
             return
+        auto, self.auto_pick = self.auto_pick == iid, None
+        if not auto:
+            self.step_from(iid)
         self.show(iid)
 
-    def open_topic(self, topic_id):
+    def here(self):
+        """The page shown now and its top line, for Back / Forward (None: nothing shown yet)."""
+        if self.topic is None or self.drawn is None or self.drawn[0] != self.topic:
+            return None
+        return self.topic, self.text.index("@0,0")
+
+    def step_from(self, topic_id):
+        """Going to topic_id by a click: the page now goes on the Back list, Forward is forgotten."""
+        now = self.here()
+        if now and topic_id != now[0]:
+            self.back.append(now)
+            del self.back[:-100]
+            self.forward.clear()
+        self.sync_steps()
+
+    def go(self, step):
+        """Back (-1) or Forward (+1): that page again, scrolled where it was."""
+        take, keep = (self.back, self.forward) if step < 0 else (self.forward, self.back)
+        if not take:
+            return
+        now = self.here()
+        if now:
+            keep.append(now)
+        topic_id, top = take.pop()
+        self.open_topic(topic_id, step=False)
+        self.text.yview(top)
+        self.sync_steps()
+
+    def sync_steps(self):
+        self.back_button.state(["!disabled" if self.back else "disabled"])
+        self.forward_button.state(["!disabled" if self.forward else "disabled"])
+
+    def open_topic(self, topic_id, step=True):
+        if step:
+            self.step_from(topic_id)
         if self.query.get() and topic_id not in [t["id"] for t in self.matches()]:
             self.query.set("")
         self.topic = topic_id
