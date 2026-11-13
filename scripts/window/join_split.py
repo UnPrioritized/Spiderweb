@@ -1326,8 +1326,9 @@ class JoinSplit:
         laps = []  # (an Add between group: unlinked, user; each shape keeps its colour turn and its repeat, so with
         turns = between_turns(self.shapes, laps)  # "Repeated colours get new channels" it stays on its channels, hunt)
         gids = {group_of(self.shapes[i]) for i in made} - {None}
-        if not gids:
-            return
+        # (no group any more but the shapes already hold their turn: an earlier step of this same cut unlinked it, e.g.
+        # an end turned plain first; their pieces still take it, else they went back to a colour of their own;
+        # cases 419149320 / 219135606)
         for i, sh in enumerate(self.shapes):
             if group_of(sh) in gids and turns[i] is not None:
                 sh["team"] = list(turns[i]) + ([laps[i]] if laps[i] is not None else [])

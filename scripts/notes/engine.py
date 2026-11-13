@@ -1948,6 +1948,11 @@ def stirred_piece(sh, notes, tracks, held_, get, gate, rule):
     rounds = bool(sh.get("_rounds"))  # (the whole's rounds too: a piece's notes take the round with the colour)
     if rounds:
         whole["_rounds"] = True
+    was = sh.get("_order_was")  # (the order the whole ran its steps in: steps.expanded; case 277319369)
+    if was:
+        whole["order"] = was[0]
+        if was[1] is not None:
+            rc["order"] = was[1]
     wn, wt = get(dict(whole, recolour=rc))
     return from_whole(notes, tracks, wn, wt, held_, lambda n: places_of(n, rule, gate, box_of(n)), rounds)
 

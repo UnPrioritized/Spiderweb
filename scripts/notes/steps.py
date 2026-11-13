@@ -306,6 +306,10 @@ def expanded(sh):
     have = own_steps(sh)
     E = {k: v for k, v in sh.items() if k not in ("order", "off", "recolour", "_upto", "_before") + LENGTHS}
     E["_run"] = True  # (made so: never expanded again)
+    if raw and sh.get("cut") and sh.get("order") is not None and FX in sh["order"] and not fx:
+        # (a Stir piece naming its whole's pages: the order it was cut with, for engine.stirred_piece to make the
+        # whole as it was, else its colour steps ran after the pages and the piece took other colours than the whole)
+        E["_order_was"] = [list(sh["order"]), copy.deepcopy(raw.get("order"))]
     if inside:  # (its whole made with them, in this order: sliced.source)
         E["_whole"] = dict({k: copy.deepcopy(sh[k]) for k in inside}, order=list(sh["order"]),
                            **({"off": copy.deepcopy(sh["off"])} if sh.get("off") else {}))
