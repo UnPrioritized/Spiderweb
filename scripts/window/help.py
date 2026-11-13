@@ -502,9 +502,10 @@ class HelpWindow(tk.Toplevel):
             top = t.index("end-1c")  # (where the topic links go)
             if topic_id == "about":
                 self.about_banner()
-            if self.add_clip(topic_id):
-                t.insert("end", "\n\n")
             page = topic["page"]
+            # (the page's own-named clip goes at the top, unless the page places it itself: not shown twice)
+            if f"[clip:{topic_id}]" not in page and self.add_clip(topic_id):
+                t.insert("end", "\n\n")
             if topic_id == "whats_new":
                 page = with_build_date(page)
             links = 0
