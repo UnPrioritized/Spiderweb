@@ -6,7 +6,7 @@ import math
 import numpy as np
 
 from notes.envelope import env_values
-from notes.hz_settings import FAST, LOOP, LOOP_SHAPES, WOBBLE_RATE_MOST
+from notes.hz_settings import FAST, LOOP, LOOP_SHAPES, WOBBLE_RATE_MOST, WOBBLE_SEED_STEP
 
 
 def bent_part(u, bend):
@@ -95,30 +95,58 @@ def note_bend(n, beat, most):
     return np.clip(got, -most, most)
 
 
-def wave_of(shape, c):
+def random_heights(j):
+    """A Random wobble's height (-1..1) at whole wave number j (an int array: its "seed" + the waves gone by), the
+    same every time (play, export, red line, Bake); 0 at every whole WOBBLE_SEED_STEP (a new run starts on its line)."""
+    j = np.asarray(j, np.int64)
+    with np.errstate(over="ignore"):
+        x = j.astype(np.uint64) * np.uint64(0x9E3779B97F4A7C15)
+        x ^= x >> np.uint64(31)
+        x *= np.uint64(0xBF58476D1CE4E5B9)
+        x ^= x >> np.uint64(29)
+    h = (x >> np.uint64(11)).astype(float) / float(1 << 53) * 2.0 - 1.0
+    return np.where(j % WOBBLE_SEED_STEP == 0, 0.0, h)
+
+
+def wave_of(shape, c, seed=0):
     """A wobble's wave (-1..1) at c cycles from its start (an array): starts at 0 going up (a square: up first),
-    WOBBLE_SHAPES."""
-    f = np.asarray(c, float) % 1.0
+    WOBBLE_SHAPES. Random (user 2026-11-13: smooth) = an eased glide to a new height (random_heights, from `seed`)
+    each wave; Pluck (user 2026-11-13) = each wave kicks to the top, then curves back to the middle."""
+    c = np.asarray(c, float)
+    f = c % 1.0
     if shape == "triangle":
         return np.where(f < 0.25, 4.0 * f, np.where(f < 0.75, 2.0 - 4.0 * f, 4.0 * f - 4.0))
     if shape == "saw":
         return np.where(f < 0.5, 2.0 * f, 2.0 * f - 2.0)
     if shape == "square":
         return np.where(f < 0.5, 1.0, -1.0)
+    if shape == "pluck":
+        return (1.0 - f) ** PLUCK_FALL
+    if shape == "random":
+        k = np.floor(c).astype(np.int64) + int(seed)
+        a, b = random_heights(k), random_heights(k + 1)
+        return a + (b - a) * (1.0 - np.cos(math.pi * f)) / 2.0
     return np.sin(2.0 * math.pi * f)
 
 
+PLUCK_FALL = 3.0  # wave_of: a Pluck wave falls back from its top like (1 - x) to this power (fast, then settling)
 WAVE_GAP = 1e-9  # wobble_keys: a run's waves read at most this far (waves) before its end
 HALF_NEAR = 1e-6  # wave_end: a run's wave count this near a whole half wave IS that half wave (rounding)
 POINT_NEAR = 1e-7  # fit_wobbles: a wobble end this near a bend point (parts of the note) is put on it
 U_NEAR = 1e-12  # wobble_keys: this near a run's start / end (parts of the note) counts as on it
 
 
+def wave_start(w):
+    """Where a wobble run's wave count starts at its u0: waves gone before ("phase", a cut run going on) + the
+    user's Phase nudge ("nudge")."""
+    return w.get("phase", 0.0) + w.get("nudge", 0.0)
+
+
 def wave_end(w, span):
     """Waves a wobble run has gone through at its end (+ its phase); a hair off a whole half wave = that half wave
     (user's pictures 2026-10-28: a free note length made 8 waves 8.0000004, a sliver of a new half drawn as a
     spike)."""
-    end = w.get("phase", 0.0) + w["rate"] * (w["at"][1] - w["at"][0]) * span
+    end = wave_start(w) + w["rate"] * (w["at"][1] - w["at"][0]) * span
     half = round(end * 2.0) / 2.0
     return half if abs(end - half) < HALF_NEAR else end
 
@@ -138,7 +166,8 @@ def wobble_keys(runs, u, span):
         # (never quite its end's wave count: a hair before the end must read the last half wave, not the next one
         # rounding makes of it; user's picture 2026-10-28, a square ending in a dip)
         end = wave_end(w, span)
-        wave = wave_of(w.get("shape"), np.minimum(w.get("phase", 0.0) + w["rate"] * (u - u0) * span, end - WAVE_GAP))
+        wave = wave_of(w.get("shape"), np.minimum(wave_start(w) + w["rate"] * (u - u0) * span, end - WAVE_GAP),
+                       w.get("seed", 0))
         # (up to its end, not on it: the piece after takes over there, user's picture 2026-10-28: a square's last
         # instant added to the next piece's wobble; the note's own end too: its ">" sits on its end point, user)
         inside = (u >= u0 - U_NEAR) & (u < u1 - U_NEAR)  # (a beat turned into u may land a hair off: rounding)
@@ -154,7 +183,7 @@ def wobble_edges(n, most, lo=-math.inf, hi=math.inf):
     for w in n.get("wobble") or ():
         u0, u1 = w["at"]
         b0, b1 = t + u0 * span, t + u1 * span
-        phase, rate = w.get("phase", 0.0), w["rate"]
+        phase, rate = wave_start(w), w["rate"]
         out += [b for b in (b0, b1) if lo <= b <= hi]
         a, b = max(b0, lo), min(b1, hi)
         if b <= a:
@@ -164,6 +193,16 @@ def wobble_edges(n, most, lo=-math.inf, hi=math.inf):
         if len(out) + last - first > most:
             return []
         out += [b0 + (k / 4 - phase) / rate for k in range(first, last)]
+    return out
+
+
+def went_on(w, waves):
+    """The "phase" (and a Random run's "seed") of the part of run w that starts `waves` waves after its own start:
+    it goes on in step, the same heights too."""
+    gone = w.get("phase", 0.0) + waves
+    out = {"phase": round(gone % 1.0, 9)}
+    if "seed" in w or w.get("shape") == "random":
+        out["seed"] = w.get("seed", 0) + int(math.floor(round(gone, 9)))
     return out
 
 
@@ -179,7 +218,7 @@ def split_wobbles(n, u):
         d = w["depth"][0] + (w["depth"][1] - w["depth"][0]) * (u - u0) / (u1 - u0)
         first = dict(w, at=[u0, u], depth=[w["depth"][0], round(d, 4)])
         second = dict(w, at=[u, u1], depth=[round(d, 4), w["depth"][1]],
-                      phase=round((w.get("phase", 0.0) + w["rate"] * (u - u0) * n["len"]) % 1.0, 9))
+                      **went_on(w, w["rate"] * (u - u0) * n["len"]))
         out += [first, second]
     if out:
         n["wobble"] = out
@@ -211,15 +250,18 @@ def fit_wobbles(n):
         beats = (w["at"][1] - w["at"][0]) * n["len"]
         if beats <= 1e-12:
             continue
-        if w.get("phase") and end and abs(end[0] - w["at"][0]) < ON_POINT:
-            w["phase"] = round(end[1] % 1.0, 9)
+        # (going on from the run before: a phase, or a Random run's seed off a whole step: one that went on from a
+        # whole wave has no phase left)
+        going = w.get("phase") or w.get("seed", 0) % WOBBLE_SEED_STEP
+        if going and end and abs(end[0] - w["at"][0]) < ON_POINT:
+            w.update(went_on(end[2], end[1] - end[2].get("phase", 0.0)))
             if not w["phase"]:
                 del w["phase"]
         phase = w.get("phase", 0.0)
         if not w.get("free"):
             waves = max(phase + 0.5, round(2.0 * (phase + w["rate"] * beats)) / 2.0)
             w["rate"] = min(WOBBLE_RATE_MOST, max(0.01, (waves - phase) / beats))  # (not rounded: whole half waves)
-        end = (w["at"][1], phase + w["rate"] * beats)
+        end = (w["at"][1], phase + w["rate"] * beats, w)
 
 
 def wobble_part(n, t, span):
@@ -237,7 +279,7 @@ def wobble_part(n, t, span):
             return round(w["depth"][0] + (w["depth"][1] - w["depth"][0]) * (x - a) / (b - a), 4)
         run = dict(w, at=[round((lo - off) / span, 9), round((hi - off) / span, 9)], depth=[depth(lo), depth(hi)])
         if lo > a + 1e-12:
-            run["phase"] = round((w.get("phase", 0.0) + w["rate"] * (lo - a)) % 1.0, 9)
+            run.update(went_on(w, w["rate"] * (lo - a)))
         out.append(run)
     return out or None
 

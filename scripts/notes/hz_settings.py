@@ -88,7 +88,10 @@ FAST = 0.5  # their bend: fast first, then settling ((1 - u)^2, the drop the use
 GROUPS = 6  # "groups" at 1
 NOTE_BEND_MOST = 127.0  # keys a note's own bend line (tone["bend"]) goes each way at most: the Range knob is the
 # Pitch line's only (user 2026-10-28: a bend is repeat spacing, no pitch wheel to limit it)
-WOBBLE_SHAPES = ("sine", "triangle", "saw", "square")  # a wobble's wave (hz_lines.wave_of; missing = sine)
+WOBBLE_SHAPES = ("sine", "triangle", "saw", "square", "random", "pluck")  # a wobble's wave (hz_lines.wave_of; missing = sine)
+# a new Random wobble's "seed" = a whole number of these (hz_lines.random_heights: the wave at such a number starts on
+# the line); a run cut in two / going on adds the waves gone by, so it goes on with the same heights
+WOBBLE_SEED_STEP = 1 << 16
 WOBBLE_RATE = 4.0  # a new wobble's waves a beat (the plugin's default, user 2026-10-28)
 WOBBLE_RATE_MOST = 64.0  # waves a beat at most
 PITCH = 12.0  # "pitch": keys up at 1 (and down at 0; 0.5 = the tone as placed), unless hz["lfo"]["bend_range"]
@@ -323,8 +326,9 @@ def clean_wobble(runs):
     """A note's wobbles checked (tone["wobble"], the Sketch tool's; heard in hz_lines.note_bend until baked):
     [{"at": [u0, u1] along the note, "depth": [keys at u0, at u1] each way, "rate": waves a beat(, "shape":
     WOBBLE_SHAPES but sine, "flip": True = going down first, "phase": waves gone before u0, "free": True = speed set
-    with Ctrl)}] in order; runs with
-    no length or depth left out; None when none is left."""
+    with Ctrl, "nudge": waves the user moved its wave on (0..1, the Phase menu items), "seed": a Random wave's
+    heights (a whole number, WOBBLE_SEED_STEP))}] in order; runs with no length or depth left out; None when none is
+    left."""
     out = []
     for w in runs or ():
         try:
@@ -332,9 +336,11 @@ def clean_wobble(runs):
             d = [min(NOTE_BEND_MOST, max(0.0, float(k))) for k in w["depth"][:2]]
             rate = min(WOBBLE_RATE_MOST, float(w["rate"]))
             phase = float(w.get("phase", 0.0)) % 1.0
+            nudge = float(w.get("nudge", 0.0)) % 1.0
+            seed = w.get("seed")
         except (TypeError, ValueError, KeyError, IndexError, AttributeError):
             continue
-        if not (len(d) == 2 and all(map(math.isfinite, d + [u0, u1, rate, phase]))) or u1 - u0 <= 1e-9 \
+        if not (len(d) == 2 and all(map(math.isfinite, d + [u0, u1, rate, phase, nudge]))) or u1 - u0 <= 1e-9 \
                 or rate <= 0 or max(d) <= 0:
             continue
         run = {"at": [u0, u1], "depth": d, "rate": rate}
@@ -346,6 +352,10 @@ def clean_wobble(runs):
             run["free"] = True
         if phase:
             run["phase"] = phase
+        if round(nudge, 9) % 1.0:
+            run["nudge"] = round(nudge, 9)
+        if isinstance(seed, int) and not isinstance(seed, bool) and 0 <= seed < 1 << 40:
+            run["seed"] = seed
         out.append(run)
     return sorted(out, key=lambda w: w["at"]) or None
 

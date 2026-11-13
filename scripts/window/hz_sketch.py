@@ -11,14 +11,15 @@ dashed line at its own key."""
 
 import copy
 import math
+import random
 import tkinter as tk
 
 import numpy as np
 
 from files.lang import tr, trn
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOBBLE_RATE_MOST, WOBBLE_SHAPES, bend_of,
-                          bend_part, bends, bent_part, line_at, pitch, split_wobbles, wave_end, wobble_keys,
-                          wobble_part)
+                          WOBBLE_SEED_STEP, bend_part, bends, bent_part, line_at, pitch, split_wobbles, wave_end,
+                          wave_start, wobble_keys, wobble_part)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
 from window.hz_bend import BEND, LINE_NEAR, NEAR, drop_point
@@ -35,6 +36,7 @@ WOBBLE_LIFT = 12  # px: a picked piece's depth line sits this far above the piec
 WOBBLE_STEP = 0.1  # keys: the depth goes in these steps (Shift: 0.01)
 SPEED_POST = 12  # px: the speed post's height above the depth line
 SPEED_DOUBLE = 60  # px: the speed post dragged this far right = twice as fast (left: half)
+PHASE_STEP = 0.125  # waves: the wobble menu's Phase ◀ / ▶ move its wave this much (the plugin's 1/8, user 2026-11-13)
 
 
 def split_curve(bend, t):
@@ -81,7 +83,7 @@ def bake_wobble(n, run):
     pts = [list(p) for p in n.get("bend") or ([0.0, 0.0], [1.0, 0.0])]
     u0, u1 = run["at"]
     j = next(j for j in range(len(pts) - 1) if abs(pts[j][0] - u0) < ON_POINT and abs(pts[j + 1][0] - u1) < ON_POINT)
-    span, rate, phase = n["len"], run["rate"], run.get("phase", 0.0)
+    span, rate, phase = n["len"], run["rate"], wave_start(run)
 
     def f(u):  # (as heard: the line + the wave; u an array, all at once: hunt 2026-10-28, Bake froze for seconds)
         u = np.asarray(u, float)
@@ -251,6 +253,9 @@ class HzSketch:
         menu.add_checkbutton(label=tr("hz.wobble_flip"), variable=flip,
                              command=lambda: self.wobble_edit(i, u0, u1, "flip", flip.get()))
         menu.add_separator()
+        for key, step in (("hz.wobble_phase_back", -PHASE_STEP), ("hz.wobble_phase_on", PHASE_STEP)):
+            menu.add_command(label=tr(key), command=lambda step=step: self.wobble_edit(i, u0, u1, "nudge", step))
+        menu.add_separator()
         menu.add_command(label=tr("hz.wobble_bake"), command=lambda: self.wobble_edit(i, u0, u1, "bake", None))
         menu.add_command(label=tr("hz.wobble_remove"), command=lambda: self.wobble_edit(i, u0, u1, "remove", None))
         menu.vars = (shape, flip)  # (kept while the menu shows)
@@ -273,8 +278,15 @@ class HzSketch:
                 n["bend"] = bake_wobble(n, run)
                 self.sketch_pick = None  # (the piece is many now)
             name = f"hz.step_wobble_{what}"
+        elif what == "nudge":  # (within one wave, like the other shapes: 8 steps = as it was; a Random seed untouched)
+            run["nudge"] = round((run.get("nudge", 0.0) + value) % 1.0, 9) % 1.0
+            if not run["nudge"]:
+                del run["nudge"]
+            name = "hz.step_wobble_phase"
         elif what == "shape" and value == "sine":
             run.pop("shape", None)
+        elif what == "shape" and value == "random" and "seed" not in run:
+            run.update(shape="random", seed=random.randrange(1, 1 << 14) * WOBBLE_SEED_STEP)
         elif what == "flip" and not value:
             run.pop("flip", None)
         else:
