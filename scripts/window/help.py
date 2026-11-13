@@ -526,7 +526,9 @@ class HelpWindow(tk.Toplevel):
         self.back_button.state(["!disabled" if self.back else "disabled"])
         self.forward_button.state(["!disabled" if self.forward else "disabled"])
 
-    def open_topic(self, topic_id, step=True):
+    def open_topic(self, topic_id, step=True, spot=None):
+        """Show that page (step: the page now goes on the Back list); spot = words of the part a link is about:
+        the page opens scrolled there and that line flashes."""
         if step:
             self.step_from(topic_id)
         if self.query.get() and topic_id not in [t["id"] for t in self.matches()]:
@@ -536,6 +538,62 @@ class HelpWindow(tk.Toplevel):
             self.tree.selection_set(topic_id)
             self.tree.see(topic_id)
         self.show(topic_id)
+        if spot:
+            self.go_to_spot(spot)
+
+    def find_spot(self, spot):
+        """The line holding the spot words (a heading first, else the first paragraph with them; never the title,
+        the section name or the "On this page" line); None if they aren't on the page."""
+        t, first, at = self.text, None, "1.0"
+        while True:
+            at = t.search(spot, at, "end", nocase=True)
+            if not at:
+                break
+            tags = t.tag_names(at)
+            line = int(at.split(".")[0])
+            if not ({"title", "section"} & set(tags) or any(x.startswith("head_link") for x in tags)):
+                if "heading" in tags:
+                    return line
+                first = first or line
+            at = f"{line + 1}.0"
+        return first
+
+    def go_to_spot(self, spot):
+        """Scroll the page so the spot's line is near the top (the empty line above it showing) and pulse it."""
+        line = self.find_spot(spot)
+        if line is None:
+            return
+        t = self.text
+        t.update_idletasks()
+        t.yview(f"{max(1, line - 1)}.0")
+        self.flash(line)
+
+    FLASH_STEPS = (1.0, 0.75, 0.5, 0.25, 0.0, 0.0, 0.5, 1.0, 0.8, 0.6, 0.4, 0.25, 0.1, 0.0)  # two pulses, ~1.2 s
+
+    def flash(self, line):
+        """A short pulse on the line (user 2026-11-14: shows "here" after a link jumped down the page)."""
+        t = self.text
+        job = getattr(self, "_flash_job", None)
+        if job:
+            self.after_cancel(job)
+        t.tag_remove("flash", "1.0", "end")
+        t.tag_add("flash", f"{line}.0", f"{line}.end+1c")
+        t.tag_lower("flash")  # (search hits and links stay readable on top)
+        page = [c / 65535 for c in self.winfo_rgb(t.cget("background"))]
+        strong = [c / 65535 for c in self.winfo_rgb(look.HELP_FLASH)]
+
+        def step(n=0):
+            self._flash_job = None
+            if not t.winfo_exists():
+                return
+            if n >= len(self.FLASH_STEPS):
+                t.tag_remove("flash", "1.0", "end")
+                return
+            k = self.FLASH_STEPS[n]
+            t.tag_configure("flash", background="#%02x%02x%02x" % tuple(
+                round(255 * (p + (s - p) * k)) for p, s in zip(page, strong)))
+            self._flash_job = self.after(85, step, n + 1)
+        step()
 
     def show(self, topic_id):
         """The topic's page (None: "Nothing found", the open topic kept for when the search finds it again)."""
@@ -550,6 +608,9 @@ class HelpWindow(tk.Toplevel):
         for w in t.winfo_children():  # (deleting the text leaves them to Python, with their pictures)
             w.destroy()
         t.delete("1.0", "end")
+        if getattr(self, "_flash_job", None):  # (a pulse from the page before stops)
+            self.after_cancel(self._flash_job)
+            self._flash_job = None
         if topic_id is None:
             t.insert("end", tr("help.nothing_found_try_fewer_or_other"), "section")
         else:
@@ -619,12 +680,12 @@ class HelpWindow(tk.Toplevel):
         t, at = self.text, 0
         for m in PAGE_LINK.finditer(part):
             t.insert("end", part[at:m.start()])
-            words, tid = link_words(m), m.group(1)
+            words, tid, spot = link_words(m), m.group(1), m.group(2)
             if tid in BY_ID:
                 tag = f"page_link:{links}"
                 links += 1
                 t.insert("end", words, ("link", tag))
-                self.bind_link(tag, lambda tid=tid: self.open_topic(tid))
+                self.bind_link(tag, lambda tid=tid, spot=spot: self.open_topic(tid, spot=spot))
             else:
                 t.insert("end", words)
             at = m.end()

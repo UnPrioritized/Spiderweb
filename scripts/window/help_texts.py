@@ -15,6 +15,8 @@ there). A clip that isn't there is just left out.
 
 Links to another page: "[page:<topic id>|shown words]" (or "[page:<topic id>]" = that page's title) anywhere in a
 text; the Help window shows the words as a link that opens that page. An unknown id shows the words as plain text.
+"[page:<topic id>#<spot words>|shown words]" opens it at the first line holding the spot words (any case; a heading
+or a few words of its paragraph) and flashes that line; spot words not found = the page's top.
 Searching and the drawer's help see only the shown words."""
 
 import re
@@ -147,13 +149,14 @@ for _id, _section in TOPIC_LIST:
         _t["words"] = tr(f"help.{_id}.words")
     TOPICS.append(_t)
 BY_ID = {t["id"]: t for t in TOPICS}
-PAGE_LINK = re.compile(r"\[page:([a-z0-9_]+)(?:\|([^\]]*))?\]")  # [page:<id>|shown words] / [page:<id>]
+# [page:<id>|shown words] / [page:<id>] / [page:<id>#<spot words>|shown words]: group 1 id, 2 spot, 3 shown words
+PAGE_LINK = re.compile(r"\[page:([a-z0-9_]+)(?:#([^|\]]+))?(?:\|([^\]]*))?\]")
 
 
 def link_words(m):
     """The words a page link shows: its own, else the linked page's title (an unknown id: the id itself)."""
-    if m.group(2) is not None:
-        return m.group(2)
+    if m.group(3) is not None:
+        return m.group(3)
     t = BY_ID.get(m.group(1))
     return t["title"] if t else m.group(1)
 

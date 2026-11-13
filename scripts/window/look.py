@@ -158,6 +158,7 @@ LIST_HERE_TEXT = pick("SystemHighlightText" if WINDOWS else "#ffffff", "#ffffff"
 ICON = pick("#000000", "#e2e2e4")  # small drawn pictures on buttons (snap notes, ▾, a pinned tool's pin)
 ICON_OFF = pick("#b0b0b0", "#6c6c70")  # an unpinned tool's pin
 SEARCH_HIT = pick("#fff08a", "#6b6420")  # Help: the words searched for
+HELP_FLASH = pick("#9cc4ff", "#2f5d9e")  # Help: the spot a link opened, pulsing (fades into the page's colour)
 OUTLINE_SOFT = pick("#555", "#8a8a8e")  # a thin edge round a small colour box
 
 # --- Piano roll
