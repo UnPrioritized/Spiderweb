@@ -996,12 +996,17 @@ def without_recolour(sh):
     steps gone, it fell to the top: As drawn / Single made it before the page)."""
     out = {k: v for k, v in sh.items() if k != "recolour"}
     if sh.get("order") is not None and "recolour" in sh:
-        from notes.steps import COLOURS, FX, order_of, with_order
+        from notes.steps import COLOURS, FX, GLUE, order_of, with_order
         with_order(out, [t for t in order_of(sh) if t[0] not in COLOURS])
         if FX in sh["order"] and FX not in (out.get("order") or ()) and not sh.get("fx"):
             # (a sliced piece naming its whole's pages (it has none of its own): keep them in the list, so Sustain /
             # Gate extend / subtract placed before them still run inside the whole (steps.in_whole); rebuilt, the
             # pages fell out and Gate subtract ran after the whole's Chop page, sweep 388598133)
+            out["order"] = [k for k in sh["order"] if k not in COLOURS]
+        elif GLUE in sh["order"] and GLUE not in (out.get("order") or ()) and not sh.get("glue") and (
+                (sh.get("cut") or {}).get("whole") or {}).get("glue"):
+            # (the same for a piece whose WHOLE has the Glue boxes: Sustain ordered before them runs inside the
+            # whole, else it fell to the top and the Glue had merged notes that came back, sweep case 419192726)
             out["order"] = [k for k in sh["order"] if k not in COLOURS]
     return out
 

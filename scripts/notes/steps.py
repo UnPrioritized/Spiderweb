@@ -365,19 +365,24 @@ def _lengths_inside(sh):
     left out): [(kind, place among sh's fx entries)], in their order."""
     from notes.fx import is_page
     fx = sh.get("fx") or []
-    if not fx or sh.get("order") is None:
+    if sh.get("order") is None or not (fx or sh.get("glue")):
         return []
     off = off_tags(sh)
-    tags = [t for t in order_of(sh) if t[0] == FX or (t[0] in LENGTHS and t not in off and t[0] in sh)]
+    tags = [t for t in order_of(sh) if t[0] == FX or (t[0] in LENGTHS and t not in off and t[0] in sh)
+            or (t == (GLUE, 0) and sh.get("glue") and t not in off)]
     # (any of the whole's entries after it, a velocity line / glue place too: case 492791693, Glue after Sustain on
     # the whole merged stacked held notes; the piece held its notes only after the whole's Glue and they came back)
     last = max((p for p, t in enumerate(tags) if t[0] == FX and (is_page(fx[t[1]]) or p > 0 and any(
         q[0] == FX and is_page(fx[q[1]]) for q in tags[:p])) and not fx[t[1]].get("off")), default=-1)
+    # (the whole's own Glue boxes ordered after a Sustain / Gate extend / subtract count the same: they glue the notes
+    # as the hold left them; the piece held only after the Glue, so notes the Glue had merged came back, sweep cases
+    # 319179595 / 419192726 / 419174800)
+    last = max([last] + [p for p, t in enumerate(tags) if t[0] == GLUE and any(q[0] in LENGTHS for q in tags[:p])])
     out, n = [], 0
     for p, t in enumerate(tags):
         if t[0] == FX:
             n += 1
-        elif p < last:
+        elif t[0] in LENGTHS and p < last:
             out.append((t[0], n))
     return out
 
@@ -389,8 +394,10 @@ def in_whole(sh):
     them out. An empty set for every other shape."""
     if not sh.get("cut") or sh.get("order") is None or not any(k in sh for k in LENGTHS):
         return set()
-    if FX not in sh["order"]:  # (an order saying nothing about the whole's pages (made on the piece: glue added
-        return set()           # after its Sustain): they keep their default place, first; sweep 292805004)
+    if FX not in sh["order"] and not (GLUE in sh["order"] and not sh.get("glue") and sh["cut"].get("whole", {}).get(
+            "glue")):  # (an order saying nothing about the whole's pages (made on the piece: glue added after its
+        return set()   # Sustain): they keep their default place, first; sweep 292805004. The WHOLE's glue boxes
+        # ordered after the Sustain are the other way: the Sustain goes inside the whole)
     from notes.fx import is_page
     own_fx = sh.get("fx") or []
     if own_fx and not any(is_page(st) for st in own_fx) and sh["order"].count(FX) <= len(own_fx):
@@ -431,6 +438,8 @@ def whole_steps(sh):
             out.append(st)
             if st["tool"] != "glue0":
                 n += 1
+        for rest in put.values():  # (held after every page: the whole's Glue comes after it)
+            out += rest
         fx = out
     return fx, first
 
