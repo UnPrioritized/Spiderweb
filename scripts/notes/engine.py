@@ -1460,6 +1460,8 @@ def fx_notes(sh, ppq, keys, get):
         # heard; sweep 55660070, a sustained paste in Single had them fixed first, and a velocity line missed)
         notes, tracks = get(dict(bare, _sus=True))
         got = held_piece(sh, notes, tracks, ppq, get)
+        if got is None:
+            got = held_knife_piece(sh, notes, tracks, ppq, get)
         return got if got is not None else held(notes, tracks, auto_sustain(sh, get), ppq)
     fx = sh.get("fx")
     if "picture" in sh and not (fx and fx[-1]["tool"] in RUNNER):
@@ -1952,6 +1954,49 @@ def held_piece(sh, notes, tracks, ppq, get):
         notes = np.concatenate([notes[:, :4], add[:, :4]])
         tracks = np.concatenate([np.zeros(len(notes) - len(add), np.int64) if tracks is None else
                                  np.asarray(tracks, np.int64), add[:, 4]])
+        got = unique_rows(np.column_stack([notes, tracks]))
+        return got[:, :4], got[:, 4]
+    return notes, tracks
+
+
+def held_knife_piece(sh, notes, tracks, ppq, get):
+    """A piece cut through its notes (a custom piece, or a line piece with glue / pages: its knife cuts) of a sustained
+    shape (notes, tracks: its own, before Sustain): held as the WHOLE shape holds them, then cut by the piece's knives,
+    so a note held across the cut ends there in the piece before and goes on in the piece after (the pieces keep the
+    notes the whole sounds; held on the piece alone its last notes ended early and the tails vanished: sweep family
+    cut lost a note, 219229782). The piece's own notes keep their velocity and colour; only their ends change, and
+    tails / stop notes the piece lacks are added. None: not such a piece."""
+    got = source(sh) if sh.get("cut") and (sh["kind"] == "custom" or sh["kind"] in LINE_KINDS) else None
+    if got is None or not len(notes):
+        return None
+    src, part, same_vel = got
+    halves = part if sh["kind"] == "custom" else sh["cut"].get("knife")
+    if not halves or sh["cut"].get("mould") or sh.get("_run") or sh.get("_whole"):
+        return None
+    if sh["kind"] != "custom" and not (src.get("fx") or src.get("glue")):
+        return None  # (a plain line piece: held_piece's)
+    whole = {k: v for k, v in src.items() if k != "sustain"}
+    w0, wt0 = get(whole)
+    if not len(w0):
+        return None
+    w1, wt1 = held(w0, wt0, sh["sustain"], ppq)
+    w1 = np.asarray(w1, np.int64)
+    cn, ct = knife_cut(w1[:, :4], None if wt1 is None else np.asarray(wt1, np.int64), halves, moved_by(sh), ppq)
+    ends = {}
+    for s, e, k in cn[:, :3].tolist():
+        ends[s, k] = max(e, ends.get((s, k), e))
+    notes = np.asarray(notes, np.int64).copy()
+    have = set()
+    for i, (s, e, k) in enumerate(notes[:, :3].tolist()):
+        have.add((s, k))
+        if (s, k) in ends and ends[s, k] > s:
+            notes[i, 1] = ends[s, k]
+    miss = np.array([(s, k) not in have for s, k in cn[:, [0, 2]].tolist()], bool)
+    if miss.any():  # (held tails starting at the cut, notes on a Sustain stop)
+        add = cn[miss]
+        tracks = np.concatenate([np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64),
+                                 np.zeros(len(add), np.int64) if ct is None else np.asarray(ct, np.int64)[miss]])
+        notes = np.concatenate([notes[:, :4], add[:, :4]])
         got = unique_rows(np.column_stack([notes, tracks]))
         return got[:, :4], got[:, 4]
     return notes, tracks

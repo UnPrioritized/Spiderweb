@@ -1037,6 +1037,10 @@ def cut_through(whole, raw, spots, tracks, part, ppq, came=None, floor=None):
                 spots[late] = c
         hit = mine & (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & near
         if not hit.any():
+            # (a curve's notes are spread evenly in time, so the one sounding at the cut can be a hair more than a
+            # key from where the drawing is: its second half went missing, sweep 319217754)
+            hit = mine & (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 2)
+        if not hit.any():
             continue
         j = int(np.flatnonzero(hit)[np.argmax(spots[hit])])  # (the one started last along the path)
         second = raw[j:j + 1].copy()  # (any other columns, a velocity, go along)
@@ -1086,13 +1090,18 @@ def cut_in_two(sh, halves, at, scale, mark):
         src, part, same_vel = got
         cut = sh["cut"]
         d = moved_by(sh)
-        marks = [moved_mark(m, d) for m in cut.get("marks", [])]
+        # (a moved piece stays moved by the same d: the whole, marks, cuts and mould stay where it was cut and the
+        # halves' "was" goes back by d. Making the whole again where the piece sits made its notes up to a tick
+        # off from the ones it showed, far from the cut: notes are made at the cut and shifted by whole ticks, user
+        # rule "a sliced piece keeps its notes however it's moved"; sweep family cut-lost-moved)
+        marks = [dict(m) for m in cut.get("marks", [])]
         # (its velocities changed since it was cut: the halves keep their own, cut from its)
         own = cut.get("own_vel") or cut.get("vel") is not None and not same_vel
-        whole = dict(outline(src), **velocity(cut["whole"]), **tools(cut["whole"]), **inner(src))
+        whole = dict(outline(cut["whole"]), **velocity(cut["whole"]), **tools(cut["whole"]), **inner(cut["whole"]))
         # (cut through its notes by the Slice tool before: both halves keep that cut)
-        knives = [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in cut.get("knife", [])]
+        knives = [[b0, k0, db, dk, sd] for b0, k0, db, dk, sd in cut.get("knife", [])]
     else:
+        d = (0.0, 0.0)
         src, part, marks, own, knives = sh, [0.0, None], [], False, []
         whole = dict(outline(sh), **velocity(sh), **tools(sh))
         for h in halves:  # (the whole's glue / pages are done before the cut now)
@@ -1103,13 +1112,14 @@ def cut_in_two(sh, halves, at, scale, mark):
     for h in halves:
         path = cached_path(h)
         mids.append(spot_of(src, path[len(path) // 2], scale, part))
-    new = dict(mark, id=uuid.uuid4().hex[:12], at=[float(at[0]), float(at[1])], u=uc)
+    new = dict(mark, id=uuid.uuid4().hex[:12], at=[float(at[0]) - d[0], float(at[1]) - d[1]], u=uc)
     order = sorted(range(2), key=lambda i: mids[i])
     for i, (a, b) in zip(order, ((part[0], uc), (uc, part[1]))):
         h = halves[i]
         # (a cut through the notes, its stretch over them: both halves have notes along it)
         mine = [m for m in marks if m.get("segs") or m["u"] >= a - 1e-9 and (b is None or m["u"] <= b + 1e-9)]
-        h["cut"] = {"whole": whole, "was": outline(h), "part": [a, b], "vel": None, "marks": mine + [new]}
+        was = outline(h) if not (d[0] or d[1]) else moved(outline(h), (-d[0], -d[1]))
+        h["cut"] = {"whole": whole, "was": was, "part": [a, b], "vel": None, "marks": mine + [new]}
         floor = list(cut.get("from") or []) if got else []  # (cut_through's floor: the starts it came from)
         if a == uc and part[0]:
             floor.append(part[0])
@@ -1119,7 +1129,7 @@ def cut_in_two(sh, halves, at, scale, mark):
             h["cut"]["knife"] = json.loads(json.dumps(knives))
         if got and cut.get("mould"):  # (cut with a shape before: both halves keep that, mould.py)
             from notes.mould import moved_mould
-            h["cut"]["mould"] = moved_mould(cut["mould"], d)
+            h["cut"]["mould"] = json.loads(json.dumps(cut["mould"]))
         if own:
             h["cut"]["own_vel"] = True
 
