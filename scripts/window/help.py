@@ -337,15 +337,6 @@ class HelpWindow(tk.Toplevel):
 
         left = ttk.Frame(self, padding=(8, 8, 4, 8))
         left.pack(side="left", fill="y")
-        steps = ttk.Frame(left)
-        steps.pack(fill="x", pady=(0, 6))
-        self.back_button = ttk.Button(steps, text=tr("help.go_back"), takefocus=False, command=lambda: self.go(-1))
-        self.back_button.pack(side="left")
-        self.forward_button = ttk.Button(steps, text=tr("help.go_forward"), takefocus=False,
-                                         command=lambda: self.go(1))
-        self.forward_button.pack(side="left", padx=(6, 0))
-        Tooltip(self.back_button, tr("help.go_back_tip"))
-        Tooltip(self.forward_button, tr("help.go_forward_tip"))
         # Alt+arrows and the mouse's back / forward buttons (Tk 8.7+ gives them the numbers 8 / 9 everywhere)
         for seq, step in (("<Alt-Left>", -1), ("<Alt-Right>", 1), ("<Button-8>", -1), ("<Button-9>", 1)):
             self.bind(seq, lambda e, step=step: self.go(step) or "break")
@@ -367,8 +358,8 @@ class HelpWindow(tk.Toplevel):
         self.tree.column("#0", width=max(bold.measure(t["title"]) for t in TOPICS) + int(48 * s))
         sb = ttk.Scrollbar(tree_box, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
+        sb.pack(side="right", fill="y")  # (packed first: a tight window never squeezes it out)
         self.tree.pack(side="left", fill="both", expand=True)
-        sb.pack(side="right", fill="y")
         self.tree.bind("<<TreeviewSelect>>", lambda e: self.on_pick())
         self.tree.tag_configure("title_some", font=bold)
         self.tree.tag_configure("title_all", font=bold, background=look.SEARCH_HIT)
@@ -388,16 +379,22 @@ class HelpWindow(tk.Toplevel):
         version.bind("<Button-1>", lambda e: self.open_topic("about"))
         version.bind("<Enter>", lambda e: version.config(font=look.font(9, "underline")))
         version.bind("<Leave>", lambda e: version.config(font=look.font(9)))
+        # Back / Forward: two small coloured arrows at the top right, grey when there's nowhere to go (user
+        # 2026-11-14: buttons were too big)
+        steps = ttk.Frame(right)
+        steps.pack(side="top", fill="x")
+        self.forward_button = self.step_arrow(steps, "→", 1, tr("help.go_forward_tip"))
+        self.back_button = self.step_arrow(steps, "←", -1, tr("help.go_back_tip"))
         text_box = ttk.Frame(right)
         text_box.pack(fill="both", expand=True)
         bg = ttk.Style().lookup("TFrame", "background") or "SystemButtonFace"
         self.text = tk.Text(text_box, wrap="word", font=look.font(10), relief="flat", borderwidth=0,
                             highlightthickness=0, padx=10, pady=6, cursor="arrow", background=bg,
-                            spacing2=2, spacing3=4)
+                            spacing2=2, spacing3=4, width=20)  # (small ask: it fills what's there)
         tsb = ttk.Scrollbar(text_box, orient="vertical", command=self.text.yview)
         self.text.configure(yscrollcommand=tsb.set)
+        tsb.pack(side="right", fill="y")  # (packed first: a tight window never squeezes it out)
         self.text.pack(side="left", fill="both", expand=True)
-        tsb.pack(side="right", fill="y")
         self._banner_label, self._banner_job = None, None
         self.text.bind("<Configure>", self.banner_later, add="+")
         self.text.tag_configure("title", font=look.font(14, "bold"), spacing3=8)
@@ -540,9 +537,18 @@ class HelpWindow(tk.Toplevel):
         self.text.yview(top)
         self.sync_steps()
 
+    def step_arrow(self, row, arrow, step, tip):
+        """One Back / Forward arrow: link-coloured text, a click goes there; grey (nothing to do) when it can't."""
+        label = ttk.Label(row, text=arrow, font=look.font(13, "bold"), padding=(6, 0))
+        label.pack(side="right")
+        label.bind("<Button-1>", lambda e: self.go(step))
+        Tooltip(label, tip)
+        return label
+
     def sync_steps(self):
-        self.back_button.state(["!disabled" if self.back else "disabled"])
-        self.forward_button.state(["!disabled" if self.forward else "disabled"])
+        for label, can in ((self.back_button, self.back), (self.forward_button, self.forward)):
+            label.state(["!disabled" if can else "disabled"])
+            label.config(foreground=look.LINK if can else look.FAINT_TEXT, cursor="hand2" if can else "")
 
     def open_topic(self, topic_id, step=True, spot=None):
         """Show that page (step: the page now goes on the Back list); spot = words of the part a link is about:
