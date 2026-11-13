@@ -54,7 +54,7 @@ The ruler above the piano roll shows each tempo change ("120 → 60", "60 ↗ 18
 
 A catch-up makes up for time: after a slow (or fast) stretch, the tempo runs faster (or slower) until the music is back where it would have been at the tempo heard before it.
 
-Right-click → Add catch-up BPM here, then two drags: first over the time it counts (the yellow area), then from there to where the catch-up should stop (the teal area). With a Select box kept, the box is the yellow area at once. Esc or right-click cancels.
+Right-click → Add catch-up BPM, then two drags: first over the time it counts (the yellow area), then from there to where the catch-up should stop (the teal area). With a Select box kept, the box is the yellow area at once. Esc or right-click cancels.
 [clip:conductor-catch]
 
 Above: 120 BPM, a stop at 60 for one beat, then the catch-up runs at 140 BPM until the music is back on time when the line returns to 120.

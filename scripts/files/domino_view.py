@@ -81,7 +81,7 @@ BUILDS = {
         doc_path_at=0x18C, ts_vt=0x55B750, onion_at=0x34, colour_at=0x48),
 }
 # (shown when a Domino can't be read)
-KNOWN_VERSIONS = "Domino 1.41b, 1.42, 1.43, 1.44, and the 64-bit 1.45 test builds (the 256 keys mod too)"
+KNOWN_VERSIONS = "Domino 1.41b, 1.42, 1.43, 1.44, and the 1.45 test builds, 32-bit and 64-bit (the 256 keys mod too)"
 UNITS_PER_BEAT = 24
 
 

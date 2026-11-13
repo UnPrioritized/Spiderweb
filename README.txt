@@ -28,14 +28,18 @@ What it can do
   and put overlapping shapes on different channels (or remove the
   overlaps, track by track).
 - Hz bass: spam so fast it sounds like a tone, with a synth window (knobs,
-  effects, layers) and a preview you can hear right away.
+  effects, layers) and a preview you can hear right away. Sketch its pitch
+  with curved bends (with handles) and wobbles, or draw your own wobble
+  wave in the LFO window.
 - Image to notes: turn an image into notes in up to 15 colours (16 with
   channel 10).
 - Note tools: Claw machine, Strum and Chop pages that change the notes of a
-  shape, Add between (shapes that step from one shape to another), Recolour
-  and Stir (swirls and bends made from the colours you drew), Gate trim,
-  Gate extend, Fill gaps, Fold tracks (many tracks onto fewer), slicing
-  (with a line, a Lasso loop or another shape) and merging.
+  shape, Add between (shapes that step from one shape to another),
+  Recolour, Stir, Warp and Liquify (swirl, bend with a grid, or brush the
+  colours you drew), Gate trim, Gate extend, Fill gaps, Fold tracks (many
+  tracks onto fewer), slicing (with a line, a Lasso loop or another shape)
+  and merging. The Properties window lists every step done to a shape:
+  drag to change their order.
 - Draw on Domino (Experimental, Windows): Spiderweb's drawing tools right
   on Domino's piano roll; each finished shape goes into Domino's current
   track by itself. Take brings Domino's selected notes (several tracks, and
@@ -47,7 +51,9 @@ What it can do
   what you changed.
 - Track list and Conductor pane: see and arrange the tracks your MIDI will
   have (Tab), and draw the tempo as a line with jumps, glides and catch-ups,
-  plus time and key signatures.
+  plus time and key signatures. Change visual time signature turns bars
+  into another signature (4/4 into 7/8...) and stretches the tempo to
+  match, so it sounds the same.
 - Share shapes with others as one line of text.
 - Play it as you go (Built-in BASSMIDI, Kestrel on the graphics card, or
   Rendered ahead: the sound made a little ahead of the play line, so even
@@ -75,8 +81,8 @@ PyInstaller. If you'd rather not run the .exe, run it from source instead
   is out.
 - Update check: Spiderweb can look on GitHub for a new version when it
   starts. It asks you once how often (every start, once a day, week or
-  month, or never); change it later in Settings (the gear button), General
-  tab. It only asks GitHub for the list of versions: nothing about you or
+  month, or never); change it later in File -> Settings (Ctrl+,), General
+  page. It only asks GitHub for the list of versions: nothing about you or
   your work is sent, and nothing is downloaded by itself.
 - Signed updates: every release is signed with a key that is kept
   offline, never on GitHub. "Update and restart" checks that signature
@@ -115,7 +121,7 @@ Copying to Domino
   The tempo, signatures, CC, pitch bend and program changes come along too.
 
 Copying to other programs (Spiderweb Notes)
-- With Settings > General > "Ctrl+C also copies as Spiderweb Notes" ticked,
+- With Settings > Copying > "Ctrl+C also copies as Spiderweb Notes" ticked,
   Ctrl+C also puts the finished music on the clipboard in a format any
   program can read. If you make a MIDI program and want to paste from
   Spiderweb, SPIDERWEB-NOTES-FORMAT.md describes it (free to use).
@@ -126,7 +132,11 @@ PPQ and keys
 - Keys: 256 (under Project) takes the piano roll up to key 255, for players
   that read 256-key MIDI (handy for tunings like 31edo). Most MIDI programs,
   Domino included, only read keys 0-127, and Spiderweb's own playback skips
-  the keys above 127.
+  the keys above 127 (except in 31-EDO, below).
+- 31-EDO (with Keys: 256): the piano roll shows 31 keys an octave, and with
+  Audio ticked Spiderweb plays them tuned, every key up to 255, pitch bends
+  and instruments too (Built-in BASSMIDI, Kestrel or Rendered ahead). It
+  can play a loaded MIDI in 31-EDO as well.
 
 Limits
 - Shapes make their notes as a whole: you can't move a single note or change

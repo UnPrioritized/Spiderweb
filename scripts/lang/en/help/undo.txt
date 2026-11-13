@@ -2,4 +2,6 @@ Ctrl+Z (or the Undo button in the toolbar) undoes the last change, Ctrl+Y (or Ct
 
 Every change is a step with a name (the last 300 are kept). Tick History in the toolbar to see them all and click any step to jump straight to it (see History).
 
+To make undo quick, Spiderweb keeps the notes of shapes as they were, up to 1 GB (less on a PC with little memory). Past that the oldest are let go, and undoing that far back makes their notes again, which can take a moment on very big shapes.
+
 The drawer has its own Ctrl+Z / Ctrl+Y for its drawing. In the Hz bass window, Ctrl+Z only takes back changes made in it. While the Copy along a path or Hz shape window is open, Ctrl+Z takes back that window's changes first.

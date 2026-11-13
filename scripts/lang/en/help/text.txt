@@ -41,7 +41,7 @@ In right-to-left text the arrow keys follow the reading order, and one press mov
 
 Running Spiderweb from its source files, this needs two free packages, uharfbuzz and python-bidi: Spiderweb offers to install them once. Without them the letters aren't joined and right-to-left text runs left to right.
 
-Click a text with the Text tool (or double-click it with Select, or right-click → Edit text) to retype it. Drag, Shift+arrows, double-click (a word) or Ctrl+A select letters; Ctrl+C / X / V copy, cut and paste them (with no letters selected, Ctrl+C copies the whole shape).
+Click a text with the Text tool (or double-click it with Select, or right-click → Edit text) to retype it. Drag, Shift+arrows, double-click (a word) or Ctrl+A select letters; Ctrl+C / X / V copy, cut and paste them (with no letters selected, Ctrl+C copies the whole shape). While typing, Ctrl+Left / Ctrl+Right jump a word (with Shift: select it) and Ctrl+Backspace / Ctrl+Delete erase a whole word. On a text that's only selected, not being typed in, Ctrl+Left / Ctrl+Right turn it as usual.
 
 Right-click → Split into letters: every letter becomes its own text, right where it was, with the same notes (spaces go). If letters overlap, or the text has Claw, Chop or a Gate range (they then work on each letter alone), some notes change and the status line says so. All of them stay selected, so you can move, turn or flip each one, or click one to retype it.
 
