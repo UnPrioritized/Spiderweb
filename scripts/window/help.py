@@ -337,9 +337,13 @@ class HelpWindow(tk.Toplevel):
 
         left = ttk.Frame(self, padding=(8, 8, 4, 8))
         left.pack(side="left", fill="y")
-        # Alt+arrows and the mouse's back / forward buttons (Tk 8.7+ gives them the numbers 8 / 9 everywhere)
+        # Alt+arrows and the mouse's back / forward buttons (Tk 8.7+ gives them the numbers 8 / 9 everywhere). The
+        # buttons BOTH ways: a real press on Windows reached only a plain <ButtonPress> (the user's mouse,
+        # 2026-11-14: e.num 8 / 9, "<Button-8>" never fired), a generated one only "<Button-8>". Tk runs one
+        # binding per tag for an event, so a press never steps twice.
         for seq, step in (("<Alt-Left>", -1), ("<Alt-Right>", 1), ("<Button-8>", -1), ("<Button-9>", 1)):
             self.bind(seq, lambda e, step=step: self.go(step) or "break")
+        self.bind("<ButtonPress>", self.side_button, add="+")
         self.query = tk.StringVar()
         search = ttk.Entry(left, textvariable=self.query, width=30)
         search.pack(fill="x")
@@ -537,6 +541,14 @@ class HelpWindow(tk.Toplevel):
         self.open_topic(topic_id, step=False)
         self.text.yview(top)
         self.sync_steps()
+
+    def side_button(self, e):
+        """The mouse's back (8) / forward (9) button anywhere in the window: Back / Forward."""
+        step = {8: -1, 9: 1}.get(e.num)
+        if step:
+            self.go(step)
+            return "break"
+        return None
 
     def step_arrow(self, row, arrow, step, tip):
         """One Back / Forward arrow: link-coloured text, a click goes there; grey (nothing to do) when it can't."""
