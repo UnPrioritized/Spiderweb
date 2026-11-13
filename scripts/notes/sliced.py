@@ -1251,6 +1251,8 @@ def rejoined(olds, new, join=None):
         out["cut"]["vel"] = velocity(out)
     else:
         out["cut"]["own_vel"] = True
+        carry_drawn(olds, out)  # (velocity lines drawn on the pieces stay where they were drawn)
+        carry_was(olds, out)  # (and the line each had when cut, so the pages' velocities stay where it's unchanged)
     return out
 
 
@@ -1427,6 +1429,55 @@ def drawn_spots(sh, at, shown, t_lo, t_hi):
         last_s = np.where((us >= a - 1e-9) & (us <= b + 1e-9), k, last_s)
         last_o = np.where((uo >= a - 1e-9) & (uo <= b + 1e-9), k, last_o)
     return np.where(cut & (last_s > last_o), shown, at)
+
+
+def carry_drawn(olds, new):
+    """The velocity lines drawn on pieces olds (cut["drawn"]: stretches of their own time) kept on new, a piece made
+    of them or out of one of them (Split + Join): the same stretches of the song, in new's own time (drawn_spots)."""
+    cut = new.get("cut")
+    if not isinstance(cut, dict):
+        return
+    from notes.engine import cached_arrays
+    tn = np.concatenate(cached_arrays(new))[:, 0]
+    n0, n1 = float(tn.min()), float(tn.max())
+    if n1 - n0 < 1e-12:
+        return
+    got = []
+    for old in olds:
+        drawn = (old.get("cut") or {}).get("drawn") if isinstance(old.get("cut"), dict) else None
+        if not drawn:
+            continue
+        to = np.concatenate(cached_arrays(old))[:, 0]
+        o0, o1 = float(to.min()), float(to.max())
+        for a, b in drawn:
+            got.append([(o0 + a * (o1 - o0) - n0) / (n1 - n0), (o0 + b * (o1 - o0) - n0) / (n1 - n0)])
+    same = [k for k, g in enumerate(got) if not any(abs(g[0] - h[0]) <= 1e-9 and abs(g[1] - h[1]) <= 1e-9
+                                                   for h in got[k + 1:])]  # (the same stretch twice: its last)
+    got = [got[k] for k in same]
+    if got:
+        cut["drawn"] = got[-DRAWN_MOST:]
+
+
+def carry_was(olds, new):
+    """The lines pieces olds had when they were cut (cut["vel"]) joined into one for new, a piece made of them:
+    own_velocities then finds only the stretches drawn over, as before, and the rest keeps the pages' velocities.
+    Not when a piece has no such line."""
+    cut = new.get("cut")
+    if not isinstance(cut, dict) or cut.get("vel") is not None:
+        return
+    was = [(old.get("cut") or {}).get("vel") for old in olds]
+    if not was or not all(isinstance(w, dict) and "vel0" in w for w in was):
+        return
+    from notes.engine import cached_arrays
+    from notes.joined import join_velocity
+    spans = []
+    for sh in list(olds) + [new]:
+        t = np.concatenate(cached_arrays(sh))[:, 0]
+        spans.append((float(t.min()), float(t.max())))
+    got = {}
+    join_velocity(got, [dict(w) for w in was], spans[:-1], spans[-1])
+    if "vel0" in got:
+        cut["vel"] = {k: got[k] for k in ("vel0", "vel1", "vel_env") if k in got}
 
 
 def keep_velocity(sh):
