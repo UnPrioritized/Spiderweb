@@ -3572,6 +3572,34 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         top, bot = self.area()
         lw = max(1, round(self.scale))
         worked = plans(tempo, base, self.app.ppq)
+        ppq = self.app.ppq
+        heard_mode = self.box.mode == "heard"  # (Draw: Heard tempo: the heard lines full, the drawn one faded)
+        # (in drawing order, each piece over the ones before)
+        areas, dark = self._draw_areas(roll, kb, w, h, lw, worked)
+        keep_spans, run_of = self._keep_spans(roll, app, tempo, base, ppq, kb, w)
+        self._draw_keep_areas(roll, keep_spans, areas, worked, kb, w, h, lw, top, heard_mode)
+        self._draw_grid(roll, areas, dark, kb, w, h, lw)
+        self._draw_keep_words(roll, keep_spans, run_of, kb, w, h, lw, top)
+        xs, beats, ys, preview = self._draw_tempo_line(tempo, base, worked, kb, w, h, lw, heard_mode)
+        heard = self._draw_heard(roll, app, tempo, base, ppq, worked, keep_spans, preview, kb, w, lw, heard_mode)
+        self._draw_picked_part(heard, xs, beats, ys, lw, heard_mode)
+        self._draw_catch_lines(roll, tempo, worked, kb, w, h, lw, top)
+        self.draw_drag(lw)
+        mw = self.edges_on()
+        if mw is not None and mw.live_chain() is not None:  # (Jump areas: the edges + "Area 1, 2…")
+            mw.chain.draw(self, lw)
+        self._draw_points(roll, tempo, worked, preview, kb, w, lw, heard_mode)
+        lines = [(xs, ys)] + [(hx, hy) for hx, _, hy, _ in heard]
+        self.draw_limits(lines, kb, w, h, lw)
+        self._draw_numbers(kb, h)
+        self.draw_playhead()
+        for bar in self.bars:
+            bar.refresh()
+
+    def _draw_areas(self, roll, kb, w, h, lw, worked):
+        """_draw_all's coloured areas: the space before the start, catch-ups' yellow / teal stretches and the thin
+        gaps between touching ones. Returns (areas, dark): areas = (x0, x1, colour) each, later ones on top (the
+        faint grid lines' shade); dark = where the space before the start ends."""
         areas = []  # (x0, x1, colour) of each coloured area, later ones on top: the faint grid lines' shade
         dark = round(roll.t2x(0.0))  # (Space before the start, Settings → General: darker there, like the piano roll)
         if dark > kb:
@@ -3602,8 +3630,12 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
                     self.create_rectangle(x - 1.5 * lw, 0, x + 1.5 * lw, h, fill=look.ROLL_BG, outline="",
                                           tags="catch_gap")
                     areas.append((x - 1.5 * lw, x + 1.5 * lw, None))
-        ppq = self.app.ppq
-        heard_mode = self.box.mode == "heard"  # (Draw: Heard tempo: the heard lines full, the drawn one faded)
+        return areas, dark
+
+    def _keep_spans(self, roll, app, tempo, base, ppq, kb, w):
+        """The Keep timing parts on screen: (keep_spans, run_of). keep_spans = (x0, x1, us, start beat, end beat,
+        point) each, a run's parts side by side joined into one while nothing is loaded or dragged; run_of = point ->
+        its run (keep_runs)."""
         keep_spans = [(max(kb, roll.t2x(a / ppq)), w if e is None else min(w, roll.t2x(e / ppq)), u, a / ppq,
                        math.inf if e is None else e / ppq, i) for i, a, e, u in layout(tempo, base, ppq)["keeps"]]
         keep_spans = [s for s in keep_spans if s[1] > s[0]]
@@ -3620,6 +3652,11 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
                 else:
                     joined_spans.append(s)
             keep_spans = joined_spans
+        return keep_spans, run_of
+
+    def _draw_keep_areas(self, roll, keep_spans, areas, worked, kb, w, h, lw, top, heard_mode):
+        """Keep timing parts' purple areas, Keep timing switched off inside a catch-up, and (Draw: Heard tempo) the
+        faded stretches outside the parts. Adds to areas."""
         for x0, x1, *_ in keep_spans:  # Keep timing parts (purple), their notes keep the tempo heard before
             self.create_rectangle(x0, 0, x1, h, fill=look.TEMPO_KEEP_BG, outline="")
             areas.append((x0, x1, look.TEMPO_KEEP_BG))
@@ -3642,6 +3679,10 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
                 x = max(x, w if e is None else roll.t2x(e))
                 if x >= w:
                     break
+
+    def _draw_grid(self, roll, areas, dark, kb, w, h, lw):
+        """The grid: upright beat / bar / tick lines (shaded by the area they're on), the BPM label lines, time /
+        key signature marks, the file's slowest / fastest limits, the 0 line and the bold number's dashed line."""
         by = roll.tick_by() or 1.0
         for x, c in roll.grid_cols(w):
             if x >= kb:
@@ -3665,6 +3706,10 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
                 self.create_line(kb, y, w, y, fill=look.CHART_GRID_STRONG)
         y = float(self.b2y(self._view_bpm))
         self.create_line(kb, y, w, y, fill=look.TEMPO_BASE, dash=(4, 3), width=lw)
+
+    def _draw_keep_words(self, roll, keep_spans, run_of, kb, w, h, lw, top):
+        """Keep timing parts' notes too close (dashed orange lines), their words ("Keep timing" / too close), and the
+        limit arrows (Change visual time signature's changed bars too)."""
         dense = self.dense_now()
         words = []  # [x0, x1, too close, run, end beat, start beat]: a run's pieces side by side = one part, one
         # word (user)
@@ -3690,6 +3735,10 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             words.append([max(kb, roll.t2x(marks["a"])), min(w, roll.t2x(marks["b"])), False, None, marks["b"],
                           marks["a"]])
         self.draw_limit_arrows(words, kb, w, h)
+
+    def _draw_tempo_line(self, tempo, base, worked, kb, w, h, lw, heard_mode):
+        """The tempo line (a line being drawn: as letting go gives it), Fill with tempo jumps' faint preview and the
+        arrows to parts out of view. Returns (xs, beats, ys, preview): the line's points + drag_preview()."""
         # the line itself (faded while the heard line is drawn: user 2026-10-24)
         preview = self.drag_preview()  # (a line being drawn: the tempo as letting go gives it)
         if preview and "tempo" in preview:
@@ -3714,6 +3763,11 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
                                  width=lw + 1, tags="fill_preview")
                 lines.append((px[on], pb[on], py[on], fp["tempo"], fp["worked"], True))
         self.draw_off_marks(lines, w, kb, h, base)
+        return xs, beats, ys, preview
+
+    def _draw_heard(self, roll, app, tempo, base, ppq, worked, keep_spans, preview, kb, w, lw, heard_mode):
+        """The tempo the Keep timing notes are heard at (a loaded MIDI's own tempo there) and dotted upright lines where
+        the sound jumps at a part's end. Returns heard_lines' list."""
         # the tempo the Keep timing notes are heard at (dashed; drawn with Heard tempo: solid)
         dash = () if heard_mode else (6, 3)
         loaded = file_tempos(app.loaded) if app.loaded is not None and keep_spans else None
@@ -3754,6 +3808,10 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
                 y1 = float(self.b2y(shown_bpm(tempo, base, [b1], worked, ppq)[0]))
             if y1 is not None and abs(y1 - hy[-1]) >= 1:
                 self.create_line(x, hy[-1], x, y1, fill=look.TEMPO_KEEP, dash=(2, 2), width=lw)
+        return heard
+
+    def _draw_picked_part(self, heard, xs, beats, ys, lw, heard_mode):
+        """The picked part, thicker (Draw: Heard tempo: on the run's heard line)."""
         pick = self.picked()
         if pick and pick[0] == "part":  # the picked part, thicker
             pts = self.ed()["points"]
@@ -3771,6 +3829,9 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             if on.sum() >= 2:
                 self.create_line(*np.column_stack([px[on], py[on]]).ravel().tolist(), fill=look.TEMPO_PICKED,
                                  width=lw + 3)
+
+    def _draw_catch_lines(self, roll, tempo, worked, kb, w, h, lw, top):
+        """Pinned edges, then each catch-up's line, how far it can go, its triangle and its words."""
         for at, k, _ in self.pins(tempo, worked):
             if kb <= roll.t2x(at) <= w:
                 self.create_line(roll.t2x(at), 0, roll.t2x(at), h, width=lw * 4, tags="catch_pin",
@@ -3803,10 +3864,10 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             if box and box[2] > w - 2:  # (past the pane's right edge: left of the
                 self.itemconfig(item, anchor="e")                     # line instead, hunt 2026-10-24)
                 self.coords(item, x - 4 * self.scale, top + 8 * self.scale)
-        self.draw_drag(lw)
-        mw = self.edges_on()
-        if mw is not None and mw.live_chain() is not None:  # (Jump areas: the edges + "Area 1, 2…")
-            mw.chain.draw(self, lw)
+
+    def _draw_points(self, roll, tempo, worked, preview, kb, w, lw, heard_mode):
+        """The points' dots (Draw: Heard tempo: every run's heard points), the picked line's bend handle and the live
+        line's end squares."""
         ends = {st["end"] for st, _ in worked if st["end"] is not None}
         r = 4 * self.scale
         if heard_mode:  # (every run's heard points; the run being edited's can be picked)
@@ -3849,8 +3910,9 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             x, y, r = roll.t2x(b), float(self.b2y(v)), 5 * self.scale
             self.create_rectangle(x - r, y - r, x + r, y + r, fill=look.CHART_POINT, outline=look.TEMPO_PICKED,
                                   width=lw + 1)
-        lines = [(xs, ys)] + [(hx, hy) for hx, _, hy, _ in heard]
-        self.draw_limits(lines, kb, w, h, lw)
+
+    def _draw_numbers(self, kb, h):
+        """The BPM numbers on the left."""
         # the numbers on the left
         self.create_rectangle(0, 0, kb, h, fill=look.RULER_BG, outline="")
         self.create_line(kb - 1, 0, kb - 1, h, fill=look.ROLL_EDGE)
@@ -3859,9 +3921,6 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             if 5 * self.scale <= y <= h - 5 * self.scale:
                 self.create_text(kb - 5, y, text=bpm_text(v), anchor="e", fill=look.LABEL,
                                  font=look.font(7, "bold") if strong else look.font(7))
-        self.draw_playhead()
-        for bar in self.bars:
-            bar.refresh()
 
     def draw_limits(self, lines, kb, w, h, lw):
         """Short texts naming what the file can't do where Keep timing asks for it (user 2026-10-24): notes under a
