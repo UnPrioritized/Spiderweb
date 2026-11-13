@@ -1599,11 +1599,9 @@ def shown_subtracted(notes, sub, sh, ppq):
 
 def reads_line(sh):
     """Do sh's notes take their velocities straight off its velocity line, read at each note's start (shown_subtracted)?"""
-    # (glue that runs AFTER Gate subtract (the step order: "_noglue0", no "glue0" before it) glues the notes as read
-    # here: adding it left the velocities read at the old starts, sweep 75545074)
-    glued_first = sh.get("glue") and not (sh.get("_noglue0") and not any(
-        s.get("tool") == "glue0" for s in sh.get("fx") or ()))
-    if (sh.get("own_vel") or sh.get("merge") or sh.get("cut") or glued_first or sh.get("hz")
+    # (glue before Gate subtract too (user 2026-11-13: read where shown, like a shape without glue; a line ending just
+    # before a note whose start Subtract moved changed it, case 219230096); glue after it glues the notes as read here)
+    if (sh.get("own_vel") or sh.get("merge") or sh.get("cut") or sh.get("hz")
             or "picture" in sh or sh["kind"] in HZ_KINDS and (sh.get("hz") or {}).get("tones")):
         return False
     # (the Gate aware flip as a step of the order (a glue box makes the order explicit): it reads the line where the
