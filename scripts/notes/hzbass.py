@@ -388,6 +388,8 @@ def shifted_hz(hz, d):
             n["wobble"] = wobble_part(dict(n, t=n["t"] + d), 0.0, end)
             if n["wobble"] is None:
                 del n["wobble"]
+            else:  # (its line dropped as flat: points kept where its wobbles end, hunt 2026-11-13)
+                wobble_points(n)
         n["t"], n["len"] = max(0.0, t), max(MIN_LEN, end - max(0.0, t))
         tones.append(n)
     if "tones" in hz:

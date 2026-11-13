@@ -19,7 +19,7 @@ import numpy as np
 from files.lang import tr, trn
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOBBLE_RATE_MOST, WOBBLE_SHAPES, bend_of,
                           WOBBLE_SEED_STEP, bend_part, bends, bent_part, clean_speed, depth_at, depth_most, depth_pts,
-                          fit_speed, fit_wobbles, line_at, pitch, run_copy, set_depth, speed_mean, wave_end,
+                          fit_speed, fit_wobbles, line_at, pitch, run_copy, set_depth, speed_mean, split_wobbles, wave_end,
                           wave_start, waves_spot, wobble_keys, wobble_part)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
@@ -52,6 +52,7 @@ SPEED_STEP = 0.05  # a speed point goes in these steps of full speed (Shift: 0.0
 LOCK_SIZE, LOCK_GAP = 10, 4  # px: a speed lock's size, its room from the strip's end
 EVEN_SPEED = [[0.0, 1.0], [1.0, 1.0]]  # a wobble with no speed line: full speed all along
 POST_DROP = 9  # px: a wobble's end post's dot this far under its depth line's depth-0 height (stage D)
+POST_ROOM = 12  # px: the speed post stands this far beside a depth point it would be on (user 2026-11-13)
 
 
 def curve_to(pts, j, bend, shift):
@@ -121,6 +122,14 @@ def nearest_bends(wants, s):
         e2 = ((bent_part(s[None, :], m2[:, None]) - wants) ** 2).sum(1)
         lo, hi = np.where(e1 < e2, lo, m1), np.where(e1 < e2, m2, hi)
     return [0.0 if abs(b) < 1e-3 else b for b in (round(float(b), 4) for b in (lo + hi) / 2)]
+
+
+def put_run(n, at, run):
+    """Note n's wobble over the stretch at (u0, u1) = run: every wobble inside it replaced (hunt 2026-11-13: one
+    there that didn't match the stretch exactly stayed, and a second one was laid on top of it)."""
+    a, b = at
+    n["wobble"] = sorted([w for w in n.get("wobble") or () if not (w["at"][0] < b - ON_POINT and w["at"][1] > a + ON_POINT)]
+                         + [run], key=lambda w: w["at"])
 
 
 BAKE_GAP = 1e-10  # bake_wobble: a jump's two sides read this far (parts of the note) before / after it
@@ -274,8 +283,16 @@ class HzSketch:
         if not run:
             return None
         x0, _, x1, _, base = got
-        foot = base - float(depth_at(run, np.array([0.5]))[0]) * self.sy
-        return (x0 + x1) / 2, foot, foot - SPEED_POST * self.s
+        x = (x0 + x1) / 2
+        room = POST_ROOM * self.s
+        for p in depth_pts(run)[1:-1]:  # (a depth point there (Triangle's top): the post just beside it, user
+            px = x0 + (x1 - x0) * p[0]   # 2026-11-13: it could only be grabbed by its top)
+            if abs(px - x) < room:
+                x = px + room if px + room < x1 else px - room
+                break
+        share = (x - x0) / (x1 - x0) if x1 > x0 else 0.5
+        foot = base - float(depth_at(run, np.array([share]))[0]) * self.sy
+        return x, foot, foot - SPEED_POST * self.s
 
     def end_posts(self):
         """[(end "start" / "end", x, y of its dot)] of the picked wobble's end posts (a short stick under each end of
@@ -309,9 +326,18 @@ class HzSketch:
         boxes, shape = self.preset_boxes(), self.depth_shape()
         if not boxes or not shape:
             return None
-        gap = PRESET_GAP * self.s
-        top = max(self.ruler_h + gap, boxes[0][2] - 2 * gap - SPEED_STRIP_H * self.s)
-        return shape[1][0][0], top, shape[1][-1][0], top + SPEED_STRIP_H * self.s
+        gap, tall = PRESET_GAP * self.s, SPEED_STRIP_H * self.s
+        top = boxes[0][2] - 2 * gap - tall
+        if top < self.ruler_h + gap:  # (no room above (near the view's top): under the note instead, user 2026-11-13;
+            i, _, u0, u1 = self.picked_piece()  # it covered the preset buttons)
+            n = self.tones[i]
+            pts = n.get("bend") or ([0.0, 0.0], [1.0, 0.0])
+            run = self.wobble_run(n, u0, u1)
+            low = pitch(n) + min(float(np.min(line_at(pts, np.linspace(u0, u1, 65)))),
+                                 min(p[1] for p in pts if u0 - ON_POINT <= p[0] <= u1 + ON_POINT))
+            low -= depth_most(run) if run else 0.0
+            top = self.pitch_y(low) + self.sketch_wide() / 2 + 3 * gap
+        return shape[1][0][0], top, shape[1][-1][0], top + tall
 
     def speed_shape(self):
         """The open speed strip's line: (its points [[share, speed 0..1(, curve)], ...], [(x, y) of each point],
@@ -478,9 +504,7 @@ class HzSketch:
             peak = depth(most + k)
             for p in pts:
                 p[1] = peak if most <= 0 else round(p[1] * peak / most, 4)
-        run = set_depth(copy.deepcopy(d["orig"]), pts)
-        was = self.wobble_run(n, *d["at"])
-        n["wobble"] = sorted([w for w in n.get("wobble") or () if w is not was] + [run], key=lambda w: w["at"])
+        put_run(n, d["at"], set_depth(copy.deepcopy(d["orig"]), pts))
         self.spread_pick(d["i"], d["at"])  # (several selected notes: theirs change alike, live)
         self.redraw()
         return True
@@ -598,8 +622,7 @@ class HzSketch:
         pts = clean_speed(pts)
         if pts:
             run["speed"] = pts
-        was = self.wobble_run(n, *d["at"])
-        n["wobble"] = sorted([w for w in n.get("wobble") or () if w is not was] + [run], key=lambda w: w["at"])
+        put_run(n, d["at"], run)
         self.spread_pick(d["i"], d["at"])  # (several selected notes: theirs change alike, live)
         self.redraw()
         return True
@@ -682,8 +705,7 @@ class HzSketch:
         run.pop("free", None)
         if e.state & CTRL:  # (set freely: kept as it is when its piece's length changes, hz_lines.fit_wobbles)
             run["free"] = True
-        was = self.wobble_run(n, *d["at"])
-        n["wobble"] = sorted([w for w in n.get("wobble") or () if w is not was] + [run], key=lambda w: w["at"])
+        put_run(n, d["at"], run)
         self.spread_pick(d["i"], d["at"])  # (several selected notes: theirs change alike, live)
         self.redraw()
         return True
@@ -695,13 +717,43 @@ class HzSketch:
         end goes along the line instead (a delay), a new point left there (or onto a point on the way); dragged back
         = as it was."""
         o = d["orig"]
-        pts = [list(p) for p in o.get("bend") or ([0.0, 0.0], [1.0, 0.0])]
-        wob = copy.deepcopy(o.get("wobble") or [])
+        pts = o.get("bend") or ([0.0, 0.0], [1.0, 0.0])
         u0, u1 = d["at0"]
         start = d["end"] == "start"
         j0, j1 = run_points(pts, u0, u1)
         j = j0 if start else j1
         u = min(1.0, max(0.0, (self.snap(self.beat_at(e.x), e) - n["t"]) / max(n["len"], 1e-12)))
+        at = self.post_move(n, o, (u0, u1), start, u)
+        if at is None:
+            return True
+        moved = (u - pts[j][0]) * n["len"]  # (beats: every other selected note's same point moves as far, the plugin's
+        for k in sorted(self.sel):           # way, user 2026-11-13; notes with as many points and a wobble there)
+            if k == d["i"] or k >= len(d["before"]) or k >= len(self.tones):
+                continue
+            mo = d["before"][k]
+            mp = mo.get("bend") or ([0.0, 0.0], [1.0, 0.0])
+            if len(mp) != len(pts) or not self.wobble_run(mo, mp[j0][0], mp[j1][0]):
+                continue
+            m = self.tones[k]
+            mu = min(1.0, max(0.0, mp[j][0] + moved / max(m["len"], 1e-12)))
+            self.post_move(m, mo, (mp[j0][0], mp[j1][0]), start, mu)  # (None: it stays where it got to, as this one)
+        d["at"] = at
+        pick = (n.get("id"), *at)
+        if self.sketch_speed == self.sketch_pick:
+            self.sketch_speed = pick
+        self.sketch_pick = pick
+        self.redraw()
+        return True
+
+    def post_move(self, n, o, at0, start, u):
+        """sketch_post_to on one note: note n (o = it at the press) with the wobble over at0 having its start / end's
+        bend point moved to u (parts of the note). The note's own start / end can't move: the wobble's end goes
+        along the line instead, a new point left there. The new (u0, u1), or None (onto its other end: as it was)."""
+        pts = [list(p) for p in o.get("bend") or ([0.0, 0.0], [1.0, 0.0])]
+        wob = copy.deepcopy(o.get("wobble") or [])
+        u0, u1 = at0
+        j0, j1 = run_points(pts, u0, u1)
+        j = j0 if start else j1
         if j in (0, len(pts) - 1):
             run = self.wobble_run({"wobble": wob}, u0, u1)
             u = min(u1, max(0.0, u)) if start else min(1.0, max(u0, u))
@@ -718,18 +770,12 @@ class HzSketch:
             pts[j][0] = round(min(pts[j + 1][0], max(pts[j - 1][0], u)), 9)
             at = [pts[j][0], u1] if start else [u0, pts[j][0]]
             if at[1] - at[0] <= ON_POINT:  # (onto its other end: no wobble left, so it stops short, as it was)
-                return True
+                return None
             moved = {"bend": pts}
             follow_wobble(moved, wob, j, old)  # (this wobble's end on it follows: the start's last point, the end's
             n["bend"], wob = pts, moved.get("wobble") or wob  # first; a wobble on its other side too)
         n["wobble"] = sorted(wob, key=lambda w: w["at"])
-        d["at"] = at
-        pick = (n.get("id"), *at)
-        if self.sketch_speed == self.sketch_pick:
-            self.sketch_speed = pick
-        self.sketch_pick = pick
-        self.redraw()
-        return True
+        return at
 
     def sketch_widen(self, d, a, b, shift):
         """A click (no drag) on piece a..b of note d["i"] (stage D): picks it, or the whole wobble running over it;
@@ -791,6 +837,8 @@ class HzSketch:
                 a, b = mp[got[0]][0], mp[got[1]][0]
             else:
                 continue
+            for u in (a, b):  # (a longer one of theirs: cut around the stretch, the rest kept; hunt 2026-11-13)
+                split_wobbles(m, u)
             kept = [w for w in m.get("wobble") or () if not (w["at"][0] < b - ON_POINT and w["at"][1] > a + ON_POINT)]
             if run:
                 kept.append(run_copy(run, beats, a, b, m["len"], self.wobble_same == "speed"))

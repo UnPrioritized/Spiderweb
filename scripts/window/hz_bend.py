@@ -22,7 +22,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import fmt
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bends, line_at, merge_wobbles, note_bend, pitch,
-                          depth_most, wobble_edges)
+                          depth_most, wobble_edges, wobble_points)
 from roll.roll_shared import SHIFT
 from window import look
 
@@ -328,8 +328,15 @@ class HzBend:
                 return True
         if d["kind"] == "wobblerate" and not d["moved"]:  # (Sketch: the speed post clicked: its speed strip)
             self.speed_toggle()
-        if d["kind"] in WOBBLE_DRAGS and self.tones[d["i"]] != d["before"][d["i"]]:
-            self.spread_pick(d["i"], d["at"])  # (several selected notes: theirs the same)
+        if d["kind"] in WOBBLE_DRAGS + ("wobbleend",):
+            if self.tones[d["i"]] == d["before"][d["i"]]:  # (back where it started: the other selected notes too, no
+                self.tones[:] = copy.deepcopy(d["before"])  # undo step; hunt 2026-11-13: theirs were replaced)
+            elif d["kind"] != "wobbleend":
+                self.spread_pick(d["i"], d["at"])  # (several selected notes: theirs the same)
+            else:  # (an end post: the other selected notes' same point moved too, sketch_post_to)
+                for k in self.sel:
+                    if k != d["i"] and k < len(self.tones) and self.tones[k] != d["before"][k]:
+                        tidy_bend(self.tones[k], True)
         self.bend_done(d)
         return True
 
@@ -350,12 +357,16 @@ class HzBend:
             run = self.wobble_run(self.tones[d["i"]], *d["at"])
             if run:
                 run.pop("speed", None)
+                self.spread_pick(d["i"], d["at"])  # (the other selected notes too, hunt 2026-11-13)
             self.bend_done(d, tr("hz.step_wobble_speed_line"))
             return
+        if d["kind"] == "wobbleend":  # (an end post: the points it moved back (on every selected note), then the
+            self.tones[:] = copy.deepcopy(d["before"])  # wobble goes; hunt 2026-11-13: Delete took the whole note)
+            d["at"] = list(d["at0"])
+            self.sketch_pick, self.sketch_speed = d["pick"]
         if d["kind"] in ("wobbledepth", "wobblerate", "wobbleend"):  # (Sketch's depth line / speed post / an end
             self.sketch_depth_gone(d)                                     # post: the wobble goes)
-            if d["kind"] != "wobbleend":
-                self.spread_pick(d["i"], d["at"], gone=True)
+            self.spread_pick(d["i"], d["at"], gone=True)
             self.bend_done(d, tr("hz.step_wobble_delete"))
             return
         pts = self.tones[d["i"]]["bend"]
@@ -594,6 +605,8 @@ def tidy_bend(n, pieces=False):
         n["wobble"] = [w for w in n["wobble"] if w["at"][1] - w["at"][0] > 1e-9 and depth_most(w) > 0]
         if not n["wobble"]:
             del n["wobble"]
+        else:
+            wobble_points(n)  # (each wobble's ends on points: it can be picked; hunt 2026-11-13, Scoop / Fall)
     pts = n.get("bend")
     if pts is None:
         return

@@ -238,8 +238,13 @@ def fit_speed(w, beats, waves):
                 w["rate"] = top
                 w["speed"] = [[q[0], round(g / top, 9), *q[2:]] for q, g in zip(pts, got.tolist())]
                 return w
+    if speed_mean(w) < SPEED_FIT_LEAST:  # (all (almost) stopped: its speed kept, hunt 2026-11-13: a half wave on a
+        return w                          # stopped line raced it to the top, Even speed then ran 16x as fast)
     w["rate"] = min(WOBBLE_RATE_MOST, max(0.01, waves / (beats * max(speed_mean(w), SPEED_LEAST))))
     return w
+
+
+SPEED_FIT_LEAST = 0.05  # fit_speed: a speed line averaging under this share of full speed keeps its rate
 
 
 def speed_cut(w, a, b):
@@ -393,6 +398,34 @@ def split_wobbles(n, u):
         out += [first, second]
     if out:
         n["wobble"] = out
+
+
+def wobble_points(n):
+    """Note n's bend line given a point wherever one of its wobbles starts / ends without one (a wobble runs point to
+    point; hunt 2026-11-13: one copied onto a Scoop / Fall line stopping short, or kept on a cut note whose flat line
+    was dropped, could never be picked again). Flat before its first point / after its last, a point there changes
+    nothing heard; one inside a straight piece neither. Inside a curved piece: left (a split curve isn't exact)."""
+    runs = n.get("wobble")
+    if not runs:
+        return
+    pts = [list(p) for p in n.get("bend") or ([0.0, 0.0], [1.0, 0.0])]
+    changed = False
+    for u in sorted({u for w in runs for u in w["at"]}):
+        if any(abs(p[0] - u) < ON_POINT for p in pts):
+            continue
+        if u < pts[0][0]:
+            pts.insert(0, [round(u, 9), pts[0][1]])
+        elif u > pts[-1][0]:
+            pts.append([round(u, 9), pts[-1][1]])
+        else:
+            j = next(k for k in range(1, len(pts)) if pts[k][0] > u)
+            if len(pts[j - 1]) > 2 and abs(pts[j][1] - pts[j - 1][1]) > 1e-9:
+                continue
+            pts.insert(j, [round(u, 9), pts[j - 1][1] if pts[j][1] == pts[j - 1][1] else
+                           round(float(line_at(pts, u)), 6)])
+        changed = True
+    if changed:
+        n["bend"] = pts
 
 
 def merge_wobbles(n, lo, u, hi):
