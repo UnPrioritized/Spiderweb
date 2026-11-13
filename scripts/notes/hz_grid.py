@@ -529,6 +529,28 @@ class KeyGrid:
             got = self.made_fast(key)
             if got is not None:
                 return got
+        x, xv, noise, row, oscs, which, cents, chorus = self._key_place(key)
+        run, copy, part, number, src, waves, starts = self._waves_counted(x, oscs, which, cents, chorus)
+        part, number, src, waves, starts, late, cap = self._height_hits(key, run, part, number, src, waves, starts)
+        starts, fx_late, grid, crushed, osc, tailed, tail_u = self._lateness(
+            x, row, noise, run, copy, part, number, src, waves, starts, late)
+        (starts, limits, until, hear, fx_late, waves, grid, crushed, osc, fade, gap, env, mix, soft, quiet,
+         per) = self._loudness(xv, run, copy, part, number, src, waves, starts, cap, fx_late, grid, crushed, osc,
+                               tailed, tail_u)
+        keep, all_starts, all_limits, all_env, all_quiet, all_gain, all_waves = self._echoes(
+            run, starts, limits, until, hear, fx_late, waves, grid, crushed, fade, gap, env, quiet)
+        sq, factor, mine, wv = self._finished(run, oscs, osc, keep, mix, soft, per, all_starts, all_limits, all_env,
+                                              all_quiet, all_gain, all_waves)
+        self.wave_of[key] = wv
+        factor.setflags(write=False)
+        mine.setflags(write=False)
+        self.mine[key] = mine  # (which take their note's own velocity: factor)
+        got = self.got[key] = (sq, factor)
+        return got
+
+    def _key_place(self, key):
+        """made's first step: where the key is among the shape's keys, its random numbers, which oscillators and
+        Voice copies its row plays, and whether the chorus moves it."""
         # where the key is among the shape's keys, 0 = the lowest (a key a Height grows onto: as the edge row, so
         # Groups / Slant don't push it a wave on)
         x = min((self.n - 1) / self.n, max(0.0, (key - self.lo) / self.n))
@@ -545,6 +567,11 @@ class KeyGrid:
         if not self.same:  # (the chorus and flanger take turns among the keys of the same copy (and oscillator),
             row //= len(self.copies)  # so every copy has some moved)
         chorus = self.chorus if row % 2 == 1 else None  # (every other key)
+        return x, xv, noise, row, oscs, which, cents, chorus
+
+    def _waves_counted(self, x, oscs, which, cents, chorus):
+        """made: every part (run x Voice copy) and its repeats, the waves counted on along each chain: (run, copy,
+        part, number, src, waves, starts) in order."""
         f, each = self.flat, self.each
         runs = np.flatnonzero(np.isin(each["osc"], oscs)) if self.osc2 else np.arange(len(self.runs))
         run = np.repeat(runs, len(cents))  # each part's run
@@ -608,6 +635,12 @@ class KeyGrid:
         part, number, src, waves, starts = (np.concatenate([g[i] for g in got]) for i in range(5))
         order = np.lexsort((number, part))
         part, number, src, waves, starts = part[order], number[order], src[order], waves[order], starts[order]
+        return run, copy, part, number, src, waves, starts
+
+    def _height_hits(self, key, run, part, number, src, waves, starts):
+        """made: where in each wave this key row hits (Height, the drawn wave shape): the repeats again per hit,
+        each one's lateness in waves and (Height) how many waves it may last at most (cap)."""
+        f = self.flat
         late = np.zeros(len(part))
         cap = None  # (Height: how many waves past its start each repeat's note may last at most)
         if self.heights:  # (Height: the drawn wave shape squashed / stretched wave by wave, so each repeat has its
@@ -628,6 +661,12 @@ class KeyGrid:
                 again = np.repeat(np.arange(len(part)), len(hits))
                 part, number, src, waves, starts = part[again], number[again], src[again], waves[again], starts[again]
             late = np.tile(np.asarray(hits, float), len(part) // max(1, len(hits)))
+        return part, number, src, waves, starts, late, cap
+
+    def _lateness(self, x, row, noise, run, copy, part, number, src, waves, starts, late):
+        """made: each repeat moved late (Slant, Groups, Random start, Noisy, Growl, the flanger, the reverb's scatter)
+        and Bitcrush's grid: (starts, fx_late, grid, crushed, osc, tailed, tail_u)."""
+        f, each = self.flat, self.each
         late = late + f["slant"][src] * x + np.floor(x * f["groups"][src]) / f["groups"][src]
         if self.starting is not None:  # (Random start: each copy's waves start that far in, the same all through)
             amount = f["random"][src] if "random" in self.moved else self.random
@@ -682,6 +721,14 @@ class KeyGrid:
             late = np.where(tailed & ~crushed, late + scatter, late)
         starts = starts + late * waves
         fx_late = fx_late * waves  # (ticks)
+        return starts, fx_late, grid, crushed, osc, tailed, tail_u
+
+    def _loudness(self, xv, run, copy, part, number, src, waves, starts, cap, fx_late, grid, crushed, osc, tailed,
+                  tail_u):
+        """made: each repeat's end limit and loudness (sweep, wah, tremolo, Blend, volume, the reverb's fade,
+        Octave below; SUB's hits in every wave): (starts, limits, until, hear, fx_late, waves, grid, crushed, osc,
+        fade, gap, env, mix, soft, quiet, per)."""
+        f, each = self.flat, self.each
         hear = f["beat"][src]  # (the beat the compressor's turn-down is read at)
         if self.comp and tailed.any() and not self.after("reverb"):  # (a tail after it: as at its note's end)
             hear = np.where(tailed, each["beat0"][run][part], hear)
@@ -753,6 +800,12 @@ class KeyGrid:
                 quiet = vol < SOFT
         else:
             env, mix, soft = np.ones(len(starts)), np.ones(len(starts)), np.ones(len(starts))
+        return (starts, limits, until, hear, fx_late, waves, grid, crushed, osc, fade, gap, env, mix, soft, quiet,
+                per)
+
+    def _echoes(self, run, starts, limits, until, hear, fx_late, waves, grid, crushed, fade, gap, env, quiet):
+        """made: Bitcrush's grid, the repeats kept before their run's end, the compressor and the echoes: (keep and
+        one list each of starts, limits, env, quiet, gain, waves: the sound, then each echo)."""
         # (each note's velocity part = sqrt(env x mix) x soft x the echo's gain: env = its loudness, which the
         # compressor turns up and down; mix and soft = the waveform's and Octave below's part, which it leaves alone)
         if crushed.any():  # (onto a coarse grid of ticks; then the Effects tab's lateness)
@@ -787,6 +840,12 @@ class KeyGrid:
                 all_gain.append(np.full(len(made[0]), 1.0 if late_comp else gain))
                 all_quiet.append(made[3])
                 all_waves.append(all_waves[0])
+        return keep, all_starts, all_limits, all_env, all_quiet, all_gain, all_waves
+
+    def _finished(self, run, oscs, osc, keep, mix, soft, per, all_starts, all_limits, all_env, all_quiet, all_gain,
+                  all_waves):
+        """made's last step: each note's velocity part, the layer's line, too-quiet repeats left out, the repeats on
+        one grid (none overlapping): (sq, factor, mine, wv)."""
         if len(run):
             st, li = np.concatenate(all_starts), np.concatenate(all_limits)
             wv = np.concatenate(all_waves)
@@ -814,12 +873,7 @@ class KeyGrid:
             sq, factor, mine, wv = sq[heard], factor[heard], mine[heard], wv[heard]
         else:
             sq, factor, mine, wv = np.zeros((0, 2), np.int64), np.zeros(0), np.zeros(0, bool), np.zeros(0)
-        self.wave_of[key] = wv
-        factor.setflags(write=False)
-        mine.setflags(write=False)
-        self.mine[key] = mine  # (which take their note's own velocity: factor)
-        got = self.got[key] = (sq, factor)
-        return got
+        return sq, factor, mine, wv
 
     def trem(self, src=slice(None)):
         """The tremolo's (steady part, depth) for these repeats (src: their places in self.flat): the run's, or each
