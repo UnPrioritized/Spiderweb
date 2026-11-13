@@ -387,6 +387,7 @@ HZ_BEND = pick("#7a3cff", "#b08cff")  # the Bend tool: a note's own bend line an
 HZ_WOBBLE = pick("#e08a00", "#ffb340")  # the Sketch tool: a picked piece's wobble depth line (amber)
 HZ_LABEL_BOX = pick("white", "#2f2f31")  # the Sketch tool: the box under a drag's label (LABEL text on it; hunt 10-28)
 HZ_SPEED = pick("#2f6fdc", "#5b9bff")  # the Sketch tool: a wobble's speed post's strip (its speed line + locks; blue)
+HZ_RAIL = pick("#0d8f80", "#3fd0bf")  # Quick detune's depth rail over the copies (its line + points; teal)
 HZ_UNMADE = pick("#8a8a8a", "#1f1f21")  # over what the preview hasn't made yet
 AHEAD_UNMADE = pick("#8a8a8a", "#1f1f21")  # Rendered ahead, main piano roll: same grey, sparser dots (gray12: fainter)
 HZ_BAND_FIXED = (pick("#8ee0a4"), pick("#18a048"))

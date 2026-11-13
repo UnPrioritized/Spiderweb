@@ -248,8 +248,8 @@ class HzMouse:
         return (0, 0) if side == (0, 0) and not hit else None
 
     def on_motion(self, e):
-        if self.draw_motion(e) or self.bend_motion(e):  # (a drawing tool: hz_draw.py; Bend: hz_bend.py)
-            return
+        if self.draw_motion(e) or self.bend_motion(e) or self.rail_motion(e):  # (a drawing tool: hz_draw.py; Bend:
+            return  # hz_bend.py; Quick detune's depth rail: hz_note_tools.py)
         hit = self.hit(e.x, e.y)
         # a pencil where a press places a note (not on the keys or bar numbers, not with Ctrl: that's the box)
         inside = e.x >= self.kb_w and e.y >= self.ruler_h
@@ -285,8 +285,8 @@ class HzMouse:
         if self.fx.sel:  # (the effect points selected aren't any more)
             self.fx.sel = set()
             self.fx.redraw()
-        if not place and self.bend_press(e):  # (the Bend tool on a note: hz_bend.py)
-            return
+        if not place and (self.rail_press(e) or self.bend_press(e)):  # (Quick detune's depth rail: hz_note_tools.py;
+            return                                                    # the Bend tool on a note: hz_bend.py)
         # (the one selected note's top / bottom strip: a press there is an ordinary note press, its first up / down
         # move turns it into a Quick detune: hz_note_tools.detune_begin)
         edge = None if place else self.detune_edge(e.x, e.y)
@@ -420,8 +420,8 @@ class HzMouse:
         Anywhere else, or with Ctrl, it's a press like any other."""
         if self.draw_double(e):  # (the polyline being drawn ends: hz_draw.py)
             return
-        if self.bend_double(e):  # (the Bend tool: a curve square straight again, else a press; no note deleted)
-            return
+        if self.rail_double(e) or self.bend_double(e):  # (Quick detune's rail: a point added; the Bend tool: a curve
+            return  # square straight again, else a press; no note deleted)
         hit = self.hit(e.x, e.y)
         if (hit and hit[0] in ("note", "tune", "left", "right") and self.tones[hit[1]]["id"] == self.placed
                 and not e.state & CTRL and self.tool.get() == "pencil"):
@@ -442,7 +442,8 @@ class HzMouse:
             self.drag["double"] = True
 
     def on_drag(self, e):
-        if self.draw_drag(e) or self.bend_drag(e) or self.detune_drag(e) or self.detune_begin(e):
+        if (self.draw_drag(e) or self.bend_drag(e) or self.detune_drag(e) or self.detune_begin(e)
+                or self.rail_drag(e)):
             return
         d = self.drag
         if not d:
@@ -710,7 +711,7 @@ class HzMouse:
                     s["in"] = min(max(0.0, s0["in"] - (n["t"] - was["t"])), n["len"])
 
     def on_release(self, e):
-        if self.draw_release(e) or self.bend_release(e) or self.detune_release(e):
+        if self.draw_release(e) or self.bend_release(e) or self.detune_release(e) or self.rail_release(e):
             return
         d = self.drag
         self.drop_drag()
@@ -832,8 +833,8 @@ class HzMouse:
         if self.draft_menu(e) or self.make_draft():  # (a curve's point: removed; else a path drawn: made, like
             # the main piano roll's right-click ending a shape)
             return
-        if self.bend_menu(e):  # (the Bend tool on a bend point: it goes)
-            return
+        if self.rail_menu(e) or self.bend_menu(e):  # (Quick detune's rail point: it goes; the Bend tool on a bend
+            return                                  # point: it goes)
         hit = self.hit(e.x, e.y)
         if self.bending() and not (hit and hit[0] in DOTS):  # (the Bend tool: a note's bend line or curve square,
             got = self.bend_hit(e.x, e.y)  # wherever it has gone, is that note: its menu)
@@ -1005,6 +1006,8 @@ class HzMouse:
             return
         if d["kind"] in ("new", "detune"):  # (a Quick detune being pulled: called off, the note as it was)
             return self.cancel_drag()
+        if d["kind"] == "railpt":  # (Quick detune's rail point held: a middle one goes, hz_note_tools.py)
+            return self.rail_delete_dragged()
         if d["kind"] in ("bendpt", "bendcurve", "wobbledepth", "wobblerate", "wobblespeed", "wobbleend"):  # (a bend
             # point held: it goes; a curve square: straight again; a wobble depth line, speed post or end post: no wobble)
             return self.bend_delete_dragged()
@@ -1101,8 +1104,8 @@ class HzMouse:
             pass
         elif held:
             held()
-        elif not self.cancel_drag() and not self.loudness.confirm():  # (the last loudness line's handles go first)
-            self.select(())
+        elif not self.cancel_drag() and not self.rail_escape() and not self.loudness.confirm():  # (Quick detune's
+            self.select(())  # rail: the note back as before the pull; the last loudness line's handles go first)
         return "break"
 
     def point_again(self):

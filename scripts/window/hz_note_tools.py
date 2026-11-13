@@ -171,6 +171,49 @@ def fanned(n, spread, count, ids):
 
 DETUNE_ROWS = 8  # px: rows shorter than this have no Quick detune strip (zoomed out: the note must still move)
 DETUNE_MOVE = 4  # px the mouse moves before a press on the strip decides: up / down = detune, sideways = move
+RAIL_LIFT = 6  # px: the depth rail sits this far above the top copy's row (at the full spread)
+RAIL_NEAR = 6  # px: a press this near a rail point grabs it; this near its line (double-click) adds one
+
+
+def rail_value(pts, u):
+    """The rail's spread (cents) at u (0..1 along the note): straight between its points."""
+    if u <= pts[0][0]:
+        return pts[0][1]
+    for (u0, s0), (u1, s1) in zip(pts, pts[1:]):
+        if u <= u1:
+            return s1 if u1 <= u0 else s0 + (s1 - s0) * (u - u0) / (u1 - u0)
+    return pts[-1][1]
+
+
+def railed(n, pts, count, ids):
+    """Note n fanned into `count` copies (fanned) at the rail's widest spread, each copy's bend line following the
+    rail (stage F, user 2026-11-13: copies start together, fan out, close back in): a copy f of the way out (-1..1)
+    bends f * (spread(u) - widest) / 100 keys, on top of n's own bend. A flat rail = no bends added (= fanned)."""
+    from notes.hz_lines import line_at
+    most = max(p[1] for p in pts)
+    copies = fanned(n, most, count, ids)
+    if all(abs(p[1] - most) < 1e-9 for p in pts) or most <= 0:
+        return copies
+    own = [list(p) for p in n.get("bend") or ([0.0, 0.0], [1.0, 0.0])]
+    curved = any(len(p) > 2 for p in own)
+    spots = sorted({p[0] for p in pts} | ({k / 32 for k in range(33)} if curved else set()))
+    for m in copies:
+        f = max(-1.0, min(1.0, (pitch(m) - pitch(n)) * 100.0 / most))
+        if abs(f) < 1e-9:
+            continue
+        extra = lambda u: f * (rail_value(pts, u) - most) / 100.0
+        line = [[p[0], p[1] + extra(p[0])] for p in own] if not curved else []
+        line += [[u, float(line_at(own, u)) + extra(u)] for u in spots
+                 if curved or not any(abs(p[0] - u) < 1e-12 for p in own)]
+        line.sort(key=lambda p: p[0])  # (stable: an own jump's two points stay in order)
+        m["bend"] = [[round(u, 9), round(k, 6)] for u, k in line]
+    return copies
+
+
+def rail_key(notes):
+    """What a rail's copies look like (rounded: an undo step brings them back as saved), to know them again."""
+    return tuple(sorted((n["id"], n["key"], round(n.get("cents", 0.0), 4),
+                         tuple((round(p[0], 7), round(p[1], 5)) for p in n.get("bend") or ())) for n in notes))
 
 
 class HzNoteTools:
@@ -266,8 +309,250 @@ class HzNoteTools:
             self.redraw()
         else:
             self.commit(tr("hz.step_detune"), d["before"])
+            self.rail_start(d)
         self.point_again()
         return True
+
+    # --- the depth rail (stage F, user 2026-11-13; the plugin's: "on release a depth rail above the group shapes the
+    # spread over time. Enter bakes it, Esc restores the note"). The copies are ordinary notes from the pull on (one
+    # undo step each change); the rail shows over them while they're exactly as it made them and all of them (only
+    # them) are selected, Select tool. Enter / a click elsewhere = done (the copies stay); Esc = the note back as it
+    # was before the pull (one undo step). Undo / redo of a rail step brings the rail back as it was (states).
+
+    def rail_start(self, d):
+        ids = {n["id"] for n in self.tones} - {n["id"] for n in d["before"]} | {d["note"]["id"]}
+        made = [n for n in self.tones if n["id"] in ids]
+        top = max([m["id"] for m in d["rest"]] + [d["note"]["id"]])
+        pts = [[0.0, d["spread"]], [1.0, d["spread"]]]
+        self.rail = {"base": copy.deepcopy(d["note"]), "count": d["count"], "top": top, "pts": pts,
+                     "ids": set(ids), "states": {rail_key(made): copy.deepcopy(pts)}}
+        self.redraw()
+
+    def rail_live(self):
+        """The rail while it shows (see above), else None."""
+        r = self.__dict__.get("rail")
+        if not r:
+            return None
+        if self.drag and self.drag["kind"] == "railpt":
+            return r
+        made = [i for i, n in enumerate(self.tones) if n["id"] in r["ids"]]
+        pts = r["states"].get(rail_key([self.tones[i] for i in made])) if made else None
+        if pts is None or set(made) != self.sel or self.tool.get() != "select" or self.target() is None:
+            return None  # (hidden, kept: an undo / redo brings its copies back as they were, selected)
+        r["pts"] = copy.deepcopy(pts)
+        return r
+
+    def rail_y(self, r, s):
+        return self.pitch_y(pitch(r["base"]) + s / 100.0) - self.sy / 2 - RAIL_LIFT * self.s
+
+    def rail_xy(self, r):
+        n = r["base"]
+        return [(self.x_of(n["t"] + u * n["len"]), self.rail_y(r, s)) for u, s in r["pts"]]
+
+    def rail_hit(self, x, y):
+        """("pt", j) a rail point, ("line", u) on its line between two points, or None."""
+        r = self.rail_live()
+        if r is None or self.drag:
+            return None
+        near = RAIL_NEAR * self.s
+        xy = self.rail_xy(r)
+        for j, (px, py) in enumerate(xy):
+            if abs(x - px) <= near and abs(y - py) <= near:
+                return "pt", j
+        for (x0, y0), (x1, y1) in zip(xy, xy[1:]):
+            if x0 <= x <= x1 and x1 > x0 and abs(y - (y0 + (y1 - y0) * (x - x0) / (x1 - x0))) <= near:
+                n = r["base"]
+                return "line", (self.beat_at(x) - n["t"]) / max(n["len"], 1e-12)
+        return None
+
+    def rail_remade(self, r):
+        """The copies as the rail has them now, in place of the ones there (selected)."""
+        rest = [n for n in self.tones if n["id"] not in r["ids"]]
+        copies = railed(r["base"], r["pts"], r["count"], iter(range(r["top"] + 1, r["top"] + 100)))
+        r["ids"] |= {m["id"] for m in copies}
+        self.tones = rest + copies
+        self.sel = set(range(len(rest), len(self.tones)))
+
+    def rail_hold(self, e, r, j, moved=False):
+        kept = self.kept_box()
+        self.press_was = (set(self.sel), kept)
+        self.drop_drag()
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        self.drag = {"kind": "railpt", "j": j, "before": before, "pts0": copy.deepcopy(r["pts"]), "x": e.x, "y": e.y,
+                     "moved": moved}
+        self.redraw()
+        self.show_status(e)
+        return True
+
+    def rail_press(self, e):
+        hit = self.rail_hit(e.x, e.y)
+        if not hit:
+            return False
+        if hit[0] == "line":  # (a press on its line does nothing: a double-click there adds a point, rail_double)
+            self.drop_drag()
+            return True
+        return self.rail_hold(e, self.rail, hit[1])
+
+    def rail_double(self, e):
+        """A double-click on the rail's line: a point there (the grid, Shift: any tick), held; on a point: a press."""
+        hit = self.rail_hit(e.x, e.y)
+        if not hit:
+            return False
+        r = self.rail
+        if hit[0] == "pt":
+            return self.rail_hold(e, r, hit[1])
+        n = r["base"]
+        u = (self.snap(self.beat_at(e.x), e) - n["t"]) / max(n["len"], 1e-12)
+        pts = r["pts"]
+        if not pts[0][0] < u < pts[-1][0] or any(abs(p[0] - u) < 1e-9 for p in pts):
+            u = hit[1]
+        j = sum(p[0] <= u for p in pts)
+        pts0 = copy.deepcopy(pts)
+        pts.insert(j, [u, rail_value(pts, u)])
+        self.rail_hold(e, r, j, moved=True)
+        self.drag["pts0"] = pts0
+        return True
+
+    def rail_drag(self, e):
+        d = self.drag
+        if not d or d["kind"] != "railpt":
+            return False
+        if not d["moved"] and abs(e.x - d["x"]) < 4 and abs(e.y - d["y"]) < 4:
+            return True
+        d["moved"] = True
+        r, j = self.rail, d["j"]
+        pts, n = r["pts"], r["base"]
+        lift = self.sy / 2 + RAIL_LIFT * self.s
+        s = max(0.0, min(DETUNE_MOST, (self.pitch_at(e.y + lift) - pitch(n)) * 100.0))
+        s = float(round(s)) if e.state & CTRL else round(s / DETUNE_STEP) * DETUNE_STEP
+        if s <= 0 and all(p[1] <= 0 for k, p in enumerate(pts) if k != j):  # (never all at 0: no spread anywhere)
+            s = 1.0 if e.state & CTRL else DETUNE_STEP
+        pts[j][1] = s
+        if 0 < j < len(pts) - 1:  # (between its neighbours; the ends only up / down)
+            u = (self.snap(self.beat_at(e.x), e) - n["t"]) / max(n["len"], 1e-12)
+            pts[j][0] = min(pts[j + 1][0], max(pts[j - 1][0], u))
+        self.rail_remade(r)
+        self.redraw()
+        self.show_status(e)
+        return True
+
+    def rail_release(self, e):
+        d = self.drag
+        if not d or d["kind"] != "railpt":
+            return False
+        self.drop_drag()
+        self.rail_done_step(d, tr("hz.step_detune_rail"))
+        self.point_again()
+        return True
+
+    def rail_done_step(self, d, name):
+        r = self.rail
+        if r["pts"] == d["pts0"]:
+            self.tones = copy.deepcopy(d["before"])
+            self.sel = set(self.press_was[0])
+            self.sel_before = None
+            self.redraw()
+            return
+        # (known BEFORE the step: its redraw asks rail_live)
+        r["states"][rail_key([n for n in self.tones if n["id"] in r["ids"]])] = copy.deepcopy(r["pts"])
+        if self.tones == d["before"]:  # (a point added where the line was: nothing heard changes, no step)
+            self.sel_before = None
+        else:
+            self.commit(name, d["before"])
+        self.redraw()
+
+    def rail_delete_dragged(self):
+        """Delete while a rail point is held: a middle one goes (one step); an end: the drag is called off."""
+        d, r = self.drag, self.rail
+        if not 0 < d["j"] < len(r["pts"]) - 1 or not self.rail_can_drop(r, d["j"], d["pts0"]):
+            return self.cancel_drag()
+        self.end_drag()
+        del r["pts"][d["j"]]
+        self.rail_remade(r)
+        self.rail_done_step(d, tr("hz.step_detune_rail"))
+        self.point_again()
+
+    def rail_can_drop(self, r, j, pts):
+        """True when point j can go: some other point (as they were before the drag) keeps a spread; else the bell
+        (no spread anywhere = every copy on one pitch)."""
+        if any(p[1] > 0 for k, p in enumerate(pts) if k != j):
+            return True
+        self.bell()
+        return False
+
+    def rail_menu(self, e):
+        """Right-click on a middle rail point: it goes (one step). Ends: nothing (they stay)."""
+        hit = self.rail_hit(e.x, e.y)
+        if not hit:
+            return False
+        r = self.rail
+        if hit[0] == "pt" and 0 < hit[1] < len(r["pts"]) - 1 and self.rail_can_drop(r, hit[1], r["pts"]):
+            d = {"before": copy.deepcopy(self.tones), "pts0": copy.deepcopy(r["pts"])}
+            self.sel_before = (d["before"], self.sel_state())
+            del r["pts"][hit[1]]
+            self.rail_remade(r)
+            self.rail_done_step(d, tr("hz.step_detune_rail"))
+        return True
+
+    def rail_enter(self):
+        """Enter: the rail is done (the copies stay as they are). False without a rail."""
+        if self.drag or self.rail_live() is None:
+            return False
+        self.rail = None
+        self.redraw()
+        return True
+
+    def rail_escape(self):
+        """Esc: the note back as it was before the pull, the copies gone (one undo step). False without a rail."""
+        r = None if self.drag else self.rail_live()
+        if r is None:
+            return False
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        rest = [n for n in self.tones if n["id"] not in r["ids"]]
+        self.tones = rest + [copy.deepcopy(r["base"])]
+        self.sel = {len(rest)}
+        self.rail = None
+        self.commit(tr("hz.step_detune_off"), before)
+        return True
+
+    def rail_motion(self, e):
+        hit = self.rail_hit(e.x, e.y)
+        if not hit:
+            return False
+        r = self.rail
+        end = hit[0] == "pt" and hit[1] in (0, len(r["pts"]) - 1)
+        self.canvas.config(cursor="sb_v_double_arrow" if end else "fleur" if hit[0] == "pt" else "hand2")
+        self.show_status(e)
+        return True
+
+    def rail_status(self, e=None):
+        d = self.drag
+        if d and d["kind"] == "railpt" and self.rail:
+            return "     " + tr("hz.rail_held", cents=fmt(self.rail["pts"][d["j"]][1]))
+        if not d and self.rail_live() is not None:
+            return "     " + tr("hz.rail_hint")
+        return ""
+
+    def draw_rail(self):
+        """The depth rail over the copies: its line (and the bottom edge's mirror, faint) + a square per point."""
+        r = self.rail_live()
+        if r is None:
+            return
+        c, s = self.paint, self.s
+        xy = self.rail_xy(r)
+        width = max(2, round(2 * s))
+        base = pitch(r["base"])
+        low = [(x, self.pitch_y(base - sv / 100.0) + self.sy / 2 + RAIL_LIFT * s) for (x, _), (_, sv) in
+               zip(xy, r["pts"])]
+        c.create_line(*[v for p in low for v in p], fill=look.HZ_RAIL, width=1, dash=(3, 3))
+        c.create_line(*[v for p in xy for v in p], fill=look.HZ_RAIL, width=width)
+        q = 3.5 * s
+        held = self.drag["j"] if self.drag and self.drag["kind"] == "railpt" else -1
+        for j, (x, y) in enumerate(xy):
+            c.create_rectangle(x - q, y - q, x + q, y + q, outline=look.HZ_RAIL, width=max(1, round(1.5 * s)),
+                               fill=look.HZ_RAIL if j == held else look.HZ_DOT)
 
     def detune_status(self):
         d = self.drag

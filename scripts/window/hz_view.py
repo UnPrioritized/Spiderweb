@@ -332,6 +332,7 @@ class HzView:
             c.create_rectangle(x - r, y - r, x + r, y + r, fill=red if "bend" in sl else "", outline=red,
                                width=max(1, round(1.5 * s)))
         self.draw_bends()  # (the Bend tool: each note's own bend line and points, over the slides', hz_bend.py)
+        self.draw_rail()  # (Quick detune's depth rail over its copies: hz_note_tools.py)
         self.draw_draft(own)  # (a path being drawn, and the notes it would make: hz_draw.py)
         d = self.drag  # the Select box (with the ones kept when Ctrl+drag adds it), or the last ones (kept_box)
         boxes = d["more"] + [b for b in (self.box_area(),) if b] if d and d["kind"] == "box" else self.kept_box() or []
@@ -577,7 +578,7 @@ class HzView:
                                  hz=f"{hz_of(k, cents):.2f}")
         if self.drag and self.drag["kind"] == "tune":
             text += "     " + trnum("hz.tune", "cents", f"{self.tones[self.drag['i']]['cents']:+g}")
-        text += self.bend_status() + self.detune_status()
+        text += self.bend_status() + self.detune_status() + self.rail_status()
         if e is not None and not self.drag and self.detune_edge(e.x, e.y):  # (Quick detune: hz_note_tools.py)
             text += "     " + tr("hz.detune_hint")
         if e is not None and not self.drag:  # (Sketch: a wobble's depth preset button)

@@ -263,8 +263,8 @@ class HzWindow(HzDraw, HzSketch, HzBend, HzNoteTools, HzSimplify, HzMouse, HzGat
                                  or self.paste_domino(self.play_line_beat())  # nothing while the mouse is held)
                                  or self.fx.paste_points() or self.paste_notes(self.play_line_beat()), "break")[1])
         c.bind("<Escape>", lambda e: self.on_escape())
-        c.bind("<Return>", lambda e: self.make_draft() or self.loudness.confirm())  # (the path drawn: made; the
-        # last loudness line drawn: done)
+        c.bind("<Return>", lambda e: self.make_draft() or self.rail_enter() or self.loudness.confirm())  # (the path
+        # drawn: made; Quick detune's rail: done; the last loudness line drawn: done)
         self.bind("<space>", self.on_space)  # (anywhere in the window: the buttons don't take the keyboard)
         for k in ("<Control-a>", "<Control-A>"):
             c.bind(k, lambda e: (self.drag or self.loudness.held() or self.select_all_notes(), "break")[1])
