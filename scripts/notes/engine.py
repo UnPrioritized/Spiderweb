@@ -1569,7 +1569,9 @@ def reads_line(sh):
     if (sh.get("own_vel") or sh.get("merge") or sh.get("cut") or glued_first or sh.get("hz")
             or "picture" in sh or sh["kind"] in HZ_KINDS and (sh.get("hz") or {}).get("tones")):
         return False
-    return all(s.get("tool") in ("sustain", "extend", "subtract", "colours") for s in sh.get("fx") or ())
+    # (the Gate aware flip as a step of the order (a glue box makes the order explicit): it reads the line where the
+    # notes show too, line_at_shown; so it does not stop the reading after it, cases 119199414 ...)
+    return all(s.get("tool") in ("gate_flip", "sustain", "extend", "subtract", "colours") for s in sh.get("fx") or ())
 
 
 def _unglued_view(sh):
@@ -1754,7 +1756,7 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
     lost = rows < 0
     # (Gate subtract on a whole reading its own line: notes whose start moved read it where they show now, as the
     # uncut shape does (shown_subtracted); a piece with the whole's velocities does the same; sweep 388596266)
-    shown = src if step == "subtract" and same_vel and not runner else None
+    shown = src if step == "subtract" and same_vel else None
     w1 = _stepped_whole(made, w0, step, cfg, ppq, bool(sh.get("own_vel")), shown)
     if step == "gate_flip":  # (runs mirrored across the cut: the knife cuts the notes where they are now)
         keep = (w1[:, 0] < hi) & (w1[:, 1] > lo)
@@ -1765,9 +1767,22 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
     out[:, 0] = np.where(mine[:, 0] > w[:, 0], np.maximum(w1[:, 0], mine[:, 0]), w1[:, 0])
     out[:, 1] = np.where(mine[:, 1] < w[:, 1], np.minimum(w1[:, 1], mine[:, 1]), w1[:, 1])
     # (its own velocity: a velocity line on the piece keeps it; one the whole's step read again where the note shows
-    # now: that one, unless the piece's note was cut after its start (a cut half keeps its velocity))
+    # now: that one; a cut half too, it keeps the velocity the whole note ends with (not a changed line's)
     out[:, 3] = mine[:, 3] if shown is None else np.where(
-        (w1[:, 3] != w[:, 3]) & (mine[:, 0] == w[:, 0]), w1[:, 3], mine[:, 3])
+        (w1[:, 3] != w[:, 3]) & (mine[:, 3] == w[:, 3]), w1[:, 3], mine[:, 3])
+    if (shown is None and step == "subtract" and not runner and not same_vel and side_used(cfg.get("start"))
+            and not (sh.get("own_vel") or sh.get("fx") or sh.get("glue") or sh.get("hz") or sh.get("merge")
+                     or "picture" in sh)):
+        # (a piece with a velocity line of its own, drawn since the cut: a note Gate subtract's start side moved reads
+        # that line where it shows now, as before the line was drawn (the whole's velocities did, above) and as the
+        # uncut shape does (shown_subtracted); else drawing a line moved velocities far from it, sweep 119138096)
+        env = velocity_env(sh)
+        path = dedupe(np.concatenate(cached_arrays(sh)))[:, 0] * ppq
+        t_lo, t_hi = float(path.min()), float(path.max())
+        if len({v for _, v in env}) > 1 and t_hi > t_lo:
+            moved = (w1[:, 0] != w[:, 0]) & (mine[:, 0] == w[:, 0])
+            if moved.any():
+                out[moved, 3] = env_velocities(env, from0_starts(sh, out[moved], out[moved, 0], ppq), t_lo, t_hi)
     if lost.any():  # (as the piece alone would make them: extended / subtracted keep the rows in order)
         alone = extended(mine, cfg, ppq) if step == "extend" else subtracted(mine, cfg, ppq)
         out[lost] = np.asarray(alone, np.int64)[lost]
@@ -2488,7 +2503,9 @@ def _kind_notes_tracks(sh, ppq, keys):
         # where the note started, user 2026-11-02; pages carry their velocity column themselves)
         carry = not (sh.get("glue") or sh.get("fx")) and raw.shape[1] == 3
         if carry:
-            raw = np.column_stack([raw, raw[:, 0]])
+            # (a note across beat 0 of a shape made later rides along with the spot it reads where it shows, as the
+            # uncut shape does (from0_starts): its half wholly before beat 0 keeps that velocity too)
+            raw = np.column_stack([raw, from0_starts(sh, raw, raw[:, 0], ppq) if same_vel else raw[:, 0]])
         raw, tracks = finish(sh, raw, spots, tracks, came)
         if carry:
             vel_at, raw = raw[:, 3].copy(), raw[:, :3]
