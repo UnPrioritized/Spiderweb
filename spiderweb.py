@@ -37,7 +37,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     help_texts.py    every help text: tips, the Help window, tool tooltips, the side panel's help
     help.py          the tip popups and the Help window (F1, searchable)
     domino_overlay.py Domino companion: the see-through window lying over Domino's note grid, following it
-    domino_companion.py Draw on Domino: the floating bar, switching app.roll to the overlay piano roll and back
+    domino_companion.py Draw on Domino: switching app.roll to the overlay piano roll and back, notes in and out
+    domino_bar.py    Draw on Domino: the floating bar (its buttons, message line, place over Domino's grid, grip)
     domino_box_watch.py Draw on Domino: the boxes the user drags in Domino's piano roll, watched + kept
     updates.py       update checks: the "how often?" question, the update popup, What's new after an update
     settings_backup.py  an update's first start: the older version's settings + presets copied to user/backups
