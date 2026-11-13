@@ -109,6 +109,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     zoombar.py       the piano roll's scrollbars (drag an end to zoom) and zoom buttons
   notes/             shapes -> notes
     engine.py        shapes -> notes, overlap handling, channel assignment
+    engine_slots.py  which track + channel each shape's notes go on, and fixing notes that overlap
     paths.py         lines / polylines / freehand / curves -> notes
     custom.py        custom shapes: outlines, fill, spam, outline spam
     passengers.py    pasted notes' CCs and other Domino events riding along (kept, placed, as MIDI messages)
