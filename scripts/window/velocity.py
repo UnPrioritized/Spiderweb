@@ -644,9 +644,15 @@ class VelocityPane(KeepsItems, tk.Canvas):
         if cv is None or self.app.vel_tool.get() != cv["kind"]:
             return None
         shapes = self.app.shapes
-        for i, (sh, env, _, span, _) in cv["done"].items():
-            if i >= len(shapes) or shapes[i] is not sh or all(sh.get(k) is not env for k in ("vel_env", "notes", "fx")):
+        for i, (sh, env, base, span, fx0) in list(cv["done"].items()):
+            if i >= len(shapes) or shapes[i] is not sh:
                 break
+            if all(sh.get(k) is not env for k in ("vel_env", "notes", "fx")):
+                if sh.get("fx") is None or sh["fx"] != env:
+                    break
+                # (its steps rebuilt as an equal copy after the line, e.g. a shape with pages + Warp: still the line's
+                # own, so its handles stay; case 206580853)
+                cv["done"][i] = (sh, sh["fx"], base, span, fx0)
             if time_span(sh, self.app.ppq) != span:
                 break
         else:
