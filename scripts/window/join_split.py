@@ -72,11 +72,21 @@ def shown_slots(rows, notes, colour):
     # slot, so a Slice fixed them as one channel and the quieter note was lost, sweep 69812067; else start + key)
     found = np.zeros(len(notes), bool)
     row_slot = np.zeros(len(notes), np.int64)
-    for vel in (True, False):
-        have = shown_code(rows) * (128 if vel else 1) + (np.clip(rows[:, 3], 0, 127) if vel else 0)
+    # (and its LENGTH before those: two colours' notes starting together with the same velocity, only their lengths
+    # differ, were told apart by nothing and the shorter one was lost in the Single fix, sweep 419209946; lengths
+    # capped at 2^16 so the code stays inside int64 on long songs at a high PPQ)
+    def code(a, level):
+        c = shown_code(a)
+        if level:
+            c = c * 128 + np.clip(a[:, 3], 0, 127)
+        if level == 2:
+            c = c * (1 << 16) + np.clip(a[:, 1] - a[:, 0], 0, (1 << 16) - 1)
+        return c.astype(np.int64)
+    for level in (2, 1, 0):
+        have = code(rows, level)
         o = np.argsort(have, kind="stable")
         have, slots = have[o], rows[o, 4]
-        want = shown_code(notes) * (128 if vel else 1) + (np.clip(notes[:, 3], 0, 127) if vel else 0)
+        want = code(notes, level)
         got = np.minimum(np.searchsorted(have, want), max(len(have) - 1, 0))
         hit = (have[got] == want) & ~found
         row_slot[hit] = slots[got[hit]]
@@ -1196,11 +1206,22 @@ class JoinSplit:
         walls = r[np.isin(r[:, 5], held)]
         if not len(walls):
             return out
-        have = code(rows)
-        o = np.argsort(have, kind="stable")
-        at = np.minimum(np.searchsorted(have[o], code(out)), len(rows) - 1)
-        shown = rows[o[at]]
-        short = (have[o[at]] == code(out)) & (shown[:, 1] < out[:, 1]) & (shown[:, 4] == out[:, 4])
+        # (the shown note it is: by start, key AND velocity first. Held notes stack on one start and key (a Sustain
+        # on a spam), and the first shown one stood for all: every tail of the stack was cut where the shortest was,
+        # sweep 219210229. Else by start + key as before)
+        shown = rows[np.zeros(len(out), np.int64)]
+        found = np.zeros(len(out), bool)
+        for level in (1, 0):
+            def code_of(a):
+                return code(a) * 128 + np.clip(a[:, 3], 0, 127) if level else code(a)
+            have = code_of(rows)
+            o = np.argsort(have, kind="stable")
+            want = code_of(out)
+            at = np.minimum(np.searchsorted(have[o], want), len(rows) - 1)
+            hit = (have[o[at]] == want) & ~found
+            shown[hit] = rows[o[at]][hit]
+            found |= hit
+        short = found & (shown[:, 1] < out[:, 1]) & (shown[:, 4] == out[:, 4])
         if not short.any():
             return out
         # (a held note of another shape starting on the key, slot and tick where the shown note ends)
