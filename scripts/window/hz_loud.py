@@ -439,8 +439,12 @@ class LoudPane:
         if self.which.get() == "layer":
             if win.loud:
                 menu.add_command(label=tr("hz.loud_clear_layer"), command=self.clear_layer)
+            if len(win.loud) > 2:  # (Simplify points…: window/hz_simplify.py)
+                menu.add_command(label=tr("hz.simplify"), command=win.simplify_loud)
         elif any(n.get("vel") for i, n in enumerate(win.tones) if not win.sel or i in win.sel):
             menu.add_command(label=tr("hz.loud_clear_notes"), command=self.clear_notes)
+            if any(len(n.get("vel") or ()) > 2 for i, n in enumerate(win.tones) if not win.sel or i in win.sel):
+                menu.add_command(label=tr("hz.simplify"), command=win.simplify_loud)
         if menu.index("end") is not None:
             menu.tk_popup(e.x_root, e.y_root)
 

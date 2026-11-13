@@ -53,6 +53,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_sound.py      the Hz bass window's sound: the key held, the preview
     hz_gates.py      the Hz bass window's gates, tune, Pitch, toggles; changes saved into the shape
     hz_mouse.py      the Hz bass window's mouse and keys on its notes (place, move, select, menus)
+    hz_simplify.py   the Hz bass window's Simplify points… window (bend / loudness lines, live slider)
     hz_effects.py    the effects pane under the Hz bass window's notes (lines with points)
     hz_preview.py    the Hz bass window's Preview: its sound made ahead (greyed until made) and played
     hz_live.py       the Hz bass live keys: a key held = its Hz bass, played with the quick sound
@@ -122,6 +123,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_grid.py       Hz bass: KeyGrid, every key's own repeats and loudness when effects are on
     hz_cc.py         Hz bass: the CC lines (Cutoff, Pitch wheel...) as MIDI messages on its channels
     hz_fine.py       Hz bass: made on the file's finer ticks in Keep timing parts (the export)
+    hz_simplify.py   Hz bass: Simplify points maths (a line cut down to its biggest moves, curves fitted)
     fonts.py         letter outlines from the fonts installed in Windows
     fonts_ft.py      the same on Linux (fontconfig + FreeType)
     fonts_hb.py      the same on a Mac (font files read by uharfbuzz; untested)

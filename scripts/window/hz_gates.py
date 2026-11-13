@@ -149,21 +149,27 @@ class HzGates:
                     state["pushed"] = True
 
         got = ask_live(self, self.app, prompt, orig[held], lo, hi, steps, apply)
-        if got is None and state["pushed"]:  # Cancel: the shape back as it was, its step taken out. Not app.undo:
-            app = self.app  # that drops a slide's first mark or a half drawn shape instead (user)
-            shapes = load_state(app.undo_stack.pop()[0])
-            sh = self.target()
-            if sh is not None and app.sel < len(shapes):
-                sh.clear()
-                sh.update(shapes[app.sel])
-            app.redo_stack[:] = redo
-            app._redo_kept = None
-            self.tones = copy.deepcopy(before)  # (the same notes as the shape's: the selection stays)
-            app.shapes_changed()
-            app.sync_hz_panels()
-            app.sync_history()
-            app.schedule_autosave()
-            self.sync()
+        if got is None and state["pushed"]:
+            self.live_drop(before, redo)
+
+    def live_drop(self, before, redo):
+        """Cancel in a window trying values live (live_edit, Simplify): the shape back as it was, the step it made
+        taken out, the redo list as before. Not app.undo: that drops a slide's first mark or a half drawn shape
+        instead (user)."""
+        app = self.app
+        shapes = load_state(app.undo_stack.pop()[0])
+        sh = self.target()
+        if sh is not None and app.sel < len(shapes):
+            sh.clear()
+            sh.update(shapes[app.sel])
+        app.redo_stack[:] = redo
+        app._redo_kept = None
+        self.tones = copy.deepcopy(before)  # (the same notes as the shape's: the selection stays)
+        app.shapes_changed()
+        app.sync_hz_panels()
+        app.sync_history()
+        app.schedule_autosave()
+        self.sync()
 
     def type_tune(self, i):
         """A note's own tune in cents (live_edit)."""

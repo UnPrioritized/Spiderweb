@@ -470,6 +470,8 @@ class HzBend:
         sub.add_command(label=tr("hz.bend_clear"), command=lambda: self.set_bends(picked, None,
                                                                                    tr("hz.step_note_bend_clear")),
                         state="normal" if any(bends(self.tones[j]) for j in picked) else "disabled")
+        sub.add_command(label=tr("hz.simplify"), command=lambda: self.simplify_bends(i),  # (hz_simplify.py)
+                        state="normal" if any(self.simplifies(self.tones[j]) for j in picked) else "disabled")
         sub.add_separator()
         for kind in SHAPES:
             sub.add_command(label=tr(f"hz.bend_{kind}"),
