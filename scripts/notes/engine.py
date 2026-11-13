@@ -1666,6 +1666,8 @@ def run_step(notes, tracks, step, sh, ppq, get):
         return extended(notes, step["cfg"], ppq), tracks
     sus = step["cfg"]  # (Sustain)
     got = held_piece(dict(sh, sustain=sus), notes, tracks, ppq, get)
+    if got is None:
+        got = held_knife_piece(dict(sh, sustain=sus), notes, tracks, ppq, get)
     if got is not None:
         return got
     if "gap" not in sus and sh.get("glue"):  # (Auto: worked out without glue, as auto_sustain does)
@@ -1796,6 +1798,20 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
     if step == "gate_flip":  # (runs mirrored across the cut: the knife cuts the notes where they are now)
         keep = (w1[:, 0] < hi) & (w1[:, 1] > lo)
         return _clipped(w1[keep], lo, hi), None if tracks is None else wt[keep]
+    # (a held tail starting at the cut: stacked tails are ONE note on the piece. If the step moves the start of the
+    # whole note it stands for past the cut, it is that note's now, and the other stacked notes still holding over
+    # the cut keep ONE tail of their own there: added, sweep 219207416)
+    extra = []
+    for j in np.flatnonzero((rows >= 0) & (mine[:, 0] > w0[np.maximum(rows, 0), 0])).tolist():
+        s, e, k = mine[j, :3].tolist()
+        if w1[rows[j], 0] <= s:
+            continue
+        taken = set(rows.tolist())
+        alt = np.flatnonzero((w0[:, 2] == k) & (w0[:, 0] < s) & (w0[:, 1] >= e) & (w1[:, 0] <= s) & (w1[:, 1] > s)
+                             & (wt == pt[j]))
+        alt = [i for i in alt.tolist() if i not in taken]
+        if alt and not any(r[:3] == [s, int(w1[alt[0], 1]), k] for r in extra):
+            extra.append([s, int(w1[alt[0], 1]), k, int(w1[alt[0], 3]), j])
     w1 = w1[np.maximum(rows, 0)]
     w = w0[np.maximum(rows, 0)]
     out = w1.copy()  # (each of its notes as the whole's finished note, still cut where it was cut)
@@ -1822,6 +1838,10 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
         alone = extended(mine, cfg, ppq) if step == "extend" else subtracted(mine, cfg, ppq)
         out[lost] = np.asarray(alone, np.int64)[lost]
     keep = out[:, 1] > out[:, 0]
+    if extra:
+        add = np.asarray(extra, np.int64)
+        return (np.concatenate([out[keep], add[:, :4]]),
+                None if tracks is None else np.concatenate([pt[keep], pt[add[:, 4]]]))
     return out[keep], None if tracks is None else pt[keep]
 
 
@@ -1992,11 +2012,17 @@ def held_knife_piece(sh, notes, tracks, ppq, get):
         return None
     src, part, same_vel = got
     halves = part if sh["kind"] == "custom" else sh["cut"].get("knife")
-    if not halves or sh["cut"].get("mould") or sh.get("_run") or sh.get("_whole"):
+    runner = bool(sh.get("_run"))  # (run_step's Sustain step: only on a drawn (custom) piece)
+    if runner and not (sh["kind"] == "custom" and all(st.get("tool") in RUNNER for st in sh.get("fx") or ())):
+        return None
+    if not halves or sh["cut"].get("mould") or sh.get("_whole"):
         return None
     if sh["kind"] != "custom" and not (src.get("fx") or src.get("glue")):
         return None  # (a plain line piece: held_piece's)
     whole = {k: v for k, v in src.items() if k != "sustain"}
+    if runner and sh.get("fx"):
+        # (made by the runner: the whole gets the steps that ran before this Sustain too, as held_piece does)
+        whole["fx"], whole["_run"] = json.loads(json.dumps(list(src.get("fx") or []) + list(sh["fx"]))), True
     w0, wt0 = get(whole)
     if not len(w0):
         return None
