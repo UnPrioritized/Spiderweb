@@ -2297,7 +2297,8 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
         if last["tool"] in ("flip", "turn") and idle(fx):
             continue
         # (a glue's place: which boxes, on the drawing as it is after that many of sh's own steps)
-        up.append(dict(last, _at=len(fx) - extra) if last["tool"] in ("glue", "glue0") else last)
+        up.append(dict(last, _at=len(fx) - extra) if last["tool"] in ("glue", "glue0") else
+                  dict(last, _pre=fx) if last["tool"] == "subtract" else last)  # (_pre: the steps before it)
         if last["tool"] == "flip":
             m = toggled(m, last["axis"])
         elif last["tool"] == "turn":
@@ -2325,7 +2326,13 @@ def run_steps(a, fx, sh, ppq, m=(), pre=()):
         elif last["tool"] == "extend":  # (ordered before a page: on the whole's notes there, steps.in_whole)
             a = extended(a, last["cfg"], ppq)
         elif last["tool"] == "subtract":
-            a = subtracted(a, last["cfg"], ppq)
+            # (a Gate subtract of a shape reading its own line, with no page before it: a note whose start moved
+            # reads the line where it shows now, as the uncut shape does (shown_subtracted: user 2026-11-12); the
+            # piece took the velocity from the old start, sweep 419139207)
+            view = {k: v for k, v in sh.items() if k != "fx"}
+            if last["_pre"]:
+                view["fx"] = list(last["_pre"])
+            a = shown_subtracted(a, last["cfg"], view, ppq)
         elif last["tool"] == "sustain":  # (the pieces made by a cut keep the note's spot and track columns)
             if len(a):
                 a = held(a, None, last["cfg"], ppq)[0]

@@ -1179,6 +1179,11 @@ class JoinSplit:
         colour = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64)
         code = shown_code
         slots = shown_slots(rows, notes, colour)
+        if slots is None and self.channel_mode.get() == "single" and len(np.unique(rows[:, 4])) == 1:
+            # (Single channel: every colour shows on the one channel, so a colour hidden under another shape's
+            # notes (never shown where it starts) has that slot too; else its notes were thrown away and the other
+            # shape's shorter note showed alone, sweep 319203923)
+            slots = np.full(len(notes), int(rows[0, 4]), np.int64)
         if slots is None:
             return rows  # (a colour with no note shown where it starts: can't tell its slot)
         got, got_slots = self.heard_overlaps(sh, notes, slots)

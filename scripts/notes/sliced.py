@@ -355,6 +355,8 @@ def source(sh):
     src = {k: v for k, v in sh.items() if k not in own and k != "cut"}
     src.update(outline(moved(cut["whole"], d)))
     src.update(tools(cut["whole"]))
+    if src.get("_glue_off"):  # (the piece's Glue is switched off: the whole's too, steps.expanded)
+        src.pop("glue", None)
     src.update(inner(cut["whole"]))  # (cut from a piece: that one's own cut; moved along with it)
     src.update(velocity(cut["whole"] if same_vel else sh))
     if src.get("glue"):  # (the piece has a glue place of its own ("_noglue0", steps.expanded): that is not the whole's;

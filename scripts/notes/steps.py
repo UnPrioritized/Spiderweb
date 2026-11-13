@@ -316,6 +316,11 @@ def expanded(sh):
                            **({"off": copy.deepcopy(sh["off"])} if sh.get("off") else {}))
         if "sustain" in inside:  # (held inside the whole: its colours keep the held overlaps, case 492791693)
             E["_sus"] = True
+    if sh.get("cut") and (GLUE, 0) in off:
+        # (a sliced piece whose Glue was switched off in Properties: the glue in its whole stays off too, sliced.source
+        # leaves it out. Else the whole's notes came glued: long notes cut at the knife, shortened by the later steps,
+        # a note shown whole before the cut grew to the knife; sweep 419149651)
+        E["_glue_off"] = True
     if GATE_FLIP in have:
         E.pop("gate_flip", None)
     if GLUE in have:
