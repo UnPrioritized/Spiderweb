@@ -107,9 +107,16 @@ class NameDialog(tk.Toplevel):
 
 def ask_name(parent, title, prompt, initial="", check=None):
     """The name typed in a NameDialog (waits for it), None = cancelled."""
-    d = NameDialog(parent, title, prompt, initial, check)
+    old = parent.grab_current()  # (a modal window asking: it gets its hold back after, hunt 2026-11-13: the LFO
+    d = NameDialog(parent, title, prompt, initial, check)  # window's was lost, the windows behind it took clicks)
     d.grab_set()
     d.wait_window()
+    if old is not None:
+        try:
+            if old.winfo_exists():
+                old.grab_set()
+        except tk.TclError:
+            pass
     return d.name
 
 

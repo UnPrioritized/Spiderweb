@@ -30,8 +30,8 @@ BANK_FILE = os.path.join(USER, "hz_wobbles.json")  # the shape bank: drawn waves
 GRAB = 7  # px: how near a point a press takes it
 CURVE_PX = 40  # px: Alt+dragging a piece this far up / down = a full curve
 PAD = 10  # px round an editor's drawing area
-WAVE_SNAP = (1 / 16, 1 / 8)  # Shift held: a wave point snaps to these steps (x, y); the plugin's Shift = snap
-LINE_SNAP = (1 / 16, 0.05)  # ... a depth / speed line's point
+WAVE_SNAP = (1 / 16, 1 / 8)  # a wave point snaps to these steps (x, y); Shift = free, like the whole Hz window
+LINE_SNAP = (1 / 16, 0.05)  # ... a depth / speed line's point (user 2026-11-13: not the plugin's Shift = snap)
 PHASE_STEPS = {"plain": 1 / 8, "shift": 1 / 64, "ctrl": 1 / 4}  # the phase ◀ ▶ buttons (the plugin's)
 LOCKS = ("none", "start", "end", "both")  # the speed lock's choices (hz_settings.SPEED_LOCKS + none)
 DEPTH_MOST = 48.0  # keys: the Depth box's top (the plugin's); a deeper wobble made on the piano roll is shown as it is
@@ -128,13 +128,13 @@ _CURVED = {"sine": lambda: _fitted([0.0, 0.25, 0.5, 0.75, 1.0], lambda x: np.sin
 class LineEdit:
     """A small canvas where a line of points [[x 0..1, y(, curve)], ...] (first at 0, last at 1) is drawn: a press on
     empty space = a new point there (held: drag it), a press on a point = drag it (the ends only up / down), right-click
-    an inner point = gone, Alt+drag a piece (Ctrl+Shift too) = curve it, Shift = snap to `snap` (x, y). y from lo to hi
-    (centre: a faint line there). get() = the points now; put(points) on every change; before() at a press (an editor
-    edit starting: the drawn wave takes over from a ready shape)."""
+    an inner point = gone, Alt+drag a piece (Ctrl+Shift too) = curve it; points snap to `snap` (x, y), Shift = free.
+    y from lo to hi (centre: a faint line there). get() = the points now; put(points) on every change; before() at a
+    press, after() at its let go (a drag's start / end: the window keeps its numbers steady meanwhile)."""
 
-    def __init__(self, canvas, s, lo, hi, snap, colour, get, put, before=None, centre=None):
+    def __init__(self, canvas, s, lo, hi, snap, colour, get, put, before=None, centre=None, after=None):
         self.c, self.s, self.lo, self.hi, self.snap, self.colour = canvas, s, lo, hi, snap, colour
-        self.get, self.put, self.before, self.centre = get, put, before, centre
+        self.get, self.put, self.before, self.centre, self.after = get, put, before, centre, after
         self.drag = None
         canvas.bind("<Configure>", lambda e: self.draw())
         canvas.bind("<ButtonPress-1>", self.press)
@@ -195,7 +195,7 @@ class LineEdit:
 
     def place(self, e):
         u, v = self.at(e.x, e.y)
-        if e.state & SHIFT:
+        if not e.state & SHIFT:
             u = round(u / self.snap[0]) * self.snap[0]
             v = round(v / self.snap[1]) * self.snap[1]
         return round(u, 6), round(min(self.hi, max(self.lo, v)), 6)
@@ -221,9 +221,13 @@ class LineEdit:
         self.put(pts)
 
     def release(self, e):
-        self.drag = None
+        held, self.drag = self.drag, None
+        if self.after:
+            self.after(held)
 
     def right(self, e):
+        if self.drag:  # (a point held: right-clicks do nothing, the Hz window's rule; hunt 2026-11-13: one taken out
+            return     # under the held one made the next point follow the mouse)
         pts = [list(p) for p in self.get()]
         j = self.hit(e.x, e.y)
         if j is not None and 0 < j < len(pts) - 1:
@@ -271,7 +275,11 @@ class LfoWindow(tk.Toplevel):
     def __init__(self, hz, run, beats, notes, apply):
         super().__init__(hz)
         self.hz, self.run, self.beats, self.apply_to = hz, run, beats, apply
+        self.app = hz.app  # (the name box asks it for the sizes: hunt 2026-11-13, Save… did nothing without it)
         self.result = None
+        self.depth_scale = None  # (a depth line point held: the Depth it's shown as shares of, kept till let go)
+        self.speed_waves = None  # (a speed line point held: the waves to keep, from the press)
+        self.kept_waves = None  # (the waves the last time the speed line wasn't stopped: a stopped line keeps them)
         s = self.s = hz.s
         self.title(tr("hz.lfo_title"))
         self.transient(hz)
@@ -356,7 +364,8 @@ class LfoWindow(tk.Toplevel):
         c = self.depth_canvas = tk.Canvas(f, width=round(EDITOR_W * s), height=round(LINE_H * s),
                                           background=look.CHART_BG, highlightthickness=0, takefocus=True)
         c.grid(row=r, column=1, sticky="w", pady=(8, 0))
-        self.depth_edit = LineEdit(c, s, 0.0, 1.0, LINE_SNAP, look.HZ_WOBBLE, self.depth_shape, self.put_depth_shape)
+        self.depth_edit = LineEdit(c, s, 0.0, 1.0, LINE_SNAP, look.HZ_WOBBLE, self.depth_shape, self.put_depth_shape,
+                                   before=self.depth_press, after=self.depth_release)
         Tooltip(c, tr("hz.lfo_line_tip"))
         r += 1
         presets = ttk.Frame(f)
@@ -372,7 +381,8 @@ class LfoWindow(tk.Toplevel):
                                           background=look.CHART_BG, highlightthickness=0, takefocus=True)
         c.grid(row=r, column=1, sticky="w", pady=(8, 0))
         self.speed_edit = LineEdit(c, s, 0.0, 1.0, LINE_SNAP, look.HZ_SPEED,
-                                   lambda: self.run.get("speed") or [[0.0, 1.0], [1.0, 1.0]], self.put_speed)
+                                   lambda: self.run.get("speed") or [[0.0, 1.0], [1.0, 1.0]], self.put_speed,
+                                   before=self.speed_press, after=self.speed_release)
         Tooltip(c, tr("hz.lfo_speed_tip"))
         r += 1
         lock = ttk.Frame(f)
@@ -394,7 +404,9 @@ class LfoWindow(tk.Toplevel):
         for text, sign in (("◀", -1), ("▶", 1)):
             b = ttk.Button(ph, text=text, width=3, takefocus=False)
             b.pack(side="left", padx=(0, 2))
-            b.bind("<ButtonRelease-1>", lambda e, sign=sign: self.nudge(sign, e.state))
+            # (only when let go over the button, like any button: hunt 2026-11-13)
+            b.bind("<ButtonRelease-1>", lambda e, sign=sign: self.nudge(sign, e.state)
+                   if 0 <= e.x < e.widget.winfo_width() and 0 <= e.y < e.widget.winfo_height() else None)
             Tooltip(b, tr("hz.lfo_phase_tip"))
         self.phase_says = ttk.Label(ph, text="", foreground=look.HINT)
         self.phase_says.pack(side="left", padx=(6, 0))
@@ -426,8 +438,9 @@ class LfoWindow(tk.Toplevel):
         return self.run["rate"] * self.beats * speed_mean(self.run)
 
     def depth_shape(self):
-        """The depth line as shares (0..1) of its deepest depth."""
-        most = depth_most(self.run)
+        """The depth line as shares (0..1) of its deepest depth (while a point is held: of the Depth at the press, so
+        the held point stays under the mouse; hunt 2026-11-13: worked out anew each move, the wobble melted away)."""
+        most = self.depth_scale or depth_most(self.run)
         if most <= 0:
             return [[0.0, 1.0], [1.0, 1.0]]
         return [[p[0], round(p[1] / most, 6), *p[2:3]] for p in depth_pts(self.run)]
@@ -439,7 +452,9 @@ class LfoWindow(tk.Toplevel):
         self.shape_btns[WAVE_DRAWN].state(["!disabled"] if run.get("shape") == WAVE_DRAWN else ["disabled"])
         self.flip.set(bool(run.get("flip")))
         if self.focused() is not self.depth_box:
-            self.depth.set(fmt(round(depth_most(run), 2)))
+            self.depth.set(fmt(round(self.depth_scale or depth_most(run), 2)))
+        if speed_mean(run) > 1e-6 and self.speed_waves is None:
+            self.kept_waves = self.waves()
         if self.focused() is not self.cycles_box:
             self.cycles.set(fmt(round(self.waves(), 2)))
         self.per_beat.config(text=tr("hz.lfo_per_beat", rate=fmt(round(run["rate"], 2))))
@@ -462,7 +477,13 @@ class LfoWindow(tk.Toplevel):
     def live(self):
         if self.result is not None or not self.winfo_exists():  # (a box left while the window closes)
             return
-        self.apply_to(self.run)
+        got = self.apply_to(self.run)
+        if got:  # (as made: whole half waves; the Cycles box shows what's heard, hunt 2026-11-13)
+            for k in ("rate",) if self.speed_waves is not None else ("rate", "speed"):  # (the line held: stays put)
+                if k in got:
+                    self.run[k] = copy.deepcopy(got[k])
+                else:
+                    self.run.pop(k, None)
         self.show()
 
     # ---- the controls
@@ -499,8 +520,22 @@ class LfoWindow(tk.Toplevel):
         set_depth(self.run, [[p[0], round(p[1] * v, 4), *p[2:]] for p in shape])
         self.live()
 
+    def depth_press(self):
+        self.depth_scale = depth_most(self.run) or NEW_DEPTH
+
+    def depth_release(self, held):
+        if self.depth_scale is not None:
+            self.depth_scale = None
+            self.show()  # (the Depth box = the line's deepest now; the line's top at it again)
+
+    def speed_press(self):
+        self.speed_waves = self.waves() if speed_mean(self.run) > 1e-6 else self.kept_waves
+
+    def speed_release(self, held):
+        self.speed_waves = None
+
     def put_depth_shape(self, pts):
-        most = depth_most(self.run) or NEW_DEPTH
+        most = self.depth_scale or depth_most(self.run) or NEW_DEPTH
         pts = [[min(1.0, max(0.0, p[0])), min(1.0, max(0.0, p[1])), *p[2:3]] for p in pts]
         set_depth(self.run, [[p[0], round(p[1] * most, 4), *p[2:]] for p in pts])
         self.live()
@@ -516,8 +551,8 @@ class LfoWindow(tk.Toplevel):
             v = float(self.cycles.get().replace(",", "."))
         except ValueError:
             return self.show()
-        if v <= 0 or self.beats <= 1e-12:
-            return self.show()
+        if v <= 0 or self.beats <= 1e-12 or speed_mean(self.run) <= 1e-6:  # (a stopped speed line: no waves to set,
+            return self.show()                                               # hunt 2026-11-13: divided by zero)
         self.run["rate"] = round(min(WOBBLE_RATE_MOST, max(0.01, v / (self.beats * speed_mean(self.run)))), 9)
         self.live()
 
@@ -526,13 +561,16 @@ class LfoWindow(tk.Toplevel):
         self.live()
 
     def put_speed(self, pts):
-        waves = self.waves()
+        # (the waves from the press (a drag), else from before (a stopped line keeps the last ones): hunt 2026-11-13,
+        # down to the floor and back up lost them)
+        waves = self.speed_waves if self.speed_waves is not None else (
+            self.waves() if speed_mean(self.run) > 1e-6 else self.kept_waves)
         got = clean_speed(pts)
         if got:
             self.run["speed"] = got
         else:
             self.run.pop("speed", None)
-        if speed_mean(self.run) > 1e-6:  # (the same waves over the stretch, like the Sketch strip's points)
+        if speed_mean(self.run) > 1e-6 and waves:  # (the same waves over the stretch, like the Sketch strip's points)
             self.run["rate"] = round(min(WOBBLE_RATE_MOST, max(0.01, waves / (self.beats * speed_mean(self.run)))), 9)
         self.live()
 
@@ -660,6 +698,12 @@ class HzLfo:
         u0, u1 = (pick[2], pick[3]) if pick and pick[0] == i else (0.0, 1.0)
         nid, many = n["id"], i in self.sel and len(self.sel) > 1
         got = self.wobble_run(n, u0, u1)  # (none there: a new one; shorter ones inside it are replaced on Apply)
+        if not got:  # (a shorter one inside: the window starts from ITS settings, on the whole stretch; hunt
+            # 2026-11-13: a fresh sine replaced it the moment the window opened)
+            inside = [w for w in n.get("wobble") or () if w["at"][0] < u1 - ON_POINT and w["at"][1] > u0 + ON_POINT]
+            if inside:
+                got = {k: v for k, v in max(inside, key=lambda w: w["at"][1] - w["at"][0]).items()
+                       if k not in ("at", "phase")}
         run = copy.deepcopy(got) if got else {"depth": [NEW_DEPTH, NEW_DEPTH], "rate": WOBBLE_RATE}
         run["at"] = [u0, u1]
         beats = (u1 - u0) * n["len"]
@@ -697,6 +741,7 @@ class HzLfo:
             return k
 
         def apply(r, what="live"):
+            """The notes with run r (what as in put); the run as made back (whole half waves) or None."""
             was = copy.deepcopy(self.tones)
             put(what, r)
             if self.tones != was or not state["pushed"] and self.tones != before:
@@ -704,23 +749,37 @@ class HzLfo:
                 self.sel_before = (before, self.sel_state())
                 self.commit(tr("hz.step_lfo"), copy.deepcopy(before), push=not state["pushed"])
                 if self.app.last_step() is not top:
-                    state["pushed"] = True
+                    state["pushed"], state["step"] = True, self.app.last_step()
             else:
                 self.redraw()
+            m = next((t for t in self.tones if t.get("id") == nid), None)
+            return self.wobble_run(m, u0, u1) if m is not None and what == "live" else None
+
+        def drop():
+            """Cancel: the notes as before, the window's step taken out, but ONLY while it's still the newest (a
+            safety net, hunt 2026-11-13: an undo behind the window, then Cancel took out an older step); else only the
+            notes put back, no step taken out or made."""
+            if self.app.last_step() is state.get("step"):
+                return self.live_drop(before, redo)
+            if self.tones != before:
+                self.tones[:] = copy.deepcopy(before)
+                self.sel = set(sel0)
+                self.sel_before = (before, self.sel_state())
+                self.commit(tr("hz.step_lfo"), copy.deepcopy(before), push=False)
 
         win = self.lfo_top = LfoWindow(self, run, beats, len(self.sel) if many else 1, apply)
         win.grab_set()
-        apply(run)  # (shown on the notes at once: a new wobble there too)
+        win.live()  # (shown on the notes at once: a new wobble there too; the window shows it as made)
         win.wait_window()
         self.lfo_top = None
         what = win.result
         if what is None:  # (Cancel: as before, no step)
             if state["pushed"]:
-                self.live_drop(before, redo)
+                drop()
             return
         apply(win.run, what)
         if self.tones == before and state["pushed"]:  # (nothing changed after all)
-            self.live_drop(before, redo)
+            drop()
             return
         if what == "apply" and self.sketching():  # (its depth line shows on the stretch)
             self.sketch_pick = (nid, u0, u1)

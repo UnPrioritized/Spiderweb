@@ -497,7 +497,11 @@ class HzNoteTools:
         pts[j][1] = s
         if 0 < j < len(pts) - 1:  # (between its neighbours; the ends only up / down)
             u = (self.snap(self.beat_at(e.x), e) - n["t"]) / max(n["len"], 1e-12)
-            pts[j][0] = min(pts[j + 1][0], max(pts[j - 1][0], u))
+            # (at least a tick from its neighbours: hunt 2026-11-13, one ON a neighbour drew a jump the copies
+            # never made)
+            gap = 1.0 / max(1.0, n["len"] * self.app.ppq)
+            lo, hi = pts[j - 1][0] + gap, pts[j + 1][0] - gap
+            pts[j][0] = min(hi, max(lo, u)) if lo <= hi else (pts[j - 1][0] + pts[j + 1][0]) / 2.0
         self.rail_remade(r)
         self.redraw()
         self.show_status(e)

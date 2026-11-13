@@ -129,7 +129,10 @@ def nearest_bends(wants, s):
     """nearest_bend for each row of wants at once (a list of curves; Bake's quarter waves, hunt 2026-10-28)."""
     bs = np.linspace(-SLIDE_BEND, SLIDE_BEND, 381)
     shapes = bent_part(s[None, :], bs[:, None])
-    best = np.array([((shapes - w[None, :]) ** 2).sum(1).argmin() for w in wants], int).reshape(-1)
+    wants = np.asarray(wants, float)
+    best = np.zeros(len(wants), int)
+    for c0 in range(0, len(wants), 1024):  # (in chunks, all at once: a row at a time took seconds on a dense drawn
+        best[c0:c0 + 1024] = ((wants[c0:c0 + 1024, None, :] - shapes[None]) ** 2).sum(2).argmin(1)  # wave)
     lo, hi = bs[np.maximum(0, best - 1)], bs[np.minimum(len(bs) - 1, best + 1)]
     for _ in range(30):  # (narrowed down between its neighbours: golden section)
         m1, m2 = hi - (hi - lo) * 0.618, lo + (hi - lo) * 0.618
@@ -148,6 +151,66 @@ def put_run(n, at, run):
 
 
 BAKE_GAP = 1e-10  # bake_wobble: a jump's two sides read this far (parts of the note) before / after it
+BAKE_THIN = 0.005  # a drawn wave's baked point dropped when one curve over both its pieces stays this near (share
+BAKE_THIN_LEAST = 2e-4  # of the depth (Bake itself is within 5 %); at least this many keys: points kept to 4 places)
+
+
+def through(u, v):
+    """The bends (bent_part's single curves) going through v (array, 0..1 of the way up) at u (0..1 of the way along):
+    above the straight line = an early bulge (b > 0), below = late; held within +-SLIDE_BEND."""
+    v = np.clip(np.asarray(v, float), 1e-9, 1.0 - 1e-9)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        m = np.where(v > u, 1.0 - 0.5 ** (np.log(1.0 - v) / np.log(1.0 - u)), 0.5 ** (np.log(v) / np.log(u)))
+    b = np.clip(np.nan_to_num(2.0 * m - 1.0), -SLIDE_BEND, SLIDE_BEND)
+    return np.where(np.abs(b) < 1e-3, 0.0, b)
+
+
+def thin_baked(out, f, tol, keep):
+    """Baked points `out` with those lying on the curve dropped (hunt 2026-11-13: a drawn wave of 128 points x 256
+    waves baked into 32,513 points, every later edit stalled for seconds): a point goes when ONE curve from the point
+    before it to the point after it stays within tol keys of the sound f all the way; never the ends, a jump's two
+    points, or a bend point under the run (keep: their places). Rounds of every other point, all at once."""
+    keep = {round(u, 9) for u in keep}
+    s = np.linspace(0.0, 1.0, 17)
+    while len(out) >= 3:
+        pick, last = [], -2
+        for k in range(1, len(out) - 1):
+            a, p, b = out[k - 1], out[k], out[k + 1]
+            if (k > last + 1 and p[0] - a[0] > 1e-12 and b[0] - p[0] > 1e-12 and round(p[0], 9) not in keep
+                    and len(a) <= 3 and len(p) <= 3):
+                pick.append(k)
+                last = k
+        if not pick:
+            break
+        ua = np.array([out[k - 1][0] for k in pick])
+        va = np.array([out[k - 1][1] for k in pick])
+        ub = np.array([out[k + 1][0] for k in pick])
+        vb = np.array([out[k + 1][1] for k in pick])
+        want = f((ua[:, None] + (ub - ua)[:, None] * s[None, :]).ravel()).reshape(len(pick), -1)
+        dv = vb - va
+        flat = np.abs(dv) <= 1e-6
+        share = (want - va[:, None]) / np.where(flat, 1.0, dv)[:, None]
+        # (the curve through the sound at a quarter, the middle or three quarters of the way, the nearest of the three)
+        best, err = np.zeros(len(pick)), np.full(len(pick), np.inf)
+        for i in (len(s) // 4, len(s) // 2, 3 * len(s) // 4):
+            curves = np.round(through(s[i], share[:, i]), 4)
+            curves[flat] = 0.0
+            made = va[:, None] + dv[:, None] * bent_part(s[None, :], curves[:, None])
+            e = np.abs(made - want).max(1)
+            better = e < err
+            best[better], err[better] = curves[better], e[better]
+        curves = best
+        fits = err <= tol
+        if not fits.any():
+            break
+        for k, c, ok in reversed(list(zip(pick, curves.tolist(), fits.tolist()))):
+            if ok:
+                a = out[k - 1]
+                del a[2:]
+                if c:
+                    a.append(c)
+                del out[k]
+    return out
 
 
 def bake_wobble(n, run):
@@ -217,8 +280,10 @@ def bake_wobble(n, run):
                 if m is not None:
                     more.append([float(spots[k, m]), round(float(v[k, m]), 4)])
         out = more + [out[-1]]
+    if run.get("shape") == WAVE_DRAWN and run.get("wave"):  # (a drawn wave's many points: those on the curve go,
+        out = thin_baked(out, f, max(BAKE_THIN_LEAST, BAKE_THIN * depth_most(run)), inner)  # hunt 2026-11-13)
     s = np.linspace(0.0, 1.0, 17)
-    pairs = [(a, b) for a, b in zip(out, out[1:]) if b[0] - a[0] > 1e-12 and abs(b[1] - a[1]) > 1e-6]
+    pairs =[(a, b) for a, b in zip(out, out[1:]) if b[0] - a[0] > 1e-12 and abs(b[1] - a[1]) > 1e-6]
     if pairs:
         ua, ub = np.array([a[0] for a, _ in pairs]), np.array([b[0] for _, b in pairs])
         va, vb = np.array([a[1] for a, _ in pairs]), np.array([b[1] for _, b in pairs])
