@@ -1949,8 +1949,18 @@ def held_piece(sh, notes, tracks, ppq, get):
             e2 = int(over[:, 1].max()) if len(over) else e
         notes[i, 1] = max(min(e2, hi), s + 1) if e2 > s else e
     extra = []
-    own_at = {k for s, k in mine if s == tl}
+    own_at = {k for s, k in mine if s == tl and (s, k) in starts0}
+    # (a note of the piece starting at its first tick that is only the second half of a whole note cut there: it is
+    # that one note's tail; another whole note held across the cut on the same key still has its own tail here, else
+    # two overlapping notes lost one at the cut)
+    cut_half = {k for (s, k) in mine if s == tl and (s, k) not in starts0}
+    latest = {}  # (key -> the whole note crossing the cut that started last: the one the piece's cut half is)
+    for j, (s, e, k) in enumerate(w1[:, :3].tolist()):
+        if k in cut_half and s < lo < e and (k not in latest or s >= w1[latest[k], 0]):
+            latest[k] = j
     for j, (s, e, k, v) in enumerate(w1[:, :4].tolist()):
+        if latest.get(k) == j:
+            continue
         if s < lo < e and k not in own_at:  # (held over the cut from the piece before)
             row = [lo, min(e, hi), k, vel_of(k, s) or v]
         elif lo <= s < hi and (s, k) not in starts0 and (s, k) not in mine:  # (starting on a Sustain stop)
@@ -1961,11 +1971,12 @@ def held_piece(sh, notes, tracks, ppq, get):
             extra.append(row + [int(wt1[j])])
     if extra:
         add = np.asarray(extra, np.int64)
+        no_tracks = tracks is None and not add[:, 4].any()  # (no colours at all: still none, as stepped_piece wants)
         notes = np.concatenate([notes[:, :4], add[:, :4]])
         tracks = np.concatenate([np.zeros(len(notes) - len(add), np.int64) if tracks is None else
                                  np.asarray(tracks, np.int64), add[:, 4]])
         got = unique_rows(np.column_stack([notes, tracks]))
-        return got[:, :4], got[:, 4]
+        return got[:, :4], None if no_tracks else got[:, 4]
     return notes, tracks
 
 
