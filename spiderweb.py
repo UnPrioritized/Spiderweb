@@ -112,6 +112,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     engine_slots.py  which track + channel each shape's notes go on, and fixing notes that overlap
     paths.py         lines / polylines / freehand / curves -> notes
     custom.py        custom shapes: outlines, fill, spam, outline spam
+    custom_chop.py   custom shapes' spam gate cutting (chop), the outline gate's even band and Outline spam
     passengers.py    pasted notes' CCs and other Domino events riding along (kept, placed, as MIDI messages)
     shrink.py        the outline gate's even band: a custom shape shrunk inward
     faces.py         the areas a custom shape's lines close in, and how many lines deep each is (what Fill fills)
