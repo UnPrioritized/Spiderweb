@@ -60,4 +60,4 @@ Apply keeps the wobble live (you can change it later in Sketch or here), Bake tu
 
 ## Works with everything
 
-Everything the Sketch tool makes is the note's own bend line, the same one the Bend tool edits, so slides, the [page:hz_voice|arpeggio], export and right-click → Bend (Copy bend, Paste bend, Clear bend, Simplify points…) all work with it. Copy bend takes the wobbles along. Every change is one undo step; Ctrl+Z or Esc while dragging puts it back. More note tools (Set Pitch, Join, Quick detune, Simplify points): [page:hz_slides].
+Everything the Sketch tool makes is the note's own bend line, the same one the Bend tool edits, so slides, the [page:hz_voice#Arpeggio (the third row|arpeggio], export and right-click → Bend (Copy bend, Paste bend, Clear bend, Simplify points…) all work with it. Copy bend takes the wobbles along. Every change is one undo step; Ctrl+Z or Esc while dragging puts it back. More note tools (Set Pitch, Join, Quick detune, Simplify points): [page:hz_slides].

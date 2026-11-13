@@ -1,6 +1,6 @@
 Ripples is an [page:fill|Inside fill] for custom shapes. Rings grow out from the shapes you draw inside the outline, each ring a bigger copy of the shape it grows from. Pick it under Inside in the side panel, like Fill, Spam, [page:nested_tiles|Nested and Tiles].
 
-Each ring gets a colour of its own, so set [page:channels|Channels] to Multi channel to see them.
+Each ring gets a colour of its own, so set [page:channels#Multi channel: shapes whose|Channels] to Multi channel to see them.
 
 ## How to draw it
 

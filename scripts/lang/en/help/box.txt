@@ -11,7 +11,7 @@ Crossing star: joins every Skip-th point with straight lines that cross, like a 
 Change them any time with the polygon selected; the panel's numbers are also used for the next one you draw.
 [clip:polygon]
 
-The sides can have a shape: right-click the polygon → [page:formulas|Formula] → Shape of the line (Quarter circle, S-curve, your own…). Every side becomes that shape, from its corner to the next one, so a square can become a flower of arches. A closed shape (like Circle) sits on each side as wide as the side, and the sides stay straight.
+The sides can have a shape: right-click the polygon → [page:formulas#Shape of the line|Formula] → Shape of the line (Quarter circle, S-curve, your own…). Every side becomes that shape, from its corner to the next one, so a square can become a flower of arches. A closed shape (like Circle) sits on each side as wide as the side, and the sides stay straight.
 
 The sides can also have a pattern: right-click the polygon → Formula → Pattern along the line (a wave, zigzag, spikes, your own…). Every side gets the same pattern. Each piece = every side gets all the loops; Across all = the loops run on round the whole outline.
 

@@ -1,6 +1,6 @@
 Experimental. Select pasted notes (or a merged copy of them), then right-click them: Channel per strip (Experimental)…
 
-Normally each pasted track (each colour) stays on one channel, however many strips it has. When a song repeats its colours, for example 16 colours over 351 strips, every strip of one colour shares that channel. With Channel per strip on, Spiderweb guesses where each strip starts and gives every strip channels of its own, so you can edit each strip by itself in other programs. The colours on the piano roll stay the same. It only works with [page:channels|Channels] → Multi channel.
+Normally each pasted track (each colour) stays on one channel, however many strips it has. When a song repeats its colours, for example 16 colours over 351 strips, every strip of one colour shares that channel. With Channel per strip on, Spiderweb guesses where each strip starts and gives every strip channels of its own, so you can edit each strip by itself in other programs. The colours on the piano roll stay the same. It only works with [page:channels#Multi channel: shapes whose|Channels] → Multi channel.
 
 How it guesses: it looks at each key by itself. When a colour comes back on a key after other colours played there, that's the colour's next strip. Strips that climb or fall across the keys are followed from key to key.
 

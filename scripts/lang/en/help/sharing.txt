@@ -4,7 +4,7 @@ On the piano roll, Ctrl+C copies the selected shapes and also puts that line on 
 
 Ctrl+V (or a Select double-click on empty space) pastes whichever you copied last, a shared line or shapes in Spiderweb: at the play line (or where you double-click), with the same spacing between the shapes.
 
-For other MIDI programs: tick "Ctrl+C also copies as Spiderweb Notes" in [page:settings|Settings] → Copying, and Ctrl+C (and Ctrl+X) also puts the finished music on the clipboard in a format other programs can read: the notes as [page:files|Export MIDI] writes them, with tempo, time and key signatures, track names, colours and CC events (a pasted song's CC events only when you pick by time, with a band along the ruler or a box in the track list, as with [page:domino|Copy to Domino]). It's only useful if a program you use reads it; its makers can find how it's laid out in SPIDERWEB-NOTES-FORMAT.md, next to Spiderweb.
+For other MIDI programs: tick "Ctrl+C also copies as Spiderweb Notes" in [page:settings#Copying: what Ctrl+C|Settings] → Copying, and Ctrl+C (and Ctrl+X) also puts the finished music on the clipboard in a format other programs can read: the notes as [page:files|Export MIDI] writes them, with tempo, time and key signatures, track names, colours and CC events (a pasted song's CC events only when you pick by time, with a band along the ruler or a box in the track list, as with [page:domino|Copy to Domino]). It's only useful if a program you use reads it; its makers can find how it's laid out in SPIDERWEB-NOTES-FORMAT.md, next to Spiderweb.
 
 The status bar says when the line is longer than 2,000 characters, since some places may not take that much at once. Shapes with many points or pasted notes make longer lines.
 

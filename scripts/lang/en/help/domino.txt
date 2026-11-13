@@ -1,6 +1,6 @@
 Copy (on the Domino row under Project, or Ctrl+Shift+C) puts the selected shapes' notes on the clipboard, or all notes when nothing is selected. In Domino, pick the track and press Ctrl+V, or double-click where the notes should go. Copying and pasting notes this way is tested on Windows; on Linux (Domino through Wine) it is untested.
 
-To skip the extra step, tick "Ctrl+C also copies for Domino" in [page:settings|Settings] → Copying: then the normal Ctrl+C (and Ctrl+X) copies for Domino too, without any questions. A very big copy is left out of it (the status line says so): use Copy for those.
+To skip the extra step, tick "Ctrl+C also copies for Domino" in [page:settings#Copying: what Ctrl+C|Settings] → Copying: then the normal Ctrl+C (and Ctrl+X) copies for Domino too, without any questions. A very big copy is left out of it (the status line says so): use Copy for those.
 
 The Domino start dropdown above the row sets where the notes start, for copying and pasting both:
 
@@ -8,7 +8,7 @@ The Domino start dropdown above the row sets where the notes start, for copying 
 
 • From the bar line: the empty space from the bar line before the first note comes along, so paste on a bar line and the notes keep their place in the bar.
 
-[page:channels|Channels] (under Project) set to As drawn or Single channel: everything goes into the track you paste into, on that track's channel.
+[page:channels#As drawn: every note|Channels] (under Project) set to As drawn or Single channel: everything goes into the track you paste into, on that track's channel.
 
 Channels set to Multi channel: each channel with notes becomes a track, in channel order, packed together (channels without notes are skipped; with Settings → Note colours → Overlapping shapes keep their colours, the empty tracks between are kept so each row of channels stays in place): the first goes into the track you paste into, the next into the track below it, and so on. The pasted notes play on those tracks' own channels, and tracks that don't fit below the last one are dropped. With 10 tracks or more, Spiderweb asks first, since the 10th lands on a track that may play channel 10 (drums in most players). It doesn't ask when Use channel 10 is ticked.
 

@@ -1,7 +1,7 @@
 Areas are the pieces your lines cut the drawing into. Grey = what [page:fill|Fill] and Spam fill as normal. Pick a colour on the right (or Empty), then click an area to give it that colour, or hold the button and drag to colour every area you pass over. Right-click an area to put it back to normal; "Reset all colours" puts every area back. Each area keeps its colour when you move or change lines, and when the shape is placed and stretched.
 [clip:drawer_areas-colours]
 
-On the piano roll the colours count only with Fill or Spam. Each colour number gets a channel of its own with [page:channels|Multi channel], so it shows in a colour of its own there too (the piano roll picks those colours, so they can differ from the drawer's). Areas with the same number share a channel. Empty leaves an area without notes; a coloured hole gets filled.
+On the piano roll the colours count only with Fill or Spam. Each colour number gets a channel of its own with [page:channels#Multi channel: shapes whose|Multi channel], so it shows in a colour of its own there too (the piano roll picks those colours, so they can differ from the drawer's). Areas with the same number share a channel. Empty leaves an area without notes; a coloured hole gets filled.
 
 The line under the colours says how many colours the shape will use, with and without "Outline" on (the shape's own colour counts too, where an area is left as normal). A shape has at most 15 (16 when the project uses Multi channel with "Use channel 10" ticked, which also shows a 16th colour here): when the count with "Outline" goes past that, the line turns orange, and on the piano roll the extra colours share the last one.
 

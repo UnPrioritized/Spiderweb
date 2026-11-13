@@ -1,4 +1,4 @@
-[page:settings|Settings] → Piano roll → Keep notes made there: shapes keep the notes they make in the darker space past the keys (below the lowest key, above the highest one) and before bar 1, instead of losing them. Turn on Space past the keys or Space before the start first (the tick stays grey until then).
+[page:settings#Piano roll: Space past|Settings] → Piano roll → Keep notes made there: shapes keep the notes they make in the darker space past the keys (below the lowest key, above the highest one) and before bar 1, instead of losing them. Turn on Space past the keys or Space before the start first (the tick stays grey until then).
 
 ## How they look
 

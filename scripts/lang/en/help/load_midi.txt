@@ -14,7 +14,7 @@ Before reading, Spiderweb asks how to hold the notes:
 
 A window shows each step while it reads, with Cancel. Your project is replaced only when the reading is done. The summary at the end counts the notes, tracks, channels and tempo changes, and says what's odd in the file (notes 0 ticks long, notes never let go, damaged tracks). Those are left exactly as they are.
 
-A very big file can take a while (17 GB: about 30 seconds on a fast drive). After a slow load, Spiderweb offers to save the file's index: where everything is in it, never the notes. Next time it opens in a moment. [page:settings|Settings] → Loaded MIDI lists the saved indexes with their sizes, and deletes them. A changed file is read again the usual way.
+A very big file can take a while (17 GB: about 30 seconds on a fast drive). After a slow load, Spiderweb offers to save the file's index: where everything is in it, never the notes. Next time it opens in a moment. [page:settings#Loaded MIDI: the saved|Settings] → Loaded MIDI lists the saved indexes with their sizes, and deletes them. A changed file is read again the usual way.
 
 [clip:load-summary]
 
@@ -30,7 +30,7 @@ The PPQ box is greyed: the project uses the file's PPQ.
 
 Zoomed out, the notes show from an overview made while loading. Zoomed in, the exact notes are read from the file. Each track's notes are in their channel's colour. Where notes lie on top of each other, Settings → Note colours → Stacked notes picks which one shows (at first: the later track's).
 
-Press Tab for the track list: one row per track of the file, then the tracks of your own shapes. Click a track and press Tab to see only it (see [page:tracks|Track list]). Drag the file's tracks by their names to change the order Export MIDI writes them in; the piano roll draws them in that order too (lower in the list = on top).
+Press Tab for the track list: one row per track of the file, then the tracks of your own shapes. Click a track and press Tab to see only it (see [page:tracks#Highlighting a track|Track list]). Drag the file's tracks by their names to change the order Export MIDI writes them in; the piano roll draws them in that order too (lower in the list = on top).
 
 The [page:velocity|velocity pane] shows the loaded notes' velocities faded behind your own. They can't be changed there.
 
@@ -42,7 +42,7 @@ Export MIDI with the Conductor as it was loaded copies the file exactly. With a 
 
 ## Shapes on top
 
-Draw shapes over the loaded notes as usual. Export MIDI adds them as new tracks after the file's own, which stay copied exactly. With Keep timing they keep their time like the file's notes. Tracks you add yourself can sit above or between the file's tracks (see [page:tracks|Track list]).
+Draw shapes over the loaded notes as usual. Export MIDI adds them as new tracks after the file's own, which stay copied exactly. With Keep timing they keep their time like the file's notes. Tracks you add yourself can sit above or between the file's tracks (see [page:tracks#Adding your own tracks|Track list]).
 
 To draw into one of the file's own tracks, highlight it in the track list and draw or paste: the shape's notes go into that track, on its channel. A track holding several channels gets the one its Ch column shows (the one most of its notes use). Export MIDI writes only those tracks again; every other track is still copied exactly. If the project is opened without its MIDI, these shapes stay, and are shown and exported as tracks named after the file's tracks.
 

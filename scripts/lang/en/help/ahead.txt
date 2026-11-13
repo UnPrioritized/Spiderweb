@@ -1,4 +1,4 @@
-Rendered ahead (in the MIDI out list) makes the sound into audio a little ahead of the play line, in small pieces, and plays it from there. Since nothing has to sound at the very moment it's played, every note can ring, even in the densest walls, and the sound never breaks up or gets "Overloaded". Pick it in [page:settings|Settings] (File menu) → Sound → MIDI out. It plays your soundfonts: the same stacked list as Built-in BASSMIDI (see [page:playback|Playing and listening]).
+Rendered ahead (in the MIDI out list) makes the sound into audio a little ahead of the play line, in small pieces, and plays it from there. Since nothing has to sound at the very moment it's played, every note can ring, even in the densest walls, and the sound never breaks up or gets "Overloaded". Pick it in [page:settings#Sound: the MIDI out|Settings] (File menu) → Sound → MIDI out. It plays your soundfonts: the same stacked list as Built-in BASSMIDI (see [page:playback|Playing and listening]).
 
 ## Playing
 

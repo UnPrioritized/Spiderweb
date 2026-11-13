@@ -1,4 +1,4 @@
-Recolour changes which colour each note of a shape has. The notes never move: every note keeps its key, its start and its gate, only its colour changes. Select a shape and pick a Recolour mode in the side panel, under Colours. It needs [page:channels|Channels]: Multi channel (in one channel every note has the same colour anyway), except on notes pasted from Domino, which keep their tracks in every mode.
+Recolour changes which colour each note of a shape has. The notes never move: every note keeps its key, its start and its gate, only its colour changes. Select a shape and pick a Recolour mode in the side panel, under Colours. It needs [page:channels#Multi channel: shapes whose|Channels]: Multi channel (in one channel every note has the same colour anyway), except on notes pasted from Domino, which keep their tracks in every mode.
 
 It works on every kind of shape except a Hz bass: drawn shapes, pasted notes and the shapes made with Extract loaded notes, so note art made elsewhere can be recoloured too.
 

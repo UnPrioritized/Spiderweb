@@ -1,7 +1,7 @@
 Select one or more spam shapes, then right-click one: Gate aware flip. Only the way the gates are laid out is flipped sideways: every key row comes out exactly reversed, its gates and colours too. A row coloured red, green, blue, white reads white, blue, green, red. The drawing stays where it is.
 [clip:gate_flip-before-after]
 
-With a [page:fill|gate Range], the long and short gates swap sides, and the edge where every row starts cleanly moves to the right. This isn't the same as drawing the Range's graph the other way round: that still lays every row from its left end, so the right edge comes out jagged.
+With a [page:fill#Range… (next to|gate Range], the long and short gates swap sides, and the edge where every row starts cleanly moves to the right. This isn't the same as drawing the Range's graph the other way round: that still lays every row from its left end, so the right edge comes out jagged.
 
 Colours turn round with the gates, so the colour at the left edge is now at the right edge, on the same channel it had there. Velocities turn round too, like a normal flip. Drawing them again in the [page:velocity|velocity pane] works as usual.
 

@@ -77,7 +77,7 @@ A line whose ends both land on a line (another one, or partway along itself) isn
 
 Normal / Outline (the box next to Fill and Spam): Outline puts the notes along the edge of what's filled on a channel of their own, and the inside's on another.
 
-With Overlaps cancel out ticked, every edge counts, around every filled bit; unticked, only the outer edge. Both use the same gate so they line up (where both would play, the outline's note is kept). Outline needs [page:channels|Channels]: Multi channel; with the others it's all one channel and the box turns orange.
+With Overlaps cancel out ticked, every edge counts, around every filled bit; unticked, only the outer edge. Both use the same gate so they line up (where both would play, the outline's note is kept). Outline needs [page:channels#Multi channel: shapes whose|Channels]: Multi channel; with the others it's all one channel and the box turns orange.
 [clip:fill-outline]
 
 Coloured areas: with Fill or Spam, the areas you coloured in the drawer (see [page:drawer_areas|Drawer: Areas]) each get a colour of their own, and Empty ones get no notes.
