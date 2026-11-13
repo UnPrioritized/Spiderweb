@@ -21,7 +21,7 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import fmt
-from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bends, line_at, merge_wobbles, note_bend, pitch,
+from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bend_of, bends, line_at, merge_wobbles, note_bend, pitch,
                           depth_most, wobble_edges, wobble_points)
 from roll.roll_shared import SHIFT
 from window import look
@@ -65,7 +65,9 @@ class HzBend:
         (many wobbling notes lagged)."""
         pts = n.get("bend") or ()
         lo, hi, count = n["t"], n["t"] + n["len"], 49
-        if n.get("wobble"):
+        # (a curved piece too, user 2026-11-13: 49 spots over a long / zoomed-in note drew its curve as a few straight
+        # strokes off the smooth red line; straight pieces need only their points)
+        if n.get("wobble") or any(bend_of(p) for p in pts[:-1]):
             pad = 4 / max(self.sx, 1e-9)
             lo = max(lo, self.beat_at(self.kb_w) - pad)
             hi = min(hi, self.beat_at(self.canvas.winfo_width()) + pad)
