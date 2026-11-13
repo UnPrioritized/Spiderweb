@@ -41,7 +41,9 @@ Files (the scripts live in scripts/, one subfolder per group):
     domino_box_watch.py Draw on Domino: the boxes the user drags in Domino's piano roll, watched + kept
     updates.py       update checks: the "how often?" question, the update popup, What's new after an update
     settings_backup.py  an update's first start: the older version's settings + presets copied to user/backups
-    drawer.py        the custom shape drawer window and the shape library (shapes/*.json)
+    drawer.py        the custom shape drawer window
+    drawer_library.py the drawer's shape library (shapes/*.json): names, loading, saving, renaming
+    drawer_mirror.py the drawer's Mirror maths: a point's mirror copies, which points pair up
     drawer_areas.py  the drawer's Areas tool (colouring areas by hand) and colour swatches
     drawer_mouse.py  the mouse on the drawer's board (drawing, Select, sticking), copy / paste / flip / turn
     canvas_keep.py   kept canvas items: a redraw's items made the same way as last time stay (the drawer's board)
