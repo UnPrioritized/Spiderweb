@@ -13,6 +13,7 @@ from files.lang import tr
 from notes.bezier import handle_lines, pen_handles
 import numpy as np
 
+from notes import basics
 from notes.areas import clean_areas
 from notes.custom import (clean_strokes, colour_of, join_strokes, plain_stroke, role_of, settled_areas,
                           stroke_points)
@@ -99,10 +100,7 @@ def spot(p):
 
 def seg_dist(p, a, b):
     """How far point p is from the piece a-b."""
-    dx, dy = b[0] - a[0], b[1] - a[1]
-    ll = dx * dx + dy * dy
-    t = 0 if ll == 0 else min(1, max(0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ll))
-    return math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
+    return basics.seg_dist(p[0], p[1], a[0], a[1], b[0], b[1])
 
 
 def same_stroke(a, b):

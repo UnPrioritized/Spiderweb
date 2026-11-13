@@ -31,6 +31,7 @@ import zlib
 import numpy as np
 
 from files.speed import compiled
+from notes.basics import number
 
 SCALE = 4096  # (map units per colour box: 1/4096 of the box is the finest push kept)
 MOST_PUSH = 8.0  # (a spot looks at most this many boxes away: int16 / SCALE)
@@ -46,10 +47,6 @@ OPPOSITE = {"pinch": "bulge", "bulge": "pinch", "freeze": "thaw", "thaw": "freez
 
 _DECODED = {}  # map text -> its array (read-only); the last few kept: every making of the notes reads it
 _MASKS = {}  # frozen text -> its array 0..1 (read-only)
-
-
-def number(x):
-    return not isinstance(x, bool) and isinstance(x, (int, float)) and x == x
 
 
 def decode(grid, text):

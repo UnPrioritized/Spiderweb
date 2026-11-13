@@ -10,6 +10,7 @@ import math
 import numpy as np
 
 from files.lang import tr
+from notes.basics import seg_dist
 from notes.gliss import bent, copies_at, for_new, gliss_notes, len_for, plan, run_path, shifted
 from window import look
 
@@ -18,12 +19,6 @@ DRAW_EVERY = 8  # a bent run's dotted lines: every 8th point of its line (30 a c
 END_NEAR = 5  # px from a note's right end that grab it
 LINE_NEAR = 6  # px from a dotted line that grab it
 SIDES = ("above", "below")
-
-
-def seg_dist(px, py, x0, y0, x1, y1):
-    dx, dy = x1 - x0, y1 - y0
-    t = 0 if dx == dy == 0 else max(0, min(1, ((px - x0) * dx + (py - y0) * dy) / (dx * dx + dy * dy)))
-    return math.hypot(px - x0 - t * dx, py - y0 - t * dy)
 
 
 def clip_segment(x0, y0, x1, y1, box):

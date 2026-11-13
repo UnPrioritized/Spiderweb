@@ -65,6 +65,14 @@ def put(section, key, value):
     write_text(SETTINGS_FILE, "\n".join(lines) + "\n")
 
 
+def put_quiet(section, key, value):
+    """put, but a file that can't be written is left as it is without a word (window picks: not worth a message)."""
+    try:
+        put(section, key, value)
+    except OSError:
+        pass
+
+
 def put_many(values, lines=None):
     """Saves {(section, key): value, ...} in one write, only when one of them differs from the file's (OSError when
     the file can't be written). lines = the file's, just read."""

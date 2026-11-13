@@ -134,6 +134,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     textfast.py      a text's letters -> notes for all letters at once (the same notes as one by one, faster)
     funnel.py        funnels: curves, note grid, gates
     bezier.py        Bezier curves (anchors + handles) for curves and funnel curves, symmetry, fitting to points
+    basics.py        small shared maths: distance to a piece of line, "is this a real number" checks
     arc.py           arcs: pieces of a perfect circle through three points
     gliss.py         Glissando runs: one note per picked key along a line, one grid step each
     tumour.py        tumours: bumps along lines

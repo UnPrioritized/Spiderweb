@@ -436,10 +436,7 @@ class SustainWindow(tk.Toplevel):
                 r[4] = self.text_of(b)
         self.put_units()
         self.put_limits()
-        try:
-            settings.put("sustain", "unit", self.unit.get())
-        except OSError:
-            pass
+        settings.put_quiet("sustain", "unit", self.unit.get())
 
     def put_all(self, what):
         """A tick changed ("on", "stops", "past"): every shape takes it (a half-ticked one: a click = all on)."""

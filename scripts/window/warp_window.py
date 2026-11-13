@@ -33,10 +33,7 @@ SPLITS = ("across", "down", "both")  # (the Split buttons: a line side to side /
 
 
 def put(name, value):
-    try:
-        settings.put("warp", name, value)
-    except OSError:
-        pass
+    settings.put_quiet("warp", name, value)
 
 
 def fit_key(w):

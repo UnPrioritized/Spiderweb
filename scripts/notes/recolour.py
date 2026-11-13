@@ -38,6 +38,7 @@ from collections import OrderedDict
 import numpy as np
 
 from files.speed import key_sort, loops
+from notes.basics import number
 from notes.custom import ROUND
 
 
@@ -193,10 +194,6 @@ BLEND_DEFAULTS = {"angle": 0.0, "tight": TIGHT, "centre": [50.0, 50.0], "push": 
                   "stir": STIR_DEFAULTS}  # (left out when so: Add between blends from them)
 MOST = 15  # colours a set may use (16 with Use channel 10: the shape's "most", App.notes_tracks)
 SET = 15  # colours in a colour set (always: the ticks change no colour)
-
-
-def number(x):
-    return not isinstance(x, bool) and isinstance(x, (int, float)) and x == x
 
 
 def clean_recolour(r):
@@ -1294,8 +1291,8 @@ def kept_rule(rc):
 def before_liquify(notes, tracks, rc, held=False, gate=False, own=None):
     """recoloured's work up to the Liquify: (rc, settled notes, each note's round, the "turned" list still to make
     after it (a Reverse last in the order, else None), all_stirred's arguments with the colours after every step
-    before it), or None = nothing to recolour. Big shapes in kept_shape's order keep it (the brush's strokes and
-    Stir knob turns change nothing before it); other orders work it all out each time. Liquify's brush starts a
+    before it), or None = nothing to recolour. Big shapes keep it, in any order (_kept_before / _kept_run: the
+    brush's strokes and Stir knob turns change nothing before it). Liquify's brush starts a
     stroke with it too (Live). The Liquify must be the last step but a Reverse (liquify_last) or none at all."""
     rc = kept_rule(rc)
     if gate and (rc.get("liquify") or rc.get("warp")):  # (they work on where notes show: liquify.shown_places)
@@ -1495,16 +1492,6 @@ def bend_tail(rest):
     body = rest[:-1] if end_turn else rest
     end_liq = bool(body) and body[-1] == "liquify"
     return (body[:-1] if end_liq else body), end_turn, end_liq
-
-
-def kept_shape(rc):
-    """True when rc's order is one before_liquify's kept work follows: after the leading Shuffle / Split / Reverse,
-    every Stir, then the Warp, then the Liquify, then a Reverse (today's fixed order of them; any of them missing)."""
-    body, _, _ = bend_tail(split_order(steps_of(rc))[1])
-    i = 0
-    while i < len(body) and body[i] == "stir":
-        i += 1
-    return body[i:] in ([], ["warp"])
 
 
 def liquify_last(rc, kind="liquify"):

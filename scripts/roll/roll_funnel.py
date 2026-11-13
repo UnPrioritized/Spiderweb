@@ -4,6 +4,7 @@ curves)."""
 import math
 
 from files.lang import tr
+from notes import basics
 from notes.bezier import anchor_count, difference, handle_anchor, nearest, remove_anchor, segments, split
 from notes.funnel import (box_point, box_uf, curve_box, funnel_curves, funnel_handles, funnel_lines, line_index,
                           new_start, new_curve, next_link, partners, remove_funnel_parts, set_shape, turned, turned_curve)
@@ -13,11 +14,7 @@ from roll.roll_shared import ALT, CTRL, PICK
 
 def seg_dist(x, y, a, b):
     """Distance from (x, y) to the segment a-b (screen pixels)."""
-    (ax, ay), (bx, by) = a, b
-    dx, dy = bx - ax, by - ay
-    ll = dx * dx + dy * dy
-    u = 0 if ll == 0 else max(0, min(1, ((x - ax) * dx + (y - ay) * dy) / ll))
-    return math.hypot(x - ax - u * dx, y - ay - u * dy)
+    return basics.seg_dist(x, y, a[0], a[1], b[0], b[1])
 
 
 class FunnelEditing:
@@ -34,11 +31,7 @@ class FunnelEditing:
     def near_wall(self, sh, pt, near=8):
         """Is the point (beat, pitch) on the funnel's wall (on screen)?"""
         (xa, ya), (xb, yb) = [(self.t2x(b), self.p2y(p)) for b, p in sh["pts"][2:4]]
-        x, y = self.t2x(pt[0]), self.p2y(pt[1])
-        dx, dy = xb - xa, yb - ya
-        ll = dx * dx + dy * dy
-        u = 0 if ll == 0 else max(0, min(1, ((x - xa) * dx + (y - ya) * dy) / ll))
-        return math.hypot(x - xa - u * dx, y - ya - u * dy) <= near
+        return basics.seg_dist(self.t2x(pt[0]), self.p2y(pt[1]), xa, ya, xb, yb) <= near
 
     def screen_dir(self, a, b):
         return (b[0] - a[0]) * self.sx, (a[1] - b[1]) * self.sy

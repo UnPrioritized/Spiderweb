@@ -13,6 +13,7 @@ from files.lang import tr, trn
 from files.snap import (COUNT_RANGE, DIV_RANGE, DOTS, NOTE_RANGE, SNAP_LIST, custom_parts, custom_snap, snap_text,
                         whole_notes)
 from files.mathexpr import fmt
+from notes.basics import seg_dist
 from window import look
 from window.widgets import Tooltip, remember_place
 
@@ -29,9 +30,7 @@ def _ellipse(x, y, cx, cy, rx, ry, turn):
 
 
 def near_segment(x, y, ax, ay, bx, by, width):
-    vx, vy = bx - ax, by - ay
-    t = max(0.0, min(1.0, ((x - ax) * vx + (y - ay) * vy) / (vx * vx + vy * vy)))
-    return math.hypot(x - ax - t * vx, y - ay - t * vy) <= width / 2
+    return seg_dist(x, y, ax, ay, bx, by) <= width / 2
 
 
 def _note_inside(note, dots, triplet):

@@ -49,6 +49,7 @@ import json
 import numpy as np
 
 from files.speed import compiled
+from notes import basics
 
 MOST_CELLS = 20  # (cells across / up at most: the window's Custom boxes, a file too)
 MOST_MOVE = 4.0  # (a point moves at most this many boxes)
@@ -69,7 +70,7 @@ IN_TINY = 1e-8  # (split: nor an inner control this close to _inner's (the saved
 
 
 def number(x):
-    return not isinstance(x, bool) and isinstance(x, (int, float)) and x == x and abs(x) != float("inf")
+    return basics.number(x, finite=True)
 
 
 def _kept(v):

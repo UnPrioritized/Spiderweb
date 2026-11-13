@@ -12,6 +12,7 @@ was picked), y = pitch; custom shape strokes use u / k, v (k = how many u one v 
 import functools
 import math
 
+from notes.basics import seg_dist
 from notes.bezier import fit, segments, seg_point
 
 SMOOTH_DEFAULT = 0
@@ -292,10 +293,7 @@ def _resample(pts, n):
 
 
 def _seg_dist(p, a, b):
-    dx, dy = b[0] - a[0], b[1] - a[1]
-    ll = dx * dx + dy * dy
-    t = 0.0 if ll < 1e-24 else max(0.0, min(1.0, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / ll))
-    return math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy)
+    return seg_dist(p[0], p[1], a[0], a[1], b[0], b[1], 1e-24)
 
 
 def _dist_to_path(p, path):

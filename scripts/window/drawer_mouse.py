@@ -11,6 +11,7 @@ import numpy as np
 from files.lang import tr
 from files.system import ALT
 from notes.areas import COLOURS
+from notes.basics import seg_dist
 from notes.bezier import (add_anchor, add_anchor_pair, can_delete, delete_point, drag_point, half_at, nearest, pen_handles,
                           set_symmetry)
 from notes.custom import ROLES, carried_spots, carry_areas, role_of, stroke_points, takes_formula
@@ -1031,9 +1032,6 @@ class DrawerMouse:
             if len(pts) == 1 and math.hypot(pts[0][0] - x, pts[0][1] - y) < 8:
                 return i
             for (ax, ay), (bx, by) in zip(pts, pts[1:]):
-                dx, dy = bx - ax, by - ay
-                ll = dx * dx + dy * dy
-                t = 0 if ll == 0 else max(0, min(1, ((x - ax) * dx + (y - ay) * dy) / ll))
-                if math.hypot(x - ax - t * dx, y - ay - t * dy) < 8:
+                if seg_dist(x, y, ax, ay, bx, by) < 8:
                     return i
         return None

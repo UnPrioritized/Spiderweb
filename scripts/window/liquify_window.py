@@ -43,10 +43,7 @@ def saved(name):
 
 
 def put(name, value):
-    try:
-        settings.put("liquify", name, value)
-    except OSError:
-        pass
+    settings.put_quiet("liquify", name, value)
 
 
 class LiquifyWindow(tk.Toplevel):

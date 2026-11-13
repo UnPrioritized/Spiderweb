@@ -5,6 +5,7 @@ import copy
 import math
 import tkinter as tk
 
+from notes.basics import seg_dist
 from notes.custom import box_pts, frame_from_box
 from roll.roll_shared import SELECT_CURSOR, SHIFT
 from window import look
@@ -56,10 +57,7 @@ class CustomBox:
             return ("corner", k)
         for side in range(4):
             (ax, ay), (bx, by) = corners[side], corners[(side + 1) % 4]
-            dx, dy = bx - ax, by - ay
-            ll = dx * dx + dy * dy
-            u = 0 if ll == 0 else max(0, min(1, ((x - ax) * dx + (y - ay) * dy) / ll))
-            if math.hypot(x - ax - u * dx, y - ay - u * dy) <= 7 * s:
+            if seg_dist(x, y, ax, ay, bx, by) <= 7 * s:
                 return ("side", side)
         inside = self.inside_box(corners, x, y)
         if inside and "notes" in sh and self.big_on_screen(sh) and self.note_owner(x, y, [self.app.sel]) is None:
