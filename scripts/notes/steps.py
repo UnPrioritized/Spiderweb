@@ -306,7 +306,8 @@ def expanded(sh):
     have = own_steps(sh)
     E = {k: v for k, v in sh.items() if k not in ("order", "off", "recolour", "_upto", "_before") + LENGTHS}
     E["_run"] = True  # (made so: never expanded again)
-    if raw and sh.get("cut") and sh.get("order") is not None and FX in sh["order"] and not fx:
+    if raw and sh.get("cut") and sh.get("order") is not None and (FX in sh["order"] or GLUE in sh["order"]) \
+            and not fx:
         # (a Stir piece naming its whole's pages: the order it was cut with, for engine.stirred_piece to make the
         # whole as it was, else its colour steps ran after the pages and the piece took other colours than the whole)
         E["_order_was"] = [list(sh["order"]), copy.deepcopy(raw.get("order"))]
@@ -394,6 +395,13 @@ def in_whole(sh):
     them out. An empty set for every other shape."""
     if not sh.get("cut") or sh.get("order") is None or not any(k in sh for k in LENGTHS):
         return set()
+    if (GATE_FLIP in sh["order"] and sh.get("gate_flip") is True and sh["kind"] == "custom"
+            and not sh.get("fx")):  # (a drawn piece's Gate aware flip is done inside its whole (gateflip.LEFT_OUT), so
+        # a Sustain / extend / subtract ordered BEFORE it must run there too, else the flip came first and the
+        # piece's notes were another set than the whole's, cut: sweep 219191833)
+        before = sh["order"][:sh["order"].index(GATE_FLIP)]
+        off = off_tags(sh)
+        return {k for k in LENGTHS if k in before and k in sh and (k, 0) not in off}
     if FX not in sh["order"] and not (GLUE in sh["order"] and not sh.get("glue") and sh["cut"].get("whole", {}).get(
             "glue")):  # (an order saying nothing about the whole's pages (made on the piece: glue added after its
         return set()   # Sustain): they keep their default place, first; sweep 292805004. The WHOLE's glue boxes

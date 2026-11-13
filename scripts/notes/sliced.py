@@ -368,6 +368,23 @@ def source(sh):
         src.update(json.loads(json.dumps(src.pop("_whole"))))
         src.pop("_run", None)
         src.pop("_noglue0", None)
+    again = src.pop("_whole_colours", None)
+    if isinstance(again, dict):
+        # (engine.fx_notes, a stirred piece whose whole ran colour steps between its pages: the whole made WITH those
+        # colours, in the order it ran them, so the pages after them (a glue) treat the colours as the whole's did;
+        # the piece's Recolour counts its colours in the PIECE's box (rc "whole"), the whole in its own: left out)
+        was = src.pop("_order_was", None)
+        src.pop("_run", None)
+        src.pop("_noglue0", None)
+        rc = {k: v for k, v in again.items() if k not in ("whole", "frame", "cut_frame")}
+        then = again.get("cut_frame")  # (the whole as flipped when it was cut, like stirred_piece)
+        if then and tuple(then) != (1, 0, 0, 1):
+            rc["frame"] = list(then)
+        if was:
+            src["order"] = list(was[0])
+            if was[1] is not None:
+                rc["order"] = was[1]
+        src["recolour"] = rc
     if sh["kind"] == "custom":
         same_gate = cut.get("gate") is not None and close(velocity(sh, GATE), cut["gate"])
         src.update(velocity(cut["whole"] if same_gate else sh, GATE))

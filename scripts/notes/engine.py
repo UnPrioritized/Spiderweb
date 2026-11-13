@@ -1426,7 +1426,10 @@ def fx_notes(sh, ppq, keys, get):
         if ((rule.get("stir") or rule.get("liquify") or rule.get("warp") or rule.get("by") and rule["mode"] != KEEP)
                 and (sh.get("cut") or sh.get("colour_cut"))
                 and not (rule.get("frame") or (1, 0))[1]):  # (turned: notes made anew)
-            notes, tracks = get(without_recolour(sh))
+            base = without_recolour(sh)
+            if sh.get("cut") and sh.get("_order_was"):  # (the whole ran its colour steps between its pages: its
+                base["_whole_colours"] = sh["recolour"]  # pages after them see the colours; sliced.source)
+            notes, tracks = get(base)
             got = stirred_piece(sh, notes, tracks, held_, get, gate, rule)
             if got is not None:
                 return got
@@ -1891,13 +1894,16 @@ def held_piece(sh, notes, tracks, ppq, get):
     if got is None or not len(notes):
         return None
     src, part, same_vel = got
-    if not isinstance(part[0], (int, float)) or src.get("glue") or src.get("fx"):
+    knife = sh["cut"].get("knife")
+    through = bool(knife and same_vel and part[0] == 0 and part[1] is None)  # (cut through its notes, see below)
+    if not isinstance(part[0], (int, float)) or src.get("glue") or src.get("fx") and not through:
         return None
     whole = dict({k: v for k, v in src.items() if k != "sustain"}, **velocity(sh["cut"]["whole"]))
     if sh.get("_run") and sh.get("fx") and all(st.get("tool") in RUNNER for st in sh["fx"]):
         # (made by the runner: the whole gets the steps that ran before this Sustain too (Gate subtract first...),
         # not only the drawing; sweep 277542201: a subtracted note was held again over the cut)
-        whole["fx"], whole["_run"] = json.loads(json.dumps(sh["fx"])), True
+        # (the whole's own pages come first, then those steps: the pages are done on the whole before the piece)
+        whole["fx"], whole["_run"] = json.loads(json.dumps(list(src.get("fx") or []) + list(sh["fx"]))), True
     w0, wt0 = get(whole)
     if not len(w0):
         return None
@@ -1908,6 +1914,12 @@ def held_piece(sh, notes, tracks, ppq, get):
             _held_wholes.clear()
         was = _held_wholes[id(w0)] = (w0, (hold, ppq), held(w0, wt0, sh["sustain"], ppq))
     w1, wt1 = was[2]
+    if through and src.get("fx"):
+        # (a piece with the whole's pages is cut through its NOTES by the knife (the whole drawing stays): held as the
+        # whole holds them, then the knife cuts the finished notes, as Gate extend / subtract do (stepped_piece);
+        # held on the cut notes alone it held them only to the next note of the piece; sweep 319165685)
+        w1 = np.asarray(w1, np.int64)[:, :4]
+        return knife_cut(w1, None if wt1 is None else np.asarray(wt1, np.int64), knife, moved_by(sh), ppq)
     tl, lo, hi = piece_ticks(src, part, ppq)
     w1 = np.asarray(w1, np.int64)
     wt1 = np.zeros(len(w1), np.int64) if wt1 is None else np.asarray(wt1, np.int64)
