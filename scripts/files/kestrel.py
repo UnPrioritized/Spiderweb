@@ -64,11 +64,20 @@ def cards():
     virtual; other kinds and OpenGL left out: slower, and Kestrel's own pick never takes them), [] when none,
     None when the connector can't say. Up to a second: off the window's thread (seen_cards() = the last answer)."""
     global _cards_seen
-    try:
-        with _OPENING:  # (never beside a start: asking the cards opens their drivers too)
-            text = load().kb_cards()
-    except SynthError:
-        return None
+    text = None
+    for again in range(2):
+        try:
+            with _OPENING:  # (never beside a start: asking the cards opens their drivers too)
+                text = load().kb_cards()
+            break
+        except SynthError:
+            return None
+        except OSError:
+            # (user 2026-11-13: an access violation inside the graphics drivers' listing while a MIDI loaded, once;
+            # alone it never came back: asked once more, then "can't say" = Automatic only, never a stuck dropdown)
+            if again:
+                return None
+            time.sleep(0.5)
     if text is None:
         return None
     out = []
