@@ -14,7 +14,7 @@ from notes.polygon import update_polygon
 from window import look
 from window.formula_host import SYM_CHOICES, layer_name, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, unchanged
 
 LAYERS = ("shape", "pattern")  # (a curve's shape first: the pattern runs along it)
 LOOP_STEPS = (1, 10, 0.1)    # quick changes (widgets.Scrub): step, Shift step, Ctrl step
@@ -192,10 +192,7 @@ class PatternPanel:
         most = [most_loops(sh) for sh in self.with_layer("pattern") if sh["pattern"]["loops"] >= most_loops(sh)]
         if most:  # (with Each piece the pieces share MAX_LOOPS)
             ui["most"].config(text=tr("panel_pattern.loops_most", most=fmt(most[0])))
-        if most and not ui["most"].winfo_manager():
-            ui["most"].pack(anchor="w", after=ui["numbers"])
-        elif not most and ui["most"].winfo_manager():
-            ui["most"].pack_forget()
+        pack_shown(ui["most"], most, anchor="w", after=ui["numbers"])
 
     def on_formula_sym(self, layer, picked=-1):
         """picked = the place in the list (two choices translated alike stay apart); -1: found by its word."""

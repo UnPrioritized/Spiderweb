@@ -25,7 +25,7 @@ from window import look
 from window.jump_areas import JumpChain
 from window.jump_graph import JumpGraph, graph_pts
 from window.load_extract import boxes_now
-from window.widgets import Scrub, read_number, remember_place, unhighlight
+from window.widgets import Scrub, centre_over, open_or_lift, read_number, remember_place, unhighlight
 
 WATCH_MS = 250
 # the words round the two BPM boxes, by shape (None = one box: the second hidden)
@@ -200,10 +200,7 @@ class MelodyWindow(tk.Toplevel):
         sels = [i for i in app.sels if i < len(app.shapes)]
         self.only_sel.set(bool(sels) or bool(app.roll.kept_box()))  # (something selected: only that, to start with)
         self.sync()
-        self.update_idletasks()
-        x = app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2
-        y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        centre_over(self, app)
         remember_place(self, "melody")
         self.deiconify()
         self.watch = self.after(WATCH_MS, self.watching)
@@ -945,10 +942,4 @@ class MelodyWindow(tk.Toplevel):
 
 
 def open_melody(app):
-    w = getattr(app, "melody_window", None)
-    if w:
-        w.sync()
-        w.lift()
-        w.focus_set()
-    else:
-        MelodyWindow(app)
+    open_or_lift(app, "melody_window", lambda: MelodyWindow(app))

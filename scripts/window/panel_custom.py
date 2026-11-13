@@ -27,8 +27,8 @@ from window.panel_nested import nested_on
 from window.panel_ripples import ripples_on
 from window.panel_tiles import tiles_on
 from window.range_window import open_range_graph
-from window.widgets import (Scrub, Tooltip, bad, good, leave_box, line_up, name_index, name_list, set_names, unchanged,
-                            unit_word)
+from window.widgets import (Scrub, Tooltip, bad, good, leave_box, line_up, name_index, name_list, pack_shown, set_names,
+                            unchanged, unit_word)
 
 GAP_COLOR = look.WARN  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 MISSING_MARK = "✕ "  # in the Shape box: a placed shape whose library shape was renamed or deleted (user, 2026-10-05)
@@ -381,10 +381,7 @@ class CustomPanel:
                  else "ripples" if ripples_on(tgts[0]) else fill)
         missing = placed and not text and self.not_in_library(tgts[0])  # (no shape picker: nothing to miss)
         self.custom_combo.config(style="Missing.TCombobox" if missing else "TCombobox")
-        if missing and not self.missing_note.winfo_manager():
-            self.missing_note.pack(fill="x", pady=(2, 0), after=self.custom_shape_row)
-        elif not missing and self.missing_note.winfo_manager():
-            self.missing_note.pack_forget()
+        pack_shown(self.missing_note, missing, fill="x", pady=(2, 0), after=self.custom_shape_row)
         self._loading = True
         self.custom_pick.set(MISSING_MARK + name if missing else name)
         self.fill_var.set(shown)
@@ -436,11 +433,7 @@ class CustomPanel:
         lonely = apart and self.channel_mode.get() != "auto"  # (Outline without Multi channel: all one channel)
         self.apart_box.config(style="Gap.TCombobox" if lonely else "TCombobox")
         self.apart_tip.text = APART_TIP + (APART_NEEDS if lonely else "")
-        if bool(self.apart_box.winfo_manager()) != (shown in APART_FILLS):  # (only for the ones it's for)
-            if shown in APART_FILLS:
-                self.apart_box.pack(side="left", padx=(8, 0))
-            else:
-                self.apart_box.pack_forget()
+        pack_shown(self.apart_box, shown in APART_FILLS, side="left", padx=(8, 0))  # (only for the ones it's for)
         outline = fill in ("empty", "outline_spam") or apart  # (Fill / Spam: only with "Outline")
         self.edge_entry.config(state="normal" if outline else "disabled")
         self._loading = True

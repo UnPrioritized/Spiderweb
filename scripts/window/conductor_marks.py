@@ -13,7 +13,7 @@ from tkinter import ttk
 from files.lang import tr, trn
 from notes.meter import BOTTOMS, TOPS, at_beat, bar_at, bar_line, key_name, on_bars, sig_text, sigs_of, where
 from window import look
-from window.widgets import Tooltip
+from window.widgets import Tooltip, centre_over
 
 MARK_LEN = 10  # px (x the window's scale): a mark's line down from the pane's top edge
 ROW = 12  # px (x scale) between the time signature row and the key signature row
@@ -47,11 +47,7 @@ def _dialog(parent, title, body_fn):
     body.ok_button.pack(side="right", padx=(0, 6))
     win.bind("<Return>", lambda e: ok())
     win.bind("<Escape>", lambda e: win.destroy())
-    win.update_idletasks()
-    top = parent.winfo_toplevel()
-    x = top.winfo_rootx() + (top.winfo_width() - win.winfo_reqwidth()) // 2
-    y = top.winfo_rooty() + (top.winfo_height() - win.winfo_reqheight()) // 3
-    win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+    centre_over(win, parent.winfo_toplevel())
     win.deiconify()
     win.grab_set()
     win.wait_window()

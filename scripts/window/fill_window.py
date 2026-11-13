@@ -7,7 +7,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from window import look
-from window.widgets import remember_place
+from window.widgets import centre_over, open_or_lift, remember_place
 
 
 class FillWindow(tk.Toplevel):
@@ -45,10 +45,7 @@ class FillWindow(tk.Toplevel):
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.sync()
-        self.update_idletasks()
-        x = app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2
-        y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        centre_over(self, app)
         remember_place(self, "fill_gaps")
         self.deiconify()
         self.go.focus_set()
@@ -105,10 +102,4 @@ class FillWindow(tk.Toplevel):
 
 
 def open_fill(app):
-    w = app.fill_window
-    if w:
-        w.sync()
-        w.lift()
-        w.focus_set()
-    else:
-        FillWindow(app)
+    open_or_lift(app, "fill_window", lambda: FillWindow(app))

@@ -15,8 +15,8 @@ from notes.mask import (GROUP_KEYS, MASK_DEFAULTS, MODES, MOST_SIZE, SHOWS, THIC
                         is_solid, loops_of, mask_units, new_group_id, slot_pal, slot_rule, tidy_groups, unit_of,
                         unmasked, worked_now)
 from window import look
-from window.widgets import (Scrub, Tooltip, bad, good, leave_box, read_number, same_or_blank, show_mixed, unchanged,
-                            unit_word)
+from window.widgets import (Scrub, Tooltip, bad, good, leave_box, pack_shown, read_number, same_or_blank, show_mixed,
+                            unchanged, unit_word)
 
 SHOW_CHOICES = [(v, tr("mask.show_" + v)) for v in SHOWS]
 MODE_CHOICES = [(v, tr("mask.mode_" + v)) for v in MODES]
@@ -95,11 +95,7 @@ class MaskPanel:
         picked shape is a mask (my pick, like Colours' rows)."""
         tgts = self.mask_targets()
         shown = bool(tgts)
-        if shown != bool(self.mask_box.winfo_manager()):
-            if shown:
-                self.mask_box.pack(fill="x", pady=(4, 0), after=self.recolour_box)  # (under Recolour, panel_recolour.py)
-            else:
-                self.mask_box.pack_forget()
+        pack_shown(self.mask_box, shown, fill="x", pady=(4, 0), after=self.recolour_box)  # (under Recolour)
         if not shown:
             return
         masks = [t["mask"] for t in tgts if t.get("mask")]
@@ -122,20 +118,12 @@ class MaskPanel:
             self.mask_show_box.current(SHOWS.index(next(iter(shows))))
         show_mixed(self.mask_show_box, len(shows) > 1, self.mask_show_tip, tr("mask.show_tip"))
         self._loading = False
-        if bool(closed) != bool(self.mask_show_row.winfo_manager()):
-            if closed:
-                self.mask_show_row.pack(anchor="w", pady=(1, 0), after=self.mask_own_tick)
-            else:
-                self.mask_show_row.pack_forget()
+        pack_shown(self.mask_show_row, closed, anchor="w", pady=(1, 0), after=self.mask_own_tick)
         # (Fill / Spam masks show their whole inside: no thickness, user)
         band = [t for t in tgts if t.get("mask") and not is_solid(t)]
         self.mask_size_entry.config(state="normal" if band else "disabled")
         self.mask_thick_tip.text = tr("mask.thickness_tip") + ("" if band else "\n\n" + tr("mask.thickness_solid"))
-        if every != bool(self.mask_rows.winfo_manager()):
-            if every:
-                self.mask_rows.pack(anchor="w", padx=(20, 0), pady=(1, 0))
-            else:
-                self.mask_rows.pack_forget()
+        pack_shown(self.mask_rows, every, anchor="w", padx=(20, 0), pady=(1, 0))
         # Mode: only while every picked mask is in a group; the first in its group always adds (greyed when only firsts)
         units = mask_units(self.shapes)
         picked = [unit_of(units, i) for i in self.mask_indices()]
@@ -150,11 +138,7 @@ class MaskPanel:
                        tr("mask.mode_tip") + ("" if later else "\n\n" + tr("mask.mode_first")))
             self._loading = False
             self.mask_mode_box.config(state="readonly" if later else "disabled")
-        if grouped != bool(self.mask_mode_row.winfo_manager()):
-            if grouped:
-                self.mask_mode_row.pack(anchor="w", pady=(1, 0), before=self.mask_apply_button)
-            else:
-                self.mask_mode_row.pack_forget()
+        pack_shown(self.mask_mode_row, grouped, anchor="w", pady=(1, 0), before=self.mask_apply_button)
 
     def build_mask_fade(self, bar):
         """The toolbar's [n] % box right of Mask preview: how much of the hidden parts shows (0 = none, 100 = as

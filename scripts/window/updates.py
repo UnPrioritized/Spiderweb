@@ -18,7 +18,7 @@ from files.about import BUILD, VERSION, WEBSITE
 from files.lang import tr
 from files.update_check import newer_releases
 from window import look
-from window.widgets import remember_place
+from window.widgets import centre_over, remember_place
 
 OFTEN = ["launch", "day", "week", "month", "off"]  # (saved as these)
 PERIOD = {"launch": 0, "day": 86400, "week": 7 * 86400, "month": 30 * 86400}
@@ -175,10 +175,7 @@ def on_top(win, parent, name, focus=True):
     win.transient(parent)
     win.resizable(False, False)
     win.attributes("-topmost", True)
-    win.update_idletasks()
-    x = parent.winfo_rootx() + (parent.winfo_width() - win.winfo_reqwidth()) // 2
-    y = parent.winfo_rooty() + (parent.winfo_height() - win.winfo_reqheight()) // 3
-    win.geometry(f"+{max(0, x)}+{max(0, y)}")
+    centre_over(win, parent)
     remember_place(win, name)
     win.lift()
     if focus:

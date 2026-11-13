@@ -121,7 +121,8 @@ from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.side_panel import ScrollingSide
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, StatusLine, Tooltip, bad, click_first,
-                            fit_dropdowns, good, grid_shown, mac_buttons, no_focus, set_glide, label_column, read_number,
+                            fit_dropdowns, good, grid_shown, mac_buttons, no_focus, pack_shown, set_glide, label_column,
+                            read_number,
                             remember_good, watch_bad, ShortLabel, WrapRow)
 
 
@@ -2057,10 +2058,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.roll.clamp_view()
         warn = self.ppq >= PPQ_WARN
         self.ppq_box.config(style="Bad.TCombobox" if warn else "TCombobox")
-        if warn and not self.ppq_warning.winfo_manager():
-            self.ppq_warning.pack(side="left", padx=(5, 0))
-        elif not warn:
-            self.ppq_warning.pack_forget()
+        pack_shown(self.ppq_warning, warn, side="left", padx=(5, 0))
         self.sync_points()
         self.shapes_changed()
         self.sync_custom()  # gates are shown in ticks
@@ -2146,18 +2144,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def sync_overlap_rows(self):
         """Single's split around row only under Single channel; Multi's who wins + way only once Remove overlaps is
         ticked (only on a change: grid_shown's rule)."""
-        single = self.channel_mode.get() == "single"
-        if single != bool(self.single_split_tick.winfo_manager()):
-            if single:
-                self.single_split_tick.pack(anchor="w", padx=(18, 0), pady=(1, 0), after=self.mode_buttons["single"])
-            else:
-                self.single_split_tick.pack_forget()
-        more = bool(self.multi_cut.get())
-        if more != bool(self.multi_more.winfo_manager()):
-            if more:
-                self.multi_more.pack(anchor="w", padx=(18, 0))
-            else:
-                self.multi_more.pack_forget()
+        pack_shown(self.single_split_tick, self.channel_mode.get() == "single", anchor="w", padx=(18, 0), pady=(1, 0),
+                   after=self.mode_buttons["single"])
+        pack_shown(self.multi_more, self.multi_cut.get(), anchor="w", padx=(18, 0))
 
     def in_order(self):
         """True while the shapes take channels 1-16 in order ("Channels 1-16 in order", only with all16)."""
@@ -2259,12 +2248,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         tick = getattr(self, "edo_lanes_tick", None)
         if tick is None:  # (before the side panel is made)
             return
-        shown = self.edo()
-        if shown != bool(tick.winfo_manager()):
-            if shown:
-                tick.pack(anchor="w", padx=(18, 0), pady=(1, 0), after=self.mode_buttons["auto"])
-            else:
-                tick.pack_forget()
+        pack_shown(tick, self.edo(), anchor="w", padx=(18, 0), pady=(1, 0), after=self.mode_buttons["auto"])
         tick.state(["!disabled" if self.channel_mode.get() == "auto" else "disabled"])
         on = self.edo_lanes_on()
         self.sync_ch10_grey(on)
@@ -2642,17 +2626,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.multi_rows.pack_forget()
         self.sync_overlap_rows()
         self.sync_edo_lanes()
-        if self.all16() != bool(self.order_tick.winfo_manager()):  # (only shown with Use channel 10, user)
-            if self.all16():
-                self.order_tick.pack(anchor="w", padx=(36, 0), pady=(2, 0), before=self.rounds_tick)
-            else:
-                self.order_tick.pack_forget()
-        padding = self.blocks_apart()
-        if padding != bool(self.pad_tick.winfo_manager()):  # (only shown with the rounds tick / rows, user)
-            if padding:
-                self.pad_tick.pack(anchor="w", padx=(36, 0), pady=(2, 0), after=self.rounds_tick)
-            else:
-                self.pad_tick.pack_forget()
+        # (only shown with Use channel 10 / with the rounds tick / rows, user)
+        pack_shown(self.order_tick, self.all16(), anchor="w", padx=(36, 0), pady=(2, 0), before=self.rounds_tick)
+        pack_shown(self.pad_tick, self.blocks_apart(), anchor="w", padx=(36, 0), pady=(2, 0), after=self.rounds_tick)
         self.sync_channels_fold()  # (", empty tracks" comes and goes with Channel per strip, hunt 10-27)
         if any("into_ch" in sh for sh in self.shapes):  # (a track's own channel gone with its shapes: it takes one it
             tidy_tracks(self)                           # still holds, PLAN #11 C; found by the track sweep)

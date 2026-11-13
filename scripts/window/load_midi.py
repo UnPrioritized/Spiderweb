@@ -17,7 +17,7 @@ from files.project import OUTPUT_DIR
 from files.system import free_memory
 from notes import loaded as L
 from window import look
-from window.widgets import ShortLabel, remember_place
+from window.widgets import ShortLabel, centre_over, remember_place
 
 POLL_MS = 50
 WIDTH = 490  # px: the pages' width (their wrapped hint lines are 440-460 + indent)
@@ -82,11 +82,7 @@ def ask_choice(parent, title, text, buttons, icon="question", focus=None, skip=N
     win.bind("<Return>", lambda e: e.widget.invoke() if isinstance(e.widget, ttk.Button) else close(buttons[0][0]))
     win.bind("<Escape>", lambda e: close(buttons[-1][0]))
     win.protocol("WM_DELETE_WINDOW", lambda: close(buttons[-1][0]))
-    win.update_idletasks()
-    top = parent.winfo_toplevel()
-    x = top.winfo_rootx() + (top.winfo_width() - win.winfo_reqwidth()) // 2
-    y = top.winfo_rooty() + (top.winfo_height() - win.winfo_reqheight()) // 3
-    win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+    centre_over(win, parent.winfo_toplevel())
     remember_place(win, "load_ask")
     win.deiconify()
     win.grab_set()
@@ -217,10 +213,7 @@ class LoadWindow(tk.Toplevel):
         if self.winfo_ismapped():
             return
         app = self.app
-        self.update_idletasks()
-        x = app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2
-        y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        centre_over(self, app)
         remember_place(self, "load_midi")
         self.deiconify()
         self.grab_set()

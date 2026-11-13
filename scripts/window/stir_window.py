@@ -25,8 +25,8 @@ from window.drawer import library_lists, shape_path
 from window.edit_line import EditLine
 from window.shares_window import AngleKnob, HeldKnobs
 from window.tool_window import Knob, ThinBar
-from window.widgets import (Scrub, ShortLabel, Tooltip, bad, good, grid_shown, name_index, name_list, remember_place,
-                            set_names, show_mixed, unhighlight)
+from window.widgets import (Scrub, ShortLabel, Tooltip, bad, centre_over, good, grid_shown, name_index, name_list,
+                            open_or_lift, remember_place, set_names, show_mixed, unhighlight)
 
 TWIST_KNOB = 5.0  # turns at the Twist knob's ends (the box goes up to MOST_TIGHT)
 BULGE_KNOB = 200.0  # % at the Bulge knob's ends (the box goes up to MOST_BULGE, user 11-07)
@@ -378,10 +378,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.fix_columns()
         self.sync()
-        self.update_idletasks()
-        x = app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2
-        y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        centre_over(self, app)
         remember_place(self, "stir")
         app.centre_first = "stir"  # (its dots win over Clumps' on one spot: roll_centre.centre_boxes)
         self.bind("<FocusIn>", lambda e: setattr(app, "centre_first", "stir"), add="+")
@@ -1430,11 +1427,5 @@ class StirWindow(HeldKnobs, tk.Toplevel):
 
 
 def open_stir(app):
-    w = app.stir_window
-    if w:
-        w.sync()
-        w.lift()
-        w.focus_set()
-    else:
-        StirWindow(app)
+    if open_or_lift(app, "stir_window", lambda: StirWindow(app)):
         app.tips.show("stir", wait=True)  # (the first time: what it does, Help → Stir)

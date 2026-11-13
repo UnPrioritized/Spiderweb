@@ -8,7 +8,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from window import look
-from window.widgets import ShortLabel, remember_place
+from window.widgets import ShortLabel, centre_over, remember_place
 
 POLL_MS = 100
 WIDTH = 490  # px, like the Load MIDI window
@@ -54,10 +54,7 @@ class ExportWindow(tk.Toplevel):
         self.bind("<Escape>", lambda e: self.cancel())
         self.step, self.since = None, time.perf_counter()  # (the step shown, and when it began: its speed)
         self.refresh()
-        self.update_idletasks()
-        x = app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2
-        y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        centre_over(self, app)
         remember_place(self, "export_midi")
         self.deiconify()
 

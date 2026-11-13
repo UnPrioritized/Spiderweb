@@ -6,8 +6,8 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc
 from notes.custom import CYCLE_ALL, CYCLE_MAX, CYCLES, row_restart_ok
-from window.widgets import (Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged, unit_word,
-                            unit_text)
+from window.widgets import (Scrub, Tooltip, bad, good, leave_box, pack_shown, same_or_blank, show_mixed, unchanged,
+                            unit_word, unit_text)
 
 CYCLE_CHOICES = [(None, tr("colours.off"))] + [(v, tr("colours." + v)) for v in CYCLES]
 # "Each key row" (cycle["rows"]): off, counted from each row's first note, back from its last
@@ -174,12 +174,7 @@ class ColoursPanel:
             else:
                 for w in (self.cycle_n_label, self.cycle_n_entry):
                     w.pack_forget()
-        row = bool(cy) and not mixed
-        if row != bool(self.cycle_every_row.winfo_manager()):
-            if row:
-                self.cycle_every_row.pack(anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0))
-            else:
-                self.cycle_every_row.pack_forget()
+        pack_shown(self.cycle_every_row, bool(cy) and not mixed, anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0))
         self.sync_recolour()  # (the Recolour row under it: panel_recolour.py)
 
     def show_cycle_unit(self):

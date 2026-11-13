@@ -49,7 +49,7 @@ from window.notes_wait import stale_ok
 from window.canvas_keep import KeepsItems
 from window.conductor_marks import ROW, ConductorMarks
 from window.melody_window import open_melody
-from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, ShortLabel, Tooltip, unit_word
+from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, ShortLabel, Tooltip, centre_over, unit_word
 
 BPM_SNAPS = (0, 0.1, 1, 5, 10)  # the BPM snap dropdown's steps (0 = off)
 NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000,
@@ -106,12 +106,8 @@ def ask_domino(parent, n, notes, marks=False):
     win.bind("<Return>", lambda e: e.widget.invoke() if isinstance(e.widget, ttk.Button) else close("replace"))
     win.bind("<Escape>", lambda e: close(None))
     win.protocol("WM_DELETE_WINDOW", lambda: close(None))
-    win.update_idletasks()
-    top = parent.winfo_toplevel()
-    x = top.winfo_rootx() + (top.winfo_width() - win.winfo_reqwidth()) // 2
-    y = top.winfo_rooty() + (top.winfo_height() - win.winfo_reqheight()) // 3
-    win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
     from window.widgets import remember_place
+    centre_over(win, parent.winfo_toplevel())
     remember_place(win, "domino_tempo")
     win.deiconify()
     win.grab_set()

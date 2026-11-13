@@ -14,6 +14,7 @@ from tkinter import ttk
 
 from files import system
 from files.lang import tr
+from window.widgets import centre_over
 
 SHOW_AFTER_S = 0.5
 QUICK_S = 0.05
@@ -107,11 +108,7 @@ class CopyPopup(tk.Toplevel):
         ttk.Label(box, text=tr("app.copying_clip")).pack(anchor="w")
         self.bar = ttk.Progressbar(box, mode="indeterminate", length=int(240 * s))
         self.bar.pack(fill="x", pady=(int(8 * s), 0))
-        self.update_idletasks()
-        roll = getattr(app, "roll", None) or app
-        x = roll.winfo_rootx() + (roll.winfo_width() - self.winfo_reqwidth()) // 2
-        y = roll.winfo_rooty() + (roll.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(0, x)}+{max(0, y)}")
+        centre_over(self, getattr(app, "roll", None) or app)
         self.deiconify()
         if system.WINDOWS:  # (clicked: still never takes the keyboard)
             from window.domino_overlay import no_keyboard

@@ -8,6 +8,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.own_tracks import NAME_MOST, PORT_MOST, clean_name, port_letter
 from window import look
+from window.widgets import centre_over
 
 
 class _Box(tk.Toplevel):
@@ -42,11 +43,7 @@ class _Box(tk.Toplevel):
             self.destroy()
 
     def run(self):
-        self.update_idletasks()
-        top = self.parent.winfo_toplevel()
-        x = top.winfo_rootx() + (top.winfo_width() - self.winfo_reqwidth()) // 2
-        y = top.winfo_rooty() + (top.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        centre_over(self, self.parent.winfo_toplevel())
         self.deiconify()
         self.grab_set()
         self.wait_window()

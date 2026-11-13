@@ -370,6 +370,37 @@ def grid_shown(w, on):
         w.grid_remove()
 
 
+def pack_shown(w, on, **opts):
+    """Show (packed with opts) / hide a packed widget, only when that changes (grid_shown's rule: re-packing every
+    sync flashed the panel)."""
+    if on and not w.winfo_manager():
+        w.pack(**opts)
+    elif not on and w.winfo_manager():
+        w.pack_forget()
+
+
+def centre_over(win, parent):
+    """Places win across the middle of parent (a third of the way down), never past the screen's top left; call it
+    before remember_place (a remembered place wins)."""
+    win.update_idletasks()
+    x = parent.winfo_rootx() + (parent.winfo_width() - win.winfo_reqwidth()) // 2
+    y = parent.winfo_rooty() + (parent.winfo_height() - win.winfo_reqheight()) // 3
+    win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+
+
+def open_or_lift(app, attr, make):
+    """A tool window kept in app.<attr>: open = brought up to date + to the front (False); else make() opens it
+    (True: the caller's first-open steps follow)."""
+    w = getattr(app, attr, None)
+    if w:
+        w.sync()
+        w.lift()
+        w.focus_set()
+        return False
+    make()
+    return True
+
+
 def wrap_to_room(label):
     """A label packed with fill="x" (expand=True when packed side by side, and packed after its neighbours, so
     they get their room first): its text wraps onto more lines when it's given less room than one line needs,

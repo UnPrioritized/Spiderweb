@@ -18,7 +18,8 @@ from notes.recolour import KEEP, MOST_PUSH, MOST_TIGHT, PATTERNS, SPLIT, TIGHT, 
 from window import look
 from window.edit_line import EditLine
 from window.tool_window import Knob
-from window.widgets import Scrub, Tooltip, bad, good, remember_place, show_mixed, wheel_ready
+from window.widgets import Scrub, Tooltip, bad, centre_over, good, open_or_lift, remember_place, show_mixed, \
+    wheel_ready
 
 COLUMNS = 4
 
@@ -361,10 +362,7 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.sync()
-        self.update_idletasks()
-        x = app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2
-        y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        centre_over(self, app)
         remember_place(self, "shares")
         app.centre_first = "clumps"  # (its dots win over the Stir's on one spot: roll_centre.centre_boxes)
         self.bind("<FocusIn>", lambda e: setattr(app, "centre_first", "clumps"), add="+")
@@ -749,10 +747,4 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
 
 
 def open_shares(app):
-    w = app.shares_window
-    if w:
-        w.sync()
-        w.lift()
-        w.focus_set()
-    else:
-        SharesWindow(app)
+    open_or_lift(app, "shares_window", lambda: SharesWindow(app))

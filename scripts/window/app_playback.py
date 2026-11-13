@@ -22,7 +22,7 @@ from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
 from notes.hzbass import RING_MOST, has_cc
 from notes.tempo_file import heard_tempo
 from window.hz_preview import VOICES, font_list
-from window.widgets import bad, good, read_number
+from window.widgets import bad, centre_over, good, read_number
 
 RING_KEYS = (24, 36, 48, 60, 72, 84)  # keys whose ring is measured for Auto's CC run-on (the longest counts)
 SLOW_START_S = 15.0  # Kestrel still starting after this: "Use Built-in BASSMIDI" / "Keep waiting" (user 2026-10-28:
@@ -1083,10 +1083,7 @@ class Playback:
             job["waiting"] = True
             slow.pack_forget()
         ttk.Button(buttons, text=tr("ks.keep_waiting"), command=keep_waiting).pack(side="left")
-        win.update_idletasks()  # (over the middle of the main window)
-        x = self.winfo_rootx() + (self.winfo_width() - win.winfo_reqwidth()) // 2
-        y = self.winfo_rooty() + (self.winfo_height() - win.winfo_reqheight()) // 3
-        win.geometry(f"+{max(0, x)}+{max(0, y)}")
+        centre_over(win, self)
 
         def show():  # (only when it takes a while: on kept soundfonts a start is ~20 ms, no flash)
             if not job["gone"] and self._kestrel_job is job and win.winfo_exists():

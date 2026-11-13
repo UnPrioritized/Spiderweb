@@ -17,8 +17,8 @@ from notes import liquify as lq
 from notes.recolour import KEEP, STIR_EDGES, clean_recolour
 from window import look
 from window.edit_line import EditLine
-from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, remember_place, same_or_blank, \
-    unchanged
+from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, open_or_lift, remember_place, \
+    same_or_blank, unchanged
 
 # (Pinch + Bulge and Freeze + Thaw = ONE tool each here, Alt held = the other: user 11-07 "too much options"; the
 # dab maths keep all of them)
@@ -338,12 +338,8 @@ class LiquifyWindow(tk.Toplevel):
 
 
 def open_liquify(app):
-    w = getattr(app, "liquify_window", None)
-    if w:
-        w.sync()
-        w.lift()
-        w.focus_set()
-    else:
+    def make():
         app.roll.lq_end = None  # (a straight stroke starts from a stroke made since the window opened)
         LiquifyWindow(app)
+    if open_or_lift(app, "liquify_window", make):
         app.tips.show("liquify", wait=True)  # (the first time: what it does, Help → Liquify)

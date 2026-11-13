@@ -8,7 +8,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from window import look
-from window.widgets import remember_place
+from window.widgets import centre_over, open_or_lift, remember_place
 
 
 class MergeWindow(tk.Toplevel):
@@ -45,10 +45,7 @@ class MergeWindow(tk.Toplevel):
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.sync()
-        self.update_idletasks()
-        x = app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2
-        y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        centre_over(self, app)
         remember_place(self, "merge")
         self.deiconify()
         self.go.focus_set()
@@ -101,10 +98,4 @@ class MergeWindow(tk.Toplevel):
 
 
 def open_merge(app):
-    w = app.merge_window
-    if w:
-        w.sync()
-        w.lift()
-        w.focus_set()
-    else:
-        MergeWindow(app)
+    open_or_lift(app, "merge_window", lambda: MergeWindow(app))

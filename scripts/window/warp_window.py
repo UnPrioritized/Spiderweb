@@ -23,8 +23,8 @@ from notes import warp_presets as pr
 from notes.recolour import KEEP, STIR_EDGES, clean_recolour, new_seed
 from window import look
 from window.edit_line import EditLine
-from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, remember_place, same_or_blank, \
-    unchanged
+from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, open_or_lift, remember_place, \
+    same_or_blank, unchanged
 
 BENDS = (True, False)  # (Smooth, Straight cells: the Bend dropdown by place)
 CELLS = ("cols", "rows")  # (the Custom boxes: cells across, cells up)
@@ -659,11 +659,5 @@ class WarpWindow(tk.Toplevel):
 
 
 def open_warp(app):
-    w = getattr(app, "warp_window", None)
-    if w:
-        w.sync()
-        w.lift()
-        w.focus_set()
-    else:
-        WarpWindow(app)
+    if open_or_lift(app, "warp_window", lambda: WarpWindow(app)):
         app.tips.show("warp", wait=True)  # (the first time: what it does, Help → Warp)

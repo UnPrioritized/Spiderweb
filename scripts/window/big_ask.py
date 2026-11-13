@@ -113,12 +113,8 @@ def dialog(parent, title, text, strong, tick=None, danger=None, yes=None, no=Non
     win.bind("<Return>", lambda e: close(yes is (e.widget if e.widget in (yes, no) else first)))  # (the highlighted)
     win.bind("<Escape>", lambda e: close(False))
     win.protocol("WM_DELETE_WINDOW", lambda: close(False))
-    win.update_idletasks()
-    top = parent.winfo_toplevel()
-    x = top.winfo_rootx() + (top.winfo_width() - win.winfo_reqwidth()) // 2
-    y = top.winfo_rooty() + (top.winfo_height() - win.winfo_reqheight()) // 3
-    win.geometry(f"+{max(x, 0)}+{max(y, 0)}")
-    from window.widgets import remember_place
+    from window.widgets import centre_over, remember_place
+    centre_over(win, parent.winfo_toplevel())
     remember_place(win, "big_ask")
     win.deiconify()
     win.grab_set()

@@ -14,7 +14,7 @@ from notes.engine import pasted_notes
 from notes.steps import COLOURS, FX, cut_needed, hidden_after, upto_view
 from notes.recolour import BY, KEEP, MODES, SET, can_recolour, clean_recolour, colour_sets, edited_step, enough, \
     is_recoloured, new_seed, order_of, ordered, palettes, step_place, turns_of, wanted, without_recolour
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, show_mixed, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, same_or_blank, show_mixed, unchanged
 
 RECOLOUR_CHOICES = [(None, tr("recolour.off"))] + [(m, tr("recolour." + m)) for m in MODES]
 BY_CHOICES = [(b, tr("recolour.by_" + b)) for b in BY]
@@ -395,25 +395,13 @@ class RecolourPanel:
         self.recolour_warp.state(["!disabled" if tgts else "disabled"])
         self.recolour_liquify.state(["!disabled" if tgts else "disabled"])
         shown = bool(live)
-        if shown != bool(self.recolour_row.winfo_manager()):
-            if shown:
-                self.recolour_row.pack(anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0))
-            else:
-                self.recolour_row.pack_forget()
-        if shown != bool(self.recolour_again.winfo_manager()):
-            if shown:
-                self.recolour_again.pack(side="left", after=self.recolour_mode)
-            else:
-                self.recolour_again.pack_forget()
+        pack_shown(self.recolour_row, shown, anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0))
+        pack_shown(self.recolour_again, shown, side="left", after=self.recolour_mode)
         self.recolour_box.after_idle(self.fit_stir)  # (New shuffle / "(on)" changed the room the row needs)
         if late:
             return
         sets = shown and any(len(o) > 1 for o in owns)  # (more than one colour set: Mix across sets)
-        if sets != bool(self.recolour_mix_tick.winfo_manager()):
-            if sets:
-                self.recolour_mix_tick.pack(anchor="w", pady=(2, 0))
-            else:
-                self.recolour_mix_tick.pack_forget()
+        pack_shown(self.recolour_mix_tick, sets, anchor="w", pady=(2, 0))
         self.recolour_mix_tip.text = tr("recolour.mix_tip", most=SET)
         for w in (getattr(self, "shares_window", None), getattr(self, "stir_window", None),
                   getattr(self, "warp_window", None), getattr(self, "liquify_window", None),

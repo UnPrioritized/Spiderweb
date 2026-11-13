@@ -10,7 +10,7 @@ from tkinter import messagebox, ttk
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from window import look
-from window.widgets import Scrub, Tooltip, remember_place, unit_text
+from window.widgets import Scrub, Tooltip, centre_over, remember_place, unit_text
 
 MOST_GAP = 1_000_000  # (ticks)
 COUNT_WAIT_MS = 150  # (the count waits for the typing / stepping to rest)
@@ -61,10 +61,7 @@ class LinesWindow(tk.Toplevel):
         self.bind("<Control-Key>", lambda e: "break")  # (the piano roll's shortcuts wait until it's closed)
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.show_count()
-        self.update_idletasks()
-        x = app.winfo_rootx() + (app.winfo_width() - self.winfo_reqwidth()) // 2
-        y = app.winfo_rooty() + (app.winfo_height() - self.winfo_reqheight()) // 3
-        self.geometry(f"+{max(x, 0)}+{max(y, 0)}")
+        centre_over(self, app)
         remember_place(self, "lines")
         self.deiconify()
         self.gap_box.focus_set()

@@ -9,7 +9,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import fmt
 from notes.polygon import MAX_POINTS, STYLES, update_polygon
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, read_number, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, read_number, unchanged
 
 STYLE_NAMES = [tr("panel_polygon.style_" + s) for s in STYLES]
 # name: (lowest, highest, steps (step, Shift step, Ctrl step), whole numbers only)
@@ -81,16 +81,8 @@ class PolygonPanel:
         self.polygon_entries["skip"].config(state="normal" if d["style"] == "cross" else "disabled")
         want = {"star": "inner", "cross": "skip"}.get(d["style"])  # (only the box the kind uses shows, user)
         for name in ("inner", "skip"):
-            cell = self.polygon_cells[name]
-            if name == want and not cell.winfo_manager():
-                cell.pack(side="left", padx=(0, 10))
-            elif name != want and cell.winfo_manager():
-                cell.pack_forget()
-        if bool(want) != bool(self.polygon_row2.winfo_manager()):
-            if want:
-                self.polygon_row2.pack(fill="x", pady=(2, 0))
-            else:
-                self.polygon_row2.pack_forget()
+            pack_shown(self.polygon_cells[name], name == want, side="left", padx=(0, 10))
+        pack_shown(self.polygon_row2, want, fill="x", pady=(2, 0))
 
     def set_polygon(self, key, value, edit_key=None):
         """A polygon setting changed: on the selected polygons (their strokes made again) and for new ones.
