@@ -128,7 +128,8 @@ forward buttons) go back and forth.
 - Projects save as .spwb files (packed; older .json projects still open). Drop a project or a MIDI onto the window
   or onto Spiderweb's icon to open it. Settings → General can make .spwb files open with a double-click (Windows).
 - Everything you do is saved on its own (`user/autosave.json`). Each time Spiderweb starts, the previous session is
-  also kept as `autosave-backup.json`: open it with File → Open… if something went wrong.
+  also kept as `autosave-backup.json`: open it with File → Open… if something went wrong. The first time a new
+  version starts, it copies the older version's settings, palettes, shapes and presets into `user/backups/` first.
 - If Spiderweb runs into an error, the details go to `spiderweb-error.log` next to it. If it closes by itself,
   `spiderweb-crash.log` there says where (it's written the next time Spiderweb starts). Please include these files
   when you [report a problem](https://github.com/UnPrioritized/Spiderweb/issues).

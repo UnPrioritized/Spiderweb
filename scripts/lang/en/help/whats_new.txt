@@ -29,6 +29,8 @@ What's new:
 • Colour effects work in the order you add them: Shuffle or Split, each Stir tab, Warp, Liquify and Reverse track order each work on the colours the one before left, so a Stir and then Split: Scattered puts specks on a clean swirl. Note tool pages count too: a Stir above Copy along a path is copied like a stamp, below it one swirl goes across every copy. Properties… shows the order and changes it. While you change any step that isn't the last (a colour effect, a note tool page, Sustain…), the later ones are switched off so it stays quick; its window names them and Preview all shows the full result. Reverse track order now works on drawn shapes too. See Help → Recolour.
 • Changed: Reverse track order works together with Colours Shuffle / Split. In 1.7.2 it was greyed out there and did nothing, so a shape saved with both now shows its colours reversed: × on the Reverse line in Properties… takes it away.
 
+• At the edges (in Stir, Warp and Liquify) got Repeat the colours, where a colour cycle pulled in from past the edge carries on with no seam, and Bounce back, where the colours mirror off the edge (with or without the edge colour shown twice). See Help → At the edges.
+
 • Bulge in the Stir window (beside Turn and Twist): swells the colours out from the middle like a lens, or pinches them in with a minus number, for the bulging "ball" look of op art. No colour is added or lost: they get packed tighter towards the edge. The knob goes from -200 % to +200 %; type up to ±1000 % in the box. Without an Area it bulges the whole shape around the Centre point; with one it stays inside the area, in any area shape (untick "Bulge" under "The area limits" to bulge the whole shape again). See Help → Stir.
 
 • More bends in the Stir window (a new part that folds open under the knobs): Straight to round turns straight stripes into rays, or into rings with Turn at 90° (a Square area gives a square tunnel); Ripple makes them wavy, or rings like a water drop; Kaleidoscope mirrors one slice round the Centre point; Twist along a line wrings them like a ribbon. Each works on the whole shape or only inside the Area. See Help → Stir.
@@ -64,11 +66,19 @@ What's new:
 
 • Smaller and quicker: Spiderweb.exe is about 40 % smaller (about 70 MB instead of 116 MB), and its first start no longer waits while the speed-ups get ready. Opening, undo and redo, changing the gate and Stir on huge projects are up to 15 % faster. Running from the scripts gets the full speed with nothing extra to install.
 
+• Much less memory on big projects: 2 million notes with 7 edits now use about 650 MB instead of about 2.5 GB. Notes kept for undo stay under 1 GB (or an eighth of your PC's memory); undoing past that makes the notes again, which can take a moment on huge shapes.
+
+• Fixed: Slice, Lasso, Split, Join and the velocity line could give wrong notes on pieces of shapes with Sustain, glue, colour effects or Gate aware flip.
+
+• The first time a new version starts, it copies the older version's settings, palettes, saved shapes and presets into a backups folder inside the user folder first, and a small window tells you (Open folder shows it). See Help → About.
+
 • 31-EDO tuning (Settings → Sound): keep 31-EDO pinned to C as before, or pick "A =" and type the Hz (440 is the usual standard) to tune it to A instead. Only the sound changes. See Help → 31-EDO.
 
 • Changed: Settings… moved from the Help menu to the File menu (just above Exit), and Ctrl+, opens it.
 
 • Draw on Domino: Take works on several tracks at once (select them in Domino's track list), one colour per track, and Send puts every note back into the track it came from, controllers (CC) too. With Domino's onion skin on, Take also takes the notes of the tracks it shows inside your select boxes (Ctrl+drag adds a box). See Help → Draw on Domino.
+
+• Draw on Domino also works with the 32-bit Domino 1.45 test builds.
 
 • Fixed: Draw on Domino kept drawing its shapes over Domino's track list (Tab); it now waits until the piano roll is back. It's also gone on Linux, macOS and Windows-compatible layers, where it never worked.
 

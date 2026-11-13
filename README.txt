@@ -159,7 +159,9 @@ Autosave and problems
 - Everything you do is saved on its own (user/autosave.json). Each time
   Spiderweb starts, the previous session is also kept as
   autosave-backup.json: open it with File -> Open... if something went
-  wrong.
+  wrong. The first time a new version starts, it copies the older
+  version's settings, palettes, shapes and presets into user/backups/
+  first.
 - If Spiderweb runs into an error, the details go to spiderweb-error.log
   next to it. If it closes by itself, spiderweb-crash.log there says where
   (it's written the next time Spiderweb starts). Please include these files
