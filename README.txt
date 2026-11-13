@@ -94,7 +94,9 @@ Getting started
 Pick a tool at the top and draw on the piano roll: every key a line crosses
 gets notes. The first time you use a tool, a short tip explains it.
 Help (F1) has every tip in one searchable list, including all the keyboard
-and mouse shortcuts.
+and mouse shortcuts. Its pages link to each other, many with pictures and
+short clips; the arrows at the top right (or the mouse's back / forward
+buttons) go back and forth.
 
   Draw             drag a shape out, or click where it starts and where it
                    ends

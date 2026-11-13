@@ -77,7 +77,8 @@ Just run **Spiderweb.exe**. Nothing to install.
 
 Pick a tool at the top and draw on the piano roll: every key a line crosses gets notes. The first time you use a
 tool, a short tip explains it. **Help (F1)** has every tip in one searchable list, including all the keyboard and
-mouse shortcuts.
+mouse shortcuts. Its pages link to each other, many with pictures and short clips; ◀ ▶ (or the mouse's back /
+forward buttons) go back and forth.
 
 | Key / mouse | What it does |
 |---|---|

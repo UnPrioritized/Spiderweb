@@ -72,6 +72,8 @@ What's new:
 
 • Fixed: Draw on Domino kept drawing its shapes over Domino's track list (Tab); it now waits until the piano roll is back. It's also gone on Linux, macOS and Windows-compatible layers, where it never worked.
 
+• Help (F1): pages link to the pages they mention, and a link about one part opens the page right there, with that part flashing for a moment. ◀ ▶ at the top right go back and forward (also Alt+Left / Alt+Right and the mouse's back / forward buttons). Searching puts the pages whose title has your words first and marks them. More pages have pictures and short clips: Join and split, Gate trim, Straighten, Liquify, Sustain, Glue, Fill gaps, Gate aware flip, Gate sensitive merge, Claw machine and Strum.
+
 ## Version 1.7.2
 ^^ 2026/11/06 20:34:48 UTC+07:00 · 5ec9217
 
