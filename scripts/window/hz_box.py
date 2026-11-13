@@ -39,14 +39,15 @@ class HzBox:
 
     def box8_area(self, notes=None):
         """(t0, t1, lo, hi): the selected notes' span in beats and pitch as their lines are drawn (bends + wobbles:
-        the plugin's box runs through the lowest / highest pitch heard)."""
+        the plugin's box runs through the lowest / highest pitch heard), each WHOLE note, in view or not (hunt
+        2026-11-13: the box changed size while scrolling past a wobble)."""
         notes = [self.tones[i] for i in self.sel] if notes is None else notes
         t0 = min(n["t"] for n in notes)
         t1 = max(n["t"] + n["len"] for n in notes)
         lo, hi = float("inf"), float("-inf")
         for n in notes:
             if n.get("bend") or n.get("wobble"):
-                keys = self.bend_line(n, NOTE_BEND_MOST)[1]
+                keys = self.bend_line(n, NOTE_BEND_MOST, whole=True)[1]
                 lo, hi = min(lo, float(keys.min())), max(hi, float(keys.max()))
             else:
                 lo, hi = min(lo, pitch(n)), max(hi, pitch(n))

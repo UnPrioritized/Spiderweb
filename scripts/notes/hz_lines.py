@@ -7,7 +7,7 @@ import math
 import numpy as np
 
 from notes.envelope import env_values
-from notes.hz_settings import FAST, LOOP, LOOP_SHAPES, WOBBLE_RATE_MOST, WOBBLE_SEED_STEP
+from notes.hz_settings import FAST, LOOP, LOOP_SHAPES, SHARE_MOST, WOBBLE_RATE_MOST, WOBBLE_SEED_STEP, keep_forward
 
 
 def bent_part(u, bend):
@@ -98,7 +98,7 @@ BEZ_ROUNDS = 40  # bez_at: halvings to find the spot of a Bézier piece at a tim
 
 def bez_at(x, x0, c1x, c2x, x1, v0, c1v, c2v, v1):
     """A Bézier piece's value at time x (arrays, all the same shape): the curve is solved BY TIME (its time only
-    grows along it: handles stay inside their piece), then read there."""
+    grows along it: hz_settings.keep_forward), then read there."""
     x = np.asarray(x, float)
     # (power form: B(t) = a t^3 + b t^2 + c t + p0)
     ax, bx, cx = x1 - x0 + 3.0 * (c1x - c2x), 3.0 * (x0 - 2.0 * c1x + c2x), 3.0 * (c1x - x0)
@@ -143,9 +143,12 @@ def split_bez(a, b, u):
     m = lerp(p012, p123)
     ha, hb = handles(a) or [0.0] * 4, handles(b) or [0.0] * 4
     w0, w1 = max(u - x0, 1e-15), max(x1 - u, 1e-15)
-    a_h = [ha[0], ha[1], min(1.0, max(0.0, (p01[0] - x0) / w0)), p01[1] - a[1]]
-    m_h = [min(1.0, max(0.0, (u - p012[0]) / w0)), p012[1] - m[1], min(1.0, max(0.0, (p123[0] - u) / w1)), p123[1] - m[1]]
-    b_h = [min(1.0, max(0.0, (x1 - p23[0]) / w1)), p23[1] - b[1], hb[2], hb[3]]
+
+    def share(v):  # (past 1 allowed: a long handle reaches past its new, shorter piece; the halves of a forward-only
+        return min(SHARE_MOST, max(0.0, v))  # curve go forward too, so the split stays exact: hunt 2026-11-13, A)
+    a_h = [ha[0], ha[1], share((p01[0] - x0) / w0), p01[1] - a[1]]
+    m_h = [share((u - p012[0]) / w0), p012[1] - m[1], share((p123[0] - u) / w1), p123[1] - m[1]]
+    b_h = [share((x1 - p23[0]) / w1), p23[1] - b[1], hb[2], hb[3]]
     return a_h, [u, m[1]], m_h, b_h
 
 
@@ -653,8 +656,8 @@ def bend_part(n, t, span, bits=8):
         nodes = [(u0, pts[first][1] if on else at(u0), piece_curved(pts, first) if 0 <= first < len(pts) - 1 else
                   False, on, pts[first][2:] if on else ())]
         inside = [j for j, x in enumerate(xs) if u0 + ON_POINT < x < u1 - ON_POINT]
-        for j in inside:
-            nodes.append((xs[j], pts[j][1], piece_curved(pts, j), True, pts[j][2:] if j < len(pts) - 1 else ()))
+        for j in inside:  # (the last point too: its handle back stays for a note made longer, hunt 2026-11-13; its
+            nodes.append((xs[j], pts[j][1], piece_curved(pts, j), True, pts[j][2:]))  # curve number does nothing)
         # (ending ON a point: its pitch; on a jump the first one's, the pitch arriving there, not the one after; its
         # handle back kept for a piece arriving whole)
         last = next((p for p in pts if abs(p[0] - u1) < ON_POINT), None)
@@ -662,8 +665,8 @@ def bend_part(n, t, span, bits=8):
                       last[2:] if last is not None else ()))
         out, whole = [], []  # (whole[k]: the piece out[k] -> out[k + 1] is one of the line's own, uncut)
         for (a, va, curve, on_a, tail), (b, _, _, on_b, _) in zip(nodes, nodes[1:]):
-            if curve and not (on_a and on_b) and b > a:  # (a curve cut through: sampled)
-                out.append([a, va])
+            if curve and not (on_a and on_b) and b > a:  # (a curve cut through: sampled; the point it starts on keeps
+                out.append(with_handles([a, va], handles([0, 0, *tail])))  # its handle back: hunt 2026-11-13)
                 out += [[a + (b - a) * i / bits, at(a + (b - a) * i / bits)] for i in range(1, bits)]
                 whole += [False] * bits
             else:
@@ -674,7 +677,7 @@ def bend_part(n, t, span, bits=8):
         out = [side_handles(p, k > 0 and whole[k - 1], k < len(whole) and whole[k]) if handles(p) else p
                for k, p in enumerate(out)]
         out = [with_handles(p, None) if len(p) > 2 and not handles(p) and not bend_of(p) else p for p in out]
-        out = [[(p[0] - u0) / (u1 - u0), *p[1:]] for p in out]
+        out = keep_forward([[(p[0] - u0) / (u1 - u0), *p[1:]] for p in out])
     return out if any(abs(p[1]) > 1e-9 or (h := handles(p)) and (abs(h[1]) > 1e-9 or abs(h[3]) > 1e-9)
                       for p in out) else None
 

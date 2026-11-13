@@ -6,13 +6,16 @@ The points are ranked once (rank): the line's ends and the points that must stay
 then always the point furthest from the line through the points kept so far (Ramer-Douglas-Peucker in time order),
 so flat holds and turning points survive and few points = only the biggest moves. simplified() takes the first
 `count` of that order; a piece that now spans dropped points gets the curve that follows the old line best (a glide
-drawn by many points becomes one curve), a piece between two points that were already neighbours keeps its own."""
+drawn by many points becomes one curve), a piece between two points that were already neighbours keeps its own. A
+kept point's Bézier handles stay (over a wider piece: the same reach in time), and with handles the ranking reads the
+real curve (hunt 2026-11-13)."""
 
 import heapq
 
 import numpy as np
 
 from notes.hz_lines import S_CURVE, bent_part, handles, line_arrays, line_at, side_handles, with_handles
+from notes.hz_settings import keep_forward
 
 ON_SPOT = 1e-9  # (two points this close in time: a jump)
 CURVES = np.linspace(-0.9, 0.9, 19)  # the curves tried on a piece that spans dropped points (a single, then an S)
@@ -39,19 +42,47 @@ def _worst(xs, vs, a, b):
     return float(off[k]), int(js[k])
 
 
+class _Curve:
+    """A line with Bézier handles read finely once (hunt 2026-11-13: ranking by the points' own heights dropped a big
+    bump made by handles first): spots = every point + CURVE_SPOTS inside each piece, in time order."""
+
+    def __init__(self, pts, xs):
+        inner = [xs[j] + (xs[j + 1] - xs[j]) * _U for j in range(len(xs) - 1) if xs[j + 1] - xs[j] > ON_SPOT]
+        self.x = np.sort(np.concatenate([xs] + inner))
+        self.v = line_at(pts, self.x, arrays=line_arrays(pts))
+
+    def worst(self, xs, vs, a, b):
+        """_worst, but how far the real curve strays from a -> b: (how far, the point inside nearest that spot)."""
+        off, j = _worst(xs, vs, a, b)
+        if j is None or xs[b] - xs[a] <= ON_SPOT:
+            return off, j
+        lo, hi = np.searchsorted(self.x, xs[a], "right"), np.searchsorted(self.x, xs[b], "left")
+        if hi <= lo:
+            return off, j
+        x, v = self.x[lo:hi], self.v[lo:hi]
+        dev = np.abs(v - (vs[a] + (vs[b] - vs[a]) * (x - xs[a]) / (xs[b] - xs[a])))
+        k = int(np.argmax(dev))
+        if dev[k] <= off + 1e-9:
+            return off, j
+        inner = np.arange(a + 1, b)
+        return float(dev[k]), int(inner[int(np.argmin(np.abs(xs[inner] - x[k])))])
+
+
 def rank(pts, must=()):
     """The points' numbers in the order simplified() keeps them: the first and last, those in `must` (point
-    numbers), then the furthest from the line kept so far, one at a time (ties: the earlier point)."""
+    numbers), then the furthest from the line kept so far, one at a time (ties: the earlier point). A line with
+    Bézier handles: how far its REAL curve strays counts (_Curve: a bump made by handles is a big move too)."""
     n = len(pts)
     if n <= 2:
         return list(range(n))
     xs = np.array([p[0] for p in pts], float)
     vs = np.array([p[1] for p in pts], float)
+    worst = _Curve(pts, xs).worst if any(handles(p) for p in pts) else _worst
     first = sorted({0, n - 1} | {j for j in must if 0 <= j < n})
     order = list(first)
     heap = []
     for a, b in zip(first, first[1:]):
-        off, j = _worst(xs, vs, a, b)
+        off, j = worst(xs, vs, a, b)
         if j is not None:
             heap.append((-off, j, a, b))
     heapq.heapify(heap)
@@ -59,7 +90,7 @@ def rank(pts, must=()):
         _, j, a, b = heapq.heappop(heap)
         order.append(j)
         for lo, hi in ((a, j), (j, b)):
-            off, k = _worst(xs, vs, lo, hi)
+            off, k = worst(xs, vs, lo, hi)
             if k is not None:
                 heapq.heappush(heap, (-off, k, lo, hi))
     return order
@@ -93,11 +124,11 @@ def simplified(pts, count, order=None, semitones=False, curves=True):
     keep = sorted(order[:max(2, count)])
     arrays = line_arrays(pts) if curves and len(keep) < len(pts) else None
     out = []
-    was_whole = False  # (the piece before this point is one of the line's own, kept whole)
+    prev = None  # (the kept point before this one)
     for a, b in zip(keep, keep[1:] + [None]):
         p = pts[a]
         q = [p[0], p[1]]
-        h = handles(p)  # (Bézier handles, stage H: a side kept only while its piece is kept whole)
+        h = handles(p)  # (Bézier handles, stage H)
         if b is not None:
             if b == a + 1:
                 q += [v for v in p[2:] if not isinstance(v, dict)]  # (the same piece as before)
@@ -105,15 +136,21 @@ def simplified(pts, count, order=None, semitones=False, curves=True):
                 q += fitted(pts, a, b, arrays)
         elif len(p) > 2 and p[2] == "hold":
             q += list(p[2:])
-        whole = b is not None and b == a + 1
         if h:
-            q = side_handles(with_handles(q, h), was_whole, whole)
+            # (a side over a piece that now spans dropped points keeps its reach in time, as a share of the wider
+            # piece: a bump made by a kept point's handles survives; hunt 2026-11-13)
+            h = list(h)
+            if prev is not None and prev != a - 1 and p[0] - pts[prev][0] > ON_SPOT:
+                h[0] *= (p[0] - pts[a - 1][0]) / (p[0] - pts[prev][0])
+            if b is not None and b != a + 1 and pts[b][0] - p[0] > ON_SPOT:
+                h[2] *= (pts[a + 1][0] - p[0]) / (pts[b][0] - p[0])
+            q = side_handles(with_handles(q, h), prev is not None, b is not None)
         out.append(q)
-        was_whole = whole
+        prev = a
     if semitones:
         for q in out:
             q[1] = float(round(q[1]))
-    return out
+    return keep_forward(out)
 
 
 def wobble_ends(n):

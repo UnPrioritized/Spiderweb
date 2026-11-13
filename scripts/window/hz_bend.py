@@ -24,6 +24,7 @@ from files.mathexpr import fmt
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bend_of, bends, line_at, merge_wobbles, note_bend, pitch,
                           depth_most, handles, line_curved, piece_curved, side_handles, with_handles, wobble_edges,
                           wobble_points)
+from notes.hz_settings import keep_forward
 from roll.roll_shared import SHIFT
 from window import look
 
@@ -58,19 +59,22 @@ class HzBend:
         got = note_bend(n, np.array([beat], float), self.bend_most() if most is None else most)
         return pitch(n) + (0.0 if got is None else float(got[0]))
 
-    def bend_line(self, n, most):
+    def bend_line(self, n, most, whole=False):
         """(beats, keys) along note n's bend line for drawing: evenly spread spots plus every point, a jump (two
         points at one spot) drawn straight up / down (one spot per point, each with its own value). With a wobble
         the line is drawn EXACTLY (user 2026-10-28: it's the shape asked for, the red line is how near the sound gets):
         a spot every 2 px (WOBBLE_SPOTS at most) + a spot on each side of every top / corner / jump (wobble_edges), so
         tops stay round, corners sharp, jumps upright. Only the part in view is worked out that finely (hunt
         2026-10-28: a long fast one zoomed in was rough); each note's line is remembered until it or the view changes
-        (many wobbling notes lagged)."""
+        (many wobbling notes lagged). whole = the whole note that finely, in view or not (the 8-handle box's size:
+        hunt 2026-11-13, a wobble partly out of view measured by its in-view part)."""
         pts = n.get("bend") or ()
         lo, hi, count = n["t"], n["t"] + n["len"], 49
         # (a curved piece too, user 2026-11-13: 49 spots over a long / zoomed-in note drew its curve as a few straight
         # strokes off the smooth red line; straight pieces need only their points)
-        if n.get("wobble") or line_curved(pts):
+        if whole and (n.get("wobble") or line_curved(pts)):
+            count = int(min(WOBBLE_SPOTS, max(49, n["len"] * self.sx / 2)))
+        elif n.get("wobble") or line_curved(pts):
             pad = 4 / max(self.sx, 1e-9)
             lo = max(lo, self.beat_at(self.kb_w) - pad)
             hi = min(hi, self.beat_at(self.canvas.winfo_width()) + pad)
@@ -179,15 +183,20 @@ class HzBend:
         if which:
             return "wobble", self.picked_piece()[0], which
         r = NEAR * self.s
-        for hx, hy, _, _, i, j, side in reversed(self.handle_spots()):  # (Sketch: Bézier handles stick out: first)
-            if abs(x - hx) <= r and abs(y - hy) <= r:
-                return "handle", i, j, side
+        grip = None  # (Sketch: the nearest Bézier handle end in reach; it wins unless a point is nearer still: a handle
+        for hx, hy, _, _, i, j, side in reversed(self.handle_spots()):  # lying on its own point when zoomed out hid
+            d = max(abs(x - hx), abs(y - hy))  # the point for good, hunt 2026-11-13)
+            if d <= r and (grip is None or d < grip[0]):
+                grip = (d, ("handle", i, j, side))
         slides = [max(abs(x - dx), abs(y - dy)) for dx, dy, *_ in self.dots() + self.handles()]
         for px, py, i, j in reversed(self.bend_points()):
-            if abs(x - px) <= r and abs(y - py) <= r:  # (a slide's dot nearer still wins: one just after a note's
-                if min(slides, default=r + 1) < max(abs(x - px), abs(y - py)):  # end, hunt 2026-10-28)
+            d = max(abs(x - px), abs(y - py))
+            if d <= r and (grip is None or d < grip[0]):  # (a slide's dot nearer still wins: one just after a note's
+                if min(slides, default=r + 1) < d:  # end, hunt 2026-10-28)
                     return ("slide",)
                 return "point", i, j
+        if grip:
+            return grip[1]
         for sx, sy, i, j, *_ in self.bend_squares():
             if abs(x - sx) <= r and abs(y - sy) <= r:
                 return "curve", i, j
@@ -414,6 +423,9 @@ class HzBend:
             return self.sketch_depth_double(e, hit[1], hit[2])  # its points / post / buttons: a press again)
         if hit[0] == "wobble" and hit[2][0] == "sline":  # (its speed strip's line: a speed point, held)
             return self.sketch_speed_double(e, hit[1], hit[2])
+        if self.sketching() and hit[0] in ("point", "handle") and self.curving(e.state):  # (a quick second Alt+click:
+            self.on_press(e)  # handles off like a slow one, never "point deleted"; hunt 2026-11-13)
+            return True
         if self.sketching() and hit[0] in ("note", "point", "curve"):  # (hz_sketch.py: a point added / taken away;
             return self.sketch_double(e, hit[:2] if hit[0] == "curve" else hit)  # on a square too: hunt 2026-10-28,
             # Straight is in its right-click menu)
@@ -593,19 +605,26 @@ class HzBend:
             pts[j] = with_handles(pts[j], None)
             self.bend_done({"i": i, "before": before}, tr("hz.step_handles"))
             return True
-        lo, hi = max(0, j - 1), min(len(pts) - 1, j + 1)
+        # (a side whose piece has no width is a jump: no handle into it, and the way through the point is the other
+        # side's piece alone: the hold before a jump stays flat; hunt 2026-11-13)
+        back = j > 0 and pts[j][0] - pts[j - 1][0] > 1e-12
+        on = j + 1 < len(pts) and pts[j + 1][0] - pts[j][0] > 1e-12
+        lo, hi = (j - 1 if back else j), (j + 1 if on else j)
         du = pts[hi][0] - pts[lo][0]
         slope = (pts[hi][1] - pts[lo][1]) / du if du > 1e-12 else 0.0  # (keys per part of the note)
         h = [0.0, 0.0, 0.0, 0.0]
-        if j > 0:
+        if back:
             h[0], h[1] = HANDLE_AUTO, -slope * HANDLE_AUTO * (pts[j][0] - pts[j - 1][0])
-        if j + 1 < len(pts):
+        if on:
             h[2], h[3] = HANDLE_AUTO, slope * HANDLE_AUTO * (pts[j + 1][0] - pts[j][0])
+        if not (back or on):  # (a point between two jumps: nothing to shape)
+            self.bend_done({"i": i, "before": before}, None)
+            return True
         # (a power curve on a piece by it: those pieces are Bézier now)
         pts[j] = with_handles([pts[j][0], pts[j][1]], h)
         if j > 0 and bend_of(pts[j - 1]):
             pts[j - 1] = with_handles(pts[j - 1][:2], handles(pts[j - 1]))
-        side = 1 if j + 1 < len(pts) else 0
+        side = 1 if on else 0
         self.drag = {"kind": "bendhandle", "i": i, "j": j, "side": side, "before": before, "x": e.x, "y": e.y,
                      "moved": False, "alone": False, "made": True, "name": tr("hz.step_handles")}
         self.redraw()
@@ -626,14 +645,15 @@ class HzBend:
         f = min(1.0, max(0.0, (um - u) / (other - u))) if width > 1e-12 else 0.0
         h[2 * side], h[2 * side + 1] = f, max(-most, min(most, km - k))
         o = 1 - side
-        if not d["alone"] and (j > 0 if o == 0 else j + 1 < len(pts)):
-            far = pts[j - 1][0] if o == 0 else pts[j + 1][0]
+        far = None if (j == 0 if o == 0 else j + 1 >= len(pts)) else pts[j - 1][0] if o == 0 else pts[j + 1][0]
+        if not d["alone"] and far is not None and abs(far - u) > 1e-12:  # (never into a jump: hunt 2026-11-13)
             wo = abs(far - u)
-            fo, ko = f * width / wo if wo > 1e-12 else 0.0, -h[2 * side + 1]
+            fo, ko = f * width / wo, -h[2 * side + 1]
             if fo > 1.0:  # (past its own piece: shorter, the same way)
                 fo, ko = 1.0, ko / fo
             h[2 * o], h[2 * o + 1] = fo, ko
         pts[j] = with_handles(pts[j], h)  # (dragged back onto the point: no handles)
+        keep_forward(pts)  # (the next point's handle back may be past 1 after an exact split)
         self.redraw()
         return True
 
@@ -743,13 +763,24 @@ def tidy_bend(n, pieces=False):
     if pts is None:
         return
     pts[:] = [[round(p[0], 9), round(p[1], 4), *p[2:]] for p in pts]
-    # (Bézier handles, stage H: none on the line's first point back / last point on (no piece there), all-0 ones gone)
+    # two points on one spot at one pitch do nothing: one (user 2026-10-28), the later kept (its curve is the
+    # piece after) with the earlier one's handle back (hunt 2026-11-13: Join of touching notes lost the first one's
+    # last curve); at different pitches they're a jump and stay
+    kept = []
+    for p in pts:
+        if kept and kept[-1][0] == p[0] and kept[-1][1] == p[1]:
+            hp, hq = handles(kept.pop()), handles(p) or [0.0] * 4
+            if hp and (hp[0] or hp[1]):
+                p = with_handles(p, [hp[0], hp[1], hq[2], hq[3]])
+        kept.append(p)
+    pts[:] = kept
+    # (Bézier handles, stage H: none on the line's first point back / last point on (no piece there), none into a
+    # jump's no-width piece (hunt 2026-11-13), all-0 ones gone; every piece still forward in time)
     for k, p in enumerate(pts):
         if handles(p):
-            pts[k] = side_handles(p, k > 0, k < len(pts) - 1)
-    # two points on one spot at one pitch do nothing: one (user 2026-10-28), the later kept (its curve is the
-    # piece after); at different pitches they're a jump and stay
-    pts[:] = [p for p, q in zip(pts, pts[1:] + [None]) if not (q and q[0] == p[0] and q[1] == p[1])]
+            pts[k] = side_handles(p, k > 0 and pts[k - 1][0] < p[0],
+                                  k < len(pts) - 1 and pts[k + 1][0] > p[0])
+    keep_forward(pts)
 
     def flat():  # (at 0 all along: a handle reaching up / down bends it)
         return all(abs(p[1]) < 1e-9 and not ((h := handles(p)) and (abs(h[1]) > 1e-9 or abs(h[3]) > 1e-9))

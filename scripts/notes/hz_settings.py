@@ -301,8 +301,9 @@ def clean_vel(pts):
 
 def clean_handles(h):
     """A bend point's Bézier handles checked (stage H, 2026-11-13): [in share, in keys, out share, out keys] = the
-    handle back towards the point before (share 0..1 of that piece's length, keys up from the point) and the one on
-    towards the next; None when it's no good or all at 0 (no handles)."""
+    handle back towards the point before (share of that piece's length: 0..1 as dragged, up to SHARE_MOST after an
+    exact split, keep_forward; keys up from the point) and the one on towards the next; None when it's no good or all
+    at 0 (no handles)."""
     try:
         f0, k0, f1, k1 = (float(v) for v in h)
     except (TypeError, ValueError):
@@ -310,8 +311,34 @@ def clean_handles(h):
     if not all(math.isfinite(v) for v in (f0, k0, f1, k1)):
         return None
     most = 2.0 * NOTE_BEND_MOST
-    got = [min(1.0, max(0.0, f0)), min(most, max(-most, k0)), min(1.0, max(0.0, f1)), min(most, max(-most, k1))]
+    got = [min(SHARE_MOST, max(0.0, f0)), min(most, max(-most, k0)), min(SHARE_MOST, max(0.0, f1)),
+           min(most, max(-most, k1))]
     return got if any(abs(v) > 1e-12 for v in got) else None
+
+
+SHARE_MOST = 64.0  # clean_handles: a handle's share of its piece at most (past 1 only from an exact split, keep_forward)
+
+
+def goes_forward(s1, s2):
+    """True when a Bézier piece whose first point's handle on is s1 of the piece and the next point's handle back s2
+    only ever moves forward in time (hunt 2026-11-13, user took A: shares may pass 1 after an exact split; the cubic's
+    time speed a(1-t)^2 + 2b(1-t)t + c t^2, a = s1, b = 1 - s1 - s2, c = s2, never below 0)."""
+    return 1.0 - s1 - s2 >= -math.sqrt(max(0.0, s1 * s2)) - 1e-12
+
+
+def keep_forward(pts):
+    """A bend line's Bézier pieces each made to go forward in time (in place): a piece that wouldn't (a side dropped
+    next to one past 1, a handle dragged) gets both its shares held to 1 at most (always forward, the old limit)."""
+    for p, q in zip(pts, pts[1:]):
+        hp = p[-1].get("h") if len(p) > 2 and isinstance(p[-1], dict) else None
+        hq = q[-1].get("h") if len(q) > 2 and isinstance(q[-1], dict) else None
+        s1, s2 = (hp[2] if hp else 0.0), (hq[0] if hq else 0.0)
+        if (s1 > 1.0 or s2 > 1.0) and not goes_forward(s1, s2):
+            if hp:
+                hp[2] = min(1.0, hp[2])
+            if hq:
+                hq[0] = min(1.0, hq[0])
+    return pts
 
 
 def clean_bend(pts):
@@ -342,7 +369,7 @@ def clean_bend(pts):
                 out.append(got)
     except (TypeError, ValueError, IndexError, AttributeError):
         return None
-    return sorted(out, key=lambda p: p[0]) or None
+    return keep_forward(sorted(out, key=lambda p: p[0])) or None
 
 
 def clean_env(pts):

@@ -255,7 +255,9 @@ class HzNoteTools:
         if i >= len(self.tones):
             return None
         n = self.tones[i]
-        if any(abs(p[1]) >= 0.5 for p in n.get("bend") or ()) or n.get("wobble"):
+        # (a Bézier handle's end counts too: a bulge made by handles leaves the row as well; hunt 2026-11-13)
+        if any(abs(p[1]) >= 0.5 or (h := handles(p)) and max(abs(p[1] + h[1]), abs(p[1] + h[3])) >= 0.5
+               for p in n.get("bend") or ()) or n.get("wobble"):
             return None
         if self.hit(x, y) != ("note", i):
             return None
