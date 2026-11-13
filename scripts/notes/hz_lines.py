@@ -142,11 +142,122 @@ def wave_start(w):
     return w.get("phase", 0.0) + w.get("nudge", 0.0)
 
 
+SPEED_SAMPLES = 512  # speed_table: a run's speed line read at this many even spots (+ its points) to count its waves
+_SPEED_TABLES = {}
+
+
+def speed_table(pts):
+    """(shares, waves gone) of a speed line ([[share 0..1, speed 0..1 of the run's rate(, curve)], ...]): the
+    speed added up from the run's start (in "whole runs at full speed": 1 at the end = as many waves as with no speed
+    line), at even spots + every point; remembered."""
+    key = repr(pts)
+    got = _SPEED_TABLES.get(key)
+    if got is None:
+        xs = np.sort(np.concatenate([np.linspace(0.0, 1.0, SPEED_SAMPLES + 1), [p[0] for p in pts]]))
+        v = line_at(pts, xs)
+        cum = np.concatenate([[0.0], np.cumsum((v[1:] + v[:-1]) / 2.0 * np.diff(xs))])
+        if len(_SPEED_TABLES) > 500:
+            _SPEED_TABLES.clear()
+        got = _SPEED_TABLES[key] = (xs, cum)
+    return got
+
+
+def speed_gone(w, share):
+    """How far a run's waves have come at share (0..1 of the run, an array): share itself at an even speed, else
+    its speed line ("speed", stage C 2026-11-13) added up to there (1 at the end = the run at full speed)."""
+    if not w.get("speed"):
+        return share
+    xs, cum = speed_table(w["speed"])
+    return np.interp(share, xs, cum)
+
+
+def speed_mean(w):
+    """A run's speed line's average (1: an even speed / none)."""
+    return float(speed_table(w["speed"])[1][-1]) if w.get("speed") else 1.0
+
+
+def speed_share(w, g):
+    """speed_gone turned round: the share (0..1 of the run, an array) where its waves have come g (0..speed_mean)."""
+    if not w.get("speed"):
+        return np.asarray(g, float)
+    xs, cum = speed_table(w["speed"])
+    return np.interp(g, cum, xs)
+
+
+def run_waves(w, u, span):
+    """Waves run w has gone through from its u0 to u (parts of the note, an array) on a note span beats long (its
+    phase / nudge not counted)."""
+    if not w.get("speed"):  # (the old way exactly: old saves sound the same)
+        return w["rate"] * (np.asarray(u, float) - w["at"][0]) * span
+    u0, u1 = w["at"]
+    share = np.clip((np.asarray(u, float) - u0) / max(u1 - u0, 1e-12), 0.0, 1.0)
+    return w["rate"] * (u1 - u0) * span * speed_gone(w, share)
+
+
+def waves_spot(w, waves, span):
+    """run_waves turned round: where (parts of the note, an array) run w has gone `waves` waves."""
+    u0, u1 = w["at"]
+    if not w.get("speed"):
+        return u0 + np.asarray(waves, float) / (w["rate"] * span)
+    full = w["rate"] * (u1 - u0) * span
+    return u0 + (u1 - u0) * speed_share(w, np.asarray(waves, float) / max(full, 1e-12))
+
+
+SPEED_LEAST = 1e-6  # fit_speed: a speed line averaging less than this counts as this (all stopped)
+
+
+def fit_speed(w, beats, waves):
+    """Run w (beats long) set to go through `waves` waves (its phase not counted): its rate when no end of its speed
+    line is locked ("lock"; the old way); a locked end keeps its own speed (user 2026-11-13: START / END / BOTH =
+    which end keeps its speed) and the speed line tilts from it (START: the end side moves, END: the start side,
+    BOTH: the middle bows, a middle point added when it has none). Speeds stay 0..WOBBLE_RATE_MOST; the rate grows
+    when a point would pass the top. Can't get there (a locked end alone too fast): the rate instead."""
+    lock, pts = w.get("lock"), w.get("speed")
+    if abs(w["rate"] * beats * speed_mean(w) - waves) < 1e-9:  # (there already: nothing moves)
+        return w
+    if lock and pts and beats > 1e-12:
+        pts = [list(p) for p in pts]
+        if lock == "both" and len(pts) == 2:
+            pts.insert(1, [0.5, round(float(line_at(pts, 0.5)), 6)])
+        s = np.array([p[0] for p in pts])
+        lift = s if lock == "start" else 1.0 - s if lock == "end" else 4.0 * s * (1.0 - s)
+        v = np.array([p[1] for p in pts]) * w["rate"]
+
+        def made(c):
+            got = np.clip(v + c * lift, 0.0, WOBBLE_RATE_MOST)
+            return got, beats * float(speed_table([[q[0], g, *q[2:]] for q, g in zip(pts, got.tolist())])[1][-1])
+        lo, hi = -WOBBLE_RATE_MOST * 8.0, WOBBLE_RATE_MOST * 8.0
+        if made(lo)[1] <= waves <= made(hi)[1]:
+            for _ in range(60):
+                mid = (lo + hi) / 2.0
+                lo, hi = (mid, hi) if made(mid)[1] < waves else (lo, mid)
+            got = made((lo + hi) / 2.0)[0]
+            top = max(w["rate"], float(got.max()))
+            if top > 0:
+                w["rate"] = top
+                w["speed"] = [[q[0], round(g / top, 9), *q[2:]] for q, g in zip(pts, got.tolist())]
+                return w
+    w["rate"] = min(WOBBLE_RATE_MOST, max(0.01, waves / (beats * max(speed_mean(w), SPEED_LEAST))))
+    return w
+
+
+def speed_cut(w, a, b):
+    """Run w's speed line from share a to b, laid over that part (0..1): its points inside, a curved piece cut
+    through made of short straight ones (finely: the waves must add up the same); None when it has none."""
+    pts = w.get("speed")
+    if not pts:
+        return None
+    got = bend_part({"bend": pts, "t": 0.0, "len": 1.0}, a, b - a, bits=32)
+    if got is None:  # (stopped all along)
+        return [[0.0, 0.0], [1.0, 0.0]]
+    return got
+
+
 def wave_end(w, span):
     """Waves a wobble run has gone through at its end (+ its phase); a hair off a whole half wave = that half wave
     (user's pictures 2026-10-28: a free note length made 8 waves 8.0000004, a sliver of a new half drawn as a
     spike)."""
-    end = wave_start(w) + w["rate"] * (w["at"][1] - w["at"][0]) * span
+    end = wave_start(w) + w["rate"] * (w["at"][1] - w["at"][0]) * span * speed_mean(w)
     half = round(end * 2.0) / 2.0
     return half if abs(end - half) < HALF_NEAR else end
 
@@ -192,9 +303,12 @@ def depth_cut(w, a, b):
 
 
 def cut_depth(w, a, b):
-    """Run w with its depth line cut to share a..b (depth_cut, set_depth), a new dict."""
+    """Run w with its depth line (and speed line, speed_cut) cut to share a..b (depth_cut, set_depth), a new
+    dict."""
     run = dict(w)
     run.pop("env", None)
+    if w.get("speed"):
+        run["speed"] = speed_cut(w, a, b)
     return set_depth(run, depth_cut(w, a, b))
 
 
@@ -213,7 +327,7 @@ def wobble_keys(runs, u, span):
         # (never quite its end's wave count: a hair before the end must read the last half wave, not the next one
         # rounding makes of it; user's picture 2026-10-28, a square ending in a dip)
         end = wave_end(w, span)
-        wave = wave_of(w.get("shape"), np.minimum(wave_start(w) + w["rate"] * (u - u0) * span, end - WAVE_GAP),
+        wave = wave_of(w.get("shape"), np.minimum(wave_start(w) + run_waves(w, u, span), end - WAVE_GAP),
                        w.get("seed", 0))
         # (up to its end, not on it: the piece after takes over there, user's picture 2026-10-28: a square's last
         # instant added to the next piece's wobble; the note's own end too: its ">" sits on its end point, user)
@@ -230,16 +344,26 @@ def wobble_edges(n, most, lo=-math.inf, hi=math.inf):
     for w in n.get("wobble") or ():
         u0, u1 = w["at"]
         b0, b1 = t + u0 * span, t + u1 * span
-        phase, rate = wave_start(w), w["rate"]
+        phase = wave_start(w)
         out += [b for b in (b0, b1) if lo <= b <= hi]
         a, b = max(b0, lo), min(b1, hi)
         if b <= a:
             continue
-        first = math.floor((phase + rate * (a - b0)) * 4) + 1
-        last = math.ceil((wave_end(w, span) if b >= b1 else phase + rate * (b - b0)) * 4)
+        if w.get("speed"):  # (where the speed line turns: a corner in the wave's pace)
+            out += [b0 + p[0] * (b1 - b0) for p in w["speed"] if a < b0 + p[0] * (b1 - b0) < b]
+
+        def gone(beat):
+            if not w.get("speed"):
+                return phase + w["rate"] * (beat - b0)
+            return phase + float(run_waves(w, np.array([u0 + (beat - b0) / max(span, 1e-12)]), span)[0])
+        first = math.floor(gone(a) * 4) + 1
+        last = math.ceil((wave_end(w, span) if b >= b1 else gone(b)) * 4)
         if len(out) + last - first > most:
             return []
-        out += [b0 + (k / 4 - phase) / rate for k in range(first, last)]
+        if not w.get("speed"):
+            out += [b0 + (k / 4 - phase) / w["rate"] for k in range(first, last)]
+        elif last > first:
+            out += (t + waves_spot(w, np.arange(first, last) / 4 - phase, span) * span).tolist()
     return out
 
 
@@ -264,7 +388,7 @@ def split_wobbles(n, u):
             continue
         s = (u - u0) / (u1 - u0)
         first = dict(cut_depth(w, 0.0, s), at=[u0, u])
-        second = dict(cut_depth(w, s, 1.0), at=[u, u1], **went_on(w, w["rate"] * (u - u0) * n["len"]))
+        second = dict(cut_depth(w, s, 1.0), at=[u, u1], **went_on(w, float(run_waves(w, u, n["len"]))))
         out += [first, second]
     if out:
         n["wobble"] = out
@@ -304,10 +428,10 @@ def fit_wobbles(n):
             if not w["phase"]:
                 del w["phase"]
         phase = w.get("phase", 0.0)
-        if not w.get("free"):
-            waves = max(phase + 0.5, round(2.0 * (phase + w["rate"] * beats)) / 2.0)
-            w["rate"] = min(WOBBLE_RATE_MOST, max(0.01, (waves - phase) / beats))  # (not rounded: whole half waves)
-        end = (w["at"][1], phase + w["rate"] * beats, w)
+        if not w.get("free"):  # (not rounded: whole half waves; a locked end of its speed line keeps its speed)
+            waves = max(phase + 0.5, round(2.0 * (phase + w["rate"] * beats * speed_mean(w))) / 2.0)
+            fit_speed(w, beats, waves - phase)
+        end = (w["at"][1], phase + w["rate"] * beats * speed_mean(w), w)
 
 
 def wobble_part(n, t, span):
@@ -323,7 +447,8 @@ def wobble_part(n, t, span):
         run = dict(cut_depth(w, (lo - a) / (b - a), (hi - a) / (b - a)),
                    at=[round((lo - off) / span, 9), round((hi - off) / span, 9)])
         if lo > a + 1e-12:
-            run.update(went_on(w, w["rate"] * (lo - a)))
+            run.update(went_on(w, w["rate"] * (lo - a) if not w.get("speed") else
+                               float(run_waves(w, w["at"][0] + (lo - a) / size, size))))
         out.append(run)
     return out or None
 
@@ -331,10 +456,10 @@ def wobble_part(n, t, span):
 ON_POINT = 1e-9  # bend_part: a cut this near a point (in parts of the note) is on it (points are saved to 9 places)
 
 
-def bend_part(n, t, span):
+def bend_part(n, t, span, bits=8):
     """The part of note n's bend line from beat t for span beats, as a line of its own (u 0..1 over that part), or
     None when it has none or it's at 0 all along: for a note cut at the left edge. A curved piece cut through becomes
-    short straight ones; a jump (two points at one spot) stays a jump."""
+    `bits` short straight ones; a jump (two points at one spot) stays a jump."""
     pts = n.get("bend")
     if not pts:
         return None
@@ -368,7 +493,7 @@ def bend_part(n, t, span):
         for (a, va, curve, on_a, tail), (b, _, _, on_b, _) in zip(nodes, nodes[1:]):
             if curve and not (on_a and on_b) and b > a:  # (a curve cut through: sampled)
                 out.append([a, va])
-                out += [[a + (b - a) * i / 8, at(a + (b - a) * i / 8)] for i in range(1, 8)]
+                out += [[a + (b - a) * i / bits, at(a + (b - a) * i / bits)] for i in range(1, bits)]
             else:
                 out.append([a, va] + (list(tail) if curve else []))  # (its own curve, an S too)
         out.append([u1, nodes[-1][1]])

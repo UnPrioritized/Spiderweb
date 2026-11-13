@@ -18,8 +18,9 @@ import numpy as np
 
 from files.lang import tr, trn
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOBBLE_RATE_MOST, WOBBLE_SHAPES, bend_of,
-                          WOBBLE_SEED_STEP, bend_part, bends, bent_part, depth_at, depth_most, depth_pts, line_at,
-                          pitch, set_depth, split_wobbles, wave_end, wave_start, wobble_keys, wobble_part)
+                          WOBBLE_SEED_STEP, bend_part, bends, bent_part, clean_speed, depth_at, depth_most, depth_pts,
+                          fit_speed, line_at, pitch, set_depth, speed_mean, split_wobbles, wave_end, wave_start,
+                          waves_spot, wobble_keys, wobble_part)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
 from window.hz_bend import BEND, LINE_NEAR, NEAR, drop_point
@@ -46,6 +47,19 @@ PRESET_SIZE, PRESET_GAP = 13, 3  # px: a depth preset button's size, the room be
 DEPTH_SAMPLES = 17  # a curved piece of the depth line is drawn in this many spots
 DEPTH_CURVE_PX = 40  # px: Alt+dragging a depth piece this far = a full curve (SLIDE_BEND)
 DEPTH_CURVE_STICK = 0.05  # ... nearer straight than this sticks to straight (Shift: free)
+SPEED_STRIP_H = 30  # px: the speed strip's height (top = the wobble's full speed, bottom = stopped; stage C)
+SPEED_STEP = 0.05  # a speed point goes in these steps of full speed (Shift: 0.01)
+LOCK_SIZE, LOCK_GAP = 10, 4  # px: a speed lock's size, its room from the strip's end
+EVEN_SPEED = [[0.0, 1.0], [1.0, 1.0]]  # a wobble with no speed line: full speed all along
+
+
+def curve_to(pts, j, bend, shift):
+    """Piece j of a line's points (the depth or speed line) curved by `bend` (bend_of's number): straight again when
+    nearer than DEPTH_CURVE_STICK (shift: free); a flat piece has nothing to curve."""
+    a, b = pts[j], pts[j + 1]
+    del a[2:]
+    if abs(b[1] - a[1]) > 1e-9 and (abs(bend) > DEPTH_CURVE_STICK or shift):
+        a.append(round(min(SLIDE_BEND, max(-SLIDE_BEND, bend)), 4))
 
 
 def split_curve(bend, t):
@@ -97,9 +111,16 @@ def bake_wobble(n, run):
     def f(u):  # (as heard: the line + the wave; u an array, all at once: hunt 2026-10-28, Bake froze for seconds)
         u = np.asarray(u, float)
         return line_at(pts, u) + wobble_keys([run], u, span)
-    q = 2 if run.get("shape") in ("saw", "square") else 4
+    q = (2 if run.get("shape") in ("saw", "square") else 4) * (2 if run.get("speed") else 1)
     first, last = math.floor(phase * q) + 1, math.ceil(wave_end(run, span) * q)
-    breaks = u0 + (np.arange(first, last) / q - phase) / (rate * span)
+    if run.get("speed"):  # (a speed line: each eighth wave where its waves get there (a changing pace bends a quarter
+        # wave out of shape), + where its pace turns)
+        breaks = waves_spot(run, np.arange(first, last) / q - phase, span)
+        more = [u0 + p[0] * (u1 - u0) for p in run["speed"][1:-1]]
+        breaks = np.unique(np.concatenate([breaks, [u for u in more if u0 < u < u1]]))
+        breaks = breaks[(breaks > u0 + 1e-9) & (breaks < u1 - 1e-9)]
+    else:
+        breaks = u0 + (np.arange(first, last) / q - phase) / (rate * span)
     start = j == 0  # (the note's own start: no jump, nothing before it; its end: the end point, as heard)
     lefts, rights = f(breaks - BAKE_GAP).tolist(), f(breaks + BAKE_GAP).tolist()
     a0, a1 = (float(v) for v in f([u0 + BAKE_GAP, u1 - BAKE_GAP]))
@@ -127,6 +148,7 @@ def bake_wobble(n, run):
 class HzSketch:
     sketch_alt = False  # (Alt held: every piece shows its curve square, hz_bend.bend_squares)
     sketch_pick = None  # (tone id, u0, u1): the piece clicked last; its wobble's depth line shows above it
+    sketch_speed = None  # sketch_pick while its wobble's speed strip is open (its speed post clicked; stage C)
 
     def picked_piece(self):
         """(tone number, piece number, u0, u1) of the piece picked with a click, or None: nothing picked, its note no
@@ -208,14 +230,90 @@ class HzSketch:
         return [(name, x + k * (size + gap), y0, x + k * (size + gap) + size, y0 + size)
                 for k, name in enumerate(DEPTH_PRESETS)]
 
+    def speed_strip(self):
+        """(x0, top, x1, bottom) of the picked wobble's speed strip (open while its speed post was clicked, stage C;
+        above the preset buttons, the depth line's width), or None."""
+        if not self.sketch_speed or self.sketch_speed != self.sketch_pick:
+            return None
+        boxes, shape = self.preset_boxes(), self.depth_shape()
+        if not boxes or not shape:
+            return None
+        gap = PRESET_GAP * self.s
+        top = max(self.ruler_h + gap, boxes[0][2] - 2 * gap - SPEED_STRIP_H * self.s)
+        return shape[1][0][0], top, shape[1][-1][0], top + SPEED_STRIP_H * self.s
+
+    def speed_shape(self):
+        """The open speed strip's line: (its points [[share, speed 0..1(, curve)], ...], [(x, y) of each point],
+        [(x, y, piece number), ...] along it), or None."""
+        strip, piece = self.speed_strip(), self.picked_piece()
+        run = strip and self.wobble_run(self.tones[piece[0]], piece[2], piece[3])
+        if not run:
+            return None
+        x0, top, x1, bottom = strip
+        pts = run.get("speed") or EVEN_SPEED
+
+        def xy(share, v):
+            return x0 + (x1 - x0) * share, bottom - (bottom - top) * v
+        line = []
+        for j, (a, b) in enumerate(zip(pts, pts[1:])):
+            s = np.linspace(0.0, 1.0, DEPTH_SAMPLES if len(a) > 2 and a[1] != b[1] else 2)
+            vals = a[1] + (b[1] - a[1]) * bent_part(s, bend_of(a))
+            line += [(*xy(a[0] + (b[0] - a[0]) * f, v), j) for f, v in zip(s.tolist(), vals.tolist())]
+        return pts, [xy(p[0], p[1]) for p in pts], line
+
+    def speed_locks(self):
+        """[(end "start" / "end", x0, y0, x1, y1), ...] of the open speed strip's two locks (just outside its ends)."""
+        strip = self.speed_strip()
+        if not strip:
+            return []
+        x0, top, x1, bottom = strip
+        size, gap = LOCK_SIZE * self.s, LOCK_GAP * self.s
+        y0 = (top + bottom) / 2 - size / 2
+        return [("start", x0 - gap - size, y0, x0 - gap, y0 + size), ("end", x1 + gap, y0, x1 + gap + size, y0 + size)]
+
+    @staticmethod
+    def locked(run, end):
+        """True when this end ("start" / "end") of run's speed line is locked."""
+        lock = (run or {}).get("lock")
+        return lock == "both" or lock == end
+
+    @staticmethod
+    def line_hit(spots, line, x, y, r):
+        """("pt", k) a line's point k / ("on", j) its piece j at (x, y) within r px, else None (depth / speed line)."""
+        for k in range(len(spots) - 1, -1, -1):
+            if abs(x - spots[k][0]) <= r and abs(y - spots[k][1]) <= r:
+                return "pt", k
+        best = None
+        for (ax, ay, j), (bx, by, j2) in zip(line, line[1:]):
+            if j != j2:
+                continue
+            dx, dy = bx - ax, by - ay
+            f = min(1.0, max(0.0, ((x - ax) * dx + (y - ay) * dy) / max(dx * dx + dy * dy, 1e-9)))
+            far = math.hypot(ax + f * dx - x, ay + f * dy - y)
+            if far <= r and (best is None or far < best[0]):
+                best = far, j
+        return ("on", best[1]) if best else None
+
     def depth_hit(self, x, y):
         """What of the picked piece's depth line is at (x, y): "speed" (the speed post's top), ("preset", name) a
         preset button, ("pt", k) its point k (the first / last = that end's depth: a fade), ("line", j) on its piece
-        j (dragged: all of it deeper / shallower; Alt: that piece curved), else None."""
+        j (dragged: all of it deeper / shallower; Alt: that piece curved); its open speed strip: ("lock", end),
+        ("spt", k) a speed point, ("sline", j) on a speed piece, ("strip",) elsewhere in it; else None."""
         shape = self.depth_shape()
         if not shape:
             return None
         r = NEAR * self.s
+        for end, bx0, by0, bx1, by1 in self.speed_locks():
+            if bx0 - 2 <= x <= bx1 + 2 and by0 - 2 <= y <= by1 + 2:
+                return "lock", end
+        strip = self.speed_strip()
+        if strip:
+            _, spots, line = self.speed_shape()
+            got = self.line_hit(spots, line, x, y, r)
+            if got:
+                return ("spt" if got[0] == "pt" else "sline"), got[1]
+            if strip[0] <= x <= strip[2] and strip[1] <= y <= strip[3]:
+                return ("strip",)
         post = self.speed_post()
         if post and abs(x - post[0]) <= r and post[2] - r <= y <= post[2] + r:
             return "speed"
@@ -245,7 +343,15 @@ class HzSketch:
         if which[0] == "preset":
             self.wobble_edit(i, u0, u1, "preset", which[1])
             return True
+        if which[0] == "lock":  # (the speed strip's lock at that end on / off: one undo step)
+            self.wobble_edit(i, u0, u1, "lock", which[1])
+            return True
+        if which[0] == "strip":  # (the strip's empty space: nothing)
+            self.redraw()
+            return True
         run = self.wobble_run(self.tones[i], u0, u1)
+        if which[0] in ("spt", "sline"):
+            return self.speed_press(e, i, which, before, run)
         speed = which == "speed"
         orig = copy.deepcopy(run) if run else {"at": [u0, u1], "depth": [0.0, 0.0], "rate": WOBBLE_RATE}
         if which[0] == "line" and self.curving(e.state):
@@ -334,25 +440,138 @@ class HzSketch:
 
     def sketch_depth_drop(self, i, which):
         """A right-click on a depth point between the ends: it goes (one undo step). False for anything else (the
-        wobble's menu)."""
-        if which[0] != "pt":
+        wobble's menu). A speed point between its ends: the same."""
+        if which[0] not in ("pt", "spt"):
             return False
         _, _, u0, u1 = self.picked_piece()
         run = self.wobble_run(self.tones[i], u0, u1)
-        pts = depth_pts(run) if run else ()
+        speed = which[0] == "spt"
+        pts = (run.get("speed") or EVEN_SPEED if speed else depth_pts(run)) if run else ()
         if not 0 < which[1] < len(pts) - 1:
             return False
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
-        set_depth(run, [p for k, p in enumerate(copy.deepcopy(pts)) if k != which[1]])
-        self.bend_done({"i": i, "before": before}, tr("hz.step_wobble_point"))
+        kept = [p for k, p in enumerate(copy.deepcopy(pts)) if k != which[1]]
+        if speed:
+            run.pop("speed", None)
+            kept = clean_speed(kept)
+            if kept:
+                run["speed"] = kept
+        else:
+            set_depth(run, kept)
+        self.bend_done({"i": i, "before": before}, tr("hz.step_wobble_speed_line" if speed else "hz.step_wobble_point"))
         return True
 
+    def speed_press(self, e, i, which, before, run):
+        """A press on the open speed strip's line (depth_hit's ("spt", k) / ("sline", j)): held, dragged = the speed
+        there (sketch_speed_to: a point; the line: all of it, turning on a locked end; Alt: a piece curved)."""
+        pts = copy.deepcopy(run.get("speed") or EVEN_SPEED)
+        what = "spt" if which[0] == "spt" else "scurve" if self.curving(e.state) else "sline"
+        if what == "sline" and run.get("lock") == "both" and len(pts) == 2:  # (both ends kept: the middle bows, a
+            pts.insert(1, [0.5, round(float(line_at(pts, 0.5)), 4)])        # point there to bow it)
+        self.drag = {"kind": "wobblespeed", "i": i, "which": (what, which[1]), "before": before, "x": e.x, "y": e.y,
+                     "moved": False, "at": list(run["at"]), "orig": copy.deepcopy(run), "pts": pts,
+                     "name": tr("hz.step_wobble_speed_line")}
+        self.redraw()
+        return True
+
+    def sketch_speed_to(self, d, n, e):
+        """The speed line held in drag d moved: a point up / down (one between the ends sideways too, between its
+        neighbours, on the grid; Shift free), all of it (each point as far as its lock lets it: a locked start stays
+        and the end moves most, a locked end the other way round, both locked = the middle), or (Alt) a piece
+        curved. Speeds in SPEED_STEP steps (Shift: 0.01), 0..1 of the full speed. Whole half waves come at the let
+        go (fit_wobbles)."""
+        strip = self.speed_strip()
+        if not strip:
+            return True
+        tall = max(1.0, strip[3] - strip[1])
+        step = 0.01 if e.state & SHIFT else SPEED_STEP
+        dv = round((d["y"] - e.y) / tall / step) * step
+        pts = copy.deepcopy(d["pts"])
+        what, j = d["which"]
+
+        def speed(v):
+            return max(0.0, min(1.0, round(v, 4)))
+        if what == "spt":
+            pts[j][1] = speed(round((d["pts"][j][1] + dv) / step) * step)
+            if abs(e.x - d["x"]) > 3:
+                d["side"] = True
+            if 0 < j < len(pts) - 1 and d.get("side"):
+                u0, u1 = d["at"]
+                start, beats = n["t"] + u0 * n["len"], (u1 - u0) * n["len"]
+                share = (self.snap(self.beat_at(e.x), e) - start) / max(beats, 1e-12)
+                pts[j][0] = round(min(pts[j + 1][0], max(pts[j - 1][0], share)), 9)
+        elif what == "scurve":
+            bend = (d["y"] - e.y) / (DEPTH_CURVE_PX * self.s) * (1.0 if pts[j + 1][1] > pts[j][1] else -1.0)
+            curve_to(pts, j, bend + bend_of(d["pts"][j]), e.state & SHIFT)
+        else:
+            lock = d["orig"].get("lock")
+            for p in pts:
+                lift = p[0] if lock == "start" else 1.0 - p[0] if lock == "end" else \
+                    4.0 * p[0] * (1.0 - p[0]) if lock == "both" else 1.0
+                p[1] = speed(p[1] + dv * lift)
+        run = copy.deepcopy(d["orig"])
+        run.pop("speed", None)
+        pts = clean_speed(pts)
+        if pts:
+            run["speed"] = pts
+        was = self.wobble_run(n, *d["at"])
+        n["wobble"] = sorted([w for w in n.get("wobble") or () if w is not was] + [run], key=lambda w: w["at"])
+        self.redraw()
+        return True
+
+    def sketch_speed_double(self, e, i, which):
+        """A double-click on the open speed strip's line: a point there (on the grid; Shift free), on the line as it
+        is, held like a pressed one (follows the mouse until let go). One undo step with what the drag does."""
+        self.drop_drag()
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        _, _, u0, u1 = self.picked_piece()
+        n = self.tones[i]
+        run = self.wobble_run(n, u0, u1)
+        if run is None:
+            return True
+        pts = [list(p) for p in run.get("speed") or EVEN_SPEED]
+        start, beats = n["t"] + u0 * n["len"], (u1 - u0) * n["len"]
+        share = min(1.0, max(0.0, (self.snap(self.beat_at(e.x), e) - start) / max(beats, 1e-12)))
+        j = min(len(pts) - 1, max(1, sum(p[0] <= share for p in pts)))
+        a, b = pts[j - 1], pts[j]
+        if not a[0] < share < b[0]:
+            return True
+        t = (share - a[0]) / (b[0] - a[0])
+        curves = split_curve(bend_of(a), t) if len(a) > 2 and a[1] != b[1] else None
+        if curves:
+            del a[2:]
+            a += [curves[0]] if curves[0] else []
+            pts.insert(j, [round(share, 9), round(a[1] + (b[1] - a[1]) * curves[2], 4)]
+                       + ([curves[1]] if curves[1] else []))
+        else:
+            pts.insert(j, [round(share, 9), round(float(line_at(pts, share)), 4)])
+        run["speed"] = pts
+        self.drag = {"kind": "wobblespeed", "i": i, "which": ("spt", j), "before": before, "x": e.x, "y": e.y,
+                     "moved": False, "at": [u0, u1], "orig": copy.deepcopy(run), "pts": copy.deepcopy(pts),
+                     "name": tr("hz.step_wobble_speed_line")}
+        self.redraw()
+        return True
+
+    def speed_toggle(self):
+        """The speed post clicked (not dragged): its speed strip opens / closes."""
+        self.sketch_speed = None if self.sketch_speed == self.sketch_pick else self.sketch_pick
+
     def depth_hint(self, x, y):
-        """The status line's part for the mouse over a depth preset button ("" elsewhere)."""
+        """The status line's part for the mouse over a depth preset button, the speed post, the speed strip or a
+        lock ("" elsewhere)."""
         which = self.depth_hit(x, y) if self.sketching() else None
-        if which and which[0] == "preset":
+        if not which:
+            return ""
+        if which[0] == "preset":
             return "     " + tr("hz.depth_preset_hint", name=tr(f"hz.depth_{which[1]}"))
+        if which == "speed":
+            return "     " + tr("hz.speed_post_hint")
+        if which[0] == "lock":
+            return "     " + tr(f"hz.speed_lock_{which[1]}")
+        if which[0] in ("spt", "sline", "strip"):
+            return "     " + tr("hz.speed_strip_hint")
         return ""
 
     def sketch_rate_to(self, d, n, e):
@@ -360,13 +579,20 @@ class HzSketch:
         piece holds a whole number of HALF waves (it ends back on its line; Ctrl: any speed, 0.01 a beat), at least
         one half wave, at most WOBBLE_RATE_MOST a beat."""
         beats = (d["at"][1] - d["at"][0]) * n["len"]
-        rate = d["orig"]["rate"] * 2.0 ** ((e.x - d["x"]) / (SPEED_DOUBLE * self.s))
-        if e.state & CTRL:
-            rate = round(rate, 2)
+        orig = d["orig"]
+        if orig.get("speed"):  # (a speed line (stage C): the waves it makes, turning on a locked end, fit_speed)
+            waves = orig["rate"] * beats * speed_mean(orig) * 2.0 ** ((e.x - d["x"]) / (SPEED_DOUBLE * self.s))
+            waves = max(0.01 * beats, round(waves, 2)) if e.state & CTRL else max(1.0, round(2.0 * waves)) / 2.0
+            run = fit_speed(copy.deepcopy(orig), beats, waves)
+            run["rate"] = round(run["rate"], 9)
         else:
-            rate = max(1.0, round(2.0 * rate * beats)) / (2.0 * beats)
-        rate = min(WOBBLE_RATE_MOST, max(0.5 / beats, 0.01, rate))
-        run = dict(copy.deepcopy(d["orig"]), rate=round(rate, 6))
+            rate = orig["rate"] * 2.0 ** ((e.x - d["x"]) / (SPEED_DOUBLE * self.s))
+            if e.state & CTRL:
+                rate = round(rate, 2)
+            else:
+                rate = max(1.0, round(2.0 * rate * beats)) / (2.0 * beats)
+            rate = min(WOBBLE_RATE_MOST, max(0.5 / beats, 0.01, rate))
+            run = dict(copy.deepcopy(orig), rate=round(rate, 6))
         run.pop("free", None)
         if e.state & CTRL:  # (set freely: kept as it is when its piece's length changes, hz_lines.fit_wobbles)
             run["free"] = True
@@ -399,6 +625,8 @@ class HzSketch:
         menu.add_separator()
         for key, step in (("hz.wobble_phase_back", -PHASE_STEP), ("hz.wobble_phase_on", PHASE_STEP)):
             menu.add_command(label=tr(key), command=lambda step=step: self.wobble_edit(i, u0, u1, "nudge", step))
+        if run.get("speed"):  # (its speed line gone: full speed all along again)
+            menu.add_command(label=tr("hz.wobble_even"), command=lambda: self.wobble_edit(i, u0, u1, "even", None))
         menu.add_separator()
         menu.add_command(label=tr("hz.wobble_bake"), command=lambda: self.wobble_edit(i, u0, u1, "bake", None))
         menu.add_command(label=tr("hz.wobble_remove"), command=lambda: self.wobble_edit(i, u0, u1, "remove", None))
@@ -426,6 +654,15 @@ class HzSketch:
             most = depth_most(run)
             set_depth(run, [[p[0], round(p[1] * most, 4), *p[2:]] for p in DEPTH_PRESETS[value]])
             name = "hz.step_wobble_preset"
+        elif what == "lock":  # (that end of the speed line locked / unlocked: "start" + "end" = "both")
+            ends = {e for e in ("start", "end") if self.locked(run, e)} ^ {value}
+            run.pop("lock", None)
+            if ends:
+                run["lock"] = "both" if len(ends) == 2 else ends.pop()
+            name = "hz.step_wobble_lock"
+        elif what == "even":
+            run.pop("speed", None)
+            name = "hz.step_wobble_speed_line"
         elif what == "nudge":  # (within one wave, like the other shapes: 8 steps = as it was; a Random seed untouched)
             run["nudge"] = round((run.get("nudge", 0.0) + value) % 1.0, 9) % 1.0
             if not run["nudge"]:
@@ -646,13 +883,21 @@ class HzSketch:
         """(x, y, text) of the label beside what's held: the key it's at + how far from the note's own ("A2 +2.0
         st"); None when no point / piece is held."""
         d = self.drag
-        if d and d["kind"] in ("wobbledepth", "wobblerate") and d.get("moved"):  # (the depth: "Wobble 2.0 st" / a
-            got = self.depth_line()                                               # fade "2.0 → 0.5"; the speed)
+        if d and d["kind"] in ("wobbledepth", "wobblerate", "wobblespeed") and d.get("moved"):  # (the depth:
+            got = self.depth_line()  # "Wobble 2.0 st" / a fade "2.0 → 0.5"; the speed; the speed line)
             n = self.tones[d["i"]]
             run = self.wobble_run(n, *d["at"])
-            if got and run:
+            if got and run and d["kind"] == "wobblespeed" and self.speed_strip():
+                pts, spots, line = self.speed_shape()
+                if d["which"][0] == "spt":
+                    j = d["which"][1]
+                    return spots[j][0], spots[j][1] - 8 * self.s, tr("hz.wobble_speed_pt",
+                                                                    pct=f"{pts[j][1] * 100:.0f}")
+                return ((got[0] + got[2]) / 2, min(y for _, y, _ in line) - 6 * self.s,
+                        tr("hz.wobble_speed_line", a=f"{pts[0][1] * 100:.0f}", b=f"{pts[-1][1] * 100:.0f}"))
+            if got and run and d["kind"] != "wobblespeed":
                 if d["kind"] == "wobblerate":
-                    waves = round(run["rate"] * (run["at"][1] - run["at"][0]) * n["len"], 2)
+                    waves = round(run["rate"] * (run["at"][1] - run["at"][0]) * n["len"] * speed_mean(run), 2)
                     text = trn("hz.wobble_speed", waves, rate=f"{run['rate']:.2f}".rstrip("0").rstrip("."),
                                waves=f"{waves:g}")
                     return (got[0] + got[2]) / 2, self.speed_post()[2] - 6 * self.s, text
@@ -679,6 +924,36 @@ class HzSketch:
         at = pitch(n) + (k if d["kind"] == "bendpt" or d["j"] is not None else 0.0)
         text = tr("hz.sketch_label", key=note_name(round(at)), keys=("+" if k > 0 else "") + f"{k:.1f}")
         return self.x_of(n["t"] + u * n["len"]), self.pitch_y(at) - 14 * self.s, text
+
+    def draw_speed_strip(self, c, s):
+        """The open speed strip (stage C): a box (top = full speed, bottom = stopped, a faint middle line), its
+        speed line (blue) through its points (a square each), a lock just outside each end (shut = locked)."""
+        strip = self.speed_strip()
+        if not strip:
+            return
+        x0, top, x1, bottom = strip
+        c.create_rectangle(x0, top, x1, bottom, fill=look.HZ_LABEL_BOX, outline=look.HZ_SPEED)
+        c.create_line(x0, (top + bottom) / 2, x1, (top + bottom) / 2, fill=look.HZ_SPEED, dash=(1, 3))
+        _, spots, line = self.speed_shape()
+        c.create_line(*[v for x, y, _ in line for v in (x, y)], fill=look.HZ_SPEED, width=max(1, round(2 * s)))
+        d = self.drag
+        held = d["which"][1] if d and d["kind"] == "wobblespeed" and d["which"][0] == "spt" else None
+        h = 3 * s
+        for k, (hx, hy) in enumerate(spots):
+            c.create_rectangle(hx - h, hy - h, hx + h, hy + h, outline=look.HZ_SPEED,
+                               fill=look.HZ_DOT if held == k else look.HZ_SPEED)
+        piece = self.picked_piece()
+        run = self.wobble_run(self.tones[piece[0]], piece[2], piece[3])
+        for end, lx0, ly0, lx1, ly1 in self.speed_locks():  # (a padlock: body + shackle, shut / open)
+            shut = self.locked(run, end)
+            body = ly0 + (ly1 - ly0) * 0.45
+            c.create_rectangle(lx0, body, lx1, ly1, outline=look.HZ_SPEED,
+                               fill=look.HZ_SPEED if shut else look.HZ_LABEL_BOX, width=max(1, round(s)))
+            a, b = lx0 + (lx1 - lx0) * 0.25, lx1 - (lx1 - lx0) * 0.25
+            lift = 0 if shut else (ly1 - ly0) * 0.25
+            c.create_line(a, body, a, ly0 - lift + 2 * s, (a + b) / 2, ly0 - lift, b, ly0 - lift + 2 * s,
+                          b, body if shut else body - (ly1 - ly0) * 0.2, fill=look.HZ_SPEED,
+                          width=max(1, round(1.5 * s)), smooth=True)
 
     def draw_sketch_notes(self, colours, selected):
         """The notes in view as lines (Sketch tool), each in its colours (fill, edge; selected ones in `selected`)."""
@@ -738,6 +1013,7 @@ class HzSketch:
                 h = 4 * s
                 c.create_polygon(px, top - h, px + h, top, px, top + h, px - h, top, fill=look.HZ_WOBBLE,
                                  outline=look.HZ_WOBBLE)
+            self.draw_speed_strip(c, s)
         label = self.sketch_label()
         if label:
             x, y, text = label

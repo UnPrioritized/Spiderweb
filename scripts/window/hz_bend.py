@@ -36,7 +36,7 @@ SQUARE_ROOM = 20  # px: a piece narrower than this gets no square (its points' g
 BEND = look.HZ_BEND
 BEND_TOOLS = ("bend", "sketch")  # the tools that show and edit the bend points (Sketch: hz_sketch.py)
 # the drags bend_drag / bend_release take (sketch* + wobble*: the Sketch tool's, hz_sketch.py)
-BEND_DRAGS = ("bendpt", "bendcurve", "sketchpiece", "sketchend", "wobbledepth", "wobblerate")
+BEND_DRAGS = ("bendpt", "bendcurve", "sketchpiece", "sketchend", "wobbledepth", "wobblerate", "wobblespeed")
 
 
 class HzBend:
@@ -281,6 +281,8 @@ class HzBend:
             return self.sketch_depth_to(d, n, e)
         if d["kind"] == "wobblerate":
             return self.sketch_rate_to(d, n, e)
+        if d["kind"] == "wobblespeed":
+            return self.sketch_speed_to(d, n, e)
         if d["kind"] == "bendcurve":  # how far from the piece's first point to its second the square is dragged
             _, sy, _, j, k0, k1 = d["square"]
             y = sy + e.y - d["y"]
@@ -318,6 +320,8 @@ class HzBend:
             pts = d["orig"] or ([0.0, 0.0], [1.0, 0.0])
             j = d["j"] or 0
             self.sketch_pick = (self.tones[d["i"]].get("id"), pts[j][0], pts[j + 1][0])
+        if d["kind"] == "wobblerate" and not d["moved"]:  # (Sketch: the speed post clicked: its speed strip)
+            self.speed_toggle()
         self.bend_done(d)
         return True
 
@@ -334,6 +338,12 @@ class HzBend:
         with what the drag did)."""
         d = self.drag
         self.end_drag()
+        if d["kind"] == "wobblespeed":  # (Sketch's speed line: even speed again)
+            run = self.wobble_run(self.tones[d["i"]], *d["at"])
+            if run:
+                run.pop("speed", None)
+            self.bend_done(d, tr("hz.step_wobble_speed_line"))
+            return
         if d["kind"] in ("wobbledepth", "wobblerate"):  # (Sketch's depth line / speed post: the piece's wobble goes)
             self.sketch_depth_gone(d)
             self.bend_done(d, tr("hz.step_wobble_delete"))
@@ -357,6 +367,8 @@ class HzBend:
             return False
         if hit[0] == "wobble" and hit[2][0] == "line":  # (Sketch's depth line: a depth point added there, held;
             return self.sketch_depth_double(e, hit[1], hit[2])  # its points / post / buttons: a press again)
+        if hit[0] == "wobble" and hit[2][0] == "sline":  # (its speed strip's line: a speed point, held)
+            return self.sketch_speed_double(e, hit[1], hit[2])
         if self.sketching() and hit[0] in ("note", "point", "curve"):  # (hz_sketch.py: a point added / taken away;
             return self.sketch_double(e, hit[:2] if hit[0] == "curve" else hit)  # on a square too: hunt 2026-10-28,
             # Straight is in its right-click menu)
@@ -401,9 +413,11 @@ class HzBend:
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] == "slide":
             return False
-        inner = hit[0] == "wobble" and hit[2][0] == "pt" and 0 < hit[2][1] < len(self.depth_shape()[0]) - 1
+        inner = hit[0] == "wobble" and (hit[2][0] == "pt" and 0 < hit[2][1] < len(self.depth_shape()[0]) - 1
+                                        or hit[2][0] == "spt" and 0 < hit[2][1] < len(self.speed_shape()[0]) - 1)
         cursor = ("fleur" if hit[0] == "point" or inner else
-                  "hand2" if hit[0] == "wobble" and hit[2][0] == "preset" else
+                  "hand2" if hit[0] == "wobble" and hit[2][0] in ("preset", "lock") else
+                  "arrow" if hit[0] == "wobble" and hit[2][0] == "strip" else
                   "sb_h_double_arrow" if hit[0] == "end" or hit[0] == "wobble" and hit[2] == "speed" else
                   "sb_v_double_arrow" if hit[0] == "curve" or self.sketching() else
                   self.pencil)  # (Sketch: a press on the line holds its piece, up / down)

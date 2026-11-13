@@ -346,12 +346,40 @@ def clean_env(pts):
     return out if len(out) > 2 or len(out[0]) > 2 else None
 
 
+def clean_speed(pts):
+    """A wobble's speed line checked (its "speed", stage C 2026-11-13): [[share 0..1 of the run, speed 0..1 of its
+    rate (, curve -SLIDE_BEND..SLIDE_BEND)], ...] in order, first at 0, last at 1; None when it's no good or is the
+    run's own even full speed (two points at 1, straight)."""
+    out = []
+    try:
+        for p in pts or ():
+            u, v = float(p[0]), float(p[1])
+            curve = float(p[2]) if len(p) > 2 else 0.0
+            if math.isfinite(u) and math.isfinite(v) and math.isfinite(curve):
+                got = [min(1.0, max(0.0, u)), min(1.0, max(0.0, v))]
+                if curve:
+                    got.append(min(SLIDE_BEND, max(-SLIDE_BEND, curve)))
+                out.append(got)
+    except (TypeError, ValueError, IndexError):
+        return None
+    out.sort(key=lambda p: p[0])
+    if len(out) < 2:
+        return None
+    out[0][0], out[-1][0] = 0.0, 1.0
+    del out[-1][2:]
+    return None if len(out) == 2 and len(out[0]) == 2 and out[0][1] == out[1][1] == 1.0 else out
+
+
+SPEED_LOCKS = ("start", "end", "both")  # a wobble's "lock": which end of its speed line keeps its speed (stage C)
+
+
 def clean_wobble(runs):
     """A note's wobbles checked (tone["wobble"], the Sketch tool's; heard in hz_lines.note_bend until baked):
     [{"at": [u0, u1] along the note, "depth": [keys at u0, at u1] each way, "rate": waves a beat(, "shape":
     WOBBLE_SHAPES but sine, "flip": True = going down first, "phase": waves gone before u0, "free": True = speed set
     with Ctrl, "nudge": waves the user moved its wave on (0..1, the Phase menu items), "seed": a Random wave's
-    heights (a whole number, WOBBLE_SEED_STEP), "env": the depth line's own points (clean_env; "depth" = its ends))}]
+    heights (a whole number, WOBBLE_SEED_STEP), "env": the depth line's own points (clean_env; "depth" = its ends),
+    "speed": its speed line (clean_speed), "lock": SPEED_LOCKS)}]
     in order; runs with no length or depth left out; None when none is left."""
     out = []
     for w in runs or ():
@@ -385,6 +413,11 @@ def clean_wobble(runs):
             run["nudge"] = round(nudge, 9)
         if isinstance(seed, int) and not isinstance(seed, bool) and 0 <= seed < 1 << 40:
             run["seed"] = seed
+        speed = clean_speed(w.get("speed"))
+        if speed:
+            run["speed"] = speed
+        if w.get("lock") in SPEED_LOCKS:
+            run["lock"] = w["lock"]
         out.append(run)
     return sorted(out, key=lambda w: w["at"]) or None
 

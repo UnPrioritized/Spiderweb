@@ -1005,7 +1005,7 @@ class HzMouse:
             return
         if d["kind"] in ("new", "detune"):  # (a Quick detune being pulled: called off, the note as it was)
             return self.cancel_drag()
-        if d["kind"] in ("bendpt", "bendcurve", "wobbledepth", "wobblerate"):  # (a bend point held: it goes; a curve
+        if d["kind"] in ("bendpt", "bendcurve", "wobbledepth", "wobblerate", "wobblespeed"):  # (a bend point held: it goes; a curve
             # square: straight again; a wobble depth line or speed post: no wobble)
             return self.bend_delete_dragged()
         self.end_drag()
