@@ -383,8 +383,9 @@ class HelpWindow(tk.Toplevel):
         # 2026-11-14: buttons were too big)
         steps = ttk.Frame(right)
         steps.pack(side="top", fill="x")
-        self.forward_button = self.step_arrow(steps, "→", 1, tr("help.go_forward_tip"))
-        self.back_button = self.step_arrow(steps, "←", -1, tr("help.go_back_tip"))
+        # (◀ ▶: the user's pick of 6, 2026-11-14; the side panel's shut strip uses ◀ too)
+        self.forward_button = self.step_arrow(steps, "▶", 1, tr("help.go_forward_tip"))
+        self.back_button = self.step_arrow(steps, "◀", -1, tr("help.go_back_tip"))
         text_box = ttk.Frame(right)
         text_box.pack(fill="both", expand=True)
         bg = ttk.Style().lookup("TFrame", "background") or "SystemButtonFace"
@@ -539,7 +540,7 @@ class HelpWindow(tk.Toplevel):
 
     def step_arrow(self, row, arrow, step, tip):
         """One Back / Forward arrow: link-coloured text, a click goes there; grey (nothing to do) when it can't."""
-        label = ttk.Label(row, text=arrow, font=look.font(13, "bold"), padding=(6, 0))
+        label = ttk.Label(row, text=arrow, font=look.font(12, "bold"), padding=(6, 0))
         label.pack(side="right")
         label.bind("<Button-1>", lambda e: self.go(step))
         Tooltip(label, tip)
