@@ -2106,7 +2106,9 @@ def stirred_piece(sh, notes, tracks, held_, get, gate, rule):
         if was[1] is not None:
             rc["order"] = was[1]
     wn, wt = get(dict(whole, recolour=rc))
-    if sh.get("cut") and sh.get("gate_flip") is True and not gate and len(wn) > 1:
+    if sh.get("cut") and sh.get("gate_flip") is True and not gate and len(wn) > 1 and sh.get("_run"):
+        # (the step runner: its Gate aware flip ran BEFORE this colour step, so the notes here are already flipped;
+        # a plain piece is flipped after its colours and keeps the old lookup, test recolour_stir_hunt)
         # (a gate flipped piece (gate is False for pieces: is_flipped leaves them out): its notes are the WHOLE's
         # flipped notes, cut. They were looked up in the unflipped whole by where they show now, so each took the
         # colour of another note and with keep colours two channels swapped. The whole is flipped here too (every
