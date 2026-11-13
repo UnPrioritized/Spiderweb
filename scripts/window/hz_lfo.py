@@ -43,26 +43,8 @@ EDITOR_W, WAVE_H, LINE_H = 300, 120, 54  # px at 100 %: the editors' sizes
 
 def read_bank():
     """(the saved drawn waves [{"name", "points"}] in saving order, whether the file is there but can't be read)."""
-    if not os.path.exists(BANK_FILE):
-        return [], False
-    try:
-        with open(BANK_FILE, encoding="utf-8-sig") as f:
-            data = json.load(f)
-        shapes = data.get("shapes") if isinstance(data, dict) else None
-        if not isinstance(shapes, list):
-            return [], True
-    except (OSError, ValueError):
-        return [], True
-    from window.hz_trace import clean_shape_name
-    out = []
-    for s in shapes:
-        try:
-            name, pts = clean_shape_name(str(s["name"])), clean_wave(s["points"])
-        except (TypeError, KeyError, IndexError):
-            continue
-        if name and pts:
-            out.append({"name": name, "points": pts})
-    return out, False
+    from window.hz_trace import read_named
+    return read_named(BANK_FILE, clean_wave)
 
 
 def load_bank():
@@ -73,12 +55,8 @@ def load_bank():
 def save_bank(items):
     """Writes the bank (OSError when it can't). A file there that can't be read is kept as hz_wobbles.json.bad
     first; True when it was."""
-    os.makedirs(os.path.dirname(BANK_FILE), exist_ok=True)
-    bad = read_bank()[1]
-    if bad:
-        os.replace(BANK_FILE, BANK_FILE + ".bad")
-    write_text(BANK_FILE, json.dumps({"shapes": items}, indent=1))
-    return bad
+    from window.hz_trace import save_named
+    return save_named(BANK_FILE, items, clean_wave)
 
 
 def ready_name(name):

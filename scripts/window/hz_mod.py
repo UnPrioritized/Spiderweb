@@ -319,23 +319,15 @@ class SynthMod:
 
     def mod_choice(self, box, col, src, what, ids):
         """One of an LFO box's dropdowns (Shape, Plays, Timing)."""
-        cell = ttk.Frame(box, style="Synth.Box.TFrame")
-        cell.grid(row=0, column=col, padx=6, sticky="n")
         label = "hz.synth_timing" if what == "timing" else f"hz.synth_mod_{what}"
-        ttk.Label(cell, text=tr(label), style="Synth.Box.TLabel").pack()
         def make():
             names = [tr(f"hz.synth_timing_{i}" if what == "timing" else f"hz.fx_shape_{i}" if what == "shape"
                         else f"hz.synth_mod_mode_{i}") for i in ids]
             return [n.split(" (")[0] for n in names] if what == "shape" else names  # (short: the box stays small)
         names = make()
-        var = tk.StringVar(value=names[0])
-        cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly",
-                          width=english_width(make), style="Synth.TCombobox")
-        dark_list(cb)
-        cb.pack(pady=(12, 0))
-        cb.bind("<<ComboboxSelected>>", lambda e: (self.on_mod_choice(src, what, ids[e.widget.current()]),
-                                                    self.keyboard_back(e.widget)))
-        Tooltip(cb, tr("hz.synth_tip_timing" if what == "timing" else f"hz.synth_tip_mod_{what}"))
+        var, _ = self.choice_cell(box, col, tr(label), names, lambda i: self.on_mod_choice(src, what, ids[i]),
+                                  tr("hz.synth_tip_timing" if what == "timing" else f"hz.synth_tip_mod_{what}"),
+                                  english_width(make))
         self.mod_picks[(src, what)] = (var, names, ids)
 
     def mod_dial_cell(self, box, col, src, key, kind):

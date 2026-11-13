@@ -737,17 +737,9 @@ class SynthKnobs:
             box = outer.body
             col = 0
             if name == "wave":
-                cell = ttk.Frame(box, style="Synth.Box.TFrame")
-                cell.grid(row=0, column=0, padx=6, sticky="n")
-                ttk.Label(cell, text=tr("hz.synth_wave_kind"), style="Synth.Box.TLabel").pack()
                 self.wave_names = [tr("hz.synth_wave_none")] + [tr("hz.fx_" + n) for n in WAVES]
-                self.wave_var = tk.StringVar(value=self.wave_names[0])
-                cb = self.wave_pick = ttk.Combobox(cell, textvariable=self.wave_var, values=self.wave_names,
-                                                   state="readonly", width=9, style="Synth.TCombobox")
-                dark_list(cb)
-                cb.pack(pady=(12, 0))
-                cb.bind("<<ComboboxSelected>>", lambda e: (self.on_wave(), self.keyboard_back(e.widget)))
-                Tooltip(cb, tr("hz.synth_tip_wave"))
+                self.wave_var, self.wave_pick = self.choice_cell(box, 0, tr("hz.synth_wave_kind"), self.wave_names,
+                                                                 lambda i: self.on_wave(), tr("hz.synth_tip_wave"), 9)
                 col = 1
             if name == "arp":
                 col = self.arp_cells(outer)
@@ -834,21 +826,14 @@ class SynthKnobs:
     def voice_cell(self, box, col, after):
         """The Voice box's Voices on dropdown (after Detune) or its Only notes that touch and Legato tick boxes
         (after Glide and its Curve)."""
-        cell = ttk.Frame(box, style="Synth.Box.TFrame")
-        cell.grid(row=0, column=col, padx=6, sticky="n")
         if after == "random":
-            ttk.Label(cell, text=tr("hz.synth_voices_on"), style="Synth.Box.TLabel").pack()
             self.same_names = [tr("hz.synth_voices_split"), tr("hz.synth_voices_same")]
-            self.same_var = tk.StringVar(value=self.same_names[0])
-            cb = ttk.Combobox(cell, textvariable=self.same_var, values=self.same_names, state="readonly", width=10,
-                              style="Synth.TCombobox")
-            dark_list(cb)
-            cb.pack(pady=(12, 0))
-            cb.bind("<<ComboboxSelected>>", lambda e: (
-                self.change("voice", "same", e.widget.current() == 1),
-                self.keyboard_back(e.widget)))
-            Tooltip(cb, tr("hz.synth_tip_voices_on"))
+            self.same_var, _ = self.choice_cell(box, col, tr("hz.synth_voices_on"), self.same_names,
+                                                lambda i: self.change("voice", "same", i == 1),
+                                                tr("hz.synth_tip_voices_on"), 10)
         else:
+            cell = ttk.Frame(box, style="Synth.Box.TFrame")
+            cell.grid(row=0, column=col, padx=6, sticky="n")
             ttk.Label(cell, text="", style="Synth.Box.TLabel").pack()
             self.touching_var = tk.BooleanVar(value=False)
             cb = ttk.Checkbutton(cell, text=tr("hz.synth_touching"), variable=self.touching_var,
@@ -866,18 +851,24 @@ class SynthKnobs:
     def cc_cell(self, box, col):
         """The Voice box's CC dropdown (user 2026-10-21): One channel / Own channel per note (hz["cc_own"], the whole
         Hz bass's, every layer: not a sound a preset carries; hz_cc.voices)."""
+        self.cc_names = [tr("hz.synth_cc_one"), tr("hz.synth_cc_own")]
+        self.cc_var, _ = self.choice_cell(box, col, tr("hz.synth_cc"), self.cc_names,
+                                          lambda i: self.set_cc_own(i == 1), tr("hz.synth_tip_cc"), 18)
+
+    def choice_cell(self, box, col, label, names, picked, tip, width):
+        """A dropdown with its name (label) over it in column col of a box's top row (names = its items, the first
+        shown; picked(the item's place) when one is picked, then the keyboard back to the window; tip = its tip's
+        text): (its StringVar, it)."""
         cell = ttk.Frame(box, style="Synth.Box.TFrame")
         cell.grid(row=0, column=col, padx=6, sticky="n")
-        ttk.Label(cell, text=tr("hz.synth_cc"), style="Synth.Box.TLabel").pack()
-        self.cc_names = [tr("hz.synth_cc_one"), tr("hz.synth_cc_own")]
-        self.cc_var = tk.StringVar(value=self.cc_names[0])
-        cb = ttk.Combobox(cell, textvariable=self.cc_var, values=self.cc_names, state="readonly", width=18,
-                          style="Synth.TCombobox")
+        ttk.Label(cell, text=label, style="Synth.Box.TLabel").pack()
+        var = tk.StringVar(value=names[0])
+        cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly", width=width, style="Synth.TCombobox")
         dark_list(cb)
         cb.pack(pady=(12, 0))
-        cb.bind("<<ComboboxSelected>>", lambda e: (self.set_cc_own(e.widget.current() == 1),
-                                                   self.keyboard_back(e.widget)))
-        Tooltip(cb, tr("hz.synth_tip_cc"))
+        cb.bind("<<ComboboxSelected>>", lambda e: (picked(e.widget.current()), self.keyboard_back(e.widget)))
+        Tooltip(cb, tip)
+        return var, cb
 
     def set_cc_own(self, on):
         """The CC dropdown picked: one undo step (none when it's as it was)."""
@@ -919,20 +910,12 @@ class SynthKnobs:
 
     def grows_cell(self, box, col):
         """The Character box's Grows from dropdown: the key row that stays put while Height changes."""
-        cell = ttk.Frame(box, style="Synth.Box.TFrame")
-        cell.grid(row=0, column=col, padx=6, sticky="n")
-        ttk.Label(cell, text=tr("hz.fx_height_from"), style="Synth.Box.TLabel").pack()
         def make():
             return [tr(f"hz.synth_height_{w}") for w in HEIGHT_FROM]
         names = make()
-        var = tk.StringVar(value=names[0])
-        cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly",
-                          width=english_width(make), style="Synth.TCombobox")
-        dark_list(cb)
-        cb.pack(pady=(12, 0))
-        cb.bind("<<ComboboxSelected>>", lambda e: (self.on_grows(tuple(HEIGHT_FROM)[e.widget.current()]),
-                                                    self.keyboard_back(e.widget)))
-        Tooltip(cb, tr("hz.synth_tip_height_from"))
+        var, _ = self.choice_cell(box, col, tr("hz.fx_height_from"), names,
+                                  lambda i: self.on_grows(tuple(HEIGHT_FROM)[i]), tr("hz.synth_tip_height_from"),
+                                  english_width(make))
         self.grows_pick = (var, names)
 
     def on_grows(self, where):
@@ -949,20 +932,11 @@ class SynthKnobs:
     def timing_cell(self, box, name):
         """An LFO box's Timing dropdown (column 0): Free, or its Rate only at note lengths (straight, triplets,
         dotted)."""
-        cell = ttk.Frame(box, style="Synth.Box.TFrame")
-        cell.grid(row=0, column=0, padx=6, sticky="n")
-        ttk.Label(cell, text=tr("hz.synth_timing"), style="Synth.Box.TLabel").pack()
         def make():
             return [tr(f"hz.synth_timing_{t}") for t in TIMINGS]
         names = make()
-        var = tk.StringVar(value=names[0])
-        cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly",
-                          width=english_width(make), style="Synth.TCombobox")
-        dark_list(cb)
-        cb.pack(pady=(12, 0))
-        cb.bind("<<ComboboxSelected>>", lambda e: (self.on_timing(name, TIMINGS[e.widget.current()]),
-                                                    self.keyboard_back(e.widget)))
-        Tooltip(cb, tr("hz.synth_tip_timing"))
+        var, _ = self.choice_cell(box, 0, tr("hz.synth_timing"), names, lambda i: self.on_timing(name, TIMINGS[i]),
+                                  tr("hz.synth_tip_timing"), english_width(make))
         self.timing_picks[name] = (var, names)
 
     def on_timing(self, name, timing):
@@ -992,19 +966,12 @@ class SynthKnobs:
 
     def mode_cell(self, box, col, name):
         """OSC A's (the Wave box's) or OSC B's Mode dropdown (Off, FM, Pulse width, Sync, Growl, Bitcrush)."""
-        cell = ttk.Frame(box, style="Synth.Box.TFrame")
-        cell.grid(row=0, column=col, padx=6, sticky="n")
-        ttk.Label(cell, text=tr("hz.synth_mode"), style="Synth.Box.TLabel").pack()
         names = [tr(f"hz.synth_mode_{m}") for m in MODE_NAMES]
-        var = tk.StringVar(value=names[0])
-        cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly", width=11, style="Synth.TCombobox")
-        dark_list(cb)
-        cb.pack(pady=(12, 0))
         key = "mode" if name == "wave" else "osc2_mode"
-        cb.bind("<<ComboboxSelected>>", lambda e: (
-            self.sweep_on(key), self.change(name, key, MODE_NAMES[e.widget.current()]),
-            self.keyboard_back(e.widget)))
-        Tooltip(cb, (tr("hz.synth_tip_osc2_mode") + "\n" if name == "osc2" else "") + tr("hz.synth_tip_mode"))
+        var, _ = self.choice_cell(box, col, tr("hz.synth_mode"), names,
+                                  lambda i: (self.sweep_on(key), self.change(name, key, MODE_NAMES[i])),
+                                  (tr("hz.synth_tip_osc2_mode") + "\n" if name == "osc2" else "") + tr("hz.synth_tip_mode"),
+                                  11)
         self.mode_cells[name] = {}
         self.mode_picks[name] = (var, names, key)
 
@@ -1155,21 +1122,13 @@ class SynthKnobs:
 
     def arp_choice(self, box, col, what, ids):
         """One of the Arpeggio box's dropdowns (Pattern / Chord / Scale / Root): picking one puts the arpeggio on."""
-        cell = ttk.Frame(box, style="Synth.Box.TFrame")
-        cell.grid(row=0, column=col, padx=6, sticky="n")
-        ttk.Label(cell, text=tr(f"hz.synth_arp_{what}"), style="Synth.Box.TLabel").pack()
         def make():
             return ([NOTE_NAMES[i] for i in ids] if what == "root"  # (C, C#...: as on the piano roll's keys)
                     else [tr(f"hz.synth_arp_{what}_{i}") for i in ids])
         names = make()
-        var = tk.StringVar(value=names[0])
-        cb = ttk.Combobox(cell, textvariable=var, values=names, state="readonly",
-                          width=english_width(make), style="Synth.TCombobox")
-        dark_list(cb)
-        cb.pack(pady=(12, 0))
-        cb.bind("<<ComboboxSelected>>", lambda e: (self.sweep_on("arp_"), self.change(
-            "arp", f"arp_{what}", ids[e.widget.current()]), self.keyboard_back(e.widget)))
-        Tooltip(cb, tr(f"hz.synth_tip_arp_{what}"))
+        var, _ = self.choice_cell(box, col, tr(f"hz.synth_arp_{what}"), names,
+                                  lambda i: (self.sweep_on("arp_"), self.change("arp", f"arp_{what}", ids[i])),
+                                  tr(f"hz.synth_tip_arp_{what}"), english_width(make))
         setattr(self, f"arp_{what}_pick", (var, names, ids))
 
     def on_wave(self):

@@ -60,13 +60,14 @@ SHAPES_FILE = os.path.join(USER, "hz_shapes.json")  # the user's saved lines (Sa
 # ready-made ones, newest first)
 
 
-def read_shapes():
-    """(the user's saved lines [{"name", "points"}] in saving order, whether the file is there but can't be read).
-    A broken entry is left out; a missing file = none."""
-    if not os.path.exists(SHAPES_FILE):
+def read_named(path, clean_points):
+    """(the named lines [{"name", "points"}] of a {"shapes": [...]} file in saving order, whether the file is there
+    but can't be read). clean_points(an entry's points) = the points kept, or nothing usable: a broken entry is left
+    out; a missing file = none. (The Hz shape window's saved lines and the LFO window's shape bank.)"""
+    if not os.path.exists(path):
         return [], False
     try:
-        with open(SHAPES_FILE, encoding="utf-8-sig") as f:
+        with open(path, encoding="utf-8-sig") as f:
             data = json.load(f)
         shapes = data.get("shapes") if isinstance(data, dict) else None
         if not isinstance(shapes, list):
@@ -76,14 +77,33 @@ def read_shapes():
     out = []
     for s in shapes:
         try:
-            name, raw = clean_shape_name(str(s["name"])), s["points"]
-            pts = clean_trace(raw) or ([list(p) for p in START_TRACE] if raw == [list(p) for p in START_TRACE]
-                                       else None)  # (cleaned to [] = as it starts, or nothing usable)
+            name, pts = clean_shape_name(str(s["name"])), clean_points(s["points"])
         except (TypeError, KeyError, IndexError):
             continue
         if name and pts:
             out.append({"name": name, "points": pts})
     return out, False
+
+
+def save_named(path, items, clean_points):
+    """Writes a read_named file (OSError when it can't be). A file there that can't be read is kept first as
+    <name>.bad (hunt: saving over it lost every older line); returns True when it was."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    kept = read_named(path, clean_points)[1]
+    if kept:
+        os.replace(path, path + ".bad")
+    write_text(path, json.dumps({"shapes": items}, indent=1))
+    return kept
+
+
+def trace_points(raw):
+    """A saved line's points cleaned (cleaned to [] = as it starts, or nothing usable)."""
+    return clean_trace(raw) or ([list(p) for p in START_TRACE] if raw == [list(p) for p in START_TRACE] else None)
+
+
+def read_shapes():
+    """(the user's saved lines [{"name", "points"}] in saving order, whether the file is there but can't be read)."""
+    return read_named(SHAPES_FILE, trace_points)
 
 
 def load_shapes():
@@ -92,14 +112,8 @@ def load_shapes():
 
 
 def save_shapes(items):
-    """Writes the saved lines (OSError when it can't be). A file there that can't be read is kept first as
-    hz_shapes.json.bad (hunt: saving over it lost every older line); returns True when it was."""
-    os.makedirs(os.path.dirname(SHAPES_FILE), exist_ok=True)
-    kept = read_shapes()[1]
-    if kept:
-        os.replace(SHAPES_FILE, SHAPES_FILE + ".bad")
-    write_text(SHAPES_FILE, json.dumps({"shapes": items}, indent=1))
-    return kept
+    """Writes the saved lines (hz_shapes.json; a broken one kept as .bad first: True when it was)."""
+    return save_named(SHAPES_FILE, items, trace_points)
 
 
 def clean_shape_name(name):
