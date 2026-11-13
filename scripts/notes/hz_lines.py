@@ -42,6 +42,113 @@ def bend_of(p):
     return float(p[2]) + (S_CURVE if len(p) > 3 and p[3] == "s" else 0.0)
 
 
+def handles(p):
+    """A bend point's Bézier handles [in share, in keys, out share, out keys] (hz_settings.clean_handles; stage H
+    2026-11-13), or None."""
+    return p[-1]["h"] if len(p) > 2 and isinstance(p[-1], dict) else None
+
+
+def with_handles(p, h):
+    """A copy of bend point p with handles h (None / all 0: none). Its curve number stays (0 = none: left out
+    without handles, kept as the slot before them with)."""
+    q = [v for v in p if not isinstance(v, dict)]
+    if h and any(abs(v) > 1e-12 for v in h):
+        if len(q) == 2:
+            q.append(0.0)
+        q.append({"h": [float(v) for v in h]})
+    elif len(q) == 3 and not isinstance(q[2], str) and q[2] == 0:
+        del q[2:]
+    return q
+
+
+def side_handles(p, keep_in=True, keep_out=True):
+    """Bend point p with its handle back (in) / on (out) kept or dropped (a copy)."""
+    h = handles(p)
+    if not h:
+        return [v for v in p if not isinstance(v, dict)]
+    return with_handles(p, [h[0] if keep_in else 0.0, h[1] if keep_in else 0.0,
+                            h[2] if keep_out else 0.0, h[3] if keep_out else 0.0])
+
+
+def bez_piece(a, b):
+    """True when the piece from bend point a to b is a Bézier curve: a's handle on or b's handle back isn't 0."""
+    ha, hb = handles(a), handles(b)
+    return bool(ha and (ha[2] or ha[3]) or hb and (hb[0] or hb[1]))
+
+
+def piece_curved(pts, j):
+    """True when piece j of a bend line (point j to j + 1) isn't straight: a curve number or Bézier handles."""
+    return j + 1 < len(pts) and (bool(bend_of(pts[j])) or bez_piece(pts[j], pts[j + 1]))
+
+
+def line_curved(pts):
+    """True when any piece of a bend line is curved (piece_curved)."""
+    return any(piece_curved(pts, j) for j in range(len(pts) - 1))
+
+
+def bez_controls(a, b):
+    """(c1u, c1k, c2u, c2k): the Bézier piece a -> b's two inner control points (u, keys): a's handle on, b's back."""
+    ha, hb = handles(a) or (0.0, 0.0, 0.0, 0.0), handles(b) or (0.0, 0.0, 0.0, 0.0)
+    w = b[0] - a[0]
+    return a[0] + ha[2] * w, a[1] + ha[3], b[0] - hb[0] * w, b[1] + hb[1]
+
+
+BEZ_ROUNDS = 40  # bez_at: halvings to find the spot of a Bézier piece at a time (2^-40 of the piece)
+
+
+def bez_at(x, x0, c1x, c2x, x1, v0, c1v, c2v, v1):
+    """A Bézier piece's value at time x (arrays, all the same shape): the curve is solved BY TIME (its time only
+    grows along it: handles stay inside their piece), then read there."""
+    x = np.asarray(x, float)
+    # (power form: B(t) = a t^3 + b t^2 + c t + p0)
+    ax, bx, cx = x1 - x0 + 3.0 * (c1x - c2x), 3.0 * (x0 - 2.0 * c1x + c2x), 3.0 * (c1x - x0)
+    w = np.where(x1 - x0 > 0, x1 - x0, 1.0)
+    t = np.clip((x - x0) / w, 0.0, 1.0)
+    lo, hi = np.zeros(x.shape), np.ones(x.shape)
+    for _ in range(NEWTON_ROUNDS):  # (Newton kept inside the bracket that still holds the answer; halving where it
+        f = ((ax * t + bx) * t + cx) * t + x0 - x  # would leave it: speed stage H, 40 halvings were 20x a plain line)
+        lo, hi = np.where(f < 0, t, lo), np.where(f < 0, hi, t)
+        d = (3.0 * ax * t + 2.0 * bx) * t + cx
+        with np.errstate(divide="ignore", invalid="ignore"):
+            step = t - f / d
+        t = np.where((d > 1e-300) & (step >= lo) & (step <= hi), step, (lo + hi) / 2.0)
+    s = 1.0 - t
+    return s * s * s * v0 + 3.0 * s * s * t * c1v + 3.0 * s * t * t * c2v + t * t * t * v1
+
+
+NEWTON_ROUNDS = 12  # bez_at: rounds to find a Bézier piece's spot at a time (guarded Newton: exact well before)
+
+
+def split_bez(a, b, u):
+    """Bend points a -> b (a Bézier piece) split at time u, exactly (de Casteljau): (a's new handle on, the new point
+    [u, keys] with its handles, b's new handle back), each as handles lists ([in share, in keys, out share, out keys];
+    a's / b's other side kept)."""
+    c1u, c1k, c2u, c2k = bez_controls(a, b)
+    x0, x1 = a[0], b[0]
+    t_lo, t_hi = 0.0, 1.0
+
+    def cubic(t, p0, p1, p2, p3):
+        s = 1.0 - t
+        return s * s * s * p0 + 3.0 * s * s * t * p1 + 3.0 * s * t * t * p2 + t * t * t * p3
+    for _ in range(BEZ_ROUNDS + 10):
+        mid = (t_lo + t_hi) / 2.0
+        t_lo, t_hi = (mid, t_hi) if cubic(mid, x0, c1u, c2u, x1) < u else (t_lo, mid)
+    t = (t_lo + t_hi) / 2.0
+    P = [(x0, a[1]), (c1u, c1k), (c2u, c2k), (x1, b[1])]
+
+    def lerp(p, q):
+        return p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t
+    p01, p12, p23 = lerp(P[0], P[1]), lerp(P[1], P[2]), lerp(P[2], P[3])
+    p012, p123 = lerp(p01, p12), lerp(p12, p23)
+    m = lerp(p012, p123)
+    ha, hb = handles(a) or [0.0] * 4, handles(b) or [0.0] * 4
+    w0, w1 = max(u - x0, 1e-15), max(x1 - u, 1e-15)
+    a_h = [ha[0], ha[1], min(1.0, max(0.0, (p01[0] - x0) / w0)), p01[1] - a[1]]
+    m_h = [min(1.0, max(0.0, (u - p012[0]) / w0)), p012[1] - m[1], min(1.0, max(0.0, (p123[0] - u) / w1)), p123[1] - m[1]]
+    b_h = [min(1.0, max(0.0, (x1 - p23[0]) / w1)), p23[1] - b[1], hb[2], hb[3]]
+    return a_h, [u, m[1]], m_h, b_h
+
+
 def note_vel(n, beat):
     """A note's own velocity at beat (an array, counted like its "t") from its loudness line (tone["vel"]; before
     its start / after its end: as at them), or None when it has none (it takes the Hz bass's velocity)."""
@@ -76,6 +183,8 @@ def tone_keys(n):
     overshoot them; each wobble's deepest each way)."""
     k = n["key"] + n.get("cents", 0.0) / 100.0
     vals = [p[1] for p in n.get("bend") or ()] or [0.0]
+    # (a Bézier piece stays inside its control points: the handles' ends count too)
+    vals += [p[1] + h[i] for p in n.get("bend") or () if (h := handles(p)) for i in (1, 3)]
     deep = max((depth_most(w) for w in n.get("wobble") or ()), default=0.0)
     return k + min(vals) - deep, k + max(vals) + deep
 
@@ -419,7 +528,13 @@ def wobble_points(n):
             pts.append([round(u, 9), pts[-1][1]])
         else:
             j = next(k for k in range(1, len(pts)) if pts[k][0] > u)
-            if len(pts[j - 1]) > 2 and abs(pts[j][1] - pts[j - 1][1]) > 1e-9:
+            if bez_piece(pts[j - 1], pts[j]):  # (a Bézier piece splits exactly, stage H)
+                a_h, mid, m_h, b_h = split_bez(pts[j - 1], pts[j], u)
+                pts[j - 1], pts[j] = with_handles(pts[j - 1], a_h), with_handles(pts[j], b_h)
+                pts.insert(j, with_handles([round(u, 9), round(mid[1], 6)], m_h))
+                changed = True
+                continue
+            if bend_of(pts[j - 1]) and abs(pts[j][1] - pts[j - 1][1]) > 1e-9:
                 continue
             pts.insert(j, [round(u, 9), pts[j - 1][1] if pts[j][1] == pts[j - 1][1] else
                            round(float(line_at(pts, u)), 6)])
@@ -534,25 +649,34 @@ def bend_part(n, t, span, bits=8):
         # those is a whole one, its curve kept; a cut on a point = that point, its curve too: a note made longer /
         # shorter from its start keeps its first piece's curve)
         on = 0 <= first < len(pts) - 1 and abs(xs[first] - u0) < ON_POINT
-        nodes = [(u0, pts[first][1] if on else at(u0), bend_of(pts[first]) if 0 <= first < len(pts) - 1 else 0.0,
-                  on, pts[first][2:] if on else ())]
+        # (a piece is curved by its curve number or by Bézier handles, stage H: piece_curved)
+        nodes = [(u0, pts[first][1] if on else at(u0), piece_curved(pts, first) if 0 <= first < len(pts) - 1 else
+                  False, on, pts[first][2:] if on else ())]
         inside = [j for j, x in enumerate(xs) if u0 + ON_POINT < x < u1 - ON_POINT]
         for j in inside:
-            nodes.append((xs[j], pts[j][1], bend_of(pts[j]) if j < len(pts) - 1 else 0.0, True,
-                          pts[j][2:] if j < len(pts) - 1 else ()))
-        # (ending ON a point: its pitch; on a jump the first one's, the pitch arriving there, not the one after)
+            nodes.append((xs[j], pts[j][1], piece_curved(pts, j), True, pts[j][2:] if j < len(pts) - 1 else ()))
+        # (ending ON a point: its pitch; on a jump the first one's, the pitch arriving there, not the one after; its
+        # handle back kept for a piece arriving whole)
         last = next((p for p in pts if abs(p[0] - u1) < ON_POINT), None)
-        nodes.append((u1, at(u1) if last is None else last[1], 0.0, last is not None, ()))
-        out = []
+        nodes.append((u1, at(u1) if last is None else last[1], False, last is not None,
+                      last[2:] if last is not None else ()))
+        out, whole = [], []  # (whole[k]: the piece out[k] -> out[k + 1] is one of the line's own, uncut)
         for (a, va, curve, on_a, tail), (b, _, _, on_b, _) in zip(nodes, nodes[1:]):
             if curve and not (on_a and on_b) and b > a:  # (a curve cut through: sampled)
                 out.append([a, va])
                 out += [[a + (b - a) * i / bits, at(a + (b - a) * i / bits)] for i in range(1, bits)]
+                whole += [False] * bits
             else:
-                out.append([a, va] + (list(tail) if curve else []))  # (its own curve, an S too)
-        out.append([u1, nodes[-1][1]])
+                out.append([a, va] + (list(tail) if curve or handles([0, 0, *tail]) else []))
+                whole.append(on_a and on_b)
+        out.append(with_handles([u1, nodes[-1][1]], handles([0, 0, *nodes[-1][4]])))
+        # (handles only where their piece is still whole: a cut through one makes it plain points)
+        out = [side_handles(p, k > 0 and whole[k - 1], k < len(whole) and whole[k]) if handles(p) else p
+               for k, p in enumerate(out)]
+        out = [with_handles(p, None) if len(p) > 2 and not handles(p) and not bend_of(p) else p for p in out]
         out = [[(p[0] - u0) / (u1 - u0), *p[1:]] for p in out]
-    return out if any(abs(p[1]) > 1e-9 for p in out) else None
+    return out if any(abs(p[1]) > 1e-9 or (h := handles(p)) and (abs(h[1]) > 1e-9 or abs(h[3]) > 1e-9)
+                      for p in out) else None
 
 
 def bend_from(n):
@@ -563,12 +687,27 @@ def bend_from(n):
                 bend_at=list(n.get("bend_at") or (n["t"], n["len"])))
 
 
+class LineArrays(tuple):
+    """line_arrays' (beats, values, bends); .bez = the Bézier pieces when the line has handles: (on: piece j is one,
+    c1 beat, c1 value, c2 beat, c2 value) by piece, else None."""
+    bez = None
+
+
 def line_arrays(pts, every=None):
     """line_at's points as arrays (beats, values, bends), for a caller asking about the same line many times."""
     if every:
         pts = [[pts[-1][0] - every, *pts[-1][1:]]] + list(pts) + [[pts[0][0] + every, *pts[0][1:]]]
-    return (np.array([p[0] for p in pts], float), np.array([p[1] for p in pts], float),
-            np.array([bend_of(p) for p in pts]))
+    got = LineArrays((np.array([p[0] for p in pts], float), np.array([p[1] for p in pts], float),
+                      np.array([bend_of(p) for p in pts])))
+    if any(len(p) > 2 and isinstance(p[-1], dict) for p in pts):
+        on = np.zeros(len(pts), bool)
+        c = np.zeros((4, len(pts)))
+        for j, (a, b) in enumerate(zip(pts, pts[1:])):
+            if bez_piece(a, b) and b[0] > a[0]:
+                on[j] = True
+                c[:, j] = bez_controls(a, b)
+        got.bez = (on, *c) if on.any() else None
+    return got
 
 
 def line_at(pts, beat, every=None, arrays=None):
@@ -578,14 +717,24 @@ def line_at(pts, beat, every=None, arrays=None):
     made already."""
     if every:
         beat = np.mod(np.asarray(beat, float), every)
-    xs, vs, bends = line_arrays(pts, every) if arrays is None else arrays
+    arrays = line_arrays(pts, every) if arrays is None else arrays
+    xs, vs, bends = arrays
     beat = np.asarray(beat, float)
     if len(xs) == 1:
         return np.full(beat.shape, vs[0])
     j = np.clip(np.searchsorted(xs, beat, side="right") - 1, 0, len(xs) - 2)
     w = xs[j + 1] - xs[j]
     u = np.where(w > 0, np.clip((beat - xs[j]) / np.where(w > 0, w, 1.0), 0.0, 1.0), 1.0)
-    return vs[j] + (vs[j + 1] - vs[j]) * bent_part(u, bends[j])
+    out = vs[j] + (vs[j + 1] - vs[j]) * bent_part(u, bends[j])
+    bez = getattr(arrays, "bez", None)
+    if bez is not None:  # (Bézier pieces, a Sketch point's handles: stage H 2026-11-13)
+        on = bez[0][j] & (w > 0)
+        if on.any():
+            k = j[on]
+            x = xs[k] + u[on] * w[on]
+            out = np.array(out, float)
+            out[on] = bez_at(x, xs[k], bez[1][k], bez[3][k], xs[k + 1], vs[k], bez[2][k], bez[4][k], vs[k + 1])
+    return out
 
 
 def sustained(pts, every, at, u, held):

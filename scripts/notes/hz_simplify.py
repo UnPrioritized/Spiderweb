@@ -12,7 +12,7 @@ import heapq
 
 import numpy as np
 
-from notes.hz_lines import S_CURVE, bent_part, line_arrays, line_at
+from notes.hz_lines import S_CURVE, bent_part, handles, line_arrays, line_at, side_handles, with_handles
 
 ON_SPOT = 1e-9  # (two points this close in time: a jump)
 CURVES = np.linspace(-0.9, 0.9, 19)  # the curves tried on a piece that spans dropped points (a single, then an S)
@@ -93,17 +93,23 @@ def simplified(pts, count, order=None, semitones=False, curves=True):
     keep = sorted(order[:max(2, count)])
     arrays = line_arrays(pts) if curves and len(keep) < len(pts) else None
     out = []
+    was_whole = False  # (the piece before this point is one of the line's own, kept whole)
     for a, b in zip(keep, keep[1:] + [None]):
         p = pts[a]
         q = [p[0], p[1]]
+        h = handles(p)  # (Bézier handles, stage H: a side kept only while its piece is kept whole)
         if b is not None:
             if b == a + 1:
-                q += list(p[2:])  # (the same piece as before)
+                q += [v for v in p[2:] if not isinstance(v, dict)]  # (the same piece as before)
             elif curves:
                 q += fitted(pts, a, b, arrays)
         elif len(p) > 2 and p[2] == "hold":
             q += list(p[2:])
+        whole = b is not None and b == a + 1
+        if h:
+            q = side_handles(with_handles(q, h), was_whole, whole)
         out.append(q)
+        was_whole = whole
     if semitones:
         for q in out:
             q[1] = float(round(q[1]))

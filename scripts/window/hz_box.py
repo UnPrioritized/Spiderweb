@@ -12,7 +12,7 @@ import copy
 
 from files.lang import tr
 from files.mathexpr import fmt
-from notes.hzbass import NOTE_BEND_MOST, pitch
+from notes.hzbass import NOTE_BEND_MOST, handles, pitch, with_handles
 from roll.roll_shared import BOX_CURSORS, CTRL
 from window import look
 
@@ -152,8 +152,11 @@ class HzBox:
                 else:
                     n["key"] = max(0, min(TOP_KEY, round(to - n.get("cents", 0.0) / 100.0)))
                 if n.get("bend"):
-                    for q in n["bend"]:
+                    for k, q in enumerate(n["bend"]):
                         q[1] = round(max(-NOTE_BEND_MOST, min(NOTE_BEND_MOST, q[1] * fy)), 6)
+                        h = handles(q)
+                        if h:  # (Bézier handles' keys scale with it, stage H; their shares are of the piece)
+                            n["bend"][k] = with_handles(q, [h[0], h[1] * fy, h[2], h[3] * fy])
                 for run in n.get("wobble") or ():  # (its depth in keys scales with the bend)
                     if run.get("depth"):
                         run["depth"] = [v * fy for v in run["depth"]]

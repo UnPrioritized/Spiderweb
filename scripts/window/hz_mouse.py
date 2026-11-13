@@ -1012,8 +1012,9 @@ class HzMouse:
             return self.cancel_drag()
         if d["kind"] == "railpt":  # (Quick detune's rail point held: a middle one goes, hz_note_tools.py)
             return self.rail_delete_dragged()
-        if d["kind"] in ("bendpt", "bendcurve", "wobbledepth", "wobblerate", "wobblespeed", "wobbleend"):  # (a bend
-            # point held: it goes; a curve square: straight again; a wobble depth line, speed post or end post: no wobble)
+        if d["kind"] in ("bendpt", "bendcurve", "bendhandle", "wobbledepth", "wobblerate", "wobblespeed",
+                         "wobbleend"):  # (a bend point held: it goes; a curve square: straight again; a Bézier handle:
+            # that side straight; a wobble depth line, speed post or end post: no wobble)
             return self.bend_delete_dragged()
         self.end_drag()
         if d["kind"] in DOTS:

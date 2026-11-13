@@ -13,7 +13,7 @@ import numpy as np
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.hzbass import NOTE_BEND_MOST, TUNE, pitch
+from notes.hzbass import NOTE_BEND_MOST, TUNE, handles, pitch, side_handles
 from roll.roll_shared import CTRL, SHIFT, note_name
 from window import look
 from window.widgets import REDO_KEYS, UNDO_KEYS, remember_place
@@ -127,7 +127,10 @@ def joined(notes):
         if pts:  # (the gap: held at the last pitch up to this note's start, then the jump)
             pts.append([at(0.0), pts[-1][1]])
         piece = [[at(p[0]), d + p[1], *p[2:]] for p in line]
-        del piece[-1][2:]  # (its last point bends nothing after it: the hold / the next note is straight)
+        # (its last point bends nothing after it: the hold / the next note is straight; its first has no Bézier handle
+        # back: the jump / gap before it is straight; stage H)
+        piece[-1] = side_handles(piece[-1][:2] + ([0.0, piece[-1][-1]] if handles(piece[-1]) else []), True, False)
+        piece[0] = side_handles(piece[0], False, True)
         pts += piece
         for w in n.get("wobble") or ():
             w = copy.deepcopy(w)

@@ -20,10 +20,11 @@ from files.lang import tr, trn
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOBBLE_RATE_MOST, WOBBLE_SHAPES, bend_of,
                           WOBBLE_SEED_STEP, bend_part, bends, bent_part, clean_speed, depth_at, depth_most, depth_pts,
                           fit_speed, fit_wobbles, line_at, pitch, run_copy, set_depth, speed_mean, split_wobbles, wave_end,
-                          wave_start, waves_spot, wobble_keys, wobble_part)
+                          wave_start, waves_spot, wobble_keys, wobble_part, bez_piece, handles, piece_curved, side_handles,
+                          split_bez, with_handles)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
-from window.hz_bend import BEND, LINE_NEAR, NEAR, drop_point, follow_wobble, tidy_bend
+from window.hz_bend import BEND, LINE_NEAR, NEAR, drop_point, follow_wobble, set_curve, tidy_bend
 
 SKETCH_WIDE = 0.6  # the line's thickness: this part of a key's row (between SKETCH_THIN and SKETCH_THICK px)
 SKETCH_THIN, SKETCH_THICK = 3, 9
@@ -93,16 +94,29 @@ def put_point(pts, u):
     into the two curves nearest it there, as a double-click does)."""
     pts = [list(p) for p in pts]
     j = min(len(pts) - 1, max(1, sum(p[0] <= u for p in pts)))
+    return pts, put_at(pts, j, u, 4)
+
+
+def put_at(pts, j, u, places=4):
+    """A point put at u between points j - 1 and j of a bend line (pts changed in place), on the line as it is: a
+    curved piece split into the two curves nearest it there (hunt 2026-10-28), a Bézier piece split exactly (stage
+    H), the points' other handles kept. Its number (j)."""
     a, b = pts[j - 1], pts[j]
+    if b[0] > a[0] and bez_piece(a, b):
+        a_h, mid, m_h, b_h = split_bez(a, b, u)
+        pts[j - 1], pts[j] = with_handles(a, a_h), with_handles(b, b_h)
+        pts.insert(j, with_handles([round(u, 9), round(mid[1], places)], m_h))
+        return j
     curves = (split_curve(bend_of(a), (u - a[0]) / (b[0] - a[0]))
-              if len(a) > 2 and a[1] != b[1] and b[0] > a[0] else None)
+              if bend_of(a) and a[1] != b[1] and b[0] > a[0] else None)
     if curves:
-        del a[2:]
-        a += [curves[0]] if curves[0] else []
-        pts.insert(j, [round(u, 9), round(a[1] + (b[1] - a[1]) * curves[2], 4)] + ([curves[1]] if curves[1] else []))
+        h = handles(a)
+        pts[j - 1] = a = with_handles(a[:2] + ([curves[0]] if curves[0] else []), h)
+        pts.insert(j, [round(u, 9), round(a[1] + (b[1] - a[1]) * curves[2], places)] +
+                   ([curves[1]] if curves[1] else []))
     else:
-        pts.insert(j, [round(u, 9), round(float(line_at(pts, u)), 4)])
-    return pts, j
+        pts.insert(j, [round(u, 9), round(float(line_at(pts, u)), places)])
+    return j
 
 
 def nearest_bend(want, s):
@@ -150,7 +164,8 @@ def bake_wobble(n, run):
         return line_at(pts, u) + wobble_keys([run], u, span)
     # (a speed line or a line under it that isn't flat: eighth waves, the line's own slope / curve bends a quarter
     # wave out of a single curve's reach; stage D: 6-10 % of the depth off on a steep piece, 1-3 % now)
-    sloped = any(abs(p[1] - pts[j][1]) > 1e-9 or len(p) > 2 for p in pts[j:j1]) or abs(pts[j1][1] - pts[j][1]) > 1e-9
+    sloped = (any(abs(p[1] - pts[j][1]) > 1e-9 or piece_curved(pts, k) for k, p in enumerate(pts[j:j1], j))
+              or abs(pts[j1][1] - pts[j][1]) > 1e-9)
     q = (2 if run.get("shape") in ("saw", "square") else 4) * (2 if run.get("speed") or sloped else 1)
     first, last = math.floor(phase * q) + 1, math.ceil(wave_end(run, span) * q)
     if run.get("speed"):  # (a speed line: each eighth wave where its waves get there (a changing pace bends a quarter
@@ -174,7 +189,8 @@ def bake_wobble(n, run):
         out.append([u, round(left, 4)])
         if abs(left - right) > 1e-4:  # (a jump: two points at one spot)
             out.append([u, round(right, 4)])
-    out[-1] = pts[j1]  # (the run's end point as it was, the curve after it kept)
+    # (the run's end point as it was, the curve / handle after it kept; its handle back went with the baked piece)
+    out[-1] = side_handles(pts[j1], False, True)
     if sloped:  # (a slope moves the wave's tops off its quarter waves: a piece going past both its ends gets a point
         # on its top / dip, a single curve never goes past its ends)
         ua = np.array([a[0] for a in out[:-1]])
@@ -202,6 +218,10 @@ def bake_wobble(n, run):
         for (a, _), curve in zip(pairs, nearest_bends(wants, s)):
             if curve:
                 a[2:] = [curve]
+    first = handles(pts[j])  # (the run's start point's handle back stays: the piece before it is as it was, stage H)
+    if first and j > 0 and (first[0] or first[1]):
+        out[0] = with_handles(out[0], [first[0], first[1], 0.0, 0.0] if not handles(out[0]) else
+                              [first[0], first[1], *handles(out[0])[2:]])
     return pts[:j] + [[round(p[0], 9), *p[1:]] for p in out[:-1]] + [out[-1]] + pts[j1 + 1:]
 
 
@@ -985,7 +1005,7 @@ class HzSketch:
         p = self.tones[i]["bend"][j]
         kind = tk.StringVar(self, value="double" if len(p) > 3 and p[3] == "s" else "single")
         menu = tk.Menu(self, tearoff=0)
-        curved = "normal" if len(p) > 2 else "disabled"  # (a straight piece: no curve to make one or an S, hunt)
+        curved = "normal" if bend_of(p) else "disabled"  # (a straight piece: no curve to make one or an S, hunt)
         menu.add_radiobutton(label=tr("hz.curve_single"), variable=kind, value="single", state=curved,
                              command=lambda: self.sketch_curve_kind(i, j, False))
         menu.add_radiobutton(label=tr("hz.curve_double"), variable=kind, value="double", state=curved,
@@ -998,13 +1018,8 @@ class HzSketch:
         """Piece j of note i: an S (s True), one curve (False), straight (None). One undo step."""
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
-        p = self.tones[i]["bend"][j]
-        if s is None:
-            del p[2:]
-        else:
-            del p[3:]
-            if s and len(p) > 2:
-                p.append("s")
+        pts = self.tones[i]["bend"]
+        set_curve(pts, j, 0.0 if s is None else float(pts[j][2]) if len(pts[j]) > 2 else 0.0, bool(s))
         self.bend_done({"i": i, "before": before}, tr("hz.step_note_bend_curve"))
 
     def sketch_new_to(self, d, n, e):
@@ -1048,10 +1063,11 @@ class HzSketch:
         j = sum(p[0] <= u for p in pts)
         a, b = pts[j - 1], pts[min(j, len(pts) - 1)]
         curves = (split_curve(bend_of(a), (u - a[0]) / (b[0] - a[0]))
-                  if 0 < j < len(pts) and len(a) > 2 and a[1] != b[1] and b[0] > a[0] else None)
-        if curves:  # (a curved piece: each part gets the curve nearest the old one's there, hunt 2026-10-28)
-            del a[2:]
-            a += [curves[0]] if curves[0] else []
+                  if 0 < j < len(pts) and bend_of(a) and a[1] != b[1] and b[0] > a[0] else None)
+        if 0 < j < len(pts) and b[0] > a[0] and bez_piece(a, b):  # (a Bézier piece: split exactly, stage H)
+            put_at(pts, j, u, 6)
+        elif curves:  # (a curved piece: each part gets the curve nearest the old one's there, hunt 2026-10-28)
+            pts[j - 1] = a = with_handles(a[:2] + ([curves[0]] if curves[0] else []), handles(a))
             pts.insert(j, [u, a[1] + (b[1] - a[1]) * curves[2]] + ([curves[1]] if curves[1] else []))
         else:
             pts.insert(j, [u, round(float(line_at(pts, u)), 2)])

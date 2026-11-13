@@ -22,7 +22,8 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import fmt
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bend_of, bends, line_at, merge_wobbles, note_bend, pitch,
-                          depth_most, wobble_edges, wobble_points)
+                          depth_most, handles, line_curved, piece_curved, side_handles, with_handles, wobble_edges,
+                          wobble_points)
 from roll.roll_shared import SHIFT
 from window import look
 
@@ -37,7 +38,9 @@ BEND = look.HZ_BEND
 BEND_TOOLS = ("bend", "sketch")  # the tools that show and edit the bend points (Sketch: hz_sketch.py)
 # the drags bend_drag / bend_release take (sketch* + wobble*: the Sketch tool's, hz_sketch.py)
 BEND_DRAGS = ("bendpt", "bendcurve", "sketchpiece", "sketchend", "wobbledepth", "wobblerate", "wobblespeed",
-              "wobbleend")
+              "wobbleend", "bendhandle")
+HANDLE_DOT = 3.5  # px: a Bézier handle's diamond (half its size); a press this near (+ NEAR) grabs it
+HANDLE_AUTO = 1 / 3  # handles turned on with Alt+click: this share of each piece, along the line's way there
 WOBBLE_DRAGS = ("wobbledepth", "wobblerate", "wobblespeed")  # (several selected notes: theirs change alike, stage D)
 
 
@@ -67,7 +70,7 @@ class HzBend:
         lo, hi, count = n["t"], n["t"] + n["len"], 49
         # (a curved piece too, user 2026-11-13: 49 spots over a long / zoomed-in note drew its curve as a few straight
         # strokes off the smooth red line; straight pieces need only their points)
-        if n.get("wobble") or any(bend_of(p) for p in pts[:-1]):
+        if n.get("wobble") or line_curved(pts):
             pad = 4 / max(self.sx, 1e-9)
             lo = max(lo, self.beat_at(self.kb_w) - pad)
             hi = min(hi, self.beat_at(self.canvas.winfo_width()) + pad)
@@ -140,7 +143,8 @@ class HzBend:
         out = []
         for i, j in {(i, j) for _, _, i, j in self.bend_points()}:
             pts = self.tones[i].get("bend") or ()
-            if self.sketching() and not self.sketch_alt and not (j + 1 < len(pts) and len(pts[j]) > 2):
+            # (Bézier pieces: their handles instead, stage H; Alt held: a square on every piece, Alt+drag = a curve)
+            if self.sketching() and not self.sketch_alt and not (j + 1 < len(pts) and bend_of(pts[j])):
                 continue
             q = self.piece_square(i, j)
             if q:
@@ -175,6 +179,9 @@ class HzBend:
         if which:
             return "wobble", self.picked_piece()[0], which
         r = NEAR * self.s
+        for hx, hy, _, _, i, j, side in reversed(self.handle_spots()):  # (Sketch: Bézier handles stick out: first)
+            if abs(x - hx) <= r and abs(y - hy) <= r:
+                return "handle", i, j, side
         slides = [max(abs(x - dx), abs(y - dy)) for dx, dy, *_ in self.dots() + self.handles()]
         for px, py, i, j in reversed(self.bend_points()):
             if abs(x - px) <= r and abs(y - py) <= r:  # (a slide's dot nearer still wins: one just after a note's
@@ -230,6 +237,13 @@ class HzBend:
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, (sorted(self.sel), kept and list(kept), len(before), self.sketch_pick))
         i, n = hit[1], self.tones[hit[1]]
+        if hit[0] == "handle":  # (Sketch: a point's Bézier handle held, handle_to; Alt: that side alone)
+            self.drag = {"kind": "bendhandle", "i": i, "j": hit[2], "side": hit[3], "before": before, "x": e.x,
+                         "y": e.y, "moved": False, "alone": self.curving(e.state), "name": tr("hz.step_handles")}
+            self.redraw()
+            return True
+        if hit[0] == "point" and self.sketching() and self.curving(e.state):  # (Alt+click a point: its handles
+            return self.handles_toggle(e, i, hit[2], before)                     # on / off, stage H)
         if not (self.sketching() and hit[0] in ("wobble", "note") and i in self.sel):  # (Sketch: one of several
             self.sel, self.box_kept = {i}, None  # selected notes pressed: they stay selected, their wobbles change
             # alike, stage D 2026-11-13)
@@ -298,13 +312,14 @@ class HzBend:
             s = d.setdefault("s", len(p) > 3 and p[3] == "s")  # (an S stays one: its square a quarter of the way,
             at = 0.25 if s else 0.5                              # where it's (1 + b) / 4 up)
             straight = self.pitch_y(pitch(n) + k0 + (k1 - k0) * at)
-            del p[2:]
+            b = 0.0
             if abs(y - straight) > BEND_STICK * self.s or e.state & SHIFT:  # (else it sticks to straight)
                 b = min(SLIDE_BEND, max(-SLIDE_BEND, (4.0 if s else 2.0) * part - 1.0))
-                if b:
-                    p += [b, "s"] if s else [b]
+            set_curve(n["bend"], j, b, s)  # (a Bézier piece's handles go: a curve instead, stage H)
             self.redraw()
             return True
+        if d["kind"] == "bendhandle":  # (Sketch: a point's Bézier handle, stage H)
+            return self.handle_to(d, n, e)
         pts, j = n["bend"], d["j"]
         u, k = self.bend_spot(n, e)
         if not d["pinned"]:  # (between its neighbours; two at one spot = a jump)
@@ -330,6 +345,8 @@ class HzBend:
                 return True
         if d["kind"] == "wobblerate" and not d["moved"]:  # (Sketch: the speed post clicked: its speed strip)
             self.speed_toggle()
+        if d["kind"] == "bendhandle" and not d["moved"] and not d.get("made"):  # (a handle tapped: that side
+            self.handle_straight(d["i"], d["j"], d["side"])                     # straight again, the plugin's)
         if d["kind"] in WOBBLE_DRAGS + ("wobbleend",):
             if self.tones[d["i"]] == d["before"][d["i"]]:  # (back where it started: the other selected notes too, no
                 self.tones[:] = copy.deepcopy(d["before"])  # undo step; hunt 2026-11-13: theirs were replaced)
@@ -373,7 +390,12 @@ class HzBend:
             return
         pts = self.tones[d["i"]]["bend"]
         if d["kind"] == "bendcurve":
-            del pts[d["j"]][2:]
+            set_curve(pts, d["j"], 0.0)
+        elif d["kind"] == "bendhandle":  # (that side of the point straight again)
+            self.tones[:] = copy.deepcopy(d["before"])
+            self.handle_straight(d["i"], d["j"], d["side"])
+            self.bend_done(d, tr("hz.step_handles"))
+            return
         else:
             drop_point(self.tones[d["i"]], d["j"])  # (its wobbles merged, hunt 2026-10-28)
         self.bend_done(d, tr("hz.step_note_bend_delete") if d["kind"] == "bendpt" else None)
@@ -401,7 +423,7 @@ class HzBend:
         self.drop_drag()
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
-        del self.tones[hit[1]]["bend"][hit[2]][2:]
+        set_curve(self.tones[hit[1]]["bend"], hit[2], 0.0)
         self.bend_done({"i": hit[1], "before": before}, tr("hz.step_note_bend_curve"))
         return True
 
@@ -410,6 +432,12 @@ class HzBend:
         if not self.bending():
             return False
         hit = self.bend_hit(e.x, e.y)
+        if hit and hit[0] == "handle":  # (Sketch: a Bézier handle right-clicked: that side straight again, one step)
+            before = copy.deepcopy(self.tones)
+            self.sel_before = (before, self.sel_state())
+            self.handle_straight(hit[1], hit[2], hit[3])
+            self.bend_done({"i": hit[1], "before": before}, tr("hz.step_handles"))
+            return True
         if hit and hit[0] == "wobble":  # (Sketch's depth line: a depth point goes; elsewhere the wobble's shape,
             return self.sketch_depth_drop(hit[1], hit[2]) or self.sketch_wobble_menu(e, hit[1])  # Bake, Remove...)
         if hit and hit[0] == "curve" and self.sketching():  # (Sketch: Single curve / S-curve / Straight)
@@ -438,7 +466,7 @@ class HzBend:
             return False
         inner = hit[0] == "wobble" and (hit[2][0] == "pt" and 0 < hit[2][1] < len(self.depth_shape()[0]) - 1
                                         or hit[2][0] == "spt" and 0 < hit[2][1] < len(self.speed_shape()[0]) - 1)
-        cursor = ("fleur" if hit[0] == "point" or inner else
+        cursor = ("fleur" if hit[0] in ("point", "handle") or inner else
                   "hand2" if hit[0] == "wobble" and hit[2][0] in ("preset", "lock") else
                   "arrow" if hit[0] == "wobble" and hit[2][0] == "strip" else
                   "sb_h_double_arrow" if hit[0] == "end" or hit[0] == "wobble" and (hit[2] == "speed"
@@ -521,11 +549,111 @@ class HzBend:
         self.set_bends(sorted(self.sel), kind, tr("hz.step_note_bend_shape"))
         self.say(tr("hz.ramp_done", shape=tr(f"hz.bend_{kind}")))
 
+    def handle_end(self, n, j, side, h=None):
+        """(x, y) of the end of bend point j's handle (side 0 = back towards the point before, 1 = on), note n; h =
+        those handles instead of the point's own."""
+        pts = n["bend"]
+        h = h or handles(pts[j])
+        u, k = pts[j][:2]
+        other = pts[j - 1][0] if side == 0 else pts[j + 1][0]
+        uh = u + h[2 * side] * (other - u)
+        return self.x_of(n["t"] + uh * n["len"]), self.pitch_y(pitch(n) + k + h[2 * side + 1])
+
+    def handle_spots(self):
+        """[(x, y, point x, point y, tone number, point number, side)]: the Bézier handles shown (Sketch tool, stage H:
+        the selected notes' points that have them; each side with a piece there)."""
+        if not self.sketching():
+            return []
+        out, w = [], self.canvas.winfo_width()
+        for i in sorted(self.sel):
+            if i >= len(self.tones):
+                continue
+            n = self.tones[i]
+            pts = n.get("bend") or ()
+            if self.x_of(n["t"] + n["len"]) < self.kb_w or self.x_of(n["t"]) > w:
+                continue
+            for j, p in enumerate(pts):
+                h = handles(p)
+                if not h:
+                    continue
+                px, py = self.x_of(n["t"] + p[0] * n["len"]), self.pitch_y(pitch(n) + p[1])
+                for side in (0, 1):
+                    if (j > 0 if side == 0 else j + 1 < len(pts)) and (h[2 * side] or h[2 * side + 1]):
+                        out.append((*self.handle_end(n, j, side), px, py, i, j, side))
+        return out
+
+    def handles_toggle(self, e, i, j, before):
+        """Alt+click on bend point j of note i (Sketch, stage H; the plugin's): with handles = they go (one step); without
+        = mirrored ones along the line's way through it (HANDLE_AUTO of each piece), its handle on held so a drag
+        shapes them at once (let go unmoved: they stay)."""
+        n = self.tones[i]
+        self.sel, self.box_kept = {i}, None
+        pts = n["bend"] = [list(p) for p in n.get("bend") or ([0.0, 0.0], [1.0, 0.0])]
+        if handles(pts[j]):
+            pts[j] = with_handles(pts[j], None)
+            self.bend_done({"i": i, "before": before}, tr("hz.step_handles"))
+            return True
+        lo, hi = max(0, j - 1), min(len(pts) - 1, j + 1)
+        du = pts[hi][0] - pts[lo][0]
+        slope = (pts[hi][1] - pts[lo][1]) / du if du > 1e-12 else 0.0  # (keys per part of the note)
+        h = [0.0, 0.0, 0.0, 0.0]
+        if j > 0:
+            h[0], h[1] = HANDLE_AUTO, -slope * HANDLE_AUTO * (pts[j][0] - pts[j - 1][0])
+        if j + 1 < len(pts):
+            h[2], h[3] = HANDLE_AUTO, slope * HANDLE_AUTO * (pts[j + 1][0] - pts[j][0])
+        # (a power curve on a piece by it: those pieces are Bézier now)
+        pts[j] = with_handles([pts[j][0], pts[j][1]], h)
+        if j > 0 and bend_of(pts[j - 1]):
+            pts[j - 1] = with_handles(pts[j - 1][:2], handles(pts[j - 1]))
+        side = 1 if j + 1 < len(pts) else 0
+        self.drag = {"kind": "bendhandle", "i": i, "j": j, "side": side, "before": before, "x": e.x, "y": e.y,
+                     "moved": False, "alone": False, "made": True, "name": tr("hz.step_handles")}
+        self.redraw()
+        return True
+
+    def handle_to(self, d, n, e):
+        """Bend point d["j"]'s handle d["side"] dragged to the mouse: its share of its piece (0..1: never behind the
+        point or past the next one) and keys; the other side mirrored (same length, the other way) unless held with
+        Alt ("alone", the plugin's), shortened when it would go past its own piece."""
+        pts, j, side = n["bend"], d["j"], d["side"]
+        h = list(handles(pts[j]) or (0.0, 0.0, 0.0, 0.0))
+        u, k = pts[j][:2]
+        um = (self.beat_at(e.x) - n["t"]) / max(n["len"], 1e-12)
+        km = self.top + 0.5 - (e.y - self.ruler_h) / self.sy - pitch(n)  # (pitch_y turned round)
+        most = 2.0 * self.bend_most()
+        other = pts[j - 1][0] if side == 0 else pts[j + 1][0]
+        width = abs(other - u)
+        f = min(1.0, max(0.0, (um - u) / (other - u))) if width > 1e-12 else 0.0
+        h[2 * side], h[2 * side + 1] = f, max(-most, min(most, km - k))
+        o = 1 - side
+        if not d["alone"] and (j > 0 if o == 0 else j + 1 < len(pts)):
+            far = pts[j - 1][0] if o == 0 else pts[j + 1][0]
+            wo = abs(far - u)
+            fo, ko = f * width / wo if wo > 1e-12 else 0.0, -h[2 * side + 1]
+            if fo > 1.0:  # (past its own piece: shorter, the same way)
+                fo, ko = 1.0, ko / fo
+            h[2 * o], h[2 * o + 1] = fo, ko
+        pts[j] = with_handles(pts[j], h)  # (dragged back onto the point: no handles)
+        self.redraw()
+        return True
+
+    def handle_straight(self, i, j, side):
+        """Bend point j of note i: its handle on that side gone (that side of it straight again); none left = no
+        handles."""
+        pts = self.tones[i].get("bend")
+        if pts and j < len(pts) and handles(pts[j]):
+            pts[j] = side_handles(pts[j], side != 0, side != 1)
+
     def draw_bends(self):
         """With the Bend tool: each note's bend line in view (as it bends the note, dashed) and its points."""
         if not self.bending():
             return
         c, s, most, w = self.paint, self.s, self.bend_most(), self.canvas.winfo_width()
+        r = HANDLE_DOT * s
+        for hx, hy, px, py, *_ in self.handle_spots():  # (Sketch: Bézier handles, a line + a diamond each, stage H)
+            c.create_line(px, py, hx, hy, fill=BEND, width=max(1, round(s)))
+            c.create_polygon(hx, hy - r, hx + r, hy, hx, hy + r, hx - r, hy, fill=look.HZ_DOT, outline=BEND,
+                             width=max(1, round(1.5 * s)))
         for n in self.tones if not self.sketching() else ():  # (Sketch: the note's own line shows it)
             if not n.get("bend") or self.x_of(n["t"] + n["len"]) < self.kb_w or self.x_of(n["t"]) > w:
                 continue
@@ -534,7 +662,7 @@ class HzBend:
             c.create_line(*xy, fill=BEND, width=max(1, round(1.5 * s)), dash=(4, 2))
         r = 3 * s
         for x, y, i, j, *_ in self.bend_squares():  # (filled = curved)
-            curved = len(self.tones[i]["bend"][j]) > 2
+            curved = piece_curved(self.tones[i]["bend"], j)
             c.create_rectangle(x - r, y - r, x + r, y + r, fill=BEND if curved else "", outline=BEND,
                                width=max(1, round(1.5 * s)))
         r = 3.5 * s
@@ -615,13 +743,32 @@ def tidy_bend(n, pieces=False):
     if pts is None:
         return
     pts[:] = [[round(p[0], 9), round(p[1], 4), *p[2:]] for p in pts]
+    # (Bézier handles, stage H: none on the line's first point back / last point on (no piece there), all-0 ones gone)
+    for k, p in enumerate(pts):
+        if handles(p):
+            pts[k] = side_handles(p, k > 0, k < len(pts) - 1)
     # two points on one spot at one pitch do nothing: one (user 2026-10-28), the later kept (its curve is the
     # piece after); at different pitches they're a jump and stay
     pts[:] = [p for p, q in zip(pts, pts[1:] + [None]) if not (q and q[0] == p[0] and q[1] == p[1])]
-    if pts and all(abs(p[1]) < 1e-9 for p in pts) and not pieces and n.get("wobble"):
+
+    def flat():  # (at 0 all along: a handle reaching up / down bends it)
+        return all(abs(p[1]) < 1e-9 and not ((h := handles(p)) and (abs(h[1]) > 1e-9 or abs(h[3]) > 1e-9))
+                   for p in pts)
+    if pts and flat() and not pieces and n.get("wobble"):
         # (flat, Bend tool: the points a wobble starts / ends on stay, its piece with them; hunt 2026-10-28)
         ends = {u for w in n["wobble"] for u in w["at"]} | {0.0, 1.0}
         pts[:] = [p for p in pts if any(abs(p[0] - u) < ON_POINT for u in ends)]
         pieces = True
-    if not pts or all(abs(p[1]) < 1e-9 for p in pts) and not (pieces and len(pts) > 2):
+    if not pts or flat() and not (pieces and len(pts) > 2):
         n.pop("bend")
+
+
+def set_curve(pts, j, curve, s=False):
+    """Piece j of a bend line (point j to j + 1) curved by `curve` (0: straight; s: as an S). Its Bézier handles
+    (point j's on, j + 1's back) go: Alt+drag still curves a piece the old way (user 2026-11-13, stage H: keep both);
+    point j's handle back stays."""
+    a = side_handles(pts[j], True, False)
+    base = [a[0], a[1]] + (([curve, "s"] if s else [curve]) if curve else [])
+    pts[j] = with_handles(base, handles(a))
+    if j + 1 < len(pts):
+        pts[j + 1] = side_handles(pts[j + 1], False, True)

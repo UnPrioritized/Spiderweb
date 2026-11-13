@@ -299,15 +299,33 @@ def clean_vel(pts):
     return sorted(got, key=lambda p: p[0]) or None
 
 
+def clean_handles(h):
+    """A bend point's Bézier handles checked (stage H, 2026-11-13): [in share, in keys, out share, out keys] = the
+    handle back towards the point before (share 0..1 of that piece's length, keys up from the point) and the one on
+    towards the next; None when it's no good or all at 0 (no handles)."""
+    try:
+        f0, k0, f1, k1 = (float(v) for v in h)
+    except (TypeError, ValueError):
+        return None
+    if not all(math.isfinite(v) for v in (f0, k0, f1, k1)):
+        return None
+    most = 2.0 * NOTE_BEND_MOST
+    got = [min(1.0, max(0.0, f0)), min(most, max(-most, k0)), min(1.0, max(0.0, f1)), min(most, max(-most, k1))]
+    return got if any(abs(v) > 1e-12 for v in got) else None
+
+
 def clean_bend(pts):
-    """A note's own bend line checked (tone["bend"]): [[u, keys(, curve(, "s"))], ...] in order, u = 0..1 along the
-    note, keys up (below 0: down) as far as NOTE_BEND_MOST, curve = how the piece to the next point bends
-    (-SLIDE_BEND..SLIDE_BEND, hz_lines.bent_part; missing = straight), "s" = that curve as an S (each half, the
-    Sketch tool's); None when it's no good or empty."""
+    """A note's own bend line checked (tone["bend"]): [[u, keys(, curve(, "s"))(, {"h": handles})], ...] in order,
+    u = 0..1 along the note, keys up (below 0: down) as far as NOTE_BEND_MOST, curve = how the piece to the next
+    point bends (-SLIDE_BEND..SLIDE_BEND, hz_lines.bent_part; missing = straight), "s" = that curve as an S (each
+    half, the Sketch tool's); {"h": [...]} last = the point's Bézier handles (clean_handles; a point with them always
+    has its curve number, 0 = none); None when it's no good or empty."""
     most = NOTE_BEND_MOST
     out = []
     try:
         for p in pts or ():
+            h = p[-1].get("h") if len(p) > 2 and isinstance(p[-1], dict) else None
+            p = [v for v in p if not isinstance(v, dict)]
             u, k = float(p[0]), float(p[1])
             curve = float(p[2]) if len(p) > 2 else 0.0
             if math.isfinite(u) and math.isfinite(k) and math.isfinite(curve):
@@ -316,8 +334,13 @@ def clean_bend(pts):
                     got.append(min(SLIDE_BEND, max(-SLIDE_BEND, curve)))
                     if len(p) > 3 and p[3] == "s":  # (an S: hz_lines.S_CURVE)
                         got.append("s")
+                h = clean_handles(h) if h is not None else None
+                if h:
+                    if len(got) == 2:
+                        got.append(0.0)
+                    got.append({"h": h})
                 out.append(got)
-    except (TypeError, ValueError, IndexError):
+    except (TypeError, ValueError, IndexError, AttributeError):
         return None
     return sorted(out, key=lambda p: p[0]) or None
 
