@@ -75,7 +75,7 @@ def tone_keys(n):
     overshoot them; each wobble's deepest each way)."""
     k = n["key"] + n.get("cents", 0.0) / 100.0
     vals = [p[1] for p in n.get("bend") or ()] or [0.0]
-    deep = max((max(w["depth"]) for w in n.get("wobble") or ()), default=0.0)
+    deep = max((depth_most(w) for w in n.get("wobble") or ()), default=0.0)
     return k + min(vals) - deep, k + max(vals) + deep
 
 
@@ -151,9 +151,56 @@ def wave_end(w, span):
     return half if abs(end - half) < HALF_NEAR else end
 
 
+def depth_pts(w):
+    """A wobble run's depth line: its "env" points ([[share 0..1 of the run, keys(, curve)], ...], the depth line's
+    own points, stage B 2026-11-13) or a straight line from its "depth" at the start to the one at its end."""
+    return w.get("env") or [[0.0, w["depth"][0]], [1.0, w["depth"][1]]]
+
+
+def depth_at(w, share):
+    """A wobble run's depth (keys each way) at share (0..1 of the run, an array)."""
+    return line_at(depth_pts(w), share)
+
+
+def depth_most(w):
+    """A wobble run's deepest depth (its points: the curves between them never go past them)."""
+    return max(p[1] for p in depth_pts(w))
+
+
+def set_depth(w, pts):
+    """Run w's depth line set to pts ([[share, keys(, curve)], ...], first at 0, last at 1): kept as "env" when
+    it has points between its ends or a curve, else as the plain "depth" pair (old saves' way); "depth" always holds
+    its two ends."""
+    pts = [[round(float(p[0]), 9), round(max(0.0, float(p[1])), 4), *p[2:3]] for p in pts]
+    w["depth"] = [pts[0][1], pts[-1][1]]
+    if len(pts) > 2 or any(len(p) > 2 for p in pts[:-1]):
+        w["env"] = pts
+    else:
+        w.pop("env", None)
+    return w
+
+
+def depth_cut(w, a, b):
+    """Run w's depth line from share a to b (0..1 of the run), laid over that part (0..1): its points inside, a
+    curved piece cut through made of short straight ones (as bend_part cuts a bend)."""
+    pts = w.get("env")
+    if not pts:
+        d0, d1 = w["depth"]
+        return [[0.0, round(d0 + (d1 - d0) * a, 4)], [1.0, round(d0 + (d1 - d0) * b, 4)]]
+    got = bend_part({"bend": pts, "t": 0.0, "len": 1.0}, a, b - a)
+    return got or [[0.0, 0.0], [1.0, 0.0]]
+
+
+def cut_depth(w, a, b):
+    """Run w with its depth line cut to share a..b (depth_cut, set_depth), a new dict."""
+    run = dict(w)
+    run.pop("env", None)
+    return set_depth(run, depth_cut(w, a, b))
+
+
 def wobble_keys(runs, u, span):
     """Keys a note's wobbles (tone["wobble"], hz_settings.clean_wobble) add at u (0..1 along it, an array) when it's
-    span beats long: each run's wave from u0 to u1, its depth (keys each way) going from the first to the second,
+    span beats long: each run's wave from u0 to u1, its depth (keys each way) following its depth line (depth_pts),
     `rate` waves a beat counted from its start (+ "phase" waves: a run cut at its start goes on in step)."""
     u = np.asarray(u, float)
     out = np.zeros(u.shape)
@@ -162,7 +209,7 @@ def wobble_keys(runs, u, span):
         if u1 - u0 <= 1e-12:
             continue
         share = np.clip((u - u0) / (u1 - u0), 0.0, 1.0)
-        depth = w["depth"][0] + (w["depth"][1] - w["depth"][0]) * share
+        depth = depth_at(w, share)
         # (never quite its end's wave count: a hair before the end must read the last half wave, not the next one
         # rounding makes of it; user's picture 2026-10-28, a square ending in a dip)
         end = wave_end(w, span)
@@ -215,10 +262,9 @@ def split_wobbles(n, u):
         if not u0 + ON_POINT < u < u1 - ON_POINT:
             out.append(w)
             continue
-        d = w["depth"][0] + (w["depth"][1] - w["depth"][0]) * (u - u0) / (u1 - u0)
-        first = dict(w, at=[u0, u], depth=[w["depth"][0], round(d, 4)])
-        second = dict(w, at=[u, u1], depth=[round(d, 4), w["depth"][1]],
-                      **went_on(w, w["rate"] * (u - u0) * n["len"]))
+        s = (u - u0) / (u1 - u0)
+        first = dict(cut_depth(w, 0.0, s), at=[u0, u])
+        second = dict(cut_depth(w, s, 1.0), at=[u, u1], **went_on(w, w["rate"] * (u - u0) * n["len"]))
         out += [first, second]
     if out:
         n["wobble"] = out
@@ -274,10 +320,8 @@ def wobble_part(n, t, span):
         lo, hi = max(a, off), min(b, off + span)
         if hi - lo <= 1e-9 or b - a <= 1e-12:
             continue
-
-        def depth(x):
-            return round(w["depth"][0] + (w["depth"][1] - w["depth"][0]) * (x - a) / (b - a), 4)
-        run = dict(w, at=[round((lo - off) / span, 9), round((hi - off) / span, 9)], depth=[depth(lo), depth(hi)])
+        run = dict(cut_depth(w, (lo - a) / (b - a), (hi - a) / (b - a)),
+                   at=[round((lo - off) / span, 9), round((hi - off) / span, 9)])
         if lo > a + 1e-12:
             run.update(went_on(w, w["rate"] * (lo - a)))
         out.append(run)

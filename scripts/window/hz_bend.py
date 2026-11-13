@@ -22,7 +22,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import fmt
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bends, line_at, merge_wobbles, note_bend, pitch,
-                          split_wobbles, wobble_edges)
+                          depth_most, split_wobbles, wobble_edges)
 from roll.roll_shared import SHIFT
 from window import look
 
@@ -355,6 +355,8 @@ class HzBend:
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] == "slide":
             return False
+        if hit[0] == "wobble" and hit[2][0] == "line":  # (Sketch's depth line: a depth point added there, held;
+            return self.sketch_depth_double(e, hit[1], hit[2])  # its points / post / buttons: a press again)
         if self.sketching() and hit[0] in ("note", "point", "curve"):  # (hz_sketch.py: a point added / taken away;
             return self.sketch_double(e, hit[:2] if hit[0] == "curve" else hit)  # on a square too: hunt 2026-10-28,
             # Straight is in its right-click menu)
@@ -373,8 +375,8 @@ class HzBend:
         if not self.bending():
             return False
         hit = self.bend_hit(e.x, e.y)
-        if hit and hit[0] == "wobble":  # (Sketch's depth line: the wobble's shape, Upside down, Bake, Remove)
-            return self.sketch_wobble_menu(e, hit[1])
+        if hit and hit[0] == "wobble":  # (Sketch's depth line: a depth point goes; elsewhere the wobble's shape,
+            return self.sketch_depth_drop(hit[1], hit[2]) or self.sketch_wobble_menu(e, hit[1])  # Bake, Remove...)
         if hit and hit[0] == "curve" and self.sketching():  # (Sketch: Single curve / S-curve / Straight)
             self.sketch_curve_menu(e, hit[1], hit[2])
             return True
@@ -399,7 +401,9 @@ class HzBend:
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] == "slide":
             return False
-        cursor = ("fleur" if hit[0] == "point" else
+        inner = hit[0] == "wobble" and hit[2][0] == "pt" and 0 < hit[2][1] < len(self.depth_shape()[0]) - 1
+        cursor = ("fleur" if hit[0] == "point" or inner else
+                  "hand2" if hit[0] == "wobble" and hit[2][0] == "preset" else
                   "sb_h_double_arrow" if hit[0] == "end" or hit[0] == "wobble" and hit[2] == "speed" else
                   "sb_v_double_arrow" if hit[0] == "curve" or self.sketching() else
                   self.pencil)  # (Sketch: a press on the line holds its piece, up / down)
@@ -561,7 +565,7 @@ def tidy_bend(n, pieces=False):
     """A note's bend line after a change: rounded; none left when every point is back at 0 (pieces: the Sketch
     tool's, a flat line keeps the points between its ends, they're its pieces). Wobbles with no length left go."""
     if "wobble" in n:
-        n["wobble"] = [w for w in n["wobble"] if w["at"][1] - w["at"][0] > 1e-9 and max(w["depth"]) > 0]
+        n["wobble"] = [w for w in n["wobble"] if w["at"][1] - w["at"][0] > 1e-9 and depth_most(w) > 0]
         if not n["wobble"]:
             del n["wobble"]
     pts = n.get("bend")

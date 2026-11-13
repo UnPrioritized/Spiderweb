@@ -580,6 +580,8 @@ class HzView:
         text += self.bend_status() + self.detune_status()
         if e is not None and not self.drag and self.detune_edge(e.x, e.y):  # (Quick detune: hz_note_tools.py)
             text += "     " + tr("hz.detune_hint")
+        if e is not None and not self.drag:  # (Sketch: a wobble's depth preset button)
+            text += self.depth_hint(e.x, e.y)
         hit = self.hit(e.x, e.y) if e is not None and not self.drag else None
         held = self.drag["kind"] if self.drag else hit and hit[0]
         if held in ("in", "out", "bend") and self.slides_off():

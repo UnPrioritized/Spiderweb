@@ -18,8 +18,8 @@ import numpy as np
 
 from files.lang import tr, trn
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOBBLE_RATE_MOST, WOBBLE_SHAPES, bend_of,
-                          WOBBLE_SEED_STEP, bend_part, bends, bent_part, line_at, pitch, split_wobbles, wave_end,
-                          wave_start, wobble_keys, wobble_part)
+                          WOBBLE_SEED_STEP, bend_part, bends, bent_part, depth_at, depth_most, depth_pts, line_at,
+                          pitch, set_depth, split_wobbles, wave_end, wave_start, wobble_keys, wobble_part)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
 from window.hz_bend import BEND, LINE_NEAR, NEAR, drop_point
@@ -37,6 +37,15 @@ WOBBLE_STEP = 0.1  # keys: the depth goes in these steps (Shift: 0.01)
 SPEED_POST = 12  # px: the speed post's height above the depth line
 SPEED_DOUBLE = 60  # px: the speed post dragged this far right = twice as fast (left: half)
 PHASE_STEP = 0.125  # waves: the wobble menu's Phase ◀ / ▶ move its wave this much (the plugin's 1/8, user 2026-11-13)
+# the depth line's shapes (user 2026-11-13: small buttons above the wobble; the plugin's five): [[share of the run,
+# share of the deepest depth(, curve)], ...]; Decay falls fast first, Swell grows slowly first
+DEPTH_PRESETS = {"full": [[0.0, 1.0], [1.0, 1.0]], "fade_in": [[0.0, 0.0], [1.0, 1.0]],
+                 "decay": [[0.0, 1.0, 0.6], [1.0, 0.0]], "triangle": [[0.0, 0.0], [0.5, 1.0], [1.0, 0.0]],
+                 "swell": [[0.0, 0.0, -0.6], [1.0, 1.0]]}
+PRESET_SIZE, PRESET_GAP = 13, 3  # px: a depth preset button's size, the room between them
+DEPTH_SAMPLES = 17  # a curved piece of the depth line is drawn in this many spots
+DEPTH_CURVE_PX = 40  # px: Alt+dragging a depth piece this far = a full curve (SLIDE_BEND)
+DEPTH_CURVE_STICK = 0.05  # ... nearer straight than this sticks to straight (Shift: free)
 
 
 def split_curve(bend, t):
@@ -156,60 +165,195 @@ class HzSketch:
         x0, x1 = self.x_of(n["t"] + u0 * n["len"]), self.x_of(n["t"] + u1 * n["len"])
         return x0, base - d0 * self.sy, x1, base - d1 * self.sy, base
 
+    def depth_shape(self):
+        """The picked piece's depth line as drawn: (its points [[share, keys(, curve)], ...], [(x, y) of each point],
+        [(x, y, piece number), ...] along it (each curved piece in DEPTH_SAMPLES bits)), or None."""
+        got, piece = self.depth_line(), self.picked_piece()
+        if not got:
+            return None
+        x0, _, x1, _, base = got
+        run = self.wobble_run(self.tones[piece[0]], piece[2], piece[3])
+        pts = depth_pts(run) if run else [[0.0, 0.0], [1.0, 0.0]]
+
+        def xy(share, d):
+            return x0 + (x1 - x0) * share, base - d * self.sy
+        line = []
+        for j, (a, b) in enumerate(zip(pts, pts[1:])):
+            s = np.linspace(0.0, 1.0, DEPTH_SAMPLES if len(a) > 2 and a[1] != b[1] else 2)
+            vals = a[1] + (b[1] - a[1]) * bent_part(s, bend_of(a))
+            line += [(*xy(a[0] + (b[0] - a[0]) * f, v), j) for f, v in zip(s.tolist(), vals.tolist())]
+        return pts, [xy(p[0], p[1]) for p in pts], line
+
     def speed_post(self):
         """(x, y at its foot, y at its top) of the picked piece's speed post (an upright stick in the middle of its
         depth line, dragged sideways = the wobble's speed), or None when it has no wobble."""
         got, piece = self.depth_line(), self.picked_piece()
-        if not got or not self.wobble_run(self.tones[piece[0]], piece[2], piece[3]):
+        run = got and self.wobble_run(self.tones[piece[0]], piece[2], piece[3])
+        if not run:
             return None
-        x0, ya, x1, yb, _ = got
-        foot = (ya + yb) / 2
+        x0, _, x1, _, base = got
+        foot = base - float(depth_at(run, np.array([0.5]))[0]) * self.sy
         return (x0 + x1) / 2, foot, foot - SPEED_POST * self.s
 
+    def preset_boxes(self):
+        """[(name, x0, y0, x1, y1), ...] of the depth presets' small buttons (DEPTH_PRESETS) in a row above the
+        picked piece's wobble (only with one), or []."""
+        shape, post = self.depth_shape(), self.speed_post()
+        if not shape or not post:
+            return []
+        size, gap = PRESET_SIZE * self.s, PRESET_GAP * self.s
+        y1 = min(min(y for _, y, _ in shape[2]), post[2] - 4 * self.s) - 2 * gap
+        y0 = max(self.ruler_h + gap, y1 - size)
+        x = shape[1][0][0]
+        return [(name, x + k * (size + gap), y0, x + k * (size + gap) + size, y0 + size)
+                for k, name in enumerate(DEPTH_PRESETS)]
+
     def depth_hit(self, x, y):
-        """"speed" (the speed post's top) / "a" / "b" (the handle at its start / end: that end's depth, a fade) /
-        "line" (both) when (x, y) is on the picked piece's depth line, else None."""
-        got = self.depth_line()
-        if not got:
+        """What of the picked piece's depth line is at (x, y): "speed" (the speed post's top), ("preset", name) a
+        preset button, ("pt", k) its point k (the first / last = that end's depth: a fade), ("line", j) on its piece
+        j (dragged: all of it deeper / shallower; Alt: that piece curved), else None."""
+        shape = self.depth_shape()
+        if not shape:
             return None
-        x0, ya, x1, yb, _ = got
         r = NEAR * self.s
         post = self.speed_post()
         if post and abs(x - post[0]) <= r and post[2] - r <= y <= post[2] + r:
             return "speed"
-        for which, hx, hy in (("a", x0, ya), ("b", x1, yb)):
-            if abs(x - hx) <= r and abs(y - hy) <= r:
-                return which
-        if x0 <= x <= x1 and abs(y - (ya + (yb - ya) * (x - x0) / max(x1 - x0, 1e-9))) <= r:
-            return "line"
-        return None
+        for name, bx0, by0, bx1, by1 in self.preset_boxes():
+            if bx0 <= x <= bx1 and by0 <= y <= by1:
+                return "preset", name
+        _, spots, line = shape
+        for k in range(len(spots) - 1, -1, -1):
+            if abs(x - spots[k][0]) <= r and abs(y - spots[k][1]) <= r:
+                return "pt", k
+        best = None
+        for (ax, ay, j), (bx, by, j2) in zip(line, line[1:]):
+            if j != j2:
+                continue
+            dx, dy = bx - ax, by - ay
+            f = min(1.0, max(0.0, ((x - ax) * dx + (y - ay) * dy) / max(dx * dx + dy * dy, 1e-9)))
+            far = math.hypot(ax + f * dx - x, ay + f * dy - y)
+            if far <= r and (best is None or far < best[0]):
+                best = far, j
+        return ("line", best[1]) if best else None
 
     def sketch_depth(self, e, i, which, before):
-        """A press on the picked piece's depth line (depth_hit's which): held, dragged up / down = the wobble's
-        depth (sketch_depth_to); a piece with none gets one at WOBBLE_RATE."""
+        """A press on the picked piece's depth line (depth_hit's which): held, dragged = the wobble's depth
+        (sketch_depth_to: a point / all of it; Alt: a piece curved) or speed; a piece with none gets one at
+        WOBBLE_RATE. A preset button: that depth shape at once (one undo step)."""
         _, _, u0, u1 = self.picked_piece()
+        if which[0] == "preset":
+            self.wobble_edit(i, u0, u1, "preset", which[1])
+            return True
         run = self.wobble_run(self.tones[i], u0, u1)
         speed = which == "speed"
+        orig = copy.deepcopy(run) if run else {"at": [u0, u1], "depth": [0.0, 0.0], "rate": WOBBLE_RATE}
+        if which[0] == "line" and self.curving(e.state):
+            which = "curve", which[1]
         self.drag = {"kind": "wobblerate" if speed else "wobbledepth", "i": i, "which": which, "before": before,
                      "x": e.x, "y": e.y, "moved": False, "at": [u0, u1], "p0": self.pitch_at(e.y),
                      "name": tr("hz.step_wobble_speed" if speed else "hz.step_wobble_depth"),
-                     "orig": copy.deepcopy(run) if run else {"at": [u0, u1], "depth": [0.0, 0.0], "rate": WOBBLE_RATE}}
+                     "orig": orig, "pts": copy.deepcopy(depth_pts(orig))}
         self.redraw()
         return True
 
     def sketch_depth_to(self, d, n, e):
-        """The depth line held in drag d moved up / down: its handle's end (a fade) or both ends by as many keys as
-        the mouse moved, in WOBBLE_STEP steps (Shift: 0.01), never below 0 (0 at both = no wobble once let go)."""
+        """The depth line held in drag d moved: a point up / down by as many keys as the mouse moved (one between
+        the ends sideways too, between its neighbours, on the grid; Shift free), all of it deeper / shallower (its
+        deepest spot follows the mouse, the rest in step), or (Alt) a piece curved; depths in WOBBLE_STEP steps
+        (Shift: 0.01), never below 0 (0 all along = no wobble once let go)."""
         k = self.pitch_at(e.y) - d["p0"]  # (keys under the mouse: a wheel turn mid-drag moves it too, hunt 2026-10-28)
         step = 0.01 if e.state & SHIFT else WOBBLE_STEP
-        run = copy.deepcopy(d["orig"])
-        for end in (0, 1):
-            if d["which"] == "line" or d["which"] == "ab"[end]:
-                run["depth"][end] = max(0.0, min(NOTE_BEND_MOST, round(round((run["depth"][end] + k) / step) * step, 4)))
+        pts = copy.deepcopy(d["pts"])
+
+        def depth(v):
+            return max(0.0, min(NOTE_BEND_MOST, round(round(v / step) * step, 4)))
+        what, j = (d["which"], None) if isinstance(d["which"], str) else d["which"]
+        if what == "pt":
+            pts[j][1] = depth(pts[j][1] + k)
+            if abs(e.x - d["x"]) > 3:  # (sideways only once it's moved sideways: a point off the grid dragged up /
+                d["side"] = True       # down stays where it is)
+            if 0 < j < len(pts) - 1 and d.get("side"):  # (between its neighbours; two at one spot = a jump in depth)
+                u0, u1 = d["at"]
+                start, beats = n["t"] + u0 * n["len"], (u1 - u0) * n["len"]
+                share = (self.snap(self.beat_at(e.x), e) - start) / max(beats, 1e-12)
+                pts[j][0] = round(min(pts[j + 1][0], max(pts[j - 1][0], share)), 9)
+        elif what == "curve":
+            a, b = pts[j], pts[j + 1]
+            del a[2:]
+            if abs(b[1] - a[1]) > 1e-9:  # (dragged up = deeper sooner; a flat piece has nothing to curve)
+                bend = (d["y"] - e.y) / (DEPTH_CURVE_PX * self.s) * (1.0 if b[1] > a[1] else -1.0)
+                bend += bend_of(d["pts"][j])
+                if abs(bend) > DEPTH_CURVE_STICK or e.state & SHIFT:
+                    a.append(round(min(SLIDE_BEND, max(-SLIDE_BEND, bend)), 4))
+        else:  # (the line: its deepest spot follows the mouse, every point in step; none yet = all that deep)
+            most = max(p[1] for p in pts)
+            peak = depth(most + k)
+            for p in pts:
+                p[1] = peak if most <= 0 else round(p[1] * peak / most, 4)
+        run = set_depth(copy.deepcopy(d["orig"]), pts)
         was = self.wobble_run(n, *d["at"])
         n["wobble"] = sorted([w for w in n.get("wobble") or () if w is not was] + [run], key=lambda w: w["at"])
         self.redraw()
         return True
+
+    def sketch_depth_double(self, e, i, which):
+        """A double-click on the picked piece's depth line (on a piece): a point there (on the grid; Shift free), on
+        the line as it is, held like a pressed one (it follows the mouse until let go, the plugin's way). One undo
+        step with what the drag does."""
+        self.drop_drag()
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        _, _, u0, u1 = self.picked_piece()
+        n = self.tones[i]
+        run = self.wobble_run(n, u0, u1)
+        if run is None:
+            return True
+        pts = [list(p) for p in depth_pts(run)]
+        start, beats = n["t"] + u0 * n["len"], (u1 - u0) * n["len"]
+        share = min(1.0, max(0.0, (self.snap(self.beat_at(e.x), e) - start) / max(beats, 1e-12)))
+        j = min(len(pts) - 1, max(1, sum(p[0] <= share for p in pts)))
+        a, b = pts[j - 1], pts[j]
+        if not a[0] < share < b[0]:
+            return True
+        t = (share - a[0]) / (b[0] - a[0])
+        curves = split_curve(bend_of(a), t) if len(a) > 2 and a[1] != b[1] else None
+        if curves:  # (a curved piece: each part the curve nearest the old one's there)
+            del a[2:]
+            a += [curves[0]] if curves[0] else []
+            pts.insert(j, [round(share, 9), round(a[1] + (b[1] - a[1]) * curves[2], 4)]
+                       + ([curves[1]] if curves[1] else []))
+        else:
+            pts.insert(j, [round(share, 9), round(float(depth_at(run, np.array([share]))[0]), 4)])
+        set_depth(run, pts)
+        self.drag = {"kind": "wobbledepth", "i": i, "which": ("pt", j), "before": before, "x": e.x, "y": e.y,
+                     "moved": False, "at": [u0, u1], "p0": self.pitch_at(e.y), "name": tr("hz.step_wobble_point"),
+                     "orig": copy.deepcopy(run), "pts": copy.deepcopy(pts)}
+        self.redraw()
+        return True
+
+    def sketch_depth_drop(self, i, which):
+        """A right-click on a depth point between the ends: it goes (one undo step). False for anything else (the
+        wobble's menu)."""
+        if which[0] != "pt":
+            return False
+        _, _, u0, u1 = self.picked_piece()
+        run = self.wobble_run(self.tones[i], u0, u1)
+        pts = depth_pts(run) if run else ()
+        if not 0 < which[1] < len(pts) - 1:
+            return False
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        set_depth(run, [p for k, p in enumerate(copy.deepcopy(pts)) if k != which[1]])
+        self.bend_done({"i": i, "before": before}, tr("hz.step_wobble_point"))
+        return True
+
+    def depth_hint(self, x, y):
+        """The status line's part for the mouse over a depth preset button ("" elsewhere)."""
+        which = self.depth_hit(x, y) if self.sketching() else None
+        if which and which[0] == "preset":
+            return "     " + tr("hz.depth_preset_hint", name=tr(f"hz.depth_{which[1]}"))
+        return ""
 
     def sketch_rate_to(self, d, n, e):
         """The speed post held in drag d moved sideways: SPEED_DOUBLE px right = twice as fast, left = half, so the
@@ -278,6 +422,10 @@ class HzSketch:
                 n["bend"] = bake_wobble(n, run)
                 self.sketch_pick = None  # (the piece is many now)
             name = f"hz.step_wobble_{what}"
+        elif what == "preset":  # (the depth line's shape (DEPTH_PRESETS), as deep as its deepest spot was)
+            most = depth_most(run)
+            set_depth(run, [[p[0], round(p[1] * most, 4), *p[2:]] for p in DEPTH_PRESETS[value]])
+            name = "hz.step_wobble_preset"
         elif what == "nudge":  # (within one wave, like the other shapes: 8 steps = as it was; a Random seed untouched)
             run["nudge"] = round((run.get("nudge", 0.0) + value) % 1.0, 9) % 1.0
             if not run["nudge"]:
@@ -503,15 +651,21 @@ class HzSketch:
             n = self.tones[d["i"]]
             run = self.wobble_run(n, *d["at"])
             if got and run:
-                a, b = run["depth"]
                 if d["kind"] == "wobblerate":
                     waves = round(run["rate"] * (run["at"][1] - run["at"][0]) * n["len"], 2)
                     text = trn("hz.wobble_speed", waves, rate=f"{run['rate']:.2f}".rstrip("0").rstrip("."),
                                waves=f"{waves:g}")
                     return (got[0] + got[2]) / 2, self.speed_post()[2] - 6 * self.s, text
-                text = (tr("hz.wobble_depth", depth=f"{a:.1f}") if abs(a - b) < 1e-9 else
-                        tr("hz.wobble_fade", a=f"{a:.1f}", b=f"{b:.1f}"))
-                return (got[0] + got[2]) / 2, min(got[1], got[3]) - 6 * self.s, text
+                pts, spots, line = self.depth_shape()
+                top = min(y for _, y, _ in line) - 6 * self.s
+                if d["which"][0] == "pt":  # (a point: its depth, over it)
+                    j = d["which"][1]
+                    return spots[j][0], spots[j][1] - 8 * self.s, tr("hz.wobble_depth", depth=f"{pts[j][1]:.1f}")
+                a, b = pts[0][1], pts[-1][1]
+                text = (tr("hz.wobble_depth", depth=f"{a:.1f}") if all(abs(p[1] - a) < 1e-9 for p in pts) else
+                        tr("hz.wobble_fade", a=f"{a:.1f}", b=f"{b:.1f}") if len(pts) == 2 else
+                        tr("hz.wobble_peak", depth=f"{max(p[1] for p in pts):.1f}"))
+                return (got[0] + got[2]) / 2, top, text
         if not d or d["kind"] not in ("bendpt", "sketchpiece") or not d.get("moved"):
             return None
         n = self.tones[d["i"]]
@@ -556,14 +710,27 @@ class HzSketch:
             x, y, a = x1 + END_GAP * s, ys[-1], 3 * s  # (">": the end, where a drag makes it longer / shorter)
             c.create_line(x - a / 2, y - a, x + a / 2, y, x - a / 2, y + a, fill=BEND, width=max(1, round(1.5 * s)))
         got = self.depth_line()
-        if got:  # (the picked piece's wobble depth: a line above it, a handle at each end; dashed = depth 0)
-            x0, ya, x1, yb, base = got
-            if max(base - ya, base - yb) > 0.5:
+        if got:  # (the picked piece's wobble depth: a line above it through its points (a handle each); dashed =
+            x0, _, x1, _, base = got  # depth 0)
+            _, spots, line = self.depth_shape()
+            if max(base - y for _, y, _ in line) > 0.5:
                 c.create_line(x0, base, x1, base, fill=look.HZ_WOBBLE, dash=(2, 3))
-            c.create_line(x0, ya, x1, yb, fill=look.HZ_WOBBLE, width=max(1, round(2 * s)))
+            c.create_line(*[v for x, y, _ in line for v in (x, y)], fill=look.HZ_WOBBLE, width=max(1, round(2 * s)))
+            d = self.drag
+            held = d["which"][1] if d and d["kind"] == "wobbledepth" and d["which"][0] == "pt" else None
             h = 3 * s
-            for hx, hy in ((x0, ya), (x1, yb)):
-                c.create_rectangle(hx - h, hy - h, hx + h, hy + h, fill=look.HZ_WOBBLE, outline=look.HZ_WOBBLE)
+            for k, (hx, hy) in enumerate(spots):
+                c.create_rectangle(hx - h, hy - h, hx + h, hy + h, outline=look.HZ_WOBBLE,
+                                   fill=look.HZ_DOT if held == k else look.HZ_WOBBLE)
+            for name, bx0, by0, bx1, by1 in self.preset_boxes():  # (the depth presets: a small picture each)
+                c.create_rectangle(bx0, by0, bx1, by1, fill=look.HZ_LABEL_BOX, outline=look.HZ_WOBBLE)
+                pad = 2 * s
+                f = np.linspace(0.0, 1.0, 9)
+                shape = DEPTH_PRESETS[name]
+                v = line_at(shape, f)
+                xs, ys = bx0 + pad + (bx1 - bx0 - 2 * pad) * f, by1 - pad - (by1 - by0 - 2 * pad) * v
+                c.create_line(*np.column_stack([xs, ys]).ravel().tolist(), fill=look.HZ_WOBBLE,
+                              width=max(1, round(1.5 * s)))
             post = self.speed_post()
             if post:  # (the speed post: an upright stick, a diamond on top, dragged sideways)
                 px, foot, top = post

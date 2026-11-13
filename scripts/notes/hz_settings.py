@@ -322,28 +322,57 @@ def clean_bend(pts):
     return sorted(out, key=lambda p: p[0]) or None
 
 
+def clean_env(pts):
+    """A wobble's depth line checked (its "env", stage B 2026-11-13): [[share 0..1 of the run, keys 0..NOTE_BEND_MOST
+    (, curve -SLIDE_BEND..SLIDE_BEND)], ...] in order, first at 0, last at 1; None when it's no good or holds
+    nothing a plain [start, end] depth pair doesn't (two points, straight)."""
+    out = []
+    try:
+        for p in pts or ():
+            u, k = float(p[0]), float(p[1])
+            curve = float(p[2]) if len(p) > 2 else 0.0
+            if math.isfinite(u) and math.isfinite(k) and math.isfinite(curve):
+                got = [min(1.0, max(0.0, u)), min(NOTE_BEND_MOST, max(0.0, k))]
+                if curve:
+                    got.append(min(SLIDE_BEND, max(-SLIDE_BEND, curve)))
+                out.append(got)
+    except (TypeError, ValueError, IndexError):
+        return None
+    out.sort(key=lambda p: p[0])
+    if len(out) < 2:
+        return None
+    out[0][0], out[-1][0] = 0.0, 1.0
+    del out[-1][2:]  # (no piece after the last point)
+    return out if len(out) > 2 or len(out[0]) > 2 else None
+
+
 def clean_wobble(runs):
     """A note's wobbles checked (tone["wobble"], the Sketch tool's; heard in hz_lines.note_bend until baked):
     [{"at": [u0, u1] along the note, "depth": [keys at u0, at u1] each way, "rate": waves a beat(, "shape":
     WOBBLE_SHAPES but sine, "flip": True = going down first, "phase": waves gone before u0, "free": True = speed set
     with Ctrl, "nudge": waves the user moved its wave on (0..1, the Phase menu items), "seed": a Random wave's
-    heights (a whole number, WOBBLE_SEED_STEP))}] in order; runs with no length or depth left out; None when none is
-    left."""
+    heights (a whole number, WOBBLE_SEED_STEP), "env": the depth line's own points (clean_env; "depth" = its ends))}]
+    in order; runs with no length or depth left out; None when none is left."""
     out = []
     for w in runs or ():
         try:
             u0, u1 = sorted(min(1.0, max(0.0, float(u))) for u in w["at"][:2])
             d = [min(NOTE_BEND_MOST, max(0.0, float(k))) for k in w["depth"][:2]]
+            env = clean_env(w.get("env"))
             rate = min(WOBBLE_RATE_MOST, float(w["rate"]))
             phase = float(w.get("phase", 0.0)) % 1.0
             nudge = float(w.get("nudge", 0.0)) % 1.0
             seed = w.get("seed")
         except (TypeError, ValueError, KeyError, IndexError, AttributeError):
             continue
+        if env:  # (the depth line's own points win; "depth" = its ends)
+            d = [env[0][1], env[-1][1]]
         if not (len(d) == 2 and all(map(math.isfinite, d + [u0, u1, rate, phase, nudge]))) or u1 - u0 <= 1e-9 \
-                or rate <= 0 or max(d) <= 0:
+                or rate <= 0 or max([*d, *(p[1] for p in env or ())]) <= 0:
             continue
         run = {"at": [u0, u1], "depth": d, "rate": rate}
+        if env:
+            run["env"] = env
         if w.get("shape") in WOBBLE_SHAPES[1:]:
             run["shape"] = w["shape"]
         if w.get("flip") is True:
