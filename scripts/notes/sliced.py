@@ -359,6 +359,10 @@ def source(sh):
     src.update(velocity(cut["whole"] if same_vel else sh))
     if src.get("glue"):  # (the piece has a glue place of its own ("_noglue0", steps.expanded): that is not the whole's;
         src.pop("_noglue0", None)  # the whole is glued as it was when cut, or it came out in other pieces, case 405535632)
+    if sh.get("fx") and "_whole" not in src:
+        # (the piece's own fx entries (a velocity line drawn on it) are what its order's "fx" places name: laid on the
+        # whole's pages it ran Gate extend before the Strum page; the whole keeps its default order; sweep 119172338)
+        src.pop("order", None)
     if "_whole" in src:  # (the piece's Sustain / Gate extend / subtract ordered before the whole's pages: run on the
         # whole, in that order, by its own runner; the piece leaves them out: steps.in_whole)
         src.update(json.loads(json.dumps(src.pop("_whole"))))

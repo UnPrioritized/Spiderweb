@@ -1372,6 +1372,21 @@ def pages_coloured(sh, inner, keep):
     return sh
 
 
+def colours_before_flips(rc, axes):
+    """A colour step's Recolour for notes that a later flip step (axes: sh["_m"], the flips still to come) has not
+    mirrored yet: its frame (the shape as shown, recolour.py FRAME) counts those flips undone, so the colours are
+    worked out where the notes really are and the flip then carries them (flips / turns carry the pattern,
+    recolour-1.md; with a Glue between the colours and the flip the frame stayed as shown and a Stir looked up the
+    mirrored spots)."""
+    if not axes or not isinstance(rc, dict):
+        return rc
+    from notes.recolour import SIDEWAYS, UPSIDE, moved
+    tmp = {"recolour": rc}
+    for axis in axes:
+        moved(tmp, SIDEWAYS if axis == "time" else UPSIDE)
+    return tmp["recolour"]
+
+
 def colour_step(notes, tracks, rc, ppq):
     """The notes after a "colours" step (pages_coloured): their colours only, as Recolour rc makes them (the notes as
     they are then, never settled: the page after it gets the very same notes, only coloured)."""
@@ -1506,11 +1521,28 @@ def fx_notes(sh, ppq, keys, get):
             g = glue_level(sh)
             return with_glue(notes, tracks, dict(g, glue=at_step(g.get("glue"), last)), ppq)
         if last["tool"] == "colours":  # (colour steps in front of a page: pages_coloured; or anywhere: steps.expanded)
+            last = dict(last, rc=colours_before_flips(last["rc"], sh.get("_m")))
             if last.get("full"):  # (no page after them: coloured as the Recolour at the end colours)
                 rule = rule_of(last["rc"])
                 if rule.get("stir"):
                     rule["ppq"] = ppq
                 held_ = sh.get("_sus") is True or sh.get("held") is True or keeps_laps(sh)
+                # (a sliced piece's Stir / Liquify / Warp / Per chord colours, a velocity line drawn after it: the
+                # piece looks its colours up in the whole, as the Recolour at the end does above; sweep 419171596)
+                if ((rule.get("stir") or rule.get("liquify") or rule.get("warp") or rule.get("by")
+                     and rule["mode"] != KEEP) and (sh.get("cut") or sh.get("colour_cut"))
+                        and not (rule.get("frame") or (1, 0))[1]):
+                    # (the piece as it was before the step: its Sustain / Gate extend / subtract steps back as keys,
+                    # so its whole is made with them too, as it is for the Recolour at the end)
+                    piece = dict(rest, recolour=last["rc"])
+                    piece.pop("_run", None)
+                    piece.pop("_noglue0", None)
+                    steps = piece.pop("fx", None) or []
+                    if all(st["tool"] in ("sustain", "extend", "subtract") for st in steps):
+                        piece.update({st["tool"]: st["cfg"] for st in steps})
+                        got = stirred_piece(piece, notes, tracks, held_, get, bool(last.get("gate")), rule)
+                        if got is not None:
+                            return got
                 return recoloured(notes, tracks, rule, held_, bool(last.get("gate")), free_box(rest, notes, get, keys))
             return colour_step(notes, tracks, last["rc"], ppq)
         if last["tool"] in RUNNER:

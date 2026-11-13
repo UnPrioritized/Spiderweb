@@ -391,6 +391,11 @@ def in_whole(sh):
         return set()
     if FX not in sh["order"]:  # (an order saying nothing about the whole's pages (made on the piece: glue added
         return set()           # after its Sustain): they keep their default place, first; sweep 292805004)
+    from notes.fx import is_page
+    own_fx = sh.get("fx") or []
+    if own_fx and not any(is_page(st) for st in own_fx) and sh["order"].count(FX) <= len(own_fx):
+        return set()  # (the "fx" in the order is only the piece's own velocity line / flip, drawn after its Sustain:
+        # not the whole's pages; else the Sustain was made inside the whole and stacked notes came back, sweep 492804781)
     from notes.sliced import source, whole_made
     if not whole_made(sh["cut"]):
         return set()

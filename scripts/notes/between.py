@@ -662,6 +662,11 @@ def own_fx_vel(mine, want):
     core = dict(mine, fx=fx[:k])
     core.pop("order", None)
     base = {key: v for key, v in want.items() if key != "order"}
+    wk = len(wfx)
+    while wk and wfx[wk - 1].get("tool") == "vel":
+        wk -= 1
+    if wk < len(wfx) == len(fx) and wk == k:  # (a line drawn over the one an end handed down REPLACED it, fx.
+        base["fx"] = wfx[:wk]                 # with_velocity: the same steps but that line; sweep 192809668)
     if not close(_no_own(core), _no_own(base)):
         return None
     return fx[k:]
@@ -932,7 +937,11 @@ def sync_groups(shapes):
                     b.pop("ord", None)
                 mine = dict(mine, fx=[s for s in mine["fx"]][:len(mine["fx"]) - len(vels)])
                 mine.pop("order", None)
-            if close(_no_own(mine), _no_own(want if vels is None else {k: v for k, v in plain.items() if k != "order"})):
+                plain = {k: v for k, v in plain.items() if k != "order"}
+                pfx = list(plain.get("fx") or [])
+                if len(pfx) > len(mine["fx"]) and all(s.get("tool") == "vel" for s in pfx[len(mine["fx"]):]):
+                    plain["fx"] = pfx[:len(mine["fx"])]  # (the line replaced the end's: sweep 192809668)
+            if close(_no_own(mine), _no_own(want if vels is None else plain)):
                 # (only its velocity / Sustain / Gate subtract: its own, user)
                 if not close(mine, dict(_no_vel(mine), **{k: want[k] for k in VEL_KEYS if k in want})):
                     b["vel"] = {k: sh[k] for k in VEL_KEYS if k in sh}
