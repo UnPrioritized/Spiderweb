@@ -360,13 +360,18 @@ class HelpWindow(tk.Toplevel):
         tree_box = ttk.Frame(left)
         tree_box.pack(fill="both", expand=True)
         self.tree = ttk.Treeview(tree_box, show="tree", selectmode="browse")
-        font = tkfont.nametofont(look.TK)  # (wide enough for the longest title, in any language)
-        self.tree.column("#0", width=max(font.measure(t["title"]) for t in TOPICS) + int(48 * s))
+        font = tkfont.nametofont(look.TK)  # (wide enough for the longest title, in any language, bold too)
+        bold = tkfont.Font(font=font)
+        bold.configure(weight="bold")
+        self._bold = bold  # (kept: Tk forgets a font nobody holds)
+        self.tree.column("#0", width=max(bold.measure(t["title"]) for t in TOPICS) + int(48 * s))
         sb = ttk.Scrollbar(tree_box, orient="vertical", command=self.tree.yview)
         self.tree.configure(yscrollcommand=sb.set)
         self.tree.pack(side="left", fill="both", expand=True)
         sb.pack(side="right", fill="y")
         self.tree.bind("<<TreeviewSelect>>", lambda e: self.on_pick())
+        self.tree.tag_configure("title_some", font=bold)
+        self.tree.tag_configure("title_all", font=bold, background=look.SEARCH_HIT)
 
         right = ttk.Frame(self, padding=(4, 8, 8, 8))
         right.pack(side="left", fill="both", expand=True)
@@ -453,27 +458,40 @@ class HelpWindow(tk.Toplevel):
         words = self.query.get().lower().split()
         return [t for t in TOPICS if all(w in topic_words(t) for w in words)]
 
+    def title_rank(self, topic):
+        """How well a page's title fits the search (user 2026-11-14: the best ones stand out in the list):
+        2 = every word in its title, 1 = some, 0 = none (or no search)."""
+        words = self.query.get().lower().split()
+        n = sum(w in topic["title"].lower() for w in words)
+        return 2 if words and n == len(words) else 1 if n else 0
+
     def fill_list(self):
         found = self.matches()
+        rank = {t["id"]: self.title_rank(t) for t in found}
         self.tree.delete(*self.tree.get_children())
         for section in SECTIONS:
             topics = [t for t in found if t["section"] == section]
             if not topics:
                 continue
             node = self.tree.insert("", "end", iid="section:" + section, text=SECTION_NAMES[section], open=True)
-            for t in topics:
-                self.tree.insert(node, "end", iid=t["id"], text=t["title"])
-        if self.topic and self.tree.exists(self.topic):
+            # pages whose title has the words first (in their section), bold; every word = also the search colour
+            for t in sorted(topics, key=lambda t: -rank[t["id"]]):
+                self.tree.insert(node, "end", iid=t["id"], text=t["title"],
+                                 tags=((), ("title_some",), ("title_all",))[rank[t["id"]]])
+        best = max(rank.values(), default=0)
+        if self.topic and self.tree.exists(self.topic) and rank[self.topic] >= best:
             self.tree.selection_set(self.topic)
             self.tree.see(self.topic)
             self.show(self.topic)  # (the highlighted words changed)
         elif found:
-            self.pick_first()
+            self.pick_first()  # (a page whose title has the words, when there is one)
         else:
             self.show(None)
 
     def pick_first(self):
-        first = next((c for s in self.tree.get_children() for c in self.tree.get_children(s)), None)
+        kids = [c for s in self.tree.get_children() for c in self.tree.get_children(s)]
+        ranks = {c: self.title_rank(BY_ID[c]) for c in kids}
+        first = max(kids, key=lambda c: ranks[c], default=None)  # (the first of the best: max keeps the first)
         if first:
             self.auto_pick = first
             self.tree.selection_set(first)
