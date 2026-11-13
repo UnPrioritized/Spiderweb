@@ -22,7 +22,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import fmt
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bends, line_at, merge_wobbles, note_bend, pitch,
-                          depth_most, split_wobbles, wobble_edges)
+                          depth_most, wobble_edges)
 from roll.roll_shared import SHIFT
 from window import look
 
@@ -36,7 +36,9 @@ SQUARE_ROOM = 20  # px: a piece narrower than this gets no square (its points' g
 BEND = look.HZ_BEND
 BEND_TOOLS = ("bend", "sketch")  # the tools that show and edit the bend points (Sketch: hz_sketch.py)
 # the drags bend_drag / bend_release take (sketch* + wobble*: the Sketch tool's, hz_sketch.py)
-BEND_DRAGS = ("bendpt", "bendcurve", "sketchpiece", "sketchend", "wobbledepth", "wobblerate", "wobblespeed")
+BEND_DRAGS = ("bendpt", "bendcurve", "sketchpiece", "sketchend", "wobbledepth", "wobblerate", "wobblespeed",
+              "wobbleend")
+WOBBLE_DRAGS = ("wobbledepth", "wobblerate", "wobblespeed")  # (several selected notes: theirs change alike, stage D)
 
 
 class HzBend:
@@ -226,7 +228,9 @@ class HzBend:
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, (sorted(self.sel), kept and list(kept), len(before), self.sketch_pick))
         i, n = hit[1], self.tones[hit[1]]
-        self.sel, self.box_kept = {i}, None
+        if not (self.sketching() and hit[0] in ("wobble", "note") and i in self.sel):  # (Sketch: one of several
+            self.sel, self.box_kept = {i}, None  # selected notes pressed: they stay selected, their wobbles change
+            # alike, stage D 2026-11-13)
         if hit[0] == "wobble":  # (Sketch: the picked piece's wobble depth, sketch_depth_to)
             return self.sketch_depth(e, i, hit[2], before)
         if hit[0] == "note" and self.sketching():  # (Sketch: the piece is held, sketch_piece, Alt: curved,
@@ -252,8 +256,7 @@ class HzBend:
             j = next((j for j, p in enumerate(pts) if abs(p[0] - u) < 1e-9), None)
             if j is None:  # (after the points at the same spot: the new one is the last there)
                 j = sum(p[0] <= u for p in pts)
-                pts.insert(j, [u, k])
-                split_wobbles(n, u)  # (a wobble across it: two, hunt 2026-10-28)
+                pts.insert(j, [u, k])  # (a wobble across it rides it: one wobble, stage D 2026-11-13)
             else:
                 pts[j][1] = k
             n["bend"] = pts
@@ -283,6 +286,8 @@ class HzBend:
             return self.sketch_rate_to(d, n, e)
         if d["kind"] == "wobblespeed":
             return self.sketch_speed_to(d, n, e)
+        if d["kind"] == "wobbleend":
+            return self.sketch_post_to(d, n, e)
         if d["kind"] == "bendcurve":  # how far from the piece's first point to its second the square is dragged
             _, sy, _, j, k0, k1 = d["square"]
             y = sy + e.y - d["y"]
@@ -316,12 +321,15 @@ class HzBend:
         if not d or d["kind"] not in BEND_DRAGS:
             return False
         self.drop_drag()
-        if d["kind"] == "sketchpiece" and not d["moved"]:  # (Sketch: a click picks the piece: its depth line shows)
-            pts = d["orig"] or ([0.0, 0.0], [1.0, 0.0])
-            j = d["j"] or 0
-            self.sketch_pick = (self.tones[d["i"]].get("id"), pts[j][0], pts[j + 1][0])
+        if d["kind"] == "sketchpiece" and not d["moved"]:  # (Sketch: a click picks the piece: its depth line shows;
+            pts = d["orig"] or ([0.0, 0.0], [1.0, 0.0])  # the whole wobble over it when it has one; Shift: the
+            j = d["j"] or 0                                 # picked stretch grows to it, stage D)
+            if self.sketch_widen(d, pts[j][0], pts[j + 1][0], e.state & SHIFT):
+                return True
         if d["kind"] == "wobblerate" and not d["moved"]:  # (Sketch: the speed post clicked: its speed strip)
             self.speed_toggle()
+        if d["kind"] in WOBBLE_DRAGS and self.tones[d["i"]] != d["before"][d["i"]]:
+            self.spread_pick(d["i"], d["at"])  # (several selected notes: theirs the same)
         self.bend_done(d)
         return True
 
@@ -344,8 +352,10 @@ class HzBend:
                 run.pop("speed", None)
             self.bend_done(d, tr("hz.step_wobble_speed_line"))
             return
-        if d["kind"] in ("wobbledepth", "wobblerate"):  # (Sketch's depth line / speed post: the piece's wobble goes)
-            self.sketch_depth_gone(d)
+        if d["kind"] in ("wobbledepth", "wobblerate", "wobbleend"):  # (Sketch's depth line / speed post / an end
+            self.sketch_depth_gone(d)                                     # post: the wobble goes)
+            if d["kind"] != "wobbleend":
+                self.spread_pick(d["i"], d["at"], gone=True)
             self.bend_done(d, tr("hz.step_wobble_delete"))
             return
         pts = self.tones[d["i"]]["bend"]
@@ -418,7 +428,8 @@ class HzBend:
         cursor = ("fleur" if hit[0] == "point" or inner else
                   "hand2" if hit[0] == "wobble" and hit[2][0] in ("preset", "lock") else
                   "arrow" if hit[0] == "wobble" and hit[2][0] == "strip" else
-                  "sb_h_double_arrow" if hit[0] == "end" or hit[0] == "wobble" and hit[2] == "speed" else
+                  "sb_h_double_arrow" if hit[0] == "end" or hit[0] == "wobble" and (hit[2] == "speed"
+                                                                                      or hit[2][0] == "post") else
                   "sb_v_double_arrow" if hit[0] == "curve" or self.sketching() else
                   self.pencil)  # (Sketch: a press on the line holds its piece, up / down)
         self.canvas.config(cursor=cursor)
@@ -547,16 +558,17 @@ WOBBLE_MOST = 4096  # quarter waves at most on one note (256 beats at 4 a beat)
 
 def follow_wobble(n, wob, j, old):
     """Note n's wobbles after its bend point j moved sideways from `old` (wob = its wobbles when it was pressed):
-    the wobbles on ITS two pieces (point before .. it, it .. point after) follow it; one on the far side of a jump
-    (another point on the same spot) stays (hunt 2026-10-28)."""
+    a wobble ending / starting on it follows it (over one piece or several, stage D 2026-11-13); one on the far side
+    of a jump (another point on the same spot) stays (hunt 2026-10-28): the one arriving there ends on the jump's
+    first point, the one leaving starts on its second."""
     pts, out = n["bend"], []
-    lo = pts[j - 1][0] if j > 0 else None
-    hi = pts[j + 1][0] if j + 1 < len(pts) else None
+    first = not (j > 0 and abs(pts[j - 1][0] - old) < ON_POINT)  # (no point before it on that spot)
+    last = not (j + 1 < len(pts) and abs(pts[j + 1][0] - old) < ON_POINT)
     for w in copy.deepcopy(wob):
         u0, u1 = w["at"]
-        if lo is not None and abs(u0 - lo) < ON_POINT and abs(u1 - old) < ON_POINT:
+        if first and abs(u1 - old) < ON_POINT:
             w["at"] = [u0, pts[j][0]]
-        elif hi is not None and abs(u0 - old) < ON_POINT and abs(u1 - hi) < ON_POINT:
+        elif last and abs(u0 - old) < ON_POINT:
             w["at"] = [pts[j][0], u1]
         out.append(w)
     if out:

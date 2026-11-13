@@ -1086,6 +1086,8 @@ class HzMouse:
         sel, kept = self.press_was
         self.sel = set(sel)
         self.box_kept = (kept, set(sel)) if kept else None
+        if "pick" in d:  # (Sketch's wobble end post: the picked stretch followed it, back as it was)
+            self.sketch_pick, self.sketch_speed = d["pick"]
         self.sel_before = None
         self.redraw()
         self.point_again()

@@ -1,6 +1,7 @@
 """Hz bass effect lines: a line's value at a beat (bends, holds, repeats), sustain points, the ready-made repeat
 shapes and envelopes."""
 
+import copy
 import math
 
 import numpy as np
@@ -378,8 +379,8 @@ def went_on(w, waves):
 
 
 def split_wobbles(n, u):
-    """A point put at u (0..1) on note n: a wobble across it becomes two, the second going on in step (hunt
-    2026-10-28: one wobble over two pieces couldn't be reached)."""
+    """A wobble across u (0..1) on note n becomes two there, the second going on in step. (Adding a point no longer
+    does this, stage D 2026-11-13: a wobble may run over several pieces, riding the bend under it, the plugin's way.)"""
     out = []
     for w in n.get("wobble") or ():
         u0, u1 = w["at"]
@@ -395,14 +396,34 @@ def split_wobbles(n, u):
 
 
 def merge_wobbles(n, lo, u, hi):
-    """The point at u on note n is gone (its pieces lo..u and u..hi are one now): the first of their wobbles goes
-    over the whole piece, the other is dropped (hunt 2026-10-28, user took A)."""
+    """The point at u on note n is gone (its pieces lo..u and u..hi are one now): a wobble ending there now ends at
+    hi, one starting there starts at lo; two meeting there = one, the first one's settings (hunt 2026-10-28, user
+    took A). A wobble running over several pieces keeps its far ends (stage D 2026-11-13); one with u inside it
+    (not an end) is untouched."""
     runs = n.get("wobble") or ()
-    mine = [w for w in runs if abs(w["at"][1] - u) < ON_POINT or abs(w["at"][0] - u) < ON_POINT]
+    before = [w for w in runs if abs(w["at"][1] - u) < ON_POINT]
+    after = [w for w in runs if abs(w["at"][0] - u) < ON_POINT]
+    mine = before + after
     if not mine:
         return
-    kept = dict(min(mine, key=lambda w: w["at"][0]), at=[lo, hi])
+    a = min(w["at"][0] for w in before) if before else lo
+    b = max(w["at"][1] for w in after) if after else hi
+    kept = dict(min(mine, key=lambda w: w["at"][0]), at=[a, b])
     n["wobble"] = sorted([w for w in runs if not any(w is m for m in mine)] + [kept], key=lambda w: w["at"])
+
+
+def run_copy(run, beats, a, b, length, same_speed=False):
+    """A copy of wobble `run` (beats long where it is) laid over a..b of another note `length` beats long, for
+    several notes changed alike (stage D 2026-11-13, the plugin's SAME CYCLES / SAME SPEED): as many waves (default),
+    or the same waves a beat (same_speed); its depth / speed lines (shares of the run), shape, flip, nudge, seed, lock
+    carried; no "phase" (it starts on its own line)."""
+    w = copy.deepcopy(run)
+    w.pop("phase", None)
+    w["at"] = [a, b]
+    if not same_speed:
+        waves = run["rate"] * beats * speed_mean(run)
+        w["rate"] = round(min(WOBBLE_RATE_MOST, max(0.01, waves / max((b - a) * length * speed_mean(w), 1e-12))), 9)
+    return w
 
 
 def fit_wobbles(n):

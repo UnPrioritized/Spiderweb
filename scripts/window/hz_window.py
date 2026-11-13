@@ -150,6 +150,8 @@ class HzWindow(HzDraw, HzSketch, HzBend, HzNoteTools, HzMouse, HzGates, HzSound,
             self.tool.set(kept["tool"])
         if kept.get("last") in ("pencil", "bend", "sketch", *DRAW):
             self.last_tool = kept["last"]
+        if kept.get("wobble_same") == "speed":  # (Sketch: several notes' wobbles alike at the same speed, stage D)
+            self.wobble_same = "speed"
         self.picker.show()
         self.tool.trace_add("write", lambda *a: self.on_tool())
         f = piece()
@@ -604,7 +606,7 @@ class HzWindow(HzDraw, HzSketch, HzBend, HzNoteTools, HzMouse, HzGates, HzSound,
     def tools_state(self):
         """The tools button as the autosave keeps it (app.hz_tools)."""
         return {"shown": self.picker.last, "pins": list(self.picker.pins), "tool": self.tool.get(),
-                "last": self.last_tool}
+                "last": self.last_tool, "wobble_same": self.wobble_same}
 
     def close(self):
         if self.draft is not None:  # (a path drawn: made, as if another tool were picked)
