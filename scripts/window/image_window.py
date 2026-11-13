@@ -76,17 +76,17 @@ def look_picture(grid, pal_srgb, view, width, height, look="flat", outline=1, sh
     if fall:
         across = np.maximum(dark(dx0), dark(dx1))[None, :]
         top = np.ones(grid.shape, bool)
-        top[1:] = ~join | (grid[1:] != grid[:-1])
+        top[1:] = (not join) | (grid[1:] != grid[:-1])
         bot = np.ones(grid.shape, bool)
-        bot[:-1] = ~join | (grid[:-1] != grid[1:])
+        bot[:-1] = (not join) | (grid[:-1] != grid[1:])
         along = np.maximum(dark(dy0)[:, None] * top[ry][:, cx], dark(dy1)[:, None] * bot[ry][:, cx])
         frac = (dx0 / np.maximum(dx0 + dx1, 1))[None, :, None]
     else:
         across = np.maximum(dark(dy0), dark(dy1))[:, None]
         lef = np.ones(grid.shape, bool)
-        lef[:, 1:] = ~join | (grid[:, 1:] != grid[:, :-1])
+        lef[:, 1:] = (not join) | (grid[:, 1:] != grid[:, :-1])
         rig = np.ones(grid.shape, bool)
-        rig[:, :-1] = ~join | (grid[:, :-1] != grid[:, 1:])
+        rig[:, :-1] = (not join) | (grid[:, :-1] != grid[:, 1:])
         along = np.maximum(dark(dx0)[None, :] * lef[ry][:, cx], dark(dx1)[None, :] * rig[ry][:, cx])
         frac = (dy0 / np.maximum(dy0 + dy1, 1))[:, None, None]
     if shade:
