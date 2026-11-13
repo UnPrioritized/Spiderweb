@@ -14,6 +14,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     load_midi.py     Load MIDI: the window (how to hold the notes, reading with each step, the summary)
     open_files.py    files given from outside: dropped, double-clicked, handed over by a second start
     app_playback.py  playing the notes, right-drag listening, MIDI out + Built-in BASSMIDI's settings
+    app_kestrel.py   Kestrel (GPU) starting + its Settings → Sound rows, and picking soundfonts
     app_pictures.py  placed pictures (Image to notes): placing, editing, notes made again
     panel_custom.py  the panel's custom shape settings, opening the drawer
     panel_colours.py the panel's Colours row (notes taking turns over channels)

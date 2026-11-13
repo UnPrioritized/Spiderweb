@@ -98,6 +98,7 @@ from notes.between import (copied as between_copied, keep_pushes, push_sizes, sy
                            whole_groups)
 from window.app_pictures import Pictures
 from window.app_playback import GROUP_DEFAULT, Playback
+from window.app_kestrel import KestrelSetup
 from window.app_clip import AppClip
 from window.app_transform import AppTransform
 from window.app_offrange import AppOffrange
@@ -224,7 +225,7 @@ SPLIT_TIP = (
 
 
 class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, RecolourPanel, SnapPanel, MaskPanel, PolygonPanel, FreehandPanel, GlissPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, BetweenGroups,
-          Playback, Pictures, AppClip, AppTransform, AppOffrange, AppKeys, HistoryPanel, ScrollingSide, tk.Tk):
+          Playback, KestrelSetup, Pictures, AppClip, AppTransform, AppOffrange, AppKeys, HistoryPanel, ScrollingSide, tk.Tk):
     _bg_notes = False  # the notes are being made in the background after an edit (shapes_changed, notes_wait.py)
     _recolour_owed = False  # the panel's Recolour row waits for those notes (panel_recolour.sync_recolour)
     _bg_serial = None  # (the event that started it: its other bindings don't wait for it)
