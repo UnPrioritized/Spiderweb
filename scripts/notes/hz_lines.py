@@ -6,6 +6,7 @@ import math
 
 import numpy as np
 
+from files.speed import compiled
 from notes.envelope import env_values
 from notes.hz_settings import (FAST, LOOP, LOOP_SHAPES, SHARE_MOST, WAVE_DRAWN, WOBBLE_RATE_MOST, WOBBLE_SEED_STEP,
                                keep_forward)
@@ -748,7 +749,14 @@ def line_at(pts, beat, every=None, arrays=None):
             k = j[on]
             x = xs[k] + u[on] * w[on]
             out = np.array(out, float)
-            out[on] = bez_at(x, xs[k], bez[1][k], bez[3][k], xs[k + 1], vs[k], bez[2][k], bez[4][k], vs[k + 1])
+            args = (x, xs[k], bez[1][k], bez[3][k], xs[k + 1], vs[k], bez[2][k], bez[4][k], vs[k + 1])
+            fast = compiled("bez_solve")
+            if fast is not None:  # (the compiled loop, the same bits: stage J 2026-11-13, ~2/3 of a handled edit)
+                got = np.empty(len(x))
+                fast.bez_solve(*(np.ascontiguousarray(a, float) for a in args), NEWTON_ROUNDS, got)
+                out[on] = got
+            else:
+                out[on] = bez_at(*args)
     return out
 
 

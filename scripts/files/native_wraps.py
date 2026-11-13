@@ -23,7 +23,7 @@ NEEDS = {
     "midi_events": ("midi_events", "take_bytes"), "midi_track": ("midi_track", "take_bytes"), "nearest": ("nearest",),
     "spread_line": ("spread_line",), "area_spots": ("area_spots",), "smooth_sor": ("smooth_sor",),
     "dc_block": ("dc_block",),
-    "wave_fill": ("wave_fill",), "note_ends": ("note_ends",), "hz_expand": ("hz_expand",), "hz_late": ("hz_late",),
+    "wave_fill": ("wave_fill",), "bez_solve": ("bez_solve",), "note_ends": ("note_ends",), "hz_expand": ("hz_expand",), "hz_late": ("hz_late",),
     "hz_order": ("hz_order",), "hz_finish": ("hz_finish", "hz_finish_i"),
     "gap_ticks": ("gap_ticks", "gap_room", "gap_ticks_into"), "gap_plan": ("gap_plan",),
     "midi_walk": ("midi_walk",), "midi_rewrite": ("midi_rewrite",), "midi_note_ticks": ("midi_note_ticks",),
@@ -348,6 +348,12 @@ class Wraps:
         got = self.x.wave_fill(*args)
         if got < 0 and self._again("wave_fill", got, args) < 0:
             self.base.wave_fill(*args)
+
+    def bez_solve(self, x, x0, c1x, c2x, x1, v0, c1v, c2v, v1, rounds, out):
+        args = (x, x0, c1x, c2x, x1, v0, c1v, c2v, v1, rounds, out)
+        got = self.x.bez_solve(*args)
+        if got < 0 and self._again("bez_solve", got, args) < 0:
+            self.base.bez_solve(*args)
 
     def note_ends(self, s, e, k, stick, mode, beats, pct, pct_int, wv, wf, big):
         res = np.empty(len(s), np.int64)

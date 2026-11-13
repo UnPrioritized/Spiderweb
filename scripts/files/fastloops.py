@@ -34,6 +34,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   turn_layers    merge.overlap_layers' heap loop: each note's layer (the first free one)
   note_ends      hzbass.note_lengths: a Hz bass's notes' ends by its Note length
   wave_fill      hzbass.wave_ticks: each note's wave length, one key at a time
+  bez_solve      hz_lines.bez_at: Bézier bend pieces (Sketch handles) read by time, guarded Newton per spot
   hz_expand ... hz_finish  hz_grid.KeyGrid.made for the plain settings (made_fast): a key's repeats
   key_order      np.lexsort by key, then up to 3 more columns (runs already in order merged: quick; key_order_cores =
                  the key groups on half the cores: on_cores)
@@ -2510,6 +2511,40 @@ def wave_fill(starts, a, b, sq0, wo, out):
 
 
 @njit(nogil=True)
+def bez_solve(x, x0, c1x, c2x, x1, v0, c1v, c2v, v1, rounds, out):
+    """hz_lines.bez_at, one spot at a time (the same sums in the same order, so the same bits): each Bézier piece
+    (x0, c1x, c2x, x1 in time; v0, c1v, c2v, v1 in keys) solved BY TIME at x[i] (guarded Newton, `rounds` rounds),
+    its value into out[i]."""
+    for i in range(len(x)):
+        a0, a1, a2, a3 = x0[i], c1x[i], c2x[i], x1[i]
+        ax = a3 - a0 + 3.0 * (a1 - a2)
+        bx = 3.0 * (a0 - 2.0 * a1 + a2)
+        cx = 3.0 * (a1 - a0)
+        w = a3 - a0 if a3 - a0 > 0 else 1.0
+        t = (x[i] - a0) / w
+        if t < 0.0:
+            t = 0.0
+        elif t > 1.0:
+            t = 1.0
+        lo, hi = 0.0, 1.0
+        for _ in range(rounds):
+            f = ((ax * t + bx) * t + cx) * t + a0 - x[i]
+            if f < 0:
+                lo = t
+            else:
+                hi = t
+            d = (3.0 * ax * t + 2.0 * bx) * t + cx
+            if d > 1e-300:
+                step = t - f / d
+                if step >= lo and step <= hi:
+                    t = step
+                    continue
+            t = (lo + hi) / 2.0
+        s = 1.0 - t
+        out[i] = s * s * s * v0[i] + 3.0 * s * s * t * c1v[i] + 3.0 * s * t * t * c2v[i] + t * t * t * v1[i]
+
+
+@njit(nogil=True)
 def note_ends(s, e, k, stick, mode, beats, pct, pct_int, wv, wf, big):
     """hzbass.note_lengths: the notes' (sorted by key, then start) new ends, the same steps as its NumPy
     code. mode 0 = beats (ticks), 1 = share wf of a wave (wv), 2 = pct (pct_int: a whole number), 3 = as made."""
@@ -3905,6 +3940,8 @@ def warm():
     stop_pieces(i1 * 0, i1 * 0, i1 * 0, i1, i1, i1, i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy())
     clash_pairs(np.zeros((1, 4), np.int64), 1, 1 << 28)
     wave_fill(i1, 0, 1, i1, np.zeros(1), np.zeros(1))
+    z1 = np.zeros(1)
+    bez_solve(z1, z1, z1, z1, np.ones(1), z1, z1, z1, z1, 1, np.zeros(1))
     note_ends(i1, i1 + 1, i1, True, 2, 0.0, 50.0, True, np.zeros(1), 0.0, np.int64(1) << 40)
     nearest(np.zeros((1, 3)), np.zeros((1, 3)))
     m = np.zeros((1, 3))

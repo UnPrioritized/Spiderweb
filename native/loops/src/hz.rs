@@ -49,6 +49,52 @@ pub fn wave_fill(starts: &[i64], a: i64, b: i64, sq0: &[i64], wo: &[f64], out: &
     0
 }
 
+/// fastloops.bez_solve (hz_lines.bez_at one spot at a time, the same sums in the same order) into out -> 0.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub fn bez_solve(x: &[f64], x0: &[f64], c1x: &[f64], c2x: &[f64], x1: &[f64], v0: &[f64], c1v: &[f64], c2v: &[f64],
+                 v1: &[f64], rounds: i64, out: &mut [f64]) -> i64 {
+    let n = x.len();
+    // (sizes checked once: a short one panics here, caught = the twin answers; no checks inside the loop)
+    let (x0, c1x, c2x, x1) = (&x0[..n], &c1x[..n], &c2x[..n], &x1[..n]);
+    let (v0, c1v, c2v, v1, out) = (&v0[..n], &c1v[..n], &c2v[..n], &v1[..n], &mut out[..n]);
+    for i in 0..n {
+        let (a0, a1, a2, a3) = (x0[i], c1x[i], c2x[i], x1[i]);
+        let ax = a3 - a0 + 3.0 * (a1 - a2);
+        let bx = 3.0 * (a0 - 2.0 * a1 + a2);
+        let cx = 3.0 * (a1 - a0);
+        let w = if a3 - a0 > 0.0 { a3 - a0 } else { 1.0 };
+        let xi = x[i];
+        let mut t = (xi - a0) / w;
+        if t < 0.0 {
+            t = 0.0;
+        } else if t > 1.0 {
+            t = 1.0;
+        }
+        let (mut lo, mut hi) = (0.0f64, 1.0f64);
+        for _ in 0..rounds {
+            let f = ((ax * t + bx) * t + cx) * t + a0 - xi;
+            if f < 0.0 {
+                lo = t;
+            } else {
+                hi = t;
+            }
+            let d = (3.0 * ax * t + 2.0 * bx) * t + cx;
+            if d > 1e-300 {
+                let step = t - f / d;
+                if step >= lo && step <= hi {
+                    t = step;
+                    continue;
+                }
+            }
+            t = (lo + hi) / 2.0;
+        }
+        let s = 1.0 - t;
+        out[i] = s * s * s * v0[i] + 3.0 * s * s * t * c1v[i] + 3.0 * s * t * t * c2v[i] + t * t * t * v1[i];
+    }
+    0
+}
+
 /// fastloops.note_ends into res -> 0.
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]

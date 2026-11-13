@@ -88,6 +88,8 @@ py_loops! {
     dc_block(x: NdMut<f32, 2>, c: &[f64], z: NdMut<f64, 2>) => crate::misc::dc_block;
     // ---- Hz bass (hz.rs)
     wave_fill(starts: &[i64], a: i64, b: i64, sq0: &[i64], wo: &[f64], out: &mut [f64]) => crate::hz::wave_fill;
+    bez_solve(x: &[f64], x0: &[f64], c1x: &[f64], c2x: &[f64], x1: &[f64], v0: &[f64], c1v: &[f64], c2v: &[f64],
+              v1: &[f64], rounds: i64, out: &mut [f64]) => crate::hz::bez_solve;
     note_ends(s: &[i64], e: &[i64], k: &[i64], stick: bool, mode: i64, beats: f64, pct: f64, pct_int: bool,
               wv: &[f64], wf: f64, big: i64, res: &mut [i64]) => crate::hz::note_ends;
     hz_expand(runs_sel: &[i64], copy_sel: &[i64], scale_c: &[f64], n_run: &[i64], off_run: &[i64], prev_run: &[i64],
