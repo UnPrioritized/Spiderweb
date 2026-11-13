@@ -57,25 +57,71 @@ def card_id(name, backend):
 
 
 _cards_seen = None  # (cards()' last answer: the graphics cards don't change while Spiderweb runs, mostly)
+# (ONE card check at a time, 2026-11-14: switching MIDI outs quickly built Settings → Sound twice, two checks ran;
+# the first crashed in the drivers, the second, already waiting, asked them again and the program hung. Now a
+# second caller waits for the first one's answer; after a crash or a stuck check nothing asks again this run)
+_cards_lock = threading.Lock()
+_cards_ask = None  # ([Event, answer] of the check running now)
+_cards_broken = False  # (the drivers crashed / got stuck answering: never asked again this run)
+CARD_STUCK_S = 10.0  # (a card check inside the drivers this long = stuck: let go, see _OpenLock)
 
 
 def cards():
     """The graphics cards Kestrel can play on, best first: [(name, backend, kind)] (kind discrete / integrated /
     virtual; other kinds and OpenGL left out: slower, and Kestrel's own pick never takes them), [] when none,
-    None when the connector can't say. Up to a second: off the window's thread (seen_cards() = the last answer)."""
-    global _cards_seen
+    None when the connector can't say. Up to a second: off the window's thread (seen_cards() = the last answer).
+    Asked while a check runs = that check's answer (None if it gets stuck)."""
+    global _cards_ask
+    with _cards_lock:
+        if _cards_broken:
+            return None
+        ask = _cards_ask
+        mine = ask is None
+        if mine:
+            ask = _cards_ask = [threading.Event(), None]
+    if not mine:
+        while not ask[0].wait(0.5):
+            if cards_given_up():
+                return None
+        return ask[1]
     try:
-        with _OPENING:  # (never beside a start: asking the cards opens their drivers too)
-            text = load().kb_cards()
+        ask[1] = _ask_cards()
+    finally:
+        ask[0].set()
+        with _cards_lock:
+            if _cards_ask is ask:
+                _cards_ask = None
+    return ask[1]
+
+
+def cards_given_up():
+    """True once the card list can't be asked this run (the drivers crashed, or a check got stuck: let go here)."""
+    _OPENING.drop_stuck()
+    return _cards_broken
+
+
+def _ask_cards():
+    """cards()' real ask (only ever one at a time)."""
+    global _cards_seen, _cards_broken
+    try:
+        dll = load()
     except SynthError:
         return None
+    lk = _OPENING.acquire(cards=True)  # (never beside a start: asking the cards opens their drivers too)
+    try:
+        if _cards_broken:
+            return None
+        text = dll.kb_cards()
     except OSError:
-        # (user 2026-11-13: an access violation inside the graphics drivers' listing while a heavy MIDI loaded,
-        # once; never asked again: a crash stopped mid-way may leave the drivers' locks held, a second ask could
-        # hang under _OPENING. "Can't say" = Automatic only, never a stuck dropdown)
+        # (user 2026-11-13 + 11-14: an access violation inside the graphics drivers' listing; never asked again:
+        # a crash stopped mid-way may leave the drivers' locks held, a second ask could hang. "Can't say" =
+        # Automatic only, never a stuck dropdown)
+        _cards_broken = True
         _cards_seen = []
         return None
-    if text is None:
+    finally:
+        _OPENING.release(lk)
+    if text is None or _cards_broken:
         return None
     out = []
     for line in text.decode("utf-8", "replace").splitlines():
@@ -121,7 +167,63 @@ PART_TYPE = 0xF5  # (the connector's own status: data1 = channel, data2 = 0 melo
 UNKNOWN_LEN = 0xFFFFFFFF  # (push lens: a note whose length isn't known)
 # (one Kestrel starting at a time, whatever asks: two starting together in one program can hang on the graphics
 # card, seen in the connector's tests 2026-10-27)
-_OPENING = threading.Lock()
+class _OpenLock:
+    """One Kestrel start at a time (the card check too), used as `with _OPENING:`. A card check stuck inside the
+    graphics drivers past CARD_STUCK_S is LET GO (2026-11-14: a hung check held the lock and every start after it
+    waited forever): a fresh lock replaces the one it holds, cards are never asked again this run."""
+
+    def __init__(self):
+        self._swap = threading.Lock()  # (guards _lock + cards_since)
+        self._lock = threading.Lock()
+        self._mine = threading.local()  # (each thread's taken locks, newest last)
+        self.cards_since = None  # (time.monotonic() the card check got the lock; None = no check in)
+
+    def acquire(self, cards=False):
+        """Take it; returns the lock taken (hand it to release)."""
+        while True:
+            with self._swap:
+                lk = self._lock
+            if lk.acquire(timeout=0.25):
+                with self._swap:
+                    if lk is self._lock:
+                        if cards:
+                            self.cards_since = time.monotonic()
+                        return lk
+                lk.release()  # (a let-go check's old lock, freed late: take the current one)
+                continue
+            self.drop_stuck()
+
+    def release(self, lk):
+        with self._swap:
+            if lk is self._lock:
+                self.cards_since = None
+        lk.release()
+
+    def drop_stuck(self):
+        """A card check holding the lock past CARD_STUCK_S = let go (see the class)."""
+        global _cards_broken, _cards_seen
+        with self._swap:
+            since = self.cards_since
+            if since is None or time.monotonic() - since <= CARD_STUCK_S:
+                return
+            self._lock = threading.Lock()
+            self.cards_since = None
+            _cards_broken = True
+            _cards_seen = []
+
+    def __enter__(self):
+        held = getattr(self._mine, "held", None)
+        if held is None:
+            held = self._mine.held = []
+        held.append(self.acquire())
+        return self
+
+    def __exit__(self, *exc):
+        self.release(self._mine.held.pop())
+        return False
+
+
+_OPENING = _OpenLock()
 
 
 class _Options(ctypes.Structure):

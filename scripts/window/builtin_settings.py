@@ -411,6 +411,8 @@ class BuiltinPanel(ttk.Frame):
             def wait():
                 if got:
                     fill(got[0])
+                elif kestrel.cards_given_up():  # (stuck in the drivers: Automatic only, never "Looking…" forever)
+                    fill(None)
                 elif cb.winfo_exists():
                     cb.after(50, wait)
             cb.after(50, wait)
