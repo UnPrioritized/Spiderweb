@@ -11,6 +11,7 @@ import os
 
 from files import settings
 from files.about import USER
+from files.colours import hex_of, rgb
 from files.safefile import write_text
 from roll import roll_shared
 from window.drawer import clean_name, file_stem
@@ -51,7 +52,7 @@ def clean(colours):
 def _oklab(c):
     """"#rrggbb" -> OKLab (even steps look even to the eye: gradients don't go muddy in the middle)."""
     lin = [((v / 255 + 0.055) / 1.055) ** 2.4 if v / 255 > 0.04045 else v / 255 / 12.92
-           for v in (int(c[i:i + 2], 16) for i in (1, 3, 5))]
+           for v in rgb(c)]
     r, g, b = lin
     l_, m_, s_ = ((0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3),
                   (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3),
@@ -74,7 +75,7 @@ def _hex(lab):
         v = min(1.0, max(0.0, v))
         v = 1.055 * v ** (1 / 2.4) - 0.055 if v > 0.0031308 else 12.92 * v
         out.append(round(v * 255))
-    return "#%02x%02x%02x" % tuple(out)
+    return hex_of(out)
 
 
 def with_edge(fill):
@@ -111,7 +112,7 @@ def random_colours():
     for k in range(SLOTS):
         h = (start + k * 0.618033988749895) % 1.0
         r, g, b = colorsys.hls_to_rgb(h, random.uniform(0.62, 0.78), random.uniform(0.55, 0.85))
-        out.append(with_edge("#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))))
+        out.append(with_edge(hex_of((round(r * 255), round(g * 255), round(b * 255)))))
     return by_channel(out)
 
 
@@ -229,8 +230,8 @@ def apply(colours, app=None):
     roll_draw.NOTE_COLORS[:] = [(shade, b) for f, b in roll_shared.SLOT_COLORS
                                 + [roll_shared.SELECTED_COLOR, roll_shared.DRAFT_COLOR]
                                 for shade in roll_shared.velocity_shades(f)]
-    roll_draw.NOTE_RGB = roll_draw.np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair]
-                                             for pair in roll_draw.NOTE_COLORS], roll_draw.np.uint8)
+    roll_draw.NOTE_RGB = roll_draw.np.array([[rgb(c) for c in pair] for pair in roll_draw.NOTE_COLORS],
+                                            roll_draw.np.uint8)
     roll_draw._tables.clear()
     velocity.LAYERS[:] = ([(roll_shared.fade(f), roll_shared.fade(b, 0.55)) for f, b in roll_shared.SLOT_COLORS]
                           + list(roll_shared.SLOT_COLORS) + [roll_shared.SELECTED_COLOR, roll_shared.DRAFT_COLOR])

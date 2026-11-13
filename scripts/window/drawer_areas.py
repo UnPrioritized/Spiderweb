@@ -7,6 +7,7 @@ from tkinter import messagebox
 
 import numpy as np
 
+from files.colours import rgb
 from files.lang import tr
 from files.speed import Photo
 from notes.areas import ALL_COLOURS, most_colours
@@ -19,10 +20,6 @@ from window import look
 AREA_NORMAL, AREA_EMPTY, OFF_BOARD, BOARD = look.AREA_NORMAL, look.AREA_EMPTY, look.DRAWER_BG, look.BOARD
 WARN_COLOR = look.WARN  # more colours than a shape can have (like the side panel's warning)
 AREA_FRAME = DRAWN_FRAME  # (the drawing's box as a custom shape, for finding its areas)
-
-
-def rgb(color):
-    return [int(color[i:i + 2], 16) for i in (1, 3, 5)]
 
 
 def area_color(c):

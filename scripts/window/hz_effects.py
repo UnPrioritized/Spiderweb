@@ -36,6 +36,7 @@ from tkinter import ttk
 
 import numpy as np
 
+from files.colours import WHITE, mix
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.snap import SNAPS, snap_beats, snap_text
@@ -82,8 +83,7 @@ class _At:
 
 def faint(colour, by=0.6):
     """colour mixed with white."""
-    r, g, b = (int(colour[i:i + 2], 16) for i in (1, 3, 5))
-    return "#%02x%02x%02x" % tuple(round(v + (255 - v) * by) for v in (r, g, b))
+    return mix(colour, WHITE, by)
 
 
 class FxPane:

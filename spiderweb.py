@@ -196,6 +196,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     share.py         shapes / drawings as one line of text to share (packed, checked when pasted back)
     unzip.py         unpacking outside data with a size limit (no "zip bomb" can fill the memory)
     colour_list.py   picture colours as text for a player's settings (formats), and colours read out of any text
+    colours.py       colour codes <-> numbers, mixing two colours, a colour lightened for the dark look
     playback.py      playing through Windows MIDI out
     maestro.py       Maestro (the user's own install) as a MIDI out, through its API: every note stamped with its time
     kestrel.py       Kestrel (GPU) through our connector DLL: live play, and pieces made ahead (Merlin / Kestrel)

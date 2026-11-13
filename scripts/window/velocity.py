@@ -1072,10 +1072,11 @@ class VelocityPane(KeepsItems, tk.Canvas):
 
         # (kept notes, kept_bars, and split around's leftovers: each layer see-through on the grey like the piano
         # roll's, OFF_FADE; layers as bars makes them: kept behind, usual, leftovers on top)
-        from roll.roll_draw import OFF_FADE, mixed
+        from files.colours import mix
+        from roll.roll_draw import OFF_FADE
         grey, share = look.space_shade(look.ROLL_BG), 1 - OFF_FADE[0] / 100
-        faded_f = [px(mixed(f, share, grey)) for f, _ in LAYERS]
-        faded_b = [px(mixed(b, share, grey)) for _, b in LAYERS]
+        faded_f = [px(mix(f, grey, share)) for f, _ in LAYERS]
+        faded_b = [px(mix(b, grey, share)) for _, b in LAYERS]
         fills = faded_f + [px(f) for f, _ in LAYERS] + faded_f
         borders = faded_b + [px(b) for _, b in LAYERS] + faded_b
         row_color = {self.v2y(v): look.CHART_GRID for v in (96, 64, 32)}

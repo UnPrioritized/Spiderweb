@@ -29,6 +29,7 @@ from tkinter import font as tkfont, ttk
 
 import numpy as np
 
+from files import colours
 from files.lang import english_width, tr, trnum
 from files.mathexpr import calc, fmt
 from notes.hzbass import (ARP, ARP_PATTERNS, BLEND, CHORDS, CRUSH, DETUNE, FAST, GLIDE_CURVE, GROUPS, GROWL, LFO, LOOP,
@@ -1718,8 +1719,7 @@ class SynthKnobs:
             where = line_at(pts, b)
             loud = 0.08 + 0.92 * np.clip(np.cos(np.pi * (x[:, None] - where[None, :])), 0.0, 1.0) ** 4
         loud = loud * ((1.0 + np.cos(2.0 * np.pi * WAH * v["wah"] * (x - 0.5))) / 2.0)[:, None]
-        rgb = [int(self.pic_colour("tone")[i:i + 2], 16) for i in (1, 3, 5)]
-        dark = [int(PIC[i:i + 2], 16) for i in (1, 3, 5)]
+        rgb, dark = colours.rgb(self.pic_colour("tone")), colours.rgb(PIC)
         cw, rh = (w - 2 * pad) / cols, (h - 2 * pad) / rows
         for r in range(rows):
             y = h - pad - (r + 1) * rh

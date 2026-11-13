@@ -11,6 +11,7 @@ import os
 
 from files import settings
 from files.about import USER
+from files.colours import hex_of, lighter, rgb  # (rgb used from here by other parts)
 from files.system import WINDOWS, dark_system
 
 LOOKS = ("light", "dark", "windows")  # (saved as these; windows = follow the system's setting)
@@ -177,8 +178,7 @@ def space_shade(colour):
     """colour as drawn in the Space past the keys / before the start ("#rrggbb"; a shade of one stays itself)."""
     got = _space.get(colour)
     if got is None:
-        v = [round(int(colour[i:i + 2], 16) * SPACE_DIM) for i in (1, 3, 5)]
-        got = _space[colour] = "#%02x%02x%02x" % tuple(v)
+        got = _space[colour] = hex_of(round(v * SPACE_DIM) for v in rgb(colour))
         _space[got] = got
     return got
 GRID_SNAP, GRID_BEAT, GRID_BAR = pick("#eef1f6", "#464649"), pick("#bcc4d2", "#57575a"), pick("#3a3a3a", "#8a8a8c")
@@ -426,23 +426,10 @@ def parts():
 TITLED = set()  # the open windows whose title bar was made dark (apply)
 
 
-def rgb(colour):
-    """"#rrggbb" as (r, g, b) 0-255 (for pictures drawn pixel by pixel)."""
-    return tuple(int(colour[i:i + 2], 16) for i in (1, 3, 5))
-
-
 def readable(colour):
     """A colour made for a white background, light enough to see on the dark one (its hue kept): the light look
     keeps it as it is."""
-    if not DARK:
-        return colour
-    import colorsys
-    r, g, b = (int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5))
-    h, lum, s = colorsys.rgb_to_hls(r, g, b)
-    lum = max(lum, 0.6)
-    if s > 0.1:
-        s = max(s, 0.55)
-    return "#%02x%02x%02x" % tuple(round(v * 255) for v in colorsys.hls_to_rgb(h, lum, s))
+    return lighter(colour) if DARK else colour
 
 
 def apply_size(root):

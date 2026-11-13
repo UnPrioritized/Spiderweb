@@ -9,6 +9,7 @@ import time
 import numpy as np
 
 from files.about import ICONS
+from files.colours import mix, rgb
 from files.system import ALT  # (used from here by the piano roll's parts)
 
 from notes.engine import OWN0, cached_path, cached_strokes  # (used from here by the piano roll's parts)
@@ -325,9 +326,7 @@ BOX_CURSORS = {(-1, 0): "sb_h_double_arrow", (1, 0): "sb_h_double_arrow", (0, -1
 
 def fade(color, amount=0.72):
     """color mixed towards the piano roll's background (white in the light look)"""
-    r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
-    to = [int(look.ROLL_BG[i:i + 2], 16) for i in (1, 3, 5)]
-    return "#%02x%02x%02x" % tuple(round(c + (t - c) * amount) for c, t in zip((r, g, b), to))
+    return mix(color, look.ROLL_BG, amount)
 
 
 FILL_LEVEL = 22  # velocity shade (velocity // 4) drawn in the colour itself; louder = deeper, up to shade 31
@@ -337,8 +336,8 @@ def velocity_shades(color):
     """The 32 fills of a note colour, velocity // 4 each (user 2026-11-01, like Domino): a straight line from
     the background (velocity 0-3) to a deeper shade of the colour at 127; the colour itself at FILL_LEVEL (~90),
     or louder when going deeper would clip a channel (the hue would change: dark look's light colours)."""
-    r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
-    to = [int(look.ROLL_BG[i:i + 2], 16) for i in (1, 3, 5)]
+    r, g, b = rgb(color)
+    to = rgb(look.ROLL_BG)
     k = 31 / FILL_LEVEL  # (the colour pushed away from the background as far again)
     for c, t in zip((r, g, b), to):
         if c != t:

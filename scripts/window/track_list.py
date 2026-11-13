@@ -19,6 +19,7 @@ from tkinter import ttk
 
 import numpy as np
 
+from files.colours import rgb_loose as hex_rgb
 from files.lang import tr, trn
 from files.mathexpr import calc
 from files.midi_out import track_slots
@@ -97,13 +98,6 @@ def lone_keys(notes, keys, at):
     srt = np.sort(mine)
     want = keys[at]
     return np.searchsorted(srt, want, "right") - np.searchsorted(srt, want, "left") == 1
-
-
-def hex_rgb(colour):
-    colour = colour.lstrip("#")
-    if len(colour) == 3:
-        colour = "".join(c * 2 for c in colour)
-    return [int(colour[i:i + 2], 16) for i in (0, 2, 4)]
 
 
 class TrackList(tk.Canvas):

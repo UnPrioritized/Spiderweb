@@ -25,6 +25,7 @@ from tkinter import ttk
 
 import numpy as np
 
+from files.colours import BLACK, WHITE, mix
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from files.system import double_click_ms
@@ -64,9 +65,8 @@ KEEP_SHADE = 0.14  # on the Keep timing parts' purple (user 2026-10-24: 0.08 sti
 def area_shade(colour, by):
     """A tick line's colour on a coloured area (user 2026-10-24): the area's colour, darker (dark look: lighter,
     like the grid there), by = how strong the tick lines show."""
-    to = 255 if look.DARK else 0
     k = (KEEP_SHADE if colour == look.TEMPO_KEEP_BG else AREA_SHADE) * by
-    return "#%02x%02x%02x" % tuple(round(c + (to - c) * k) for c in (int(colour[i:i + 2], 16) for i in (1, 3, 5)))
+    return mix(colour, WHITE if look.DARK else BLACK, k)
 
 
 def ids(items):

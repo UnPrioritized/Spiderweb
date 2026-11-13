@@ -12,6 +12,7 @@ import tkinter.font as tkfont
 import numpy as np
 
 from notes.custom import custom_note_count, edge_inner, gap_lines, role_of
+from files import colours
 from files.lang import tr, trn
 from files.midi_index import CC_MOST
 from files.speed import key_sort, loops
@@ -261,7 +262,7 @@ def ring_chains(xa, ya, xb, yb, up, extra):
     return lines
 
 
-NOTE_RGB = np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair] for pair in NOTE_COLORS], np.uint8)
+NOTE_RGB = np.array([[colours.rgb(c) for c in pair] for pair in NOTE_COLORS], np.uint8)
 # placed pictures' notes: 16 more colour groups after these, the picture's own colours (no paler shades: the colour IS
 # the picture; the outline a darker shade of it). note_tables() adds them for the colours in use.
 PICTURE_GROUP = len(NOTE_COLORS) // 32
@@ -285,13 +286,6 @@ WRAP_SHARE = 0.6
 # then one group: a landing note sitting on a real note (the export will see them overlap): red, ON TOP
 CLASH_GROUP = 4 * GHOST_BASE
 _tables = {}
-
-
-def mixed(color, amount, to):
-    """color ("#rrggbb") mixed toward to by amount (0 = itself, 1 = to)."""
-    a = [int(color[i:i + 2], 16) for i in (1, 3, 5)]
-    b = [int(to[i:i + 2], 16) for i in (1, 3, 5)]
-    return "#%02x%02x%02x" % tuple(round(c + (t - c) * amount) for c, t in zip(a, b))
 
 
 def off_code(group, vel):
@@ -325,21 +319,19 @@ def note_tables(pal):
         extra = []
         for k in range(16):
             h = pal[k] if pal and k < len(pal) else "C0C0C0"
-            rgb = [int(h[i:i + 2], 16) for i in (0, 2, 4)]
-            dark = "#%02x%02x%02x" % tuple(int(c * 0.6) for c in rgb)
+            dark = colours.hex_of(int(c * 0.6) for c in colours.rgb_loose(h))
             extra += [("#" + h.lower(), dark)] * 32
         away, behind = 1 - GHOST_FADE[0] / 100, 1 - TRACK_FADE[0] / 100
         groups = NOTE_COLORS + extra
         extra += [(fade(f, a), fade(b, a)) for g in range(0, len(groups), 32)
                   for (f, b), a in zip(groups[g:g + 31] + [groups[g + 31]], [behind] * 31 + [away])]
         space, off = look.space_shade(look.ROLL_BG), 1 - OFF_FADE[0] / 100  # (OFF_BASE: after the ghosts)
-        extra += [(mixed(f, off, space), mixed(b, off, space)) for f, b in groups]
+        extra += [(colours.mix(f, space, off), colours.mix(b, space, off)) for f, b in groups]
         away = 1 - wrap_fade()  # (WRAP_BASE: where wrapped notes land, inside the keys)
-        extra += [(mixed(f, away, look.ROLL_BG), mixed(b, away, look.ROLL_BG)) for f, b in groups]
+        extra += [(colours.mix(f, look.ROLL_BG, away), colours.mix(b, look.ROLL_BG, away)) for f, b in groups]
         extra += [(look.WRAP_CLASH_FILL, look.WRAP_CLASH)] * 32  # (CLASH_GROUP)
         colors = NOTE_COLORS + extra
-        rgb = np.concatenate([NOTE_RGB, np.array([[[int(c[i:i + 2], 16) for i in (1, 3, 5)] for c in pair]
-                                                  for pair in extra], np.uint8)])
+        rgb = np.concatenate([NOTE_RGB, np.array([[colours.rgb(c) for c in pair] for pair in extra], np.uint8)])
         got = _tables[key] = (colors, rgb)
         if len(_tables) > 20:
             _tables.pop(next(iter(_tables)))

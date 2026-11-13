@@ -4,10 +4,11 @@ Spiderweb is planned): its colours, a box with a header strip, the big tab butto
 Windows' own ttk parts (vista theme) can't be coloured, so the styles' boxes, dropdowns, tick boxes, buttons and
 scroll bars are the plain "clam" theme's parts, which can."""
 
-import colorsys
 import sys
 import tkinter as tk
 from tkinter import ttk
+
+from files.colours import lighter, mix  # (mix used from here by the synth window's parts)
 
 BG = "#1d2026"  # the window
 PANEL = "#2a2f37"  # a box
@@ -27,21 +28,7 @@ HEAD_FONT = ("Segoe UI Semibold", 9)
 ENTRY = "Synth.TEntry"  # (a number box's style: hz_knobs puts it back after a wrong value)
 
 
-def bright(colour):
-    """A colour light enough to see on the dark look (its hue kept, a bit more vivid)."""
-    r, g, b = (int(colour[i:i + 2], 16) / 255 for i in (1, 3, 5))
-    h, l, s = colorsys.rgb_to_hls(r, g, b)
-    l = max(l, 0.6)
-    if s > 0.1:
-        s = max(s, 0.55)
-    return "#%02x%02x%02x" % tuple(round(v * 255) for v in colorsys.hls_to_rgb(h, l, s))
-
-
-def mix(colour, toward, by):
-    """colour mixed `by` (0..1) toward another."""
-    a = [int(colour[i:i + 2], 16) for i in (1, 3, 5)]
-    b = [int(toward[i:i + 2], 16) for i in (1, 3, 5)]
-    return "#%02x%02x%02x" % tuple(round(x + (y - x) * by) for x, y in zip(a, b))
+bright = lighter  # a colour light enough to see on the dark look (its hue kept, a bit more vivid)
 
 
 def styles(w):
