@@ -6,6 +6,7 @@ import threading
 
 import numpy as np
 
+from files.midi_bytes import vlq
 from files.safefile import write_bytes
 from files.own_tracks import among_file, plan
 from files.speed import loops
@@ -20,15 +21,6 @@ TRACK_WORKERS = 8  # tracks made side by side (with the speed-ups)
 AHEAD_NOTES = 16_000_000  # notes in tracks under way / made ahead of the one written at most (~64 bytes each
 # while made: the sort's arrays, ~8 bytes once made)
 JOB_NOTES = 200_000  # small tracks made together in jobs of about this many notes
-
-
-def vlq(value):
-    out = [value & 0x7F]
-    value >>= 7
-    while value:
-        out.append((value & 0x7F) | 0x80)
-        value >>= 7
-    return bytes(reversed(out))
 
 
 def track_events(notes, ch):

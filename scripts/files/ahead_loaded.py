@@ -17,6 +17,7 @@ from collections import OrderedDict
 import numpy as np
 
 from files import midi_piece
+from files.midi_bytes import vlq as _vlq
 from files.ahead_pieces import HELD_PRE, PIECE_MOST, POST_S, PRE, PieceMidi, Song
 from files.synth import RATE, SynthError
 
@@ -1386,16 +1387,6 @@ def _sysex_before_notes(b):
                 return out, True  # (the first note: set-up is before it)
         p += 1 if hi in (0xC0, 0xD0) else 2
     return out, False
-
-
-def _vlq(n):
-    n = max(0, n)  # (a negative wait never ends the loop below)
-    out = [n & 0x7F]
-    n >>= 7
-    while n:
-        out.append(0x80 | (n & 0x7F))
-        n >>= 7
-    return bytes(reversed(out))
 
 
 def song_for(lm, own, muted=()):

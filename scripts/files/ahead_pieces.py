@@ -28,6 +28,7 @@ import time
 import numpy as np
 
 from files import errors
+from files.midi_bytes import vlq as _vlq
 from files.playback import TimeMap
 from files.synth import RATE
 
@@ -68,15 +69,6 @@ BUSY_MOST = 2  # a loaded MIDI's BASSMIDI pieces being made at once copy at most
 # (BASSMIDI holds ~2x a piece's bytes, measured on a dense wall: a full 512 MB cap piece = +1 GB)
 # GS "use for rhythm part" off for part 10 (Kestrel + Merlin read it: midi.rs DrumPart)
 _MELODIC_10 = bytes([0xF0, 0x0A, 0x41, 0x10, 0x42, 0x12, 0x40, 0x10, 0x15, 0x00, 0x1B, 0xF7])
-
-
-def _vlq(n):
-    out = [n & 0x7F]
-    n >>= 7
-    while n:
-        out.append(0x80 | (n & 0x7F))
-        n >>= 7
-    return bytes(reversed(out))
 
 
 def _track(events, tail=b""):

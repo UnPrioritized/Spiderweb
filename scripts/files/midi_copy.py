@@ -13,6 +13,7 @@ import threading
 import numpy as np
 
 from files import midi_scan, safefile, speed
+from files.midi_bytes import vlq
 from files.midi_out import name_event
 from files.midi_read import BIGGEST_EVENT, PIECE, SCAN_WORKERS, Cancelled, FileChanged, MidiError
 from files.own_tracks import PART, key_track
@@ -457,15 +458,6 @@ def keep_inserts(ins_t, ins_at, ins_b, keep, meta):
     sizes = np.diff(ins_at)[ok]
     take = np.repeat(ok, np.diff(ins_at))
     return ins_t[ok], np.concatenate([[0], np.cumsum(sizes)]).astype(np.int64), ins_b[take]
-
-
-def vlq(n):
-    out = [n & 127]
-    n >>= 7
-    while n:
-        out.insert(0, (n & 127) | 128)
-        n >>= 7
-    return bytes(out)
 
 
 class Added:

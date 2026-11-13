@@ -177,6 +177,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     system.py        what's asked of Windows / Linux (double-click speed, free memory, an error box)
     c_fill.py        makes a C runtime's do-nothing complex-number stand-ins work (before NumPy loads)
     update_check.py  asking GitHub for newer versions (and their notes)
+    midi_bytes.py    small MIDI byte helpers shared by the writers (variable-length numbers)
     midi_out.py      MIDI file writer
     midi_read.py     reading any MIDI file safely (Load MIDI): layout, every track checked, fingerprint
     midi_scan.py     the byte loops reading / writing MIDI tracks (also in the own loops, native/loops)

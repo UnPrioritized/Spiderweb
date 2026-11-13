@@ -14,6 +14,7 @@ import weakref
 import numpy as np
 
 from files.lang import tr
+from files.midi_bytes import vlq as _vlq
 from files.system import WINDOWS, WINE, wintypes
 from notes.engine import channels_of, ports_of
 from notes.hz_settings import CC_NUMBER, CC_START
@@ -109,15 +110,6 @@ def edo_sysex(first=EDO_FIRST):
             raw = tuning_sysex(chans, cents)
             events.setdefault(port, []).append(b"\xf0" + _vlq(len(raw) - 1) + raw[1:])
     return events
-
-
-def _vlq(n):
-    out = [n & 0x7F]
-    n >>= 7
-    while n:
-        out.append(0x80 | (n & 0x7F))
-        n >>= 7
-    return bytes(reversed(out))
 
 
 def tuning_sysex(chans, cents):
