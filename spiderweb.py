@@ -6,6 +6,10 @@ Draw lines, polylines, freehand strokes, curves, arcs and text on a piano roll a
 Files (the scripts live in scripts/, one subfolder per group):
   window/            the main window and its side panel
     app.py           main window: toolbar, side panel, shapes
+    app_clip.py      the main window's Copy / Cut / Paste of shapes (the program's clipboard, shared text, Domino)
+    app_transform.py the main window's Flip, Rotate and Stretch of the selected shapes
+    app_offrange.py  the main window's notes past the keys / before the start: kept, wrapped, their masks
+    app_keys.py      the main window's shortcut keys and which window has the keyboard
     menubar.py       the menu bar (File, Edit, Shape, Tools, View, Help)
     load_midi.py     Load MIDI: the window (how to hold the notes, reading with each step, the summary)
     open_files.py    files given from outside: dropped, double-clicked, handed over by a second start
@@ -120,6 +124,7 @@ Files (the scripts live in scripts/, one subfolder per group):
   notes/             shapes -> notes
     engine.py        shapes -> notes, overlap handling, channel assignment
     engine_slots.py  which track + channel each shape's notes go on, and fixing notes that overlap
+    app_layout.py    all the shapes' notes made together: channels worked out, laid on tracks, wrapped, CC times
     paths.py         lines / polylines / freehand / curves -> notes
     custom.py        custom shapes: outlines, fill, spam, outline spam
     custom_chop.py   custom shapes' spam gate cutting (chop), the outline gate's even band and Outline spam
