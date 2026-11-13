@@ -2106,6 +2106,14 @@ def stirred_piece(sh, notes, tracks, held_, get, gate, rule):
         if was[1] is not None:
             rc["order"] = was[1]
     wn, wt = get(dict(whole, recolour=rc))
+    if sh.get("cut") and sh.get("gate_flip") is True and not gate and len(wn) > 1:
+        # (a gate flipped piece (gate is False for pieces: is_flipped leaves them out): its notes are the WHOLE's
+        # flipped notes, cut. They were looked up in the unflipped whole by where they show now, so each took the
+        # colour of another note and with keep colours two channels swapped. The whole is flipped here too (every
+        # note keeps its colour: same row in wn / wt) and each piece note looks up its colour in that, as shown;
+        # slice-1.md GATE AWARE FLIP + a cut: the flip is done on the whole; partial sweep 219206175)
+        wn = mirrored_runs(places_of(wn, rule, False, box_of(wn)), None, True)[0]
+        return from_whole(notes, tracks, wn, wt, held_, None, rounds)
     return from_whole(notes, tracks, wn, wt, held_, lambda n: places_of(n, rule, gate, box_of(n)), rounds)
 
 
