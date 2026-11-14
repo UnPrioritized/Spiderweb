@@ -12,6 +12,11 @@ from notes.sliced import on_side, piece_knives
 from roll.roll_shared import ALT, CTRL, PICK
 
 
+# a wall less than ~12 degrees from a line (on screen) isn't placed, and its ends / the lines' ends can't be dragged
+# that flat afterwards either (hunt 2026-11-14: the curves then swung thousands of beats away)
+FLAT = 0.2
+
+
 def seg_dist(x, y, a, b):
     """Distance from (x, y) to the segment a-b (screen pixels)."""
     return basics.seg_dist(x, y, a[0], a[1], b[0], b[1])
@@ -40,16 +45,30 @@ class FunnelEditing:
         """[line start, line end, wall 1, wall 2] as drawn -> in order, or None if they run side by side.
         Whichever was drawn first, the more upright one is the wall, and the line starts at its end away from
         the wall."""
+        if self.apart(pts[:2], pts[2:4]) < FLAT:
+            return None
         (ax, ay), (bx, by) = self.screen_dir(pts[0], pts[1]), self.screen_dir(pts[2], pts[3])
         la, lb = math.hypot(ax, ay), math.hypot(bx, by)
-        if la == 0 or lb == 0 or abs(ax * by - ay * bx) < 0.2 * la * lb:  # less than ~12 degrees apart
-            return None
         line, wall = [list(p) for p in pts[:2]], [list(p) for p in pts[2:]]
         if abs(ay) / la > abs(by) / lb:
             line, wall = wall, line
         if self.wall_dist(wall, line[0]) < self.wall_dist(wall, line[1]):
             line.reverse()
         return line + wall
+
+    def apart(self, line, wall):
+        """How far apart a line and the wall point on screen: the sine of the angle between them (0 = along each
+        other, or one has no length)."""
+        (ax, ay), (bx, by) = self.screen_dir(*line), self.screen_dir(*wall)
+        la, lb = math.hypot(ax, ay), math.hypot(bx, by)
+        return abs(ax * by - ay * bx) / (la * lb) if la and lb else 0.0
+
+    def flattest(self, sh):
+        """The funnel line lying closest along the wall: apart() of the worst one (1.0 without a wall)."""
+        pts = sh["pts"]
+        if len(pts) < 4:
+            return 1.0
+        return min((self.apart(line, pts[2:4]) for line in funnel_lines(sh)), default=1.0)
 
     def wall_dist(self, wall, pt):
         """How far pt is from the (endless) wall line, on screen."""

@@ -28,7 +28,7 @@ from notes.sliced import clip_strokes, fresh_marks, on_side, piece_knives, steps
 from roll.roll_curve import CurveEditing
 from roll.roll_custom import CustomBox
 from roll.roll_draw import RollDrawing
-from roll.roll_funnel import FunnelEditing
+from roll.roll_funnel import FLAT, FunnelEditing
 from roll.roll_gliss import GlissEditing
 from roll.roll_hz import HzStart
 from window import look
@@ -1539,11 +1539,15 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.drag_curve(self.app.selected(), self.drag[1], e)
             else:
                 sh, i = self.app.selected(), self.drag[1]
+                funnel = sh["kind"] == "funnel"
+                was, flat = ([list(p) for p in sh["pts"]], self.flattest(sh)) if funnel else (None, None)
                 sh["pts"][i] = pt = self.event_pt(e)
-                if sh["kind"] == "funnel" and i in (2, 3) and e.state & CTRL:  # the wall centred on the line
+                if funnel and i in (2, 3) and e.state & CTRL:  # the wall centred on the line
                     mid = self.crossing(sh["pts"][:2], (sh["pts"][5 - i], pt))
                     if mid:
                         sh["pts"][5 - i] = [2 * mid[0] - pt[0], 2 * mid[1] - pt[1]]
+                if funnel and self.flattest(sh) < min(FLAT, flat):  # (no flatter than placing allows: it stops
+                    sh["pts"][:] = was                               # there; one already flatter may only open)
             if self.unmoved(step):
                 return
             if self.stayed_inside(step):
