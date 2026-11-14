@@ -39,11 +39,13 @@ import copy
 import functools
 import json
 import hashlib
+import itertools
 import marshal
 import math
 import os
 import re
 import struct
+import threading
 
 import numpy as np
 
@@ -83,7 +85,7 @@ def has_tempo(tempo):
 # change, not 14 times a redraw (13 k tempos from a loaded MIDI = 7-11 ms each). Only the line watch() was given
 # is remembered; App.tempo_changed / a new line call changed(). SPIDERWEB_TEMPO_CHECK=1 (tests) = every reuse
 # checked against the line itself (an edit that didn't say so raises).
-_text = {"tempo": None, "ver": 0, "made": -1, "text": None}
+_text = {"tempo": None, "ver": 0, "made": -1, "text": None, "kmade": -1, "key": None}
 _CHECK = bool(os.environ.get("SPIDERWEB_TEMPO_CHECK"))
 
 
@@ -122,10 +124,61 @@ def held_copy(tempo):
 
 
 def tempo_key(tempo):
-    """What the caches know tempo by: its text, a token for the held line (never the same as another's)."""
+    """What the caches know tempo by: a token for the held line (never the same as another's), else its marshal
+    bytes (2026-11-14: ~10x quicker than its json text; 144,000 short BPM changes = 11 ms, json 114 ms), made once
+    per change for the watched line. Equal lines = equal bytes (a json round trip too); NOT the saved / undo text
+    (tempo_text): only for remembering results."""
     if tempo is not None and tempo is _held["tempo"]:
         return ("held", _held["n"])
-    return tempo_text(tempo)
+    known = getattr(_known_t, "pair", None)
+    if tempo is not None and known is not None and tempo is known[0]:
+        return known[1]
+    if tempo is None or tempo is not _text["tempo"]:
+        return _mkey(tempo)
+    if _text["kmade"] != _text["ver"]:
+        _text["key"], _text["kmade"] = _mkey(tempo), _text["ver"]
+    elif _CHECK and _mkey(tempo) != _text["key"]:
+        import sys
+        import traceback
+        sys.stderr.write("TEMPO STALE\n" + "".join(traceback.format_stack(limit=8)[:-1]))
+        _text["key"] = _mkey(tempo)
+    return _text["key"]
+
+
+_known_t = threading.local()  # (per thread: a background read never sees another thread's line)
+
+
+class known_key:
+    """with known_key(tempo): its key worked out once for every cache asked inside (a line that isn't the watched
+    one, e.g. a change's trial line: ~30 ms a key at 190,000 points, asked 4-5 times a read). The line must not
+    change inside."""
+
+    def __init__(self, tempo):
+        self.tempo = tempo
+
+    def __enter__(self):
+        self.was = getattr(_known_t, "pair", None)
+        if self.tempo is not None and (self.was is None or self.was[0] is not self.tempo):
+            _known_t.pair = (self.tempo, tempo_key(self.tempo))
+        return self
+
+    def __exit__(self, *exc):
+        _known_t.pair = self.was
+        return False
+
+
+def _mkey(tempo):
+    try:
+        return marshal.dumps(tempo, 2)  # (version 2: no object references, so the same line = the same bytes)
+    except ValueError:  # (a number marshal can't write, e.g. NumPy's: its text, as before)
+        return json.dumps(tempo)
+
+
+def key_copy(key, tempo):
+    """A copy of tempo as its key (tempo_key) reads back: what's remembered never changes with the line."""
+    if isinstance(key, bytes):
+        return marshal.loads(key)
+    return json.loads(key) if isinstance(key, str) else held_copy(tempo)
 
 
 def tempo_text(tempo):
@@ -767,6 +820,29 @@ def held_us(bpm):
     return int(nearest_safe([60_000_000 / bpm])[0])
 
 
+def _held_us_many(bpm, base, base_u):
+    """held_us of each BPM (array) as an int64 array, the project's own BPM = base_u: the same numbers as one at a
+    time (Python's round and NumPy's rint both round halves to even; int() of a positive = trunc)."""
+    bpm = np.asarray(bpm, float)
+    out = np.zeros(len(bpm), np.int64)
+    if not len(bpm):
+        return out
+    with np.errstate(all="ignore"):
+        u1 = np.rint(60_000_000 / bpm)
+        ok1 = (u1 >= 1) & (u1 <= 0xFFFFFF) & (60_000_000 / u1 == bpm)
+        u2 = np.trunc(60_000_000 / bpm.astype(np.float32).astype(float))
+        ok2 = ~ok1 & (u2 >= 1) & (u2 <= 0xFFFFFF)
+    out[ok1] = u1[ok1].astype(np.int64)
+    out[ok2] = u2[ok2].astype(np.int64)
+    for k in np.flatnonzero(~(ok1 | ok2)).tolist():
+        try:
+            out[k] = held_us(float(bpm[k]))
+        except (ValueError, OverflowError):  # (a curved part's own reading: never used as held)
+            out[k] = 0
+    out[bpm == base] = base_u
+    return out
+
+
 def typed_bpms(tempo):
     """{us: the f32 BPM typed}: each point's BPM by the microseconds held_us gives it, so a Domino copy / .dms
     writes the BPM as typed (252, not another f32 that also gives 238,095 us; user 2026-11-01)."""
@@ -834,7 +910,27 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
     k0 = 0 if p_lo == 0 else p_lo + 1
     # (every held part's BPM read at once: one read per part made a loaded MIDI with 35,000 tempo changes hang)
     arrays = point_arrays(near["points"]) if near["points"] else None
-    held_bpm = drawn_bpm(near, base, np.maximum(edges[:-1], t0) / ppq, arrays).tolist()
+    held_bpm = drawn_bpm(near, base, np.maximum(edges[:-1], t0) / ppq, arrays)
+    # (every part's ends + a held part's microseconds at once, 2026-11-14: 190,000 short BPM changes one by one
+    # took ~0.3 s a read; the same numbers as held_us one at a time)
+    e_arr = np.asarray(edges, np.int64)
+    a_arr, b_arr = np.maximum(e_arr[:-1], t0), np.minimum(e_arr[1:], t1)
+    ii = np.arange(len(edges) - 1) + k0 - 1  # (the point each part starts at; -1 = before the first)
+    nxt = np.minimum(ii + 1, len(pts) - 1) - p_lo  # (the next point, as near's index)
+    cur = np.maximum(ii, 0) - p_lo
+    near_pts = near["points"]
+    if near_pts:
+        vs = arrays[1]
+        holds = np.fromiter((p[2] == "hold" for p in near_pts), bool, len(near_pts))
+        same = vs[np.clip(cur, 0, len(near_pts) - 1)] == vs[np.clip(nxt, 0, len(near_pts) - 1)]
+        held_arr = (ii < 0) | (ii == len(pts) - 1) | holds[np.clip(cur, 0, len(near_pts) - 1)] | same
+    else:
+        held_arr = np.ones(len(ii), bool)
+    held_u = _held_us_many(held_bpm, base, base_u)
+    if bool(held_arr[a_arr < b_arr].all()):  # (all held: no per-part steps to work out)
+        on = a_arr < b_arr
+        return list(zip(a_arr[on].tolist(), b_arr[on].tolist(), held_u[on].tolist()))
+    held_u = held_u.tolist()
     every_all = tempo.get("every", EVERY)
     for j in range(len(edges) - 1):
         k = k0 + j
@@ -844,8 +940,7 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
         i = k - 1
         held = i < 0 or i == len(pts) - 1 or pts[i][2] == "hold" or pts[i][1] == pts[i + 1][1]
         if held:
-            bpm = held_bpm[j]
-            out.append((a, b, base_u if bpm == base else held_us(bpm)))
+            out.append((a, b, held_u[j]))
         else:  # (a new value every "every" ticks from the part's first tick; the first step the start point's
             # BPM, the last the end point's: step_shares; a part's own Interval: point[8])
             every, off = step_of(pts[i], every_all)
@@ -933,25 +1028,42 @@ def _put_many(segs, puts):
     every piece = a minute before Play); anything else = one at a time, as before. The same answer."""
     def sane(spans):
         return all(b > a for a, b in spans) and all(b0 <= a1 for (_, b0), (a1, _) in zip(spans, spans[1:]))
+    if not puts:  # (nothing to put: the pieces as they are; a sane list is in order already, as sorting gave)
+        return list(segs)
     if not sane([(ra, rb) for ra, rb, _ in puts]) or not sane([(a, b) for a, b, _ in segs]):
         for ra, rb, news in puts:
             segs = _put_all(segs, ra, rb, news)
         return segs
-    out, j = [], 0
-    for a, b, u in segs:
-        while j < len(puts) and puts[j][1] <= a:  # (puts ending before this piece: done with)
-            j += 1
-        at, k = a, j
-        while k < len(puts) and puts[k][0] < b:
-            ra, rb = puts[k][0], puts[k][1]
-            if ra > at:
-                out.append((at, ra, u if isinstance(u, int) else u[at - a:ra - a]))
-            at = max(at, rb)
-            k += 1
-        if b > at:
-            out.append((at, b, u if isinstance(u, int) else u[at - a:b - a]))
+    # (2026-11-14: only the pieces a put touches are cut; the runs between are copied as they are, not piece by
+    # piece: 190,000 short BPM changes with a few catch-ups / Keep timing parts. The same pieces in the same order)
+    out, at_seg = [], 0
+    ends = [b for _, b, _ in segs]
+    starts = [a for a, _, _ in segs]
+    cut = {}  # (piece index -> where it's cut: the parts of it left, in order)
+    for ra, rb, _ in puts:
+        lo = bisect.bisect_right(ends, ra)  # (the first piece ending after ra)
+        hi = bisect.bisect_left(starts, rb)  # (pieces from here on start at / after rb)
+        for k in range(lo, hi):
+            a, b, u = segs[k]
+            have = cut.get(k, [(a, b)])
+            left = []
+            for x, y in have:
+                for lo2, hi2 in ((x, min(y, ra)), (max(x, rb), y)):
+                    if hi2 > lo2:
+                        left.append((lo2, hi2))
+            cut[k] = left
+    for k in sorted(cut):
+        out += segs[at_seg:k]
+        a, b, u = segs[k]
+        out += [(x, y, u if isinstance(u, int) else u[x - a:y - a]) for x, y in cut[k]]
+        at_seg = k + 1
+    out += segs[at_seg:]
     out += [s for _, _, news in puts for s in news if s[1] > s[0]]
-    return sorted(out, key=lambda s: s[0])
+    return sorted(out, key=_first)
+
+
+def _first(s):
+    return s[0]
 
 
 def catch_plan(tempo, base, st, ppq, real=None):
@@ -1108,7 +1220,7 @@ def layout(tempo, base, ppq):
     if key in _layouts:
         return _layouts[key]
     # (its own copy: what's remembered never changes with the line; the held line copied straight: no text)
-    tempo = json.loads(key[0]) if isinstance(key[0], str) else held_copy(tempo)
+    tempo = key_copy(key[0], tempo)
     ordered = all(p[0] <= q[0] for p, q in zip(tempo["points"], tempo["points"][1:]))  # (once: _segments' many reads)
     start_u = base_us(base)
     sts = stretches(tempo, base)
@@ -1544,14 +1656,20 @@ def tempo_events(tempo, base, ppq):
     return plan["events"], plan["bad"]
 
 
+def segs_end(tempo, ppq, end):
+    """The tick file_segments' pieces run to: end, or past the last point / catch-up end when that is later (asked
+    with any end up to there = the same pieces: the caches know them by this one)."""
+    pts = tempo["points"]
+    last = max([p[0] for p in pts] + [x for c in tempo["catch"] for x in (c[0], catch_get(c, 4)) if x is not None])
+    return max(end, beat_tick(last, ppq) + 1)
+
+
 def file_segments(tempo, base, ppq, end=0):
     """The file's tempo before Keep timing moves anything, as [(a, b, us)] from tick 0 to at least end, and the
     beats of catch-up lines that can't work. Each stretch with a working catch-up adds up exactly to the time of
     the tempo heard before it; one that can't work leaves its stretch as drawn (heard) and is listed."""
     base_u = base_us(base)
-    pts = tempo["points"]
-    last = max([p[0] for p in pts] + [x for c in tempo["catch"] for x in (c[0], catch_get(c, 4)) if x is not None])
-    end = max(end, beat_tick(last, ppq) + 1)
+    end = segs_end(tempo, ppq, end)
     segs = _segments(tempo, base, base_u, ppq, 0, end)
     bad, puts = [], []
     for st, plan in plans(tempo, base, ppq):
@@ -1599,31 +1717,35 @@ def ruler_marks(tempo, base, ppq, bar=4):
     out = []
     pb = np.array([p[0] for p in pts], float)
     befores = shown_bpm(tempo, base, pb - 1e-9 * np.maximum(1.0, pb), worked).tolist()  # (all in one go)
-    marks = []  # [index, before, at, then, until]
-    for i, p in enumerate(pts):
-        b = p[0]
-        if i + 1 < len(pts) and pts[i + 1][0] == b:  # (where a curve arrives: the next one on its beat says it)
-            continue
-        before = befores[i] if b > 0 else None
-        then = until = None
-        if p[2] != "hold" and i + 1 < len(pts) and pts[i + 1][1] != p[1]:
-            n = bisect.bisect_right(lines, b)  # (a catch-up line cuts the part short: the first one after b)
-            cut = lines[n] if n < len(lines) and lines[n] < pts[i + 1][0] else None
-            then = float(drawn_bpm(tempo, base, [cut])[0]) if cut is not None else float(pts[i + 1][1])
-            until = cut if cut is not None else pts[i + 1][0]
-        marks.append([i, before, float(p[1]), then, until])
+    # (2026-11-14: every point's mark + the stairs found with arrays, not one by one: 190,000 short BPM changes
+    # took ~0.5 s a change. The same marks as before: dev/scratch/i_marks.py checks them against the old way)
+    n_p = len(pts)
+    vals = np.array([p[1] for p in pts], float)
+    hold = np.fromiter((p[2] == "hold" for p in pts), bool, n_p)
+    shown = np.ones(n_p, bool)
+    shown[:-1] = pb[1:] != pb[:-1]  # (where a curve arrives: the next one on its beat says it)
+    glides = np.zeros(n_p, bool)
+    glides[:-1] = ~hold[:-1] & (vals[1:] != vals[:-1])
+    idx = np.flatnonzero(shown)
+    m_before = [v if p else None for v, p in zip(np.asarray(befores, float)[idx].tolist(), (pb[idx] > 0).tolist())]
+    m_at = vals[idx].tolist()
+    m_then, m_until = [None] * len(idx), [None] * len(idx)
+    for k in np.flatnonzero(glides[idx]).tolist():  # (a part that moves: where it goes, cut short by a catch-up)
+        i = int(idx[k])
+        b = pts[i][0]
+        n = bisect.bisect_right(lines, b)  # (a catch-up line cuts the part short: the first one after b)
+        cut = lines[n] if n < len(lines) and lines[n] < pts[i + 1][0] else None
+        m_then[k] = float(drawn_bpm(tempo, base, [cut])[0]) if cut is not None else float(pts[i + 1][1])
+        m_until[k] = cut if cut is not None else pts[i + 1][0]
+    beats = [pts[i][0] for i in idx.tolist()]
+    singles = list(zip(beats, itertools.repeat("point"), zip(m_before, m_at, m_then), m_until))
     k = 0
-    while k < len(marks):
-        run = _stairs(marks, k, pts, lines, bar)
-        i, before, at, then, until = marks[k]
-        if len(run) >= STAIR_MIN:
-            last = marks[k + len(run) - 1]
-            steps = [(pts[m[0]][0], m[1], m[2]) for m in run]
-            out.append((pts[i][0], "point", (before, at, last[2]), pts[last[0]][0], steps))
-            k += len(run)
-            continue
-        out.append((pts[i][0], "point", (before, at, then), until))
-        k += 1
+    for s, e in _stair_runs(idx, m_before, m_at, m_then, hold, pb, lines, bar):
+        out += singles[k:s]
+        steps = [(beats[x], m_before[x], m_at[x]) for x in range(s, e)]
+        out.append((beats[s], "point", (m_before[s], m_at[s], m_at[e - 1]), beats[e - 1], steps))
+        k = e
+    out += singles[k:]
     out += [(st["line"], "catch", plan["bpm"] if plan["ok"] else None,
              st["end"] if st["end"] is not None else math.inf) for st, plan in worked]
     if len(_marks) > 4:
@@ -1673,32 +1795,53 @@ def kept_bpms(tempo, base, ppq, beats):
     return out
 
 
-def _stairs(marks, k, pts, lines, bar):
-    """The marks from k on that make stairs (held steps in a row, one way, small, within a bar of each other, no
-    catch-up line between them; lines sorted); fewer than STAIR_MIN = not stairs."""
-    run, way = [], 0
-    for x in range(k, len(marks)):  # (by index: marks[k:] copied the rest of the list on every call, = slow
-        m = marks[x]                # with thousands of points, e.g. short BPM changes)
-        i, before, at = m[0], m[1], m[2]
-        if before is None or pts[i][2] != "hold" or m[3] is not None:
-            break
-        if i == 0 or pts[i - 1][2] != "hold":  # (a glide arrives here: not a step)
-            break
-        if abs(at - before) > STAIR_STEP * before:
-            break
-        d = (at > before) - (at < before)
-        if d and way and d != way:
-            break
-        if run:
-            a, b = pts[run[-1][0]][0], pts[i][0]
-            n = bisect.bisect_right(lines, a)  # (lines sorted: the first one after a)
-            if b - a > bar or (n < len(lines) and lines[n] <= b):
-                break
-        way = way or d
-        run.append(m)
-    while run and run[-1][1] == run[-1][2]:  # (no change at the end: not part of the climb)
-        run.pop()
-    return run if sum(m[1] != m[2] for m in run) >= STAIR_MIN else run[:0]
+def _stair_runs(idx, before, at, then, hold, pb, lines, bar):
+    """[(k, e)]: the marks k..e-1 (places in idx, the points marked) that make STAIRS, looked for from the first
+    mark on (a run taken = the next look starts after it), all at once with arrays (2026-11-14; was one look per
+    mark). A run from k: held steps (a held point after a held part, not past STAIR_STEP of the BPM), one way (the
+    first change sets it), each within a bar of the one before with no catch-up line between (lines sorted);
+    steps with no change at its end left off; STAIR_MIN+ changes = stairs."""
+    n = len(idx)
+    if n < STAIR_MIN:
+        return []
+    has = np.array([b is not None for b in before], bool)
+    bef = np.array([b if b is not None else np.nan for b in before], float)
+    at = np.asarray(at, float)
+    no_then = np.array([t is None for t in then], bool)
+    prev_hold = (idx > 0) & hold[np.maximum(idx - 1, 0)]
+    with np.errstate(invalid="ignore"):
+        ent = has & hold[idx] & no_then & prev_hold & ~(np.abs(at - bef) > STAIR_STEP * bef)
+        d = np.where(ent, (at > bef).astype(np.int8) - (at < bef).astype(np.int8), 0)
+    beats = pb[idx]
+    lines_a = np.asarray(lines, float)
+    link = np.zeros(n, bool)  # (mark x can follow mark x - 1: within a bar, no catch-up line between)
+    link[1:] = (beats[1:] - beats[:-1] <= bar) & (np.searchsorted(lines_a, beats[1:], "right")
+                                                    == np.searchsorted(lines_a, beats[:-1], "right"))
+    brk = np.flatnonzero(~(ent & link))  # (a run from k stops at the first of these after k)
+    nz, pos, neg = np.flatnonzero(d != 0), np.flatnonzero(d > 0), np.flatnonzero(d < 0)
+    cnz = np.concatenate([[0], np.cumsum(d != 0)])
+
+    def after(arr, x):  # (first of arr at / after x, else n)
+        j = np.searchsorted(arr, x)
+        return np.where(j < len(arr), arr[np.minimum(j, len(arr) - 1)] if len(arr) else n, n)
+    ks = np.flatnonzero(ent)
+    if not len(ks):
+        return []
+    blk = after(brk, ks + 1)
+    f = after(nz, ks)
+    df = d[np.minimum(f, n - 1)]
+    g = np.where(df > 0, after(neg, f + 1), after(pos, f + 1))
+    end = np.where(f < blk, np.minimum(blk, g), blk)
+    ok = (f < end) & (cnz[end] - cnz[ks] >= STAIR_MIN)
+    if not ok.any():
+        return []
+    tend = nz[np.searchsorted(nz, end) - 1] + 1  # (no change at the end: not part of the climb)
+    acc, acc_end = ks[ok].tolist(), tend[ok].tolist()
+    out, j = [], 0
+    while j < len(acc):
+        out.append((acc[j], acc_end[j]))
+        j = bisect.bisect_left(acc, acc_end[j], j + 1)
+    return out
 
 
 _marks = {}

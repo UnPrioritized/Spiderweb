@@ -23,7 +23,7 @@ from files import speed
 from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of
 from notes.tempo import (EVERY, _put_all, _put_many, base_us, beat_tick,
                          typed_bpms, step_of,
-                         file_segments, has_tempo, keep_heard, layout, tempo_text)
+                         file_segments, has_tempo, keep_heard, known_key, layout, segs_end, tempo_key)
 from notes.tempo_safe import PAIR_REACH, SAFE_REACH, _fit_blocks, _fit_exact, _flat_pair, _runs, domino_safe
 
 MAX_US = 0xFFFFFF  # the slowest tempo a file holds, in microseconds per beat
@@ -751,7 +751,8 @@ def kept_drawn(tempo, base, ppq, end=0):
 def _file_segs(tempo, base, ppq, end):
     """file_segments' pieces, the last few remembered: heard_tempo and kept_drawn both ask after each tempo change
     (worked out twice doubled the track list's wait on a big tempo map)."""
-    key = (tempo_text(tempo), base, ppq, end)
+    end = segs_end(tempo, ppq, end)  # (any end up to the last point = the same pieces: one entry, 2026-11-14)
+    key = (tempo_key(tempo), base, ppq, end)
     got = _segs.get(key)
     if got is None:
         if len(_segs) > 4:
@@ -770,7 +771,13 @@ def heard_tempo(tempo, base, ppq, end=0, heard=None):
     notes keep the time they have in the file, as keep_gaps). None without a tempo line."""
     if not has_tempo(tempo):
         return None
-    key = (tempo_text(tempo), base, ppq, end, id(heard))
+    with known_key(tempo):  # (its key made once for the caches below)
+        return _heard_tempo(tempo, base, ppq, end, heard)
+
+
+def _heard_tempo(tempo, base, ppq, end, heard):
+    end = segs_end(tempo, ppq, end)  # (the same answer for any end up to the last point)
+    key = (tempo_key(tempo), base, ppq, end, id(heard))
     if key in _heard:  # (Play / each tempo edit while playing: remembered until the line changes)
         return _heard[key]
     segs = _file_segs(tempo, base, ppq, end)

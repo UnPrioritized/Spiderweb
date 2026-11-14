@@ -827,16 +827,32 @@ def _put_chains(pts, puts, ppq, base):
         backs[r] = [r / ppq, src[1] if src else base] + (copy.deepcopy(src[2:]) if src else
                                                         ["hold", "", "lin", False, list(T.BEND)])
     adds = list(backs.values())
-    for put, _ in puts:
-        for t, us in put:
-            b, v = t / ppq, 60_000_000 / us
+    tu = [(t, us) for put, _ in puts for t, us in put]
+    if tu:  # (2026-11-14: which ticks have a point near found for all at once; only those looked at one by one)
+        ta = np.array([t for t, _ in tu], np.int64)
+        ba = ta / ppq
+        ua = np.array([u for _, u in tu], np.int64)
+        va = (60_000_000 / ua).tolist()
+        bl = np.asarray(beats, float)
+        near = np.searchsorted(bl, ba - 2e-9, "left") < np.searchsorted(bl, ba + 2e-9, "right")
+        bt = ba.tolist()
+        bend = T.BEND
+        new = [None if n else [b, v, "hold", "", "lin", False, list(bend)]  # (none there: a point leaving at
+               for b, v, n in zip(bt, va, near.tolist())]                   # the new BPM)
+        for k in np.flatnonzero(near).tolist():
+            b, v = bt[k], va[k]
             on = T.on_beat(pts, b, beats)
             if on and not (len(on) == 1 and _curved(pts, on[0] - 1)):
                 pts[on[-1]][1], pts[on[-1]][2] = v, "hold"
-            else:  # (none there, or a curve arrives on it: a point leaving at the new BPM)
-                adds.append([b, v, "hold", "", "lin", False, list(T.BEND)])
+            else:  # (a curve arrives on it: a point leaving at the new BPM)
+                new[k] = [b, v, "hold", "", "lin", False, list(bend)]
+        adds += [p for p in new if p is not None]  # (in the order they came, as one by one)
     if adds:
-        pts[:] = sorted(pts + adds, key=lambda p: p[0])  # (stable: an arriving point stays first)
+        pts[:] = sorted(pts + adds, key=_beat_of)  # (stable: an arriving point stays first)
+
+
+def _beat_of(p):
+    return p[0]
 
 
 def _curved(pts, i):

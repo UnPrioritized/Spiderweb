@@ -187,6 +187,12 @@ def _fit_exact(ideal, target):
 
 def _runs(segs):
     """[(a, b, us)] -> [(tick, us)] only where the value changes."""
+    if len(segs) > 64 and all(type(u) is int for _, _, u in segs):  # (all held: at once, 2026-11-14; the same)
+        a = np.fromiter((s[0] for s in segs), np.int64, len(segs))
+        u = np.fromiter((s[2] for s in segs), np.int64, len(segs))
+        keep = np.ones(len(u), bool)
+        keep[1:] = u[1:] != u[:-1]
+        return list(zip(a[keep].tolist(), u[keep].tolist()))
     out = []
     for a, b, u in segs:
         if isinstance(u, int):

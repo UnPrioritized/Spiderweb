@@ -33,7 +33,7 @@ from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_
                          bpm_text, clamp_bpm, curve, drawn_bpm, drawn_from, drop_loose, end_point, formula_fn,
                          catch_get, catch_set, heard_before, heard_line, heard_of, keep_off, keep_points, keep_runs, keeps, on_beat,
                          layout, plans, set_bend, shift_heard, shown_bpm, split_at, step_edges, stretches,
-                         swap_part, tempo_text)
+                         swap_part, tempo_key, tempo_text)
 from notes.tempo import changed as tempo_edited, keep_heard, FAR, hold as hold_tempo, version as tempo_version
 from notes.tempo import catch_step, copy_step, own_step, set_heard, set_step, stamp_steps, step_of
 from notes.loaded import file_tempos
@@ -807,8 +807,8 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
     def runs(self):
         """[(first point, the run's points, first beat, end beat or None)] of the Keep timing runs."""
         tempo = self.app.tempo
-        key = tempo_text(tempo)
-        if self._runs[0] is not key:
+        key = tempo_key(tempo)
+        if self._runs[0] is not key:  # (the same key OBJECT = this very line unchanged: the runs hold its points)
             pts = tempo["points"]
             self._runs = (key, [(pts[i], pts[i:j + 1], pts[i][0], pts[j + 1][0] if j + 1 < len(pts) else None)
                                 for i, j in keep_runs(tempo)])
@@ -2320,7 +2320,7 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
 
     def dense_key(self):
         app = self.app
-        return (tempo_text(app.tempo), self.base(), app.ppq, app.beats, id(app.rendered), id(app.loaded),
+        return (tempo_key(app.tempo), self.base(), app.ppq, app.beats, id(app.rendered), id(app.loaded),
                 map_key(app.loaded_map))
 
     def dense_now(self):

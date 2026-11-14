@@ -31,7 +31,7 @@ from notes.engine import BEATS_FAR, OWN0, channels_of, pasted_notes, slot_track_
 from notes.loaded import KEY_SIG, TEMPO, TIME_SIG, tempo_tracks, track_port as file_port
 from notes.mask import pinned_slots
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
-from notes.tempo import bpm_text, tempo_text
+from notes.tempo import bpm_text, tempo_key
 from notes.tempo_file import heard_tempo, kept_drawn
 from notes import loaded_shown as LS, loaded_view as LV
 from roll import roll_loaded as RL
@@ -3647,7 +3647,7 @@ class TrackList(tk.Canvas):
         base = pane.base() if pane is not None else 120.0
         n = app.rendered
         end = int(n[:, 1].max()) + 1 if len(n) else 0
-        key = (tempo_text(app.tempo), base, app.ppq, end)
+        key = (tempo_key(app.tempo), base, app.ppq, end)
         if self._heard is not None and self._heard[0] == key:
             return self._heard[1]
         got = heard_tempo(app.tempo, base, app.ppq, end)
