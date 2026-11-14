@@ -543,11 +543,13 @@ def _clean_points(raw, inner=False):
     """A tempo line's points cleaned (clean_tempo); inner = a heard tempo line's (no Keep timing, no line of
     their own). Big lists: in bulk (_clean_plain, _clean_mixed), the same list."""
     if isinstance(raw, list) and len(raw) >= BIG_LINE:
-        got = _clean_plain(raw, inner)
-        if got is None:
-            got = _clean_mixed(raw, inner)
-        if got is not None:
-            return got
+        for way in (_clean_plain, _clean_mixed):
+            try:  # (a value a bulk way can't sort out, e.g. a list where a word goes: the next way, last point by
+                got = way(raw, inner)  # point, which drops that point like before)
+            except (TypeError, ValueError, IndexError, KeyError, AttributeError, OverflowError):
+                got = None
+            if got is not None:
+                return got
     pts = []
     seen = {}
     for p in raw if isinstance(raw, list) else []:
@@ -1024,23 +1026,32 @@ _COLS = []  # (ds5) [[points list, version, n, beats, BPMs, log2 BPMs or None, p
 _ig0, _ig1, _ig2, _ig5 = (__import__("operator").itemgetter(k) for k in (0, 1, 2, 5))
 
 
+def _col_owner(pts):
+    """Whose change number a points list's column read may be remembered by: the watched line's (changed()) or the
+    held drag preview's (hold()); None = any other list (a change's working copy, edited in place while it is read
+    again: read fresh every time, never remembered, as before the column read)."""
+    for line, ver in ((_text["tempo"], ("watched", _text["ver"])), (_held["tempo"], ("held", _held["n"]))):
+        if isinstance(line, dict) and line.get("points") is pts:
+            return ver
+    return None
+
+
 def col_entry(pts):
     """(ds5) ONE shared read of a big points list (~12 ms for 192,000 points, made once per tempo change = per
     watch / changed() version): its beats + BPMs as arrays, and `plain` = every point an ordinary held 7-field point
     (hold, no Keep timing, no heard line / own Interval) so the quick lanes below may skip per-point checks. None for
-    a small list."""
+    a small list. Remembered ONLY for the watched / held line (_col_owner): another list is read fresh each call."""
     n = len(pts)
     if n < BIG_LINE:
         return None
-    ver = _text["ver"]
-    for e in _COLS:
+    ver = _col_owner(pts)
+    for e in _COLS if ver is not None else ():
         if e[0] is pts and e[1] == ver and e[2] == n:
             if _CHECK and not (np.array_equal(e[3], np.fromiter(map(_ig0, pts), float, n))
                                and np.array_equal(e[4], np.fromiter(map(_ig1, pts), float, n))
                                and e[10] == [i for i, p in enumerate(pts) if len(p) > 5 and p[5] is True]):
-                _stale("TEMPO COLUMNS STALE")  # (a line changed in place without changed(): made again)
-                _COLS.remove(e)
-                break
+                _stale("TEMPO COLUMNS STALE")  # (the watched line changed in place without changed())
+                raise RuntimeError("TEMPO COLUMNS STALE: the tempo line changed without tempo.changed()")
             return e
     beats = np.fromiter(map(_ig0, pts), float, n)
     vs = np.fromiter(map(_ig1, pts), float, n)
@@ -1055,8 +1066,9 @@ def col_entry(pts):
     cand[:-1] = ~hold[:-1] & (vs[1:] != vs[:-1]) & (beats[1:] > beats[:-1])
     keeps = [] if nokeep else [i for i, p in enumerate(pts) if p[5] is True]  # (keep_points' answer)
     e = [pts, ver, n, beats, vs, None, plain, hold, nokeep, cand, keeps]
-    _COLS.insert(0, e)
-    del _COLS[3:]
+    if ver is not None:
+        _COLS.insert(0, e)
+        del _COLS[3:]
     return e
 
 
@@ -1084,10 +1096,10 @@ def drawn_bpm(tempo, base, beats, arrays=None):
     idx = np.searchsorted(pb, beats, "right") - 1  # the point at or before each beat (-1: before the first)
     has = idx >= 0
     out[has] = vs[idx[has]]
-    ce = col_entry(pts)
     asked = idx[has & (idx < len(pts) - 1)]
-    if ce is not None:  # (only the curved parts among them: the loop below `continue`s on all the others)
-        asked = asked[ce[9][asked]]
+    ce = col_entry(pts) if len(asked) > 64 else None  # (a few beats: the loop below is quicker than a column read
+    if ce is not None:  # of a list that isn't remembered) (only the curved parts among them: the loop `continue`s
+        asked = asked[ce[9][asked]]  # on all the others)
     asked = np.unique(asked)
     for i in asked.tolist():  # (only the parts asked about: a song with
         kind = pts[i][2]  # thousands of points read part by part was slow, hunt 2026-10-22)

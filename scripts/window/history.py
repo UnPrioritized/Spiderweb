@@ -515,6 +515,13 @@ class HistoryPanel:
             return hz.status.config(text=tr("hz.redo_elsewhere" if redo else "hz.undo_elsewhere"))
         self._restore(src, self.undo_stack if redo else self.redo_stack)
 
+    def _follow_saved(self, step, moved):
+        """The saved mark (project.is_dirty: the newest undo step when last saved) follows its step across undo /
+        redo (each move makes a new step), so undo then redo back to the saved state counts as saved again."""
+        mark = getattr(self, "_saved_mark", None)
+        if mark is not None and mark[0] is step:
+            self._saved_mark = (moved, mark[1])
+
     def _restore(self, src, dst, count=1):
         """count steps from src to dst (a History jump: the steps on the way only move, the shapes are made once)."""
         self.settle_windows()  # (so Ctrl+Z here takes back the claw / strum / tumours / sustain being tried out)
@@ -530,11 +537,13 @@ class HistoryPanel:
         ch10 = None
         boxes = was_boxes = (self.pvar["bpm"].get(), self.project_file)
         for _ in range(min(count, len(src))):
-            state, name, picked, hz = src.pop()
+            step = src.pop()
+            state, name, picked, hz = step
             got = boxes_mark((state, name, picked))
             if got:  # (the boxes swap: this side gets the ones now, the boxes get the step's)
                 picked = tuple(picked[:-1])
                 dst.append((now, name, tuple(sel_now) + ((BOXES,) + boxes,), hz))
+                self._follow_saved(step, dst[-1])
                 boxes = got[1:]
                 now, sel_now = state, picked
                 continue
@@ -549,6 +558,7 @@ class HistoryPanel:
                     ch10, mark = (last[1] if type(last) is tuple else False), (CH10_OFF,)
                 picked = tuple(picked[:-1])
             dst.append((now, name, tuple(sel_now) + mark, hz))
+            self._follow_saved(step, dst[-1])
             now, sel_now = state, picked
         if ch10 is not None:
             self.use_ch10.set(ch10)
