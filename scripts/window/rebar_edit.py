@@ -4,8 +4,9 @@ or moved (other bars), each one undo step. No window here (stage C draws them, s
 
 app.rebar = Rebar((changes, groups)), never changed in place (undo steps hold it by reference, slot 18 of
 sel_state; saved in the project as {"changes": [...], "groups": [...]}).
-- A CHANGE: {"id", "bars": [first, last] (bar numbers from 0: each old bar stays ONE bar, so its bar numbers never
-  change, whatever other changes do), "sig", "dense", "between", "ppq", "pl" (its plan as numbers: where it is now),
+- A CHANGE: {"id", "seq" (the order the changes were made in: an edited one is made again = the newest), "sig",
+  "dense", "between", "ppq", "pl" (its plan as numbers: where it is now, in beats; its bars are worked out from them
+  each time (bars_now): a time signature edited before it renumbers the bars, never its beats),
   "tempo" ({list: {"m0", "m1", "s1", "pb"}}: the tempo line's points / catch-ups / signatures / key signatures it
   replaced (m0) and made (m1); the rest of the line is the same before and after, moved), "link" (its link in
   app.loaded_map or None), "del" ([[box now, box before]]: Delete loaded notes' boxes it moved other than along)}.
@@ -17,6 +18,9 @@ sel_state; saved in the project as {"changes": [...], "groups": [...]}).
 - Everything after a change's bars just moves: taken back = moved back (not recorded, so a song of shapes after
   the bars doesn't double the project file); shapes added after the bars later move back too.
 - Overlapping changes: refused (user 2026-11-14: two never overlap).
+- TOUCHING CHANGES (bars right next to each other) share the bar line between them: the newer one replaced the
+  older one's tempo point / signature there. So a change is taken back the way undo would: the newer changes
+  touching it (in a row) taken back first, newest first, then made again on their bars (rebuild).
 Making permanent (stage B): bake() forgets a change (and the ones sharing a shape with it)."""
 
 import bisect
@@ -60,7 +64,37 @@ def change_of(app, cid):
 
 def changes(app):
     """The editable changes, in bar order."""
-    return sorted(of(app).changes, key=lambda c: c["bars"][0])
+    return sorted(of(app).changes, key=lambda c: c["pl"]["a"])
+
+
+def seq(c):
+    return c.get("seq", c["id"])
+
+
+def bars_now(app, c, sigs=None):
+    """[first, last] bar (from 0) a change is on now: from its beats (each old bar stayed one bar, so taking changes
+    back / making them again never renumbers bars; a time signature edited before it does)."""
+    sigs = meter.sigs_of(app.tempo) if sigs is None else sigs
+    first = meter.where(sigs, c["pl"]["a"] + EPS)[0]
+    return [first, first + c["pl"]["count"] - 1]
+
+
+def touching(x, y):
+    """Two changes on bars right next to each other (one's end bar line = the other's start)."""
+    return abs(x["pl"]["new_b"] - y["pl"]["a"]) <= 1e-6 or abs(y["pl"]["new_b"] - x["pl"]["a"]) <= 1e-6
+
+
+def linked(rb, c):
+    """The changes newer than c touching it, or touching one of those (in a row), oldest first: they replaced c's
+    bar-line items, so they are taken back before it and made again after."""
+    out, todo = [], [c]
+    while todo:
+        x = todo.pop()
+        for y in rb.changes:
+            if y is not c and seq(y) > seq(c) and all(y is not z for z in out) and touching(x, y):
+                out.append(y)
+                todo.append(y)
+    return sorted(out, key=seq)
 
 
 # ------------------------------------------------------------------ the plan as numbers (JSON) and moved along
@@ -237,6 +271,19 @@ def _inv(y, f, guess):
     return guess
 
 
+def _unmap(pl, y):
+    """map_beat's way back, about (_inv finds the exact beat): before the stretch the same, after it moved back, inside
+    it through its run (a ramp's step a touching change held just before its edge lies in there)."""
+    if y < pl["a"] - EPS:
+        return y
+    if y >= pl["new_b"] - EPS:
+        return pl["b"] + (y - pl["new_b"])
+    for oa, ob, na, nb, f in pl["runs"]:
+        if y < nb - EPS:
+            return oa + (y - na) / f
+    return pl["b"]
+
+
 def _back(kind, item, pl):
     """_fwd's way back (the very beat that moves onto it, when there is one). A new item (only what holds beats
     copied deeply: a long line's points one by one were the slow part)."""
@@ -249,7 +296,7 @@ def _back(kind, item, pl):
         return it
 
     def one(y):
-        return _inv(y, lambda x: R.map_beat(pl, x), pl["b"] + (y - pl["new_b"]))
+        return _inv(y, lambda x: R.map_beat(pl, x), _unmap(pl, y))
     it[0] = one(item[0])
     if kind == "points":
         for q in T.heard_line(it):
@@ -382,17 +429,26 @@ def link_out(saved, link):
 
 # ------------------------------------------------------------------ made / slid / forgotten with the project
 
-def overlap(app, pl):
-    """A change already on these bars: {"why": "overlap", "at"} (user 2026-11-14: two never overlap), else None."""
-    lo, hi = pl["bars"]
+def overlap(app, pl, but=None):
+    """A change already on these bars (pl's old stretch, beats now): {"why": "overlap", "at"} (user 2026-11-14: two
+    never overlap), else None. but: a change id left out (the one being moved)."""
     for c in of(app).changes:
-        if c["bars"][0] <= hi and lo <= c["bars"][1]:
+        if c["id"] != but and c["pl"]["a"] < pl["b"] - 1e-6 and pl["a"] < c["pl"]["new_b"] - 1e-6:
             return {"why": "overlap", "at": c["pl"]["a"]}
     return None
 
 
-def _after(c, bars):
-    return c["bars"][0] > bars[1]
+def _after(c, end):
+    """Change c lies after beat end (a change's end)."""
+    return c["pl"]["a"] >= end - 1e-6
+
+
+def _group(recs, before, base, whole, made):
+    """A group; "base_same": its base is its one shape before (a paste only moved): saved once, not twice."""
+    same_base = base is not None and len(before) == 1 and same(
+        {k: v for k, v in base.items() if k != "rebar_whole"}, before[0])
+    return {"recs": list(recs), "before": list(before), "base": base, "whole": bool(whole), "made": list(made),
+            "base_same": same_base}
 
 
 def _slid_change(c, d, ppq, fwd=True):
@@ -430,32 +486,45 @@ def record(app, pl, kinds, old, owners, bases, old_tempo, link, old_deleted, den
             status[i] = "moved"
         else:
             status[i] = "changed"
-    groups, claimed, bake = [], set(), set()
+    found = []  # (each group: its shapes' old indexes (None: not in the project any more), changed by this one)
     for g in rb.groups:
         idx = [find(old, m) for m in g["made"]]
-        if any(i is None for i in idx):  # (not in the project any more: an edit Stage B makes permanent)
+        st = [status[i] for i in idx] if all(i is not None for i in idx) else None
+        found.append((idx, st, st is not None and not all(s == "same" for s in st)
+                      and not all(s == "moved" for s in st)))
+    # (a drawn shape (no base) a change stretched, changed by this one: that change becomes permanent, with every
+    # change sharing a group with it; this one keeps the shapes as they are now as its own "before")
+    bake = {r for g, (idx, st, chg) in zip(rb.groups, found) if chg and g["base"] is None for r in g["recs"]}
+    while bake:
+        more = {r for g in rb.groups if bake & set(g["recs"]) for r in g["recs"]} - bake
+        if not more:
+            break
+        bake |= more
+    groups, claimed = [], set()
+    for g, (idx, st, chg) in zip(rb.groups, found):
+        if st is None:  # (not in the project any more: an edit Stage B makes permanent)
             groups.append(g)
             continue
         claimed.update(idx)
-        st = [status[i] for i in idx]
         made = [s for i in idx for s in outs[i]]
-        if all(s == "same" for s in st):
-            groups.append(g)
-        elif all(s == "moved" for s in st):  # (wholly after the bars: its shapes as they were move along too)
-            groups.append(dict(g, made=made, before=[slide(s, pl["shift"], dt) for s in g["before"]],
-                               base=g["base"] and moved(g["base"], pl["shift"])))
-        elif g["base"] is not None:  # (cut again: made again from the base by both when one is taken back)
+        if bake & set(g["recs"]):
+            if chg:  # (those are permanent: this change's own group, from the shapes as they were just now)
+                groups.append(_group([cid], [old[i] for i in idx], None, False, made))
+            continue  # (else: forgotten with them)
+        if not chg:
+            if all(s == "same" for s in st):
+                groups.append(g)
+            else:  # (wholly after the bars: its shapes as they were move along too)
+                groups.append(dict(_group(g["recs"], [slide(s, pl["shift"], dt) for s in g["before"]],
+                                          g["base"] and moved(g["base"], pl["shift"]), g.get("whole"), made)))
+        else:  # (cut again: made again from the base by both when one is taken back)
             groups.append(dict(g, recs=list(g["recs"]) + [cid], made=made))
-        else:  # (a drawn shape a change stretched, changed by this one: that one becomes permanent)
-            bake.update(g["recs"])
-            groups.append(dict(g, recs=list(g["recs"]) + [cid], made=made, gone=True))
     for i in range(n):
         if i in claimed or status[i] != "changed":
             continue
         base = bases.get(i)
-        groups.append({"recs": [cid], "before": [old[i]], "base": base, "whole": bool(base and base.get("rebar_whole")),
-                       "made": outs[i]})
-    chs = [_slid_change(c, d, ppq) if _after(c, pl["bars"]) else c for c in rb.changes]
+        groups.append(_group([cid], [old[i]], base, base and base.get("rebar_whole"), outs[i]))
+    chs = [_slid_change(c, d, ppq) if _after(c, pl["b"]) else c for c in rb.changes]
     pieces = tempo_pieces(old_tempo, app.tempo, pl)
     dels = []
     for go, gn in zip(old_deleted or [], app.deleted or []):
@@ -463,8 +532,9 @@ def record(app, pl, kinds, old, owners, bases, old_tempo, link, old_deleted, den
             if list(bn) != list(bo) and not (bo[0] >= round(pl["b"] * ppq) and list(bn) == [bo[0] + dt, bo[1] + dt,
                                                                                            bo[2], bo[3]]):
                 dels.append([list(bn), list(bo)])
-    chs.append({"id": cid, "bars": list(pl["bars"]), "sig": list(pl["sig"]), "dense": bool(dense),
-                "between": bool(between), "ppq": ppq, "pl": d, "tempo": pieces, "link": link, "del": dels})
+    chs.append({"id": cid, "seq": max((seq(c) for c in rb.changes), default=0) + 1, "sig": list(pl["sig"]),
+                "dense": bool(dense), "between": bool(between), "ppq": ppq, "pl": d, "tempo": pieces, "link": link,
+                "del": dels})
     app.rebar = Rebar((tuple(chs), tuple(groups)))
     if bake:
         bake_ids(app, bake)
@@ -481,7 +551,7 @@ def bake_ids(app, ids):
             break
         ids |= more
     chs = tuple(c for c in rb.changes if c["id"] not in ids)
-    groups = tuple(g for g in rb.groups if not ids & set(g["recs"]) and not g.get("gone"))
+    groups = tuple(g for g in rb.groups if not ids & set(g["recs"]))
     app.rebar = Rebar((chs, groups))
     return ids
 
@@ -541,7 +611,7 @@ def take_back(app, cid):
     db = d["shift"]
     nb_t = round(d["new_b"] * ppq)
     # (the others after it: back first, so a group's replay places them where they are without this one)
-    chs = [_slid_change(x, d, ppq, fwd=False) if _after(x, c["bars"]) else x for x in rb.changes if x is not c]
+    chs = [_slid_change(x, d, ppq, fwd=False) if _after(x, d["new_b"]) else x for x in rb.changes if x is not c]
     plans = {x["id"]: plan_of(x["pl"]) for x in chs}
     shapes = list(app.shapes)
     taken, puts, groups = set(), {}, []
@@ -561,7 +631,7 @@ def take_back(app, cid):
                 if not left:
                     new = list(g["before"])
                 else:
-                    order = sorted(left, key=lambda r: next(x["bars"][0] for x in chs if x["id"] == r))
+                    order = sorted(left, key=lambda r: next(x["pl"]["a"] for x in chs if x["id"] == r))
                     new = replay(g["base"], [plans[r] for r in order], g.get("whole", False), ppq)
                     if new is None:
                         return {"why": "edited"}
@@ -574,8 +644,8 @@ def take_back(app, cid):
                 made = [slide_back(shapes[i], db, dt, ppq) for i in idx]
                 for i, s in zip(idx, made):
                     puts[i] = [s]
-                groups.append(dict(g, made=made, before=[slide_back(s, db, dt, ppq) for s in g["before"]],
-                                   base=g["base"] and slide_back(g["base"], db, dt, ppq)))
+                groups.append(_group(g["recs"], [slide_back(s, db, dt, ppq) for s in g["before"]],
+                                     g["base"] and slide_back(g["base"], db, dt, ppq), g.get("whole"), made))
             else:
                 groups.append(g)
             continue
@@ -661,6 +731,9 @@ def put(app, got):
 
 def remove(app, cid, name):
     """Remove a change: everything as it was before it (one undo step). {"ok": True} or {"why"}."""
+    c = change_of(app, cid)
+    if c is not None and linked(of(app), c):  # (newer touching ones: taken back first, made again after)
+        return _rebuild(app, cid, name)
     got = take_back(app, cid)
     if "why" in got:
         return got
@@ -682,28 +755,44 @@ def redo_as(app, cid, name, bars=None, sig=None, dense=None, between=None, dry=F
     c = change_of(app, cid)
     if c is None:
         return {"why": "gone"}
-    got = take_back(app, cid)
-    if "why" in got:
-        return got
-    first, last = bars or c["bars"]
-    top, bottom = sig or c["sig"]
-    dense = c["dense"] if dense is None else dense
-    between = c["between"] if between is None else between
-    kept = (list(app.shapes), json.loads(json.dumps(app.tempo)), list(app.loaded_map or []), app.deleted, of(app),
-            app.playhead, app.sels, app.sel)
+    sigs = meter.sigs_of(app.tempo)
+    now = bars_now(app, c, sigs)
+    new = (list(bars) if bars else now, list(sig) if sig else list(c["sig"]),
+           c["dense"] if dense is None else dense, c["between"] if between is None else between)
+    if new[0] == now and new[1] == list(c["sig"]):  # (the numbers it has: nothing would change)
+        return {"why": "same", "at": c["pl"]["a"]}
+    return _rebuild(app, cid, name, new, dry)
+
+
+def _same_lengths(sigs, pl):
+    """The bars are that long already (the box's own check, conductor.rebar_same)."""
+    return all(abs(r[4] - 1) < 1e-12 for r in pl["runs"]) and all(
+        meter.at_beat(sigs, s)[1:] == pl["sig"] for s, _ in R.old_bars(sigs, pl["a"], pl["b"]))
+
+
+def _rebuild(app, cid, name, new=None, dry=False):
+    """Change cid taken back (new None) or made again as new = (bars, sig, dense, between), one undo step. The newer
+    changes touching it (linked) are taken back first, newest first (undo's order: each one's record was made on
+    the line the newer ones then changed), and made again on their bars afterwards, oldest first, keeping their ids
+    (bar numbers stay: one old bar = one new bar). {"ok"} / apply's answer, or {"why"}: nothing changed, no step.
+    dry: a test run, everything put back (its marks too)."""
+    from window import rebar_work as W
+    rb = of(app)
+    c = change_of(app, cid)
+    if c is None:
+        return {"why": "gone"}
+    sigs = meter.sigs_of(app.tempo)
+    later = linked(rb, c)
+    specs = [(x["id"], bars_now(app, x, sigs), list(x["sig"]), x["dense"], x["between"]) for x in later]
+    if new is not None:
+        specs.append((cid, *new))
+    pane = app.tempo_pane
+    kept = (list(app.shapes), json.loads(json.dumps(app.tempo)), list(app.loaded_map or []), app.deleted, rb,
+            app.playhead, app.sels, app.sel, getattr(pane, "_rebar", None))
     if not dry:
         app.push_undo(name=name)
-    put(app, got)
-    sigs = meter.sigs_of(app.tempo)
-    lo, hi = bars_beats(sigs, first, last)
-    pl = R.plan(sigs, lo, hi, top, bottom)
-    out = W.apply(app, pl, name, dense=dense, between=between, push=False)
-    if "id" in out and out["id"] != cid:  # (the same change, edited: it keeps its id)
-        rb, new = of(app), out["id"]
-        app.rebar = Rebar((tuple(dict(c, id=cid) if c["id"] == new else c for c in rb.changes),
-                           tuple(dict(g, recs=[cid if r == new else r for r in g["recs"]]) for g in rb.groups)))
-        out["id"] = cid
-    if dry or "why" in out:  # (a refusal / a test run: all as it was, the step it pushed gone)
+
+    def back(out):  # (a refusal / a test run: all as it was, the step pushed gone)
         from notes.tempo import changed as tempo_changed_now
         from window.history import undo_state
         app.shapes[:] = kept[0]
@@ -718,9 +807,40 @@ def redo_as(app, cid, name, bars=None, sig=None, dense=None, between=None, dry=F
         app.shapes_changed(now=True)
         app.tempo_changed()
         app.meter_changed()
+        pane._rebar = kept[8]
+        pane.request_redraw()
         if not dry:
             app.drop_empty_step(undo_state(app.shapes))
             app.sync_history()
+        return out
+
+    for x in sorted(later + [c], key=seq, reverse=True):
+        got = take_back(app, x["id"])
+        if "why" in got:
+            return back(got)
+        put(app, got)
+    out = {"ok": True}
+    for sid, (first, last), (top, bottom), dense, between in specs:
+        sigs = meter.sigs_of(app.tempo)
+        lo, hi = bars_beats(sigs, first, last)
+        pl = R.plan(sigs, lo, hi, top, bottom)
+        if sid == cid and _same_lengths(sigs, pl):  # (edited back to what the bars were: refused like the box)
+            return back({"why": "same", "at": pl["a"]})
+        got = W.apply(app, pl, name, dense=dense, between=between, push=False)
+        if "why" in got:
+            return back(got)
+        if got["id"] != sid:  # (the same change made again: it keeps its id)
+            rb, made = of(app), got["id"]
+            app.rebar = Rebar((tuple(dict(x, id=sid) if x["id"] == made else x for x in rb.changes),
+                               tuple(dict(g, recs=[sid if r == made else r for r in g["recs"]]) for g in rb.groups)))
+            got["id"] = sid
+        if sid == cid:
+            out = got
+    if new is None and later:  # (the marks of the ones made again aren't this step's news)
+        pane._rebar = None
+        pane.request_redraw()
+    if dry:
+        return back(out)
     return out
 
 
@@ -730,27 +850,56 @@ def edit(app, cid, top, bottom, name, dense=None, between=None, dry=False):
 
 
 def move(app, cid, first, last, name, dry=False):
-    """Change cid moved to bars first..last (from 0; the same before and after any change: one old bar = one new
-    bar), same signature (one undo step). Another change there: refused."""
-    rb = of(app)
-    for x in rb.changes:
-        if x["id"] != cid and x["bars"][0] <= last and first <= x["bars"][1]:
-            return {"why": "overlap", "at": x["pl"]["a"]}
+    """Change cid moved to bars first..last (from 0, as numbered now; the same before and after any change: one old
+    bar = one new bar), same signature (one undo step). Another change there: refused."""
+    c = change_of(app, cid)
+    if c is None:
+        return {"why": "gone"}
+    sigs = meter.sigs_of(app.tempo)
+    lo, hi = bars_beats(sigs, first, last)
+    clash = overlap(app, {"a": lo, "b": hi}, but=cid)
+    if clash:
+        return clash
     return redo_as(app, cid, name, bars=(first, last), dry=dry)
 
 
 # ------------------------------------------------------------------ saved in the project
 
+GONE = {"kind": "_gone"}  # (a group's shape not found in the project when read back: that change can't be taken back)
+
+
+def _key(sh):
+    """A shape's kind + first point: checks a saved place still holds it (a damaged shape left out shifts them)."""
+    p = (sh.get("pts") or [[None, None]])[0]
+    return [sh.get("kind"), None if p[0] is None else round(p[0], 4), None if p[1] is None else round(p[1], 4)]
+
+
 def saved(app):
-    """app.rebar as the project file keeps it (None: nothing)."""
+    """app.rebar as the project file keeps it (None: nothing). A group's made shapes ARE the project's: saved as
+    their places (+ a check), and its base only when it isn't its one shape before (a paste: saved once, not 3x)."""
     rb = of(app)
     if not rb.changes:
         return None
-    return {"changes": [plain(c) for c in rb.changes], "groups": [plain(g) for g in rb.groups]}
+    pos = {id(s): i for i, s in enumerate(app.shapes)}
+    groups = []
+    for g in rb.groups:
+        at = []
+        for m in g["made"]:
+            i = pos.get(id(m))
+            if i is None:
+                i = find(app.shapes, m)
+            at.append(-1 if i is None else i)
+        out = {"recs": list(g["recs"]), "before": plain(g["before"]), "whole": bool(g.get("whole")),
+               "made_at": at, "made_key": [_key(m) for m in g["made"]]}
+        if g["base"] is not None:
+            out["base"] = "before" if g.get("base_same") else plain(g["base"])
+        groups.append(out)
+    return {"changes": [plain(c) for c in rb.changes], "groups": groups}
 
 
-def loaded(data):
-    """A project's "rebar" read back -> Rebar (anything damaged: none of it, the changes stay as they are)."""
+def loaded(data, shapes=()):
+    """A project's "rebar" read back -> Rebar (anything damaged: none of it, the changes stay as they are). shapes:
+    the project's, read just before (the groups' made shapes are places in it)."""
     from notes.engine import clean_shape
     try:
         if not isinstance(data, dict):
@@ -759,17 +908,31 @@ def loaded(data):
         for c in data.get("changes") or []:
             d = c["pl"]
             plan_of(d)
-            assert isinstance(c["id"], int) and len(c["bars"]) == 2 and len(c["sig"]) == 2
+            assert isinstance(c["id"], int) and len(c["sig"]) == 2
             assert all(k in c["tempo"] for k in LISTS)
             chs.append(c)
         groups = []
         for g in data.get("groups") or []:
-            sh = lambda s: clean_shape(s)
-            groups.append({"recs": [int(r) for r in g["recs"]], "before": [sh(s) for s in g["before"]],
-                           "base": sh(g["base"]) if g.get("base") else None, "whole": bool(g.get("whole")),
-                           "made": [sh(s) for s in g["made"]]})
-            if any(s is None for s in groups[-1]["before"] + groups[-1]["made"]):
+            before = [clean_shape(s) for s in g["before"]]
+            if any(s is None for s in before):
                 return EMPTY
+            whole = bool(g.get("whole"))
+            base = g.get("base")
+            if base == "before":
+                base = dict(before[0], rebar_whole=True) if whole else dict(before[0])
+            elif base:
+                base = clean_shape(base)
+                if base is None:
+                    return EMPTY
+                if whole:
+                    base["rebar_whole"] = True
+            else:
+                base = None
+            made = []
+            for i, k in zip(g["made_at"], g["made_key"]):
+                ok = isinstance(i, int) and 0 <= i < len(shapes) and _key(shapes[i]) == k
+                made.append(shapes[i] if ok else GONE)
+            groups.append(_group([int(r) for r in g["recs"]], before, base, whole, made))
         return Rebar((tuple(chs), tuple(groups)))
     except Exception:
         return EMPTY

@@ -538,7 +538,7 @@ class ProjectFiles:
         self.file_gone = clean_file_gone(data.get("file_gone"))
         self.file_props = clean_file_props(data.get("file_props"))
         self.loaded_map = loaded_map.clean(data.get("loaded_map"))
-        self.rebar = rebar_edit.loaded(data.get("rebar"))
+        self.rebar = rebar_edit.loaded(data.get("rebar"), self.shapes)
         nxt =data.get("own_next")  # (ids never used twice in a project: own_tracks.new_id)
         self.own_next = new_id(own, nxt if type(nxt) is int and 0 <= nxt < ID_MOST else 0)
         if not quiet:  # (another project: copies from the one before aren't laid on these tracks)
