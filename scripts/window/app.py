@@ -883,8 +883,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         def shown_off(off):  # (only the shapes / tracks shown)
             if len(off) and (hidden or self.track_list.current is not None):
                 keep = ~np.isin(off[:, 5], list(hidden))
-                if self.track_list.current is not None:
-                    keep &= np.isin(off[:, 4], list(self.track_list.shown_slots()))
+                if self.track_list.current is not None:  # (by TRACK like the real notes, drawn_slots: a track added
+                    ids = track_ids(off[:, 4])  # by hand / a loaded MIDI's track is another number than its slots)
+                    keep &= (np.isin(ids, list(self.track_list.shown_slots()))
+                             | self.track_list.shown_mask(off, ids))
                 off = off[keep]
             return off
         off = shown_off(self.off_all)
