@@ -687,11 +687,12 @@ def funnel_grid(sh, ppq, dspans, length):
         gates.append(gate(marks[-1]))
     marks.append(marks[-1] + gates[-1])  # room for the wall column past the wall
     gates.append(gates[-1])
-    first = gates[0]
-    while marks[0] > lo:
-        marks.insert(0, marks[0] - first)
-        gates.insert(0, first)
-    return marks, gates
+    first, before, x = gates[0], [], marks[0]
+    while x > lo:  # (curves reaching back before the line start: built in one go, not put in front one by one, which
+        x -= first  # took a minute at 768 k steps; the same numbers, subtracted in the same order)
+        before.append(x)
+    before.reverse()
+    return before + marks, [first] * len(before) + gates
 
 
 def _nearest(xs, x):
