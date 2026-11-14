@@ -65,7 +65,17 @@ def put(app, clip, at, name, push=True):
             pane.put_domino_sigs(clip.get("sigs") or [], clip.get("keys") or [], at, clip["length"], "replace")
         return {"ok": True}
     from window import rebar_edit
-    items = sorted(clip["rebar"], key=lambda r: r["a"])
+    step = None if push else app.last_step()  # (the caller's step: Cancel / a refusal takes ALL of it back, the
+    items = sorted(clip["rebar"], key=lambda r: r["a"])  # notes a track list box copy brought too; hunt 2026-11-15)
+
+    def whole_back():
+        if step is not None and app.last_step() is step:
+            rebar_edit.undo_edit(app)
+
+    def done(got):
+        if "why" in got:
+            whole_back()
+        return _said(app, got)
     sigs = meter.sigs_of(app.tempo)
     s = max(0.0, at + items[0]["a"])  # (the first change on the bar line nearest where it lands: the whole paste
     a, b = meter.bar_line(sigs, s), meter.bar_line(sigs, s, after=True)  # moves with it, the track list's sig_dt)
@@ -86,15 +96,14 @@ def put(app, clip, at, name, push=True):
                                       tick=tr("conductor.rebar_bake_tick"), yes=tr("conductor.rebar_paste_yes"),
                                       no=tr("conductor.rebar_bake_no"))
             if not go:
-                if not push:
-                    rebar_edit.undo_edit(app)
+                whole_back()
                 app.status.config(text=tr("conductor.rebar_paste_cancel"))
                 return {"why": "cancel"}
             if skip:
                 app.rebar_bake_skip = True  # (this session only, as the edits' heads-up)
-    if pane.loaded_ticks_wait(at, end - EPS, then=lambda: _said(app, _lay(app, clip, at, name, push, hit))):
+    if pane.loaded_ticks_wait(at, end - EPS, then=lambda: done(_lay(app, clip, at, name, push, hit))):
         return {"wait": True}
-    return _said(app, _lay(app, clip, at, name, push, hit))
+    return done(_lay(app, clip, at, name, push, hit))
 
 
 def _said(app, got):

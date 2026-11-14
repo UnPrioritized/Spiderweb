@@ -2041,6 +2041,10 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
             ch = self.edges_on().live_chain()  # an edge only pressed, nothing added / moved: just let go, hunt)
             only = only or ch is not None and not ch.moved
             self.edges_on().edge_release()
+        if d and d["kind"] == "rebar":  # (a held time signature change makes its step only at the let-go: Ctrl+Z /
+            only = True  # Ctrl+Y = Esc, nothing earlier undone; its tint + "Let go..." text go too)
+            self.rebar_tint(None)
+            self.app.status.config(text="")
         if d and d["kind"] == "box":  # (the picks and boxes from before the press, hunt 10-27)
             self.sel = list(d["before"])
             self.bands, self.part = d["was"]

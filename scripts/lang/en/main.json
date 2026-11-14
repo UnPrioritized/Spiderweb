@@ -522,6 +522,7 @@
  "conductor.rebar_why_keep_loaded": "A Keep timing part near bar {bar} lies in bars changed over the loaded MIDI, so its notes can't keep their exact time there. Change the box or the part first.",
  "conductor.rebar_why_limit": "The tempo near bar {bar} would go past what a MIDI file can hold.",
  "conductor.rebar_why_same": "Bar {bar} is that long already: nothing would change.",
+ "conductor.rebar_why_same_there": "Bar {bar} already has that time signature, so the change stayed where it was.",
  "conductor.rebar_why_overlap": "Bar {bar} already has a time signature change you can still edit. Edit that one, or pick other bars.",
  "conductor.rebar_why_paste_bar": "Near bar {bar} the copied time signature change wouldn't start on a bar line.",
  "conductor.rebar_paste_yes": "Make permanent and paste",

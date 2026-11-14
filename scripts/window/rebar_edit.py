@@ -413,8 +413,11 @@ def _locate(kind, items, piece, pl):
     return 0 if pb is None else bisect.bisect_right(beats, pb + 1e-7)
 
 
-def tempo_back(tempo, pieces, pl):
-    """The tempo line with a change taken back (a new dict), or None when a piece isn't there any more."""
+def tempo_back(tempo, pieces, pl, upto=None):
+    """The tempo line with a change taken back (a new dict), or None when a piece isn't there any more. upto (a beat
+    as it is now): only what comes before it taken back after the change (+ the next two items, for what glides into
+    them): enough to DRAW the change's own bars (the purple line pointed at: the whole rest of a 35k-point line took
+    130 ms, hunt 2026-11-15); the line after it is then cut short."""
     out = dict(tempo)
     for kind in LISTS:
         piece = pieces.get(kind)
@@ -425,6 +428,11 @@ def tempo_back(tempo, pieces, pl):
         if i is None:
             return None
         tail = items[i + len(piece["m1"]):]
+        if upto is not None:
+            k = 0
+            while k < len(tail) and _beat(kind, tail[k]) < upto:
+                k += 1
+            tail = tail[:k + 2]
         rest = [_back(kind, x, pl) for x in tail]
         fix = {round(m, 9): o for m, o in piece.get("fix") or ()}
         if fix:
@@ -820,9 +828,9 @@ def redo_as(app, cid, name, bars=None, sig=None, dense=None, between=None, dry=F
     now = bars_now(app, c, sigs)
     new = (list(bars) if bars else now, list(sig) if sig else list(c["sig"]),
            c["dense"] if dense is None else dense, c["between"] if between is None else between)
-    if new[0] == now and new[1] == list(c["sig"]):  # (the numbers it has: nothing would change)
-        return {"why": "same", "at": c["pl"]["a"]}
-    return _rebuild(app, cid, name, new, dry)
+    if new[0] == now and new[1] == list(c["sig"]) and new[2] == c["dense"] and new[3] == c["between"]:
+        return {"why": "same", "at": c["pl"]["a"]}  # (the numbers + ticks it has: nothing would change; a ticks-only
+    return _rebuild(app, cid, name, new, dry, moved=new[0] != now)  # edit is a real one, user 2026-11-15)
 
 
 def _same_lengths(sigs, pl):
@@ -831,7 +839,22 @@ def _same_lengths(sigs, pl):
         meter.at_beat(sigs, s)[1:] == pl["sig"] for s, _ in R.old_bars(sigs, pl["a"], pl["b"]))
 
 
-def _rebuild(app, cid, name, new=None, dry=False):
+def forecast_back(app, cid, top, bottom):
+    """The Edit box's warning lines for change cid made again as top / bottom: rebar_work.forecast on its bars AS
+    THEY WERE (taken back for a moment, everything put back; hunt 2026-11-15: no forecast = the "Short BPM changes"
+    ticks never showed, so they couldn't be changed). {} for the bars' own length (= Remove) or a refusal."""
+    from window import rebar_work as W
+
+    def look(bars):
+        sigs = meter.sigs_of(app.tempo)
+        lo, hi = bars_beats(sigs, *bars)
+        pl = R.plan(sigs, lo, hi, top, bottom)
+        return {} if _same_lengths(sigs, pl) else W.forecast(app, pl)
+    got = _rebuild(app, cid, "", dry=True, look=look)
+    return {} if "why" in got else got
+
+
+def _rebuild(app, cid, name, new=None, dry=False, moved=False, look=None):
     """Change cid taken back (new None) or made again as new = (bars, sig, dense, between), one undo step. The newer
     changes touching it (linked) are taken back first, newest first (undo's order: each one's record was made on
     the line the newer ones then changed), and made again on their bars afterwards, oldest first, keeping their ids
@@ -842,6 +865,10 @@ def _rebuild(app, cid, name, new=None, dry=False):
     c = change_of(app, cid)
     if c is None:
         return {"why": "gone"}
+    lm = app.loaded
+    if lm is not None and lm.notes and lm._anchors is None and \
+            W.moves_loaded(app, round(c["pl"]["a"] * app.ppq)):  # (a safety net: the window reads them first on a
+        lm.anchors()  # thread; unread, a remade change squeezed short loaded notes to 0 ticks, hunt 2026-11-15)
     sigs = meter.sigs_of(app.tempo)
     later = linked(rb, c)
     specs = [(x["id"], bars_now(app, x, sigs), list(x["sig"]), x["dense"], x["between"]) for x in later]
@@ -880,12 +907,16 @@ def _rebuild(app, cid, name, new=None, dry=False):
         if "why" in got:
             return back(got)
         put(app, got)
+    if look is not None:  # (forecast_back: a look at the bars as they were, everything put back)
+        return back(look(bars_now(app, c)))
     out = {"ok": True}
     for sid, (first, last), (top, bottom), dense, between in specs:
         sigs = meter.sigs_of(app.tempo)
         lo, hi = bars_beats(sigs, first, last)
         pl = R.plan(sigs, lo, hi, top, bottom)
         if sid == cid and _same_lengths(sigs, pl):  # (edited back to what the bars were = Remove, user 2026-11-15)
+            if moved:  # (dragged onto bars that long already: refused, it stays where it was; a drag never
+                return back({"why": "same_there", "at": lo, "bar": first + 1})  # deletes, user 2026-11-15)
             out = {"ok": True, "removed": True}
             continue
         got = W.apply(app, pl, name, dense=dense, between=between, push=False)
@@ -1097,6 +1128,7 @@ def check_edit(app):
     if odd:
         bake_ids(app, odd)
         rb = of(app)
+        _redraw_all(app)
     step = app.last_step()
     if step is None or step is getattr(app, "_rebar_seen", None):
         return
@@ -1123,8 +1155,20 @@ def check_edit(app):
         if skip:
             app.rebar_bake_skip = True  # (this session only, user 2026-11-14: back after a restart)
     bake_ids(app, ids)
-    app.tempo_pane.request_redraw()
+    _redraw_all(app)
     app.status.config(text=tr("conductor.rebar_baked" if many else "conductor.rebar_baked_one", bars=where))
+
+
+def _redraw_all(app):
+    """After changes were made permanent: the Conductor pane AND the piano roll / velocity pane (their faint purple
+    bar lines go; hunt 2026-11-15: they stayed until a scroll), the pointed-at one forgotten."""
+    pane = app.tempo_pane
+    pane._rebar_hot = None
+    if hasattr(pane, "rebar_tint"):
+        pane.rebar_tint(None)
+    pane.request_redraw()
+    app.roll.request_redraw()
+    app.vel.request_redraw()
 
 
 def _sharing(rb, ids):

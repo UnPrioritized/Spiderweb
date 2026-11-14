@@ -105,7 +105,8 @@ def ask_key_sig(parent, sharps, minor):
     return _dialog(parent, tr("conductor.key_sig_title"), body)
 
 
-def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=None, dense=True, between=False):
+def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=None, dense=True, between=False,
+              was=None):
     """Change visual time signature's box (user 2026-11-12): the new signature for the bars lo..hi grow to, with
     which bars and what the tempo becomes shown as it's typed. bpm_at(beat) = the tempo there; why_of(plan) = a
     refusal text or None. forecast_of(plan) = {reason: shapes} that will become plain notes (cheap, shown as typed),
@@ -113,7 +114,8 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
     user 2026-11-12) or a refusal text. dense: "Short BPM changes for exact timing" ticked to start with (shown only
     when the change brings notes under a tick apart, forecast_of's "dense"); between: the same for notes landing
     between two ticks (its own line + tick, unticked at first: user 2026-11-14). The plan (rebar.plan, + "dense" /
-    "between": the ticks) to do, or None (cancelled)."""
+    "between": the ticks) to do, or None (cancelled). was: (dense, between) an editable change was made with (its
+    Edit box): the same numbers with a tick changed is a real edit, not "the same" (hunt 2026-11-15)."""
     from notes import rebar as R
     now = at_beat(sigs, bar_line(sigs, lo))
 
@@ -235,7 +237,8 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
                 e.focus_set()
                 e.selection_range(0, "end")
                 return None
-            if all(abs(r[4] - 1) < 1e-12 for r in pl["runs"]) and all(
+            ticks_changed = was is not None and (bool(keep.get()) != bool(was[0]) or bool(exact.get()) != bool(was[1]))
+            if not ticks_changed and all(abs(r[4] - 1) < 1e-12 for r in pl["runs"]) and all(
                     at_beat(sigs, s)[1:] == pl["sig"] for s, _ in R.old_bars(sigs, pl["a"], pl["b"])):
                 hint.config(text=tr("conductor.rebar_same"))
                 return None
@@ -421,7 +424,7 @@ class ConductorMarks:
 
     def rebar_why(self, got):
         """A refusal ({"why", "at"}) as the text the box / status line shows."""
-        bar = where(sigs_of(self.app.tempo), max(0.0, got["at"]))[0] + 1
+        bar = got["bar"] if "bar" in got else where(sigs_of(self.app.tempo), max(0.0, got["at"]))[0] + 1
         return tr("conductor.rebar_why_" + got["why"], bar=bar)
 
     def rebar(self, lo, hi):

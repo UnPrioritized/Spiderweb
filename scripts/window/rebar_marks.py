@@ -175,17 +175,21 @@ class RebarMarks:
         """(the tempo line as it was before change c, its plan) or None (a newer touching change replaced its
         bar-line items: not found). Cached per change + record + line."""
         from window import rebar_edit
-        key = (c["id"], id(rebar_edit.of(self.app)), tempo_key(self.app.tempo))
+        # (one result PER CHANGE while the record + line stay: pointing A, B, A, B redid it each time, hunt
+        # 2026-11-15; only the change's own bars taken back = the line after it cut short: drawing only)
+        key = (id(rebar_edit.of(self.app)), tempo_key(self.app.tempo))
         got = getattr(self, "_rebar_orig", None)
-        if got is not None and got[0] == key:
-            return got[1]
+        if got is None or got[0] != key:
+            got = self._rebar_orig = (key, {})
+        if c["id"] in got[1]:
+            return got[1][c["id"]]
         pl = rebar_edit.plan_of(c["pl"])
         try:
-            back = rebar_edit.tempo_back(self.app.tempo, c["tempo"], pl)
+            back = rebar_edit.tempo_back(self.app.tempo, c["tempo"], pl, upto=c["pl"]["new_b"])
         except (KeyError, IndexError, TypeError, ValueError):
             back = None
         out = None if back is None else (back, pl)
-        self._rebar_orig = (key, out)
+        got[1][c["id"]] = out
         return out
 
     def draw_rebar_was(self, c, x0, x1, kb, w, lw):
@@ -238,6 +242,23 @@ class RebarMarks:
         else:
             self._rebar_hot = got
         return got
+
+    def rebar_recheck(self):
+        """The changes list was put back / changed (undo, redo, Remove, Edit) with the mouse resting: the pointed-at
+        change's tint redone on its bars now, or gone with it (hunt 2026-11-15: it stayed on the old bars)."""
+        from window import rebar_edit
+        hot = getattr(self, "_rebar_hot", None)
+        roll = self.app.roll
+        if hot is None and getattr(roll, "rebar_span", None) is None:
+            return
+        d = getattr(self, "drag", None)
+        if d and d.get("kind") == "rebar":
+            return
+        if hot is not None and rebar_edit.change_of(self.app, hot[0]) is None:
+            self._rebar_hot = None
+            hot = None
+        self.rebar_tint(hot[0] if hot else None)
+        self.request_redraw()
 
     def rebar_tint(self, cid):
         """The piano roll tinted over change cid's bars (None: none)."""
@@ -391,13 +412,17 @@ class RebarMarks:
         from window import rebar_edit
         cid, (first, last) = d["cid"], d["to"]
         name = tr("conductor.step_rebar_move" if d["part"] == "line" else "conductor.step_rebar_bars")
+        where = rebar_edit.bars_text(self.app, {cid})
         got = rebar_edit.move(self.app, cid, first, last, name)
         self.rebar_done()
         if "why" in got:
             self.app.status.config(text=self.rebar_why_any(got))
             return
         c = rebar_edit.change_of(self.app, cid)
-        text = tr("conductor.rebar_done", bars=self.rebar_where(cid), sig=sig_text(c["sig"]) if c else "")
+        if got.get("removed") or c is None:  # (never from a drag now: bars that long already are refused)
+            self.app.status.config(text=tr("conductor.rebar_removed", bars=where))
+            return
+        text = tr("conductor.rebar_done", bars=self.rebar_where(cid), sig=sig_text(c["sig"]))
         n = sum((got.get("whys") or {}).values())
         if n:
             text += " " + trn("conductor.rebar_plain", n, n=n)
@@ -450,21 +475,57 @@ class RebarMarks:
             return
         sigs = sigs_of(app.tempo)
         lo, hi = c["pl"]["a"], c["pl"]["new_b"] - 1e-9
+        if self.loaded_ticks_wait(lo, hi, then=lambda: self.rebar_edit(cid)):  # (the loaded MIDI's note ticks
+            return  # first, like a new change / a drag: unread, its short notes were squeezed to 0, hunt 2026-11-15)
         name = tr("conductor.step_rebar_edit")
+        where = rebar_edit.bars_text(app, {cid})
+        seen, done = {}, {}
 
-        def test_of(pl):
-            got = rebar_edit.edit(app, cid, pl["sig"][0], pl["sig"][1], name, dense=pl.get("dense", c["dense"]),
-                                  between=pl.get("between", c["between"]), dry=True)
-            return self.rebar_why_any(got) if "why" in got else got.get("whys", {})
+        def forecast_of(pl):  # (on the bars as they were: the "Short BPM changes" lines + ticks show, hunt 11-15)
+            key = tuple(pl["sig"])
+            if key not in seen:
+                seen[key] = rebar_edit.forecast_back(app, cid, *key)
+            return seen[key]
+
+        def ticks(pl):
+            return (tuple(pl["sig"]), bool(pl.get("dense", c["dense"])), bool(pl.get("between", c["between"])))
+
+        def test_of(pl):  # (the test run IS the edit: kept when the box closes, taken back when it stays open;
+            got = rebar_edit.edit(app, cid, pl["sig"][0], pl["sig"][1], name,  # OK did it twice, hunt 2026-11-15)
+                                  dense=pl.get("dense", c["dense"]), between=pl.get("between", c["between"]))
+            if "why" in got:
+                return self.rebar_why_any(got)
+            done.clear()
+            done.update(key=ticks(pl), got=got, step=app.last_step())
+            return got.get("whys", {})
+
+        def undo_test():  # (the box stays open / closes another way: the test's edit taken back, no redo)
+            if done and app.last_step() is done["step"]:
+                rebar_edit.undo_edit(app)
+            done.clear()
         from notes.tempo import drawn_bpm as bpm_of
         tempo, base = app.tempo, self.base()
+
+        def test_kept(pl):
+            got = test_of(pl)
+            if not isinstance(got, str) and done and not done["got"].get("removed"):
+                fore = forecast_of(pl)
+                ahead = {k: v for k, v in fore.items() if k not in ("dense", "dense_most", "between", "between_most")}
+                if sum(got.values()) > sum(ahead.values()):
+                    undo_test()  # (the box stays open: "Change anyway")
+            return got
         pl = ask_rebar(self, sigs, lo, hi, lambda b: round(float(bpm_of(tempo, base, [b])[0]), 3),
-                       lambda pl: None, None, test_of, c["dense"], c["between"])
+                       lambda pl: None, forecast_of, test_kept, c["dense"], c["between"],
+                       was=(c["dense"], c["between"]))
         if pl is None:
+            undo_test()
             return
-        where = rebar_edit.bars_text(app, {cid})
-        got = rebar_edit.edit(app, cid, pl["sig"][0], pl["sig"][1], name, dense=pl.get("dense", c["dense"]),
-                              between=pl.get("between", c["between"]))
+        if done and done["key"] == ticks(pl) and app.last_step() is done["step"]:
+            got = done["got"]
+        else:
+            undo_test()
+            got = rebar_edit.edit(app, cid, pl["sig"][0], pl["sig"][1], name, dense=pl.get("dense", c["dense"]),
+                                  between=pl.get("between", c["between"]))
         if "why" in got:
             app.status.config(text=self.rebar_why_any(got))
             return
@@ -488,6 +549,12 @@ class RebarMarks:
     def rebar_remove(self, cid):
         """Remove this change: its bars back as they were (one undo step)."""
         from window import rebar_edit
+        c = rebar_edit.change_of(self.app, cid)
+        if c is None:
+            return
+        if rebar_edit.linked(rebar_edit.of(self.app), c) and self.loaded_ticks_wait(
+                c["pl"]["a"], c["pl"]["new_b"] - 1e-9, then=lambda: self.rebar_remove(cid)):
+            return  # (newer touching changes are made again: the loaded MIDI's note ticks first, hunt 2026-11-15)
         where = rebar_edit.bars_text(self.app, {cid})
         got = rebar_edit.remove(self.app, cid, tr("conductor.step_rebar_remove"))
         if "why" in got:

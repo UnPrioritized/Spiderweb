@@ -1408,6 +1408,9 @@ class TrackList(tk.Canvas):
             start = min(b for sh in app.clipboard for b, _ in cached_path(sh))
             moved = min(b for i in new for b, _ in cached_path(app.shapes[i])) - start
             tempo_at = self.put_tempo(clip, clip["from"] + moved, tr("tempo.step_paste"))
+            if tempo_at is None:  # (Cancel / refused: the whole paste taken back, notes too, hunt 2026-11-15)
+                self.request_redraw()
+                return
         r = app.rendered
         mine = np.isin(r[:, 5], new) if new and len(r) else np.zeros(len(r), bool)
         rows = self.note_rows()[mine]
@@ -1431,17 +1434,21 @@ class TrackList(tk.Canvas):
         name = tr("tempo.step_paste")
         app.push_undo(name=name)
         at = self.put_tempo(clip, app.playhead, name)
+        if at is None:  # (Cancel / refused: nothing pasted, the boxes stay, hunt 2026-11-15)
+            self.request_redraw()
+            return
         self.boxes = [{"t0": at, "t1": at + clip["length"], "rows": (CONDUCTOR_ROW, CONDUCTOR_ROW)}] \
             if clip["length"] > 0 else []
         self.request_redraw()
 
     def put_tempo(self, clip, at, name):
-        """clip laid from beat at (on a tick; in the caller's undo step) -> where it went."""
+        """clip laid from beat at (on a tick; in the caller's undo step) -> where it went, None when cancelled /
+        refused (the caller's step taken back then)."""
         from window import track_tempo
         pane = track_tempo.visual(self.app)  # (never kept inside a Keep timing part: Draw: Heard tempo, hunt)
         at = pane.tick_beat(max(0.0, at), skip=pane.ed()["points"])
-        track_tempo.put(self.app, clip, at, name)
-        return at
+        got = track_tempo.put(self.app, clip, at, name) or {}
+        return None if "why" in got else at
 
     def busy(self):
         """A drag going on in the list (tracks, a box, speakers): its keys wait."""

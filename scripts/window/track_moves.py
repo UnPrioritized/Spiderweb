@@ -114,8 +114,8 @@ def tempo_only(app, kind, tempo, dt=0.0):
     app.push_undo(name=name)
     if kind in ("cut", "delete"):
         track_tempo.empty(app, spans, name)
-    else:
-        track_tempo.move(app, spans, dt, kind == "copy", name)
+    elif "why" in (track_tempo.move(app, spans, dt, kind == "copy", name) or {}):
+        return False  # (Cancel / a refusal: the whole step taken back, the boxes stay where they were, hunt 11-15)
     tl = app.track_list
     if kind in ("cut", "delete"):
         tl.boxes = []
@@ -239,7 +239,9 @@ def finish_job(app, boxes, kind, dt, drow, lm=None, files=(), got=(), extra=None
     done = move_now(app, boxes, dt, drow, kind == "copy", fresh)
     if done and tempo is not None and tempo["clip"] is not None:
         from window import track_tempo
-        track_tempo.move(app, tempo["spans"], dt, kind == "copy", name)
+        if "why" in (track_tempo.move(app, tempo["spans"], dt, kind == "copy", name) or {}):
+            app.track_list.request_redraw()  # (Cancel / a refusal: the WHOLE copy taken back, notes too; the boxes
+            return False  # put back by undo with it, hunt 2026-11-15)
     return done
 
 

@@ -623,6 +623,9 @@ class HistoryPanel:
             self.loaded_map = loaded_map.clean(json.loads(picked[17]))
         if len(picked) > 18 and isinstance(picked[18], rebar_edit.Rebar):
             self.rebar = picked[18]
+            pane = getattr(self, "tempo_pane", None)
+            if pane is not None and hasattr(pane, "rebar_recheck"):
+                pane.rebar_recheck()  # (the pointed-at change's tint follows it / goes with it, hunt 2026-11-15)
         self._edit_key = self._scrub = None
         self._rebar_seen = self.last_step()  # (undo / redo isn't an edit: its time signature changes as they were)
         self.sync_panel()

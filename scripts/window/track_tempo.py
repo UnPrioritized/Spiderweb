@@ -103,15 +103,15 @@ def put(app, clip, at, name, backs=None):
     lines there (the Conductor pane's paste from Domino rule; backs: put_domino_sigs'). Editable changes along:
     made fresh where they land (rebar_paste)."""
     pane = visual(app)
-    if clip.get("rebar"):
+    if clip.get("rebar"):  # ({"why"}: cancelled / refused = the caller's whole step taken back: its boxes stay)
         from window import rebar_paste
-        rebar_paste.put(app, clip, at, name, push=False)
-        return
+        return rebar_paste.put(app, clip, at, name, push=False)
     if clip["points"] or clip["catch"]:
         pane.put_copies(clip, at, name, push=False)
     if clip.get("sigs") or clip.get("keys"):
         pane.put_domino_sigs(clip.get("sigs") or [], clip.get("keys") or [], at, clip["length"], "replace",
                              backs=backs)
+    return {"ok": True}
 
 
 def _moved_sigs(app, spans):
@@ -150,10 +150,10 @@ def move(app, spans, dt, copying, name):
     changing inside them: nothing (a held stretch laid elsewhere would change the tempo there)."""
     clip = clip_of(app, spans, editable=copying)
     if clip is None or not changes(app, spans):
-        return
+        return {"ok": True}
     at = max(0.0, clip["from"] + dt)
     backs = None
     if not copying:
         backs = _backs(app, spans, at + clip["length"])
         empty(app, spans, name)
-    put(app, clip, at, name, backs)
+    return put(app, clip, at, name, backs)
