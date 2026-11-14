@@ -109,11 +109,13 @@ def multi_slots(rows, multi):
     rows = rows.copy()
     if not len(multi):
         return rows
-    most = int(np.bincount(multi[:, 4]).argmax())
-    have = multi[:, 0].astype(np.int64) * 1024 + multi[:, 2]  # (start and key as one number: keys < 1024)
+    vals, counts = np.unique(multi[:, 4], return_counts=True)  # (any slot numbers: own tracks' are past 2 ** 32,
+    most = int(vals[counts.argmax()])                          # a count per possible slot ran out of memory)
+    # (start and key as one number; keys -4096 .. 4095: notes kept past the keys reach a few keyboards out)
+    have = multi[:, 0].astype(np.int64) * 8192 + (multi[:, 2] + 4096)
     o = np.argsort(have, kind="stable")
     have, slot = have[o], multi[o, 4]
-    want = rows[:, 0].astype(np.int64) * 1024 + rows[:, 2]
+    want = rows[:, 0].astype(np.int64) * 8192 + (rows[:, 2] + 4096)
     at = np.searchsorted(have, want, side="right") - 1  # (two notes starting on one spot: the later one, as before)
     found = (at >= 0) & (have[np.maximum(at, 0)] == want)
     rows[:, 4] = np.where(found, slot[np.maximum(at, 0)], most)
