@@ -668,6 +668,7 @@ class ProjectFiles:
                               "tempo_view": list(self.tempo_pane.view) if self.tempo_pane.view else None,
                               "tempo_log": self.tempo_pane.log,
                               "rebar_dense": getattr(self.tempo_pane, "rebar_dense", True),
+                              "rebar_between": getattr(self.tempo_pane, "rebar_between", False),
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
                               "edo10_piano": self.edo10_piano.get(),
@@ -837,6 +838,7 @@ class ProjectFiles:
             pane = self.tempo_pane
             pane.log = win.get("tempo_log") is True  # (linear unless exponential was picked)
             pane.rebar_dense = win.get("rebar_dense") is not False  # (Short BPM changes for exact timing: on at first)
+            pane.rebar_between = win.get("rebar_between") is True  # (the same for notes between ticks: off at first)
             pane.box.graph.current(1 if pane.log else 0)
             view = win.get("tempo_view")
             if (isinstance(view, list) and len(view) == 2 and all(isinstance(v, (int, float)) for v in view)

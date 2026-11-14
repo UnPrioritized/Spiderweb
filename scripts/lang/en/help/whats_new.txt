@@ -5,6 +5,7 @@ What changed in each version, newest first. This page opens by itself the first 
 What's new:
 
 • Change visual time signature… now works over a loaded MIDI too: its notes move and play with the bars, and Export MIDI writes them exactly where the piano roll shows them (the file itself stays as it is until then). Extract boxes move with the bars. See Help → Change visual time signature.
+• Change visual time signature…: notes that would land between two ticks (going to 5/4, say) get their own "Short BPM changes for exact timing" tick in the box, so they can play exactly on time instead of up to half a tick off.
 
 • Fixed: Kestrel (GPU) could freeze when you switched MIDI outs quickly, or when several things used the graphics card at once (Rendered ahead, the Hz bass preview, playback, changing soundfonts). Everything that uses the graphics card now takes turns, one at a time.
 

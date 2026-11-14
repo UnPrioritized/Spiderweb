@@ -110,7 +110,31 @@ def forecast(app, pl):
         out["dense"] = n = int(np.isin(starts, np.concatenate([np.array(g, np.int64) for g in groups])).sum())
         if n >= DENSE_MOST * len(starts):  # (user 2026-11-12: a 1-tick spam squashed = short BPM changes everywhere,
             out["dense_most"] = ppq_times(pl, starts, ppq)  # undoing the change: say a higher PPQ is needed instead)
+    n = between_count(app, pl)
+    if n:  # (user 2026-11-14: notes landing between ticks, their own line + tick)
+        out["between"] = n
     return out
+
+
+def between_ticks(app, pl):
+    """(The shapes' notes in the bars as rows, every note start / end there + the loaded MIDI's): between_fix's
+    ticks."""
+    ppq, r = app.ppq, app.rendered
+    a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
+    rows = np.asarray(r[(r[:, 0] >= a_t) & (r[:, 0] < b_t), :2], np.int64)
+    own = np.unique(rows)
+    return rows, with_loaded(app, own[(own >= a_t) & (own < b_t)], a_t, b_t)
+
+
+def between_count(app, pl):
+    """How many notes will land between two ticks (a note counted once, start or end; a loaded MIDI's by its
+    ticks)."""
+    rows, ticks = between_ticks(app, pl)
+    offs = R.between_spots(pl, ticks, app.ppq)
+    if not len(offs):
+        return 0
+    n = int((np.isin(rows[:, 0], offs) | np.isin(rows[:, 1], offs)).sum()) if len(rows) else 0
+    return n + int(len(np.setdiff1d(offs, rows.ravel())))
 
 
 DENSE_MOST = 0.5  # (share of the bars' notes under a tick apart from which the box says "most notes": my pick)
@@ -392,6 +416,11 @@ def same_notes(old, new, pl, ppq, f=1.0):
                 from notes.tempo_file import seconds_at, ticks_at
                 ro, rn = pl["sound"]
                 exact[snd] = ticks_at(rn, ppq, seconds_at(ro, ppq, old[snd, c].astype(float)))
+        done = pl.get("between_done")
+        if done is not None and len(done):  # (kept exact in time by short BPM changes on THAT tick: exactly there,
+            hit = np.isin(old[:, c], done)  # a shape's own rounding a tick off would sound off: plain notes)
+            exact[hit] = R.map_ticks(pl, old[hit, c], ppq)
+            m[hit, 4 + c] = 0.0
         dm = pl.get("dense_map")
         if dm:  # (kept apart by short BPM changes: exactly there)
             i = np.minimum(np.searchsorted(dm[0], old[:, c]), len(dm[0]) - 1)
@@ -443,6 +472,9 @@ def spots_of(app, pl, old_r):
     out = {"rebar_round": [], "rebar_dense": [], "rebar_cc": []}
     if len(ticks):
         new, off = _rounded(pl, ticks, ppq)
+        done = pl.get("between_done")
+        if done is not None and len(done):  # (kept exact by short BPM changes: not moved in time)
+            off &= ~np.isin(ticks, done)
         out["rebar_round"] = (np.unique(new[off]) / ppq).tolist()
         same = np.flatnonzero(new[1:] == new[:-1])  # (two old ticks on one new tick)
         out["rebar_dense"] = (np.unique(new[same]) / ppq).tolist()
@@ -455,16 +487,17 @@ def spots_of(app, pl, old_r):
     return out
 
 
-def apply(app, pl, name, dry=False, dense=True):
+def apply(app, pl, name, dry=False, dense=True, between=False):
     """The change done on the project in one undo step: {"ok": True, "plain": shapes made plain notes by the safety
     net, "cut": shapes cut at the edges, "off": shapes whose notes still differ} or {"why", "at"} (nothing changed).
     dry: a test run (OK first, user 2026-11-12) taken back from its OWN copy, never through undo / redo, so Cancel
-    leaves the History, Ctrl+Y, a half-drawn shape and the tool windows' tries exactly as they were."""
+    leaves the History, Ctrl+Y, a half-drawn shape and the tool windows' tries exactly as they were. dense /
+    between: "Short BPM changes for exact timing" for notes under a tick apart / landing between ticks."""
     if not dry:
-        return _apply(app, pl, name, False, dense)
+        return _apply(app, pl, name, False, dense, between)
     kept = (list(app.shapes), json.dumps(app.tempo))
     try:
-        return _apply(app, pl, name, True, dense)
+        return _apply(app, pl, name, True, dense, between)
     finally:
         if (len(app.shapes) != len(kept[0]) or any(a is not b for a, b in zip(app.shapes, kept[0]))
                 or json.dumps(app.tempo) != kept[1]):
@@ -475,7 +508,7 @@ def apply(app, pl, name, dry=False, dense=True):
             app.shapes_changed(now=True)
 
 
-def _apply(app, pl, name, dry, dense):
+def _apply(app, pl, name, dry, dense, between=False):
     new_tempo = R.tempo_of(app.tempo, app.tempo_pane.base(), pl, app.ppq)
     if "why" in new_tempo:
         return new_tempo
@@ -490,6 +523,9 @@ def _apply(app, pl, name, dry, dense):
     a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
     starts = with_loaded(app, old_r[(old_r[:, 0] >= a_t) & (old_r[:, 0] < b_t), 0], a_t, b_t)
     pl["dense_map"] = None  # (user 2026-11-12: "Short BPM changes for exact timing" ticked = notes kept apart)
+    pl["between_done"] = None  # (user 2026-11-14: the same for notes landing between ticks; first: dense_fix keeps
+    between_n = (R.between_fix(app.tempo, new_tempo, app.tempo_pane.base(), ppq, pl,  # the times it finds there)
+                               between_ticks(app, pl)[1]) if between else 0)
     dense_n = R.dense_fix(app.tempo, new_tempo, app.tempo_pane.base(), ppq, pl, starts) if dense else 0
     link, new_map = None, app.loaded_map
     was_map = list(app.loaded_map or [])
@@ -573,7 +609,7 @@ def _apply(app, pl, name, dry, dense):
     for i, r in kinds.reasons.items():  # (shapes that were something else than notes, by why)
         if not was_plain[i] and (r != "net" or i in back):
             whys[r] = whys.get(r, 0) + 1
-    got = {"ok": True, "plain": plain_n, "cut": cut, "off": off, "whys": whys, "dense": dense_n,
+    got = {"ok": True, "plain": plain_n, "cut": cut, "off": off, "whys": whys, "dense": dense_n, "between": between_n,
            "loaded": link is not None and len(new_map) > len(was_map)}
     if dry:  # (a test run: put back by apply)
         return got

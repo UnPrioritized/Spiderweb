@@ -655,6 +655,159 @@ def dense_fix(old, new, base, ppq, pl, ticks):
     return done
 
 
+BETWEEN_SEC = 1e-5  # (a note kept exact by between_fix: heard within this of its old second, else its spot is undone)
+
+
+def between_spots(pl, ticks, ppq):
+    """Old note ticks in the bars whose new place falls BETWEEN two ticks (rounded to the nearest), sorted, each once
+    (user 2026-11-14: "Short BPM changes for exact timing" for them too). Left out: ticks placed by when they sound
+    (sound spans) and notes landing on or before the tick the one before took (under a tick apart: dense_spots)."""
+    t = np.unique(np.asarray(ticks, np.int64))
+    a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
+    t = t[(t >= a_t) & (t < b_t)]
+    if not len(t):
+        return t
+    ta = np.array([round(r[0] * ppq) for r in pl["runs"]], np.int64)
+    f = np.array([r[4] for r in pl["runs"]], float)
+    i = np.maximum(np.searchsorted(ta, t, "right") - 1, 0)
+    ex = (t - ta[i]) * f[i]
+    off = np.abs(ex - np.rint(ex)) > 1e-6
+    if not off.any():
+        return t[off]
+    for lo, hi in pl.get("sound_spans") or ():
+        off &= ~((t >= lo) & (t < hi))
+    groups = dense_spots(pl, t, ppq)
+    if groups:
+        off &= ~np.isin(t, np.concatenate([np.array(g[1:], np.int64) for g in groups]))
+    return t[off]
+
+
+def between_fix(old, new, base, ppq, pl, ticks):
+    """Notes whose new place falls between two ticks keep their exact time (user 2026-11-14): each stays on its
+    nearest tick and SHORT HELD BPM CHANGES between it and its neighbours make it sound when it did. A run of such
+    notes between two notes (or tempo points / the bars' edges) that land exactly = one spot: a held BPM from the
+    first of them up to each next one, then the old BPM back from the last, so everything after sounds as before.
+    Whole microseconds a beat counted on a running total (no drift). Left rounded: a spot inside a curved part / a
+    Keep timing part, a BPM past the limits, or one that doesn't come out exact (checked after). In place on new;
+    pl["between_done"] = the old ticks kept exact (no "moved by up to a tick" mark). How many."""
+    from notes.tempo_file import seconds_at
+    pl["between_done"] = None
+    offs = between_spots(pl, ticks, ppq)
+    if not len(offs):
+        return 0
+    a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
+    b_new = round(pl["new_b"] * ppq)
+    inside = np.unique(np.asarray(ticks, np.int64))
+    inside = inside[(inside >= a_t) & (inside < b_t)]
+    groups = dense_spots(pl, inside, ppq)
+    if groups:  # (notes pushed on by one: dense_fix's; only each group's first one is a note here)
+        inside = inside[~np.isin(inside, np.concatenate([np.array(g[1:], np.int64) for g in groups]))]
+    nn = map_ticks(dict(pl, dense_map=None), inside, ppq)
+    pts = new["points"]
+    pt_beats = [p[0] for p in pts]
+    whole = {round(b * ppq) for b in pt_beats if abs(b * ppq - round(b * ppq)) < 1e-6}
+    lone = sorted(b for b in pt_beats if abs(b * ppq - round(b * ppq)) >= 1e-6)  # (points between ticks)
+    edge = {a_t, b_new} | {t for t in whole if a_t <= t <= b_new}
+    is_off = np.isin(inside, offs) & ~np.isin(nn, list(edge))  # (a note on a point's tick: that point holds it)
+    seq = sorted(set(nn.tolist()) | edge)
+    off_at = dict(zip(nn[is_off].tolist(), inside[is_off].tolist()))  # (new tick -> its old tick)
+    ro = heard(old, base, ppq, b_t + 2)
+    rn = heard(new, base, ppq, b_new + ppq)
+    tn = dict(zip(seq, seconds_at(rn, ppq, np.array(seq, float)).tolist()))
+    so = dict(zip(off_at.values(), seconds_at(ro, ppq, np.array(list(off_at.values()), float)).tolist()))
+    chains, run = [], []
+    for k, t in enumerate(seq):  # (each run of between notes with the exact ticks either side)
+        if t in off_at:
+            if not run and k:
+                run = [seq[k - 1]]
+            if run:
+                run.append(t)
+        elif run:
+            chains.append(run + [t])
+            run = []
+    keep = [c for c in chains if _chain_ok(pts, pt_beats, lone, c, ppq)]
+    for _ in range(3):  # (spots that don't come out exact (a catch-up reading the tempo there...) left rounded)
+        if not keep:
+            break
+        trial = copy.deepcopy(new)
+        puts = [_chain_us(c, tn, so, off_at, ppq) for c in keep]
+        keep = [c for c, p in zip(keep, puts) if p is not None]
+        _put_chains(trial["points"], [p for p in puts if p is not None], ppq, base)
+        fixed = {t for c in keep for t in c[1:-1]}
+        rn2 = heard(trial, base, ppq, b_new + ppq)
+        got = seconds_at(rn2, ppq, np.array(seq, float)).tolist()
+        miss = {t for t, g in zip(seq, got) if abs(g - (so[off_at[t]] if t in fixed else tn[t])) > BETWEEN_SEC}
+        if not miss:
+            if not keep:
+                break
+            new["points"][:] = trial["points"]
+            done = sorted(off_at[t] for t in fixed)
+            pl["between_done"] = np.array(done, np.int64)
+            if pl.get("sound_spans"):
+                _sound_map(old, new, base, ppq, pl)
+            return len(done)
+        keep = [c for c in keep if not (miss & set(c))]
+    return 0
+
+
+def _chain_ok(pts, beats, lone, c, ppq):
+    """A spot (new ticks: exact, between ..., exact) can take held BPMs: inside one part, held (no curve, no Keep
+    timing), no point between ticks inside it."""
+    lo, hi = c[0] / ppq, c[-1] / ppq
+    j = bisect.bisect_right(lone, lo + EPS)
+    if j < len(lone) and lone[j] < hi - EPS:
+        return False
+    i = bisect.bisect_right(beats, lo + EPS) - 1
+    if i >= 0 and (_curved(pts, i) or (len(pts[i]) > 5 and pts[i][5])):
+        return False
+    return i + 1 >= len(pts) or pts[i + 1][0] >= hi - EPS
+
+
+def _chain_us(c, tn, so, off_at, ppq):
+    """One spot's held microseconds a beat [(tick, us)] from its first tick on, counted on a running total, or None
+    (past what a file holds / the notes out of order in time)."""
+    times = [tn[c[0]]] + [so[off_at[t]] for t in c[1:-1]] + [tn[c[-1]]]
+    if any(b <= a for a, b in zip(times, times[1:])):
+        return None
+    out, now = [], times[0]
+    for t0, t1, want in zip(c, c[1:], times[1:]):
+        us = round((want - now) * ppq * 1e6 / (t1 - t0))
+        if not 1 <= us <= 0xFFFFFF or not T.MIN_BPM <= 60_000_000 / us <= T.MAX_BPM:
+            return None
+        out.append((t0, us))
+        now += (t1 - t0) * us / (ppq * 1e6)
+    return out, c[-1]
+
+
+def _put_chains(pts, puts, ppq, base):
+    """The spots' held BPMs into the points (in place): a held point on each of a spot's ticks (a point there already
+    takes the BPM; one a curve arrives at gets a second point after it: a jump), then the old BPM back on its last
+    tick (unless a point is there, or the next spot starts there)."""
+    beats = [p[0] for p in pts]
+    starts = {t for put, _ in puts for t, _ in put}
+    backs = {}
+    for _, r in puts:
+        if r in starts:
+            continue
+        i = bisect.bisect_right(beats, r / ppq + EPS) - 1
+        if i >= 0 and abs(beats[i] - r / ppq) <= EPS:
+            continue
+        src = pts[i] if i >= 0 else None
+        backs[r] = [r / ppq, src[1] if src else base] + (copy.deepcopy(src[2:]) if src else
+                                                        ["hold", "", "lin", False, list(T.BEND)])
+    adds = list(backs.values())
+    for put, _ in puts:
+        for t, us in put:
+            b, v = t / ppq, 60_000_000 / us
+            on = T.on_beat(pts, b, beats)
+            if on and not (len(on) == 1 and _curved(pts, on[0] - 1)):
+                pts[on[-1]][1], pts[on[-1]][2] = v, "hold"
+            else:  # (none there, or a curve arrives on it: a point leaving at the new BPM)
+                adds.append([b, v, "hold", "", "lin", False, list(T.BEND)])
+    if adds:
+        pts[:] = sorted(pts + adds, key=lambda p: p[0])  # (stable: an arriving point stays first)
+
+
 def _curved(pts, i):
     return 0 <= i < len(pts) - 1 and pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1]
 

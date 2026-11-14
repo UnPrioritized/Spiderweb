@@ -105,14 +105,15 @@ def ask_key_sig(parent, sharps, minor):
     return _dialog(parent, tr("conductor.key_sig_title"), body)
 
 
-def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=None, dense=True):
+def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=None, dense=True, between=False):
     """Change visual time signature's box (user 2026-11-12): the new signature for the bars lo..hi grow to, with
     which bars and what the tempo becomes shown as it's typed. bpm_at(beat) = the tempo there; why_of(plan) = a
     refusal text or None. forecast_of(plan) = {reason: shapes} that will become plain notes (cheap, shown as typed),
     test_of(plan) = the same found by a quiet test run on OK (more = the box stays open, OK becomes "Change anyway";
     user 2026-11-12) or a refusal text. dense: "Short BPM changes for exact timing" ticked to start with (shown only
-    when the change brings notes under a tick apart, forecast_of's "dense"). The plan (rebar.plan, + "dense": the
-    tick) to do, or None (cancelled)."""
+    when the change brings notes under a tick apart, forecast_of's "dense"); between: the same for notes landing
+    between two ticks (its own line + tick, unticked at first: user 2026-11-14). The plan (rebar.plan, + "dense" /
+    "between": the ticks) to do, or None (cancelled)."""
     from notes import rebar as R
     now = at_beat(sigs, bar_line(sigs, lo))
 
@@ -134,16 +135,28 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
         keep = tk.BooleanVar(value=dense)  # (user 2026-11-12: under the warning line, "these" = those notes)
         tick = ttk.Checkbutton(f, text=tr("conductor.rebar_dense_tick"), variable=keep)
         Tooltip(tick, tr("conductor.rebar_dense_tip"))
+        off = ttk.Label(f, text="", foreground=look.WARN, wraplength=300 * look.WIDE, justify="left")
+        exact = tk.BooleanVar(value=between)  # (user 2026-11-14: notes between ticks, own line + tick)
+        etick = ttk.Checkbutton(f, text=tr("conductor.rebar_dense_tick"), variable=exact)
+        Tooltip(etick, tr("conductor.rebar_between_tip"))
         ttk.Label(f, text=tr("conductor.rebar_tip"), foreground=look.HINT, wraplength=300 * look.WIDE,
-                  justify="left").grid(row=7, column=0, columnspan=3, sticky="w", pady=(8, 0))
+                  justify="left").grid(row=9, column=0, columnspan=3, sticky="w", pady=(8, 0))
         hint = ttk.Label(f, text="", foreground=look.WARN, wraplength=300 * look.WIDE, justify="left")
-        hint.grid(row=8, column=0, columnspan=3, sticky="w", pady=(6, 0))
+        hint.grid(row=10, column=0, columnspan=3, sticky="w", pady=(6, 0))
         state = {"anyway": None}  # (the signature "Change anyway" stands for)
 
         def say(counts, sig=None):
             counts = dict(counts)
             near = counts.pop("dense", 0)
             most = counts.pop("dense_most", None)
+            apart = counts.pop("between", 0)
+            if apart:  # (shown only when some notes would land between ticks)
+                off.config(text=trn("conductor.rebar_between", apart, n=apart))
+                off.grid(row=7, column=0, columnspan=3, sticky="w", pady=(4, 0))
+                etick.grid(row=8, column=0, columnspan=3, sticky="w")
+            else:
+                off.grid_remove()
+                etick.grid_remove()
             n = sum(counts.values())
             whys = ", ".join(trn("conductor.rebar_plain_" + k, v, n=v) for k, v in counts.items() if v)
             plain.config(text=trn("conductor.rebar_will", n, n=n, why=whys) if n else "")
@@ -226,15 +239,17 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
             fore = {} if "why" in fore else fore
             pl["dense"] = bool(keep.get()) and "dense_most" not in fore  # (most notes: rounded, tick not shown)
             pl["dense_most"] = "dense_most" in fore
+            pl["between"] = bool(exact.get())
             key = (pl["a"], pl["b"], tuple(pl["sig"]))
             if test_of and state["anyway"] != key:
-                ahead = {k: v for k, v in fore.items() if k not in ("dense", "dense_most")}
+                ahead = {k: v for k, v in fore.items() if k not in ("dense", "dense_most", "between")}
                 got = test_of(pl)
                 if isinstance(got, str):  # (refused: a mask over the edge...)
                     hint.config(text=got)
                     return None
                 if sum(got.values()) > sum(ahead.values()):
-                    say(dict(got, **{k: v for k, v in fore.items() if k in ("dense", "dense_most")}), pl["sig"])
+                    say(dict(got, **{k: v for k, v in fore.items() if k in ("dense", "dense_most", "between")}),
+                        pl["sig"])
                     hint.config(text=tr("conductor.rebar_found_more"))
                     ok_text(key)
                     return None
@@ -392,16 +407,20 @@ class ConductorMarks:
             return seen[key]
 
         def test_of(pl):
-            got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"), dry=True, dense=pl.get("dense", True))
+            got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"), dry=True, dense=pl.get("dense", True),
+                                   between=pl.get("between", False))
             return self.rebar_why(got) if "why" in got else got["whys"]
         pl = ask_rebar(self, sigs_of(tempo), lo, hi, lambda b: round(float(drawn_bpm(tempo, base, [b])[0]), 3),
-                       why_of, forecast_of, test_of, getattr(self, "rebar_dense", True))
+                       why_of, forecast_of, test_of, getattr(self, "rebar_dense", True),
+                       getattr(self, "rebar_between", False))
         if pl is None:
             return
         if not pl.get("dense_most"):  # (the tick hidden for "most notes": its choice kept as it was)
             self.rebar_dense = pl.get("dense", True)  # (the tick remembered: saved with the window, project.py)
-            self.app.schedule_autosave()
-        got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"), dense=pl.get("dense", True))
+        self.rebar_between = pl.get("between", False)  # (user 2026-11-14: unticked at first, remembered)
+        self.app.schedule_autosave()
+        got = rebar_work.apply(self.app, pl, tr("conductor.step_rebar"), dense=pl.get("dense", True),
+                               between=pl.get("between", False))
         if "why" in got:
             self.app.status.config(text=self.rebar_why(got))
             return
