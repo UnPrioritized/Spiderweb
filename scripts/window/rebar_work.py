@@ -8,7 +8,12 @@ Shapes (user 2026-11-12):
   rounding (or another count) = it becomes plain notes instead (counted on the status line).
 - sticking out of the stretch (or over bars of different factors), a Hz bass inside (stage E): CUT AT THE EDGES like
   the track list's box move, every part plain notes, each note moved / stretched exactly; pasted CC events too.
-A mask that isn't wholly before / after / inside one run: refused (its notes elsewhere would change)."""
+A mask that isn't wholly before / after / inside one run: refused (its notes elsewhere would change).
+A LOADED MIDI reaching the bars (PLAN.md 2026-11-14, user: "visual only until it gets exported"): the file stays as
+it is; the change adds one link to app.loaded_map (notes/loaded_map.py) in the same undo step, so its notes are shown,
+heard and exported moved exactly like a plain notes shape's. Its note ticks (LoadedMidi.anchors, as SHOWN) count with
+the shapes' notes for "under a tick apart" and the short BPM changes (user: same as shapes) and the marks after.
+Extract / Delete loaded notes boxes move with the bars (their ticks are SHOWN ones)."""
 
 import copy
 import json
@@ -16,6 +21,7 @@ import math
 
 import numpy as np
 
+from notes import loaded_map
 from notes import rebar as R
 from notes.tempo import changed as tempo_changed_now
 from notes.custom import notes_shape, unpack_notes, block_shift
@@ -98,7 +104,7 @@ def forecast(app, pl):
             out[r] = out.get(r, 0) + 1
     ppq, r = app.ppq, app.rendered  # (notes the change brings under a tick apart: "dense", counted apart)
     a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
-    starts = r[(r[:, 0] >= a_t) & (r[:, 0] < b_t), 0]
+    starts = with_loaded(app, r[(r[:, 0] >= a_t) & (r[:, 0] < b_t), 0], a_t, b_t)
     groups = R.dense_spots(pl, starts, ppq)
     if groups:
         out["dense"] = n = int(np.isin(starts, np.concatenate([np.array(g, np.int64) for g in groups])).sum())
@@ -108,6 +114,39 @@ def forecast(app, pl):
 
 
 DENSE_MOST = 0.5  # (share of the bars' notes under a tick apart from which the box says "most notes": my pick)
+
+
+def moves_loaded(app, a_t):
+    """Does the change move a loaded MIDI's notes (some shown at the bars' start or later)? A project whose MIDI
+    is missing (Go on without it) counts: its notes can't be seen, so the bars move them anyway."""
+    lm = app.loaded
+    if lm is None:
+        return getattr(app, "midi_link", None) is not None
+    if not lm.notes:
+        return False
+    from notes.loaded_shown import shown_end
+    return shown_end(app) > a_t
+
+
+def loaded_ticks(app, a_t, b_t):
+    """The loaded MIDI's note ticks (every start / end: LoadedMidi.anchors, read first by ConductorMarks.rebar) as
+    SHOWN in a_t .. b_t - 1; empty without one (or not read)."""
+    lm = app.loaded
+    if lm is None or not lm.notes or lm._anchors is None or not moves_loaded(app, a_t):
+        return np.zeros(0, np.int64)
+    from notes.loaded_shown import anchors_shown
+    t = anchors_shown(lm, app.loaded_map)[0]
+    lo, hi = np.searchsorted(t, [a_t, b_t])
+    return t[lo:hi]
+
+
+def with_loaded(app, starts, a_t, b_t):
+    """The shapes' note starts in the bars + the loaded MIDI's note ticks there (each tick once more at most: an
+    Extract's notes are in both)."""
+    more = loaded_ticks(app, a_t, b_t)
+    if not len(more):
+        return starts
+    return np.concatenate([np.asarray(starts, np.int64), np.setdiff1d(more, starts)])
 
 
 def ppq_times(pl, starts, ppq, most=16):
@@ -281,6 +320,53 @@ def cut_mapped(plain, pl, ppq, whole=False):
     return out
 
 
+def box_ticks(pl, ppq, link, ticks):
+    """Shown ticks moved by the change the way the loaded notes are (its link: rewrite's rule), else the plan's."""
+    t = np.asarray(ticks, np.int64)
+    if link is None:
+        return R.map_ticks(pl, t, ppq)
+    return loaded_map.apply_link(loaded_map.unpack(link["n"]), loaded_map.unpack(link["f"]), t)
+
+
+def moved_groups(groups, pl, ppq, link):
+    """Extract-like groups ({"boxes": [[t0, t1, k0, k1]], ...}, SHOWN ticks) on the same loaded notes after the
+    change: t0 -> its new tick, t1 -> past the new tick of t1 - 1 (a note on the box's last tick stays in when a
+    squeeze puts it with t1). A box left with nothing between = one tick."""
+    out = []
+    for g in groups:
+        b = np.array(g["boxes"], np.int64).reshape(-1, 4)
+        if not len(b):
+            out.append(g)
+            continue
+        t0 = box_ticks(pl, ppq, link, b[:, 0])
+        t1 = np.maximum(box_ticks(pl, ppq, link, b[:, 1]), box_ticks(pl, ppq, link, b[:, 1] - 1) + 1)
+        t1 = np.maximum(t1, t0 + 1)
+        nb = np.column_stack([t0, t1, b[:, 2], b[:, 3]])
+        out.append(dict(g, boxes=nb.tolist()))
+    return out
+
+
+def with_boxes_moved(sh, pl, ppq, link):
+    """sh with its Extract boxes (and its merge parts' at any depth) moved like the loaded notes; sh itself when it
+    holds none (no copy)."""
+    from notes.loaded import extract_groups
+    new = None
+    if sh.get("extract") is not None:
+        groups = extract_groups(sh["extract"])
+        moved_g = moved_groups(groups, pl, ppq, link)
+        if any(a["boxes"] != b["boxes"] for a, b in zip(groups, moved_g)):  # (before the bars: kept as it is)
+            new = dict(sh)
+            new["extract"] = moved_g[0] if isinstance(sh["extract"], dict) and len(moved_g) == 1 else moved_g
+    for k in ("merge", "unmerge"):
+        m = sh.get(k)
+        if isinstance(m, dict) and isinstance(m.get("parts"), list):
+            parts = [with_boxes_moved(p, pl, ppq, link) if isinstance(p, dict) else p for p in m["parts"]]
+            if any(a is not b for a, b in zip(parts, m["parts"])):
+                new = new if new is not None else dict(sh)
+                new[k] = dict(m, parts=parts)
+    return sh if new is None else new
+
+
 def rows_by_owner(r):
     order = np.argsort(r[:, 5], kind="stable")
     whose = r[order, 5]
@@ -351,7 +437,8 @@ def spots_of(app, pl, old_r):
     ppq = app.ppq
     a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
     on = (old_r[:, 0] >= a_t) & (old_r[:, 0] < b_t)
-    ticks = np.unique(np.concatenate([old_r[on, 0], old_r[on, 1]]))
+    # (+ the loaded MIDI's note starts / ends there: they move the same way)
+    ticks = np.unique(np.concatenate([old_r[on, 0], old_r[on, 1], loaded_ticks(app, a_t, b_t + 1)]))
     ticks = ticks[(ticks >= a_t) & (ticks <= b_t)]
     out = {"rebar_round": [], "rebar_dense": [], "rebar_cc": []}
     if len(ticks):
@@ -401,9 +488,18 @@ def _apply(app, pl, name, dry, dense):
     old_r = np.array(app.rendered[:, :6], np.int64)
     olds = rows_by_owner(old_r)
     a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
-    starts = old_r[(old_r[:, 0] >= a_t) & (old_r[:, 0] < b_t), 0]
+    starts = with_loaded(app, old_r[(old_r[:, 0] >= a_t) & (old_r[:, 0] < b_t), 0], a_t, b_t)
     pl["dense_map"] = None  # (user 2026-11-12: "Short BPM changes for exact timing" ticked = notes kept apart)
     dense_n = R.dense_fix(app.tempo, new_tempo, app.tempo_pane.base(), ppq, pl, starts) if dense else 0
+    link, new_map = None, app.loaded_map
+    was_map = list(app.loaded_map or [])
+    if moves_loaded(app, a_t):  # (the loaded MIDI's notes: shown moved through one more link, same undo step)
+        link = loaded_map.link_of(pl, ppq, loaded_ticks(app, a_t, b_t + 1))  # (each of its notes exactly placed)
+        new_map = loaded_map.add(app.loaded_map, link)
+    if new_map:  # (a Keep timing part in bars changed over the loaded MIDI: refused, user 2026-11-14)
+        clash = loaded_map.keep_clash(new_map, new_tempo, ppq)
+        if clash:
+            return clash
     spots = None if dry else spots_of(app, pl, old_r)
     for i, k in kinds.items():  # (a shape after the bars whose notes hang on a grid from the song's start (spam
         if k == "after":         # Aligned, Chop "from the song's start", a Hz bass without tones...) and change when
@@ -422,6 +518,10 @@ def _apply(app, pl, name, dry, dense):
         app.roll.end_typing()
         app.roll.cancel_draft()  # (a half-drawn shape goes, as with undo: the shapes change under it)
         app.push_undo(name=name)
+        if new_map is not app.loaded_map:
+            app.loaded_map = new_map  # (sync_extract, from shapes_changed below, reads the boxes again under it)
+        if app.deleted:  # (Delete loaded notes' boxes: on the same notes)
+            app.deleted = moved_groups(app.deleted, pl, ppq, link)
     shapes, extra, cut = list(app.shapes), [], 0
     was_plain = {i: not becomes_plain(sh) for i, sh in enumerate(app.shapes)}
     for i, k in kinds.items():
@@ -436,6 +536,8 @@ def _apply(app, pl, name, dry, dense):
             extra += pieces[1:]
             cut += 1
     app.shapes[:] = shapes + extra
+    if not dry:  # (Extract boxes: on the same loaded notes; a test run changes no notes by them)
+        app.shapes[:] = [with_boxes_moved(sh, pl, ppq, link) for sh in app.shapes]
     app.tempo.clear()
     app.tempo.update(new_tempo)
     tempo_changed_now()
@@ -454,6 +556,8 @@ def _apply(app, pl, name, dry, dense):
         for i in back:
             if bases[i] is not None:
                 pieces = cut_mapped(bases[i], pl, ppq, whole=bases[i].get("rebar_whole", False))
+                if not dry:
+                    pieces = [with_boxes_moved(p, pl, ppq, link) for p in pieces]
                 app.shapes[i] = pieces[0]
                 more += pieces[1:]
                 plain_n += 1
@@ -469,7 +573,8 @@ def _apply(app, pl, name, dry, dense):
     for i, r in kinds.reasons.items():  # (shapes that were something else than notes, by why)
         if not was_plain[i] and (r != "net" or i in back):
             whys[r] = whys.get(r, 0) + 1
-    got = {"ok": True, "plain": plain_n, "cut": cut, "off": off, "whys": whys, "dense": dense_n}
+    got = {"ok": True, "plain": plain_n, "cut": cut, "off": off, "whys": whys, "dense": dense_n,
+           "loaded": link is not None and len(new_map) > len(was_map)}
     if dry:  # (a test run: put back by apply)
         return got
     app.playhead = max(0.0, R.map_beat(pl, app.playhead))  # (on the same music)

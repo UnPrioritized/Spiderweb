@@ -43,6 +43,68 @@ SMALL_TRACK = 1 << 20  # tracks this small read many in one compiled call (read_
 SMALL_BATCH = 4 << 20  # ... this many bytes a call at most (a stop asked between calls)
 _BIG = 1 << 40  # (small_tables' search keys: track place x this + tick)
 
+SHOWN_POLL_MS = 200  # how often the moved overview's making is looked at
+
+
+def shown_overview(app, lm):
+    """(levels, edges) of lm's far-zoom overview in SHOWN ticks for app.loaded_map (Change visual time signature,
+    user 2026-11-14: made again in the background after each change so it matches the exported file loaded), or
+    None: nothing moved, or still being made (started then; the rough one from the file's grid shows meanwhile).
+    Hidden notes (Extract) taken off like the file's grid (loaded.hidden_levels on their shown ticks)."""
+    saved = app.loaded_map
+    if not saved or lm is None:
+        return None
+    key = LS.map_key(saved)
+    so = getattr(lm, "_shown_over", None)
+    if so is None or so["key"] != key:
+        start_shown_overview(app, lm, key)
+        return None
+    if so["hv"] != lm.hide_ver:
+        from notes.loaded import hidden_levels
+        if len(lm.h_s):
+            chain = LS.chain_of(app)
+            so["levels"] = hidden_levels(so["level0"], lm.G, LS.shown(chain, lm.h_s), LS.shown(chain, lm.h_e),
+                                         lm.h_lane)
+        else:
+            so["levels"] = so["full"]
+        so["hv"], so["grid"] = lm.hide_ver, (so["levels"], so["edges"])
+    return so["grid"]
+
+
+def start_shown_overview(app, lm, key):
+    """shown_overview's making on a thread (one at a time a MIDI: another map stops the one before)."""
+    job = getattr(lm, "_shown_job", None)
+    if job is not None and job["key"] == key:
+        return
+    if job is not None:
+        job["stop"] = True
+    from notes.loaded import levels_of, shown_grid
+    chain = LS.chain_of(app)
+    job = lm._shown_job = {"key": key, "stop": False, "got": None, "end": False}
+
+    def run():
+        try:
+            job["got"] = shown_grid(lm, chain, cancel=lambda: job["stop"])
+        except Exception:  # (stopped / the file changed or went: the rough one stays; said when drawing / exporting)
+            pass
+        job["end"] = True
+
+    def poll():
+        if not job["end"]:
+            app.after(SHOWN_POLL_MS, poll)
+            return
+        if getattr(lm, "_shown_job", None) is job:
+            lm._shown_job = None
+        if job["got"] is None or job["stop"] or app.loaded is not lm or LS.map_key(app.loaded_map) != key:
+            return
+        cnt, top, etop = job["got"]
+        levels, edges = levels_of(cnt, top, etop)
+        lm._shown_over = {"key": key, "level0": (cnt, top), "full": levels, "edges": edges, "hv": None}
+        app.roll.request_redraw()
+    threading.Thread(target=run, daemon=True, name="moved overview").start()
+    app.after(SHOWN_POLL_MS, poll)
+
+
 class Exact:
     """One exact picture: rows = every key of the file (0 .. keys - 1) x W columns, pixel x of tick t =
     round(t * ax + bx); style = what else it depends on (the MIDI, tracks shown, faint ones, fade)."""
@@ -154,10 +216,11 @@ class LoadedNotes:
                 self._want(lm, style, ax, bx, W, order, faint, rest=False)  # (the wide one next, behind)
                 return cut(e, rows, 0, W)
         over = getattr(self, "_loaded_over", None)
-        if over is None or over[0] != key:
-            made = (overview_tab(lm, ax, bx, W, p_lo, nk, chain) if order is None else
+        grid = shown_overview(self.app, lm) if chain and order is None else None  # (moved: made again, exact)
+        if over is None or over[0] != key or over[3] is not grid:
+            made = (overview_tab(lm, ax, bx, W, p_lo, nk, chain, grid) if order is None else
                     pictures_tab(lm, order, faint, ax, bx, W, p_lo, nk, chain))
-            over = self._loaded_over = (key, *made)
+            over = self._loaded_over = (key, *made, grid)
         self._loaded_rough = True  # (not exact on screen: painted again when an exact picture comes, _poll_exact)
         if slow > EXACT_MOST_S:
             return over[1], over[2]
@@ -567,13 +630,17 @@ def pictures_tab(lm, order, faint, ax, bx, W, k_lo, nk, chain=None):
     return tab, np.zeros((nk, W), np.uint8)
 
 
-def overview_tab(lm, ax, bx, W, k_lo, nk, chain=None):
+def overview_tab(lm, ax, bx, W, k_lo, nk, chain=None, grid=None):
     """(tab, marks) from the loading pass's grid: each key x pixel = the highest track sounding there, in its
     channel's colour; marks from its edges (lm.edges: 2 = the top track's note starts / ends there = edge colour,
     1 = only a track under it = the shade). chain (the file's ticks moved, loaded_view): the grid is in the FILE's
     ticks, so each pixel column reads the buckets of the file ticks it shows (loaded_view.view's bounds); the level
     is the coarsest one every column still covers a whole bucket of. Rough, as the overview always is: a bucket the
-    moves cut is taken whole."""
+    moves cut is taken whole. grid = shown_overview's (levels, edges) already in SHOWN ticks: used as the file's
+    own (chain then plays no part), the same picture as the exported file's."""
+    levels, edges_of = (lm.levels, lm.edges) if grid is None else grid
+    if grid is not None:
+        chain = None
     L = 0
     if chain:
         edges = LV.float_edges(chain, ax, bx, W)
@@ -581,9 +648,9 @@ def overview_tab(lm, ax, bx, W, k_lo, nk, chain=None):
         tpp = float((hi - lo).min()) if W else 1.0  # (the narrowest column, in file ticks)
     else:
         tpp = 1 / ax
-    while L + 1 < len(lm.levels) and (lm.G << (L + 1)) <= tpp:
+    while L + 1 < len(levels) and (lm.G << (L + 1)) <= tpp:
         L += 1
-    cnt, top = lm.levels[L]
+    cnt, top = levels[L]
     GL = lm.G << L
     ng = top.shape[1]
     c = np.arange(W)
@@ -596,8 +663,8 @@ def overview_tab(lm, ax, bx, W, k_lo, nk, chain=None):
     b1 = np.maximum(np.ceil(tb / GL).astype(np.int64), b0 + 1)
     out = np.full((nk, W), -1, np.int64)
     edge = np.zeros((nk, W), np.uint8)
-    for grid, got in ((top, out), (lm.edges[L], edge)):
-        rows = grid[k_lo:k_lo + nk]
+    for grid_l, got in ((top, out), (edges_of[L], edge)):
+        rows = grid_l[k_lo:k_lo + nk]
         if not len(rows):
             continue
         on = (b1 > 0) & (b0 < ng)
@@ -622,7 +689,7 @@ SCRUB_S = 0.04  # ... exactly when that's guessed this quick, else from the over
 _GROUP_CH = np.argsort(COLOURS_16)  # (channel colour group -> channel)
 
 
-def scrub_notes(lm, order, lo, hi, at, loud=False, only=(), chain=None):
+def scrub_notes(lm, order, lo, hi, at, loud=False, only=(), chain=None, grid=None):
     """Right-drag listening on a loaded MIDI (user 2026-10-25): {(channel, key): (start, velocity)} of what's drawn
     on top: the keys sounding at tick `at` (start None) and notes starting in ticks lo..hi (start = about their
     tick; the latest per key). order = the tracks shown (shown_tracks; faint ones too unless Faint is 0 %), None = all; loud =
@@ -642,7 +709,7 @@ def scrub_notes(lm, order, lo, hi, at, loud=False, only=(), chain=None):
             tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order, loud=loud, only=dict(only) or None,
                                    chain=chain)
         elif order is None:
-            tab, marks = overview_tab(lm, ax, bx, W, 0, lm.keys, chain)
+            tab, marks = overview_tab(lm, ax, bx, W, 0, lm.keys, chain, grid)
         else:
             tab, marks = pictures_tab(lm, order, frozenset(), ax, bx, W, 0, lm.keys, chain)
     except Exception:  # (a file that changed / went: silent, told when drawing / exporting)

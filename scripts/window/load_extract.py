@@ -97,7 +97,8 @@ def sync_extract(app, found=None):
     found = dict(found or {})
     # (another map = the boxes read under the old one may hold other notes: let go, read again; what's found now was
     # read under the current one by its callers)
-    bind(lm, app.loaded_map)
+    if bind(lm, app.loaded_map):  # (Change visual time signature / its undo: drawn, heard and read again moved)
+        lm._map_dirty = True
     lm._taken.update(found)  # (an Extract's own read: kept even while other boxes are still read)
     need = {box_key(b): b for b in boxes if box_key(b) not in lm._taken}
     if need:
@@ -107,6 +108,10 @@ def sync_extract(app, found=None):
         changed = set_boxes(lm, boxes, found, chain_of(app))
     except (OSError, MidiError):  # (the file changed / went: said when drawing / exporting; nothing more hidden)
         return
+    if getattr(lm, "_map_dirty", False):
+        lm._map_dirty, changed = False, True
+        from roll.roll_loaded import shown_overview
+        shown_overview(app, lm)  # (the far-zoom overview made again in the new places, in the background)
     if not changed:
         return
     app.roll.request_redraw()

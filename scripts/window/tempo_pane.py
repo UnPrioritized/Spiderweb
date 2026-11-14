@@ -583,11 +583,16 @@ class TempoBox(ttk.Frame):
                 pts[i].extend([False] * (6 - len(pts[i])))
                 pts[i][5] = True
             offs = keep_off(tempo, stretches(tempo, base))
+            # (in bars changed over the loaded MIDI: its notes can't keep their exact time there, user 2026-11-14)
+            moved = loaded_map.keep_clash(self.app.loaded_map, tempo, ppq) if self.app.loaded_map else None
             for i, w in zip(idx, was):
                 pts[i][5] = w
             ends = [pts[i + 1][0] if i + 1 < len(pts) else math.inf for i in idx]
             if any(a < e2 - 1e-9 and pts[i][0] < b - 1e-9 for i, e2 in zip(idx, ends) for a, b in offs):
                 self.app.status.config(text=tr("tempo.keep_in_catch_refused"))
+                return self.sync()
+            if moved:
+                self.app.status.config(text=tr("tempo.keep_in_moved_refused"))
                 return self.sync()
         self.app.push_undo(name=tr("tempo.step_keep"))
         picked = [pts[i] for i in idx]

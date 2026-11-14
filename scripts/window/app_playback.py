@@ -1261,14 +1261,15 @@ class Playback:
         # (a loaded MIDI's notes drawn on top there; Spiderweb's own win a key both sound; 31-EDO: its notes played
         # as written, like playback plays them, Spiderweb's own rows tuned beside them; Loaded MIDI ticked: tuned too)
         if self.loaded is not None:
-            from roll.roll_loaded import loud_on, scrub_notes, shown_only, shown_tracks
+            from roll.roll_loaded import loud_on, scrub_notes, shown_only, shown_overview, shown_tracks
             order, faint = shown_tracks(self, self.loaded)
             if order is not None and not seen:  # (faint tracks at 0 %: not shown, not heard)
                 order = tuple(n for n in order if n not in faint)
             ppq_lm = self.loaded.ppq / self.ppq  # (its own ticks)
             from notes.loaded_shown import chain_of  # (the sweep is in shown ticks: the file's moved by a changed
             got, rough = scrub_notes(self.loaded, order, lo * ppq_lm, hi * ppq_lm, t_to * ppq_lm, loud_on(self),
-                                     shown_only(self, self.loaded), chain_of(self))  # time signature)
+                                     shown_only(self, self.loaded), chain_of(self),  # time signature)
+                                     shown_overview(self, self.loaded))
             drums = out.name == BUILTIN  # (its channel 10 = drums, as playback plays it: Built-in BASSMIDI's
             edo = tuned and self.edo_loaded()  # own drum channel; other MIDI outs' channel 10 is drums already;
             for (ch, p), (s, v) in got.items():  # 31-EDO's Loaded MIDI tick: rows, like playback plays them)

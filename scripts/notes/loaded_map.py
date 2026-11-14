@@ -183,12 +183,41 @@ def heard(saved, file_tempo):
     return out
 
 
-def link_of(pl, ppq):
+FIT_ROUNDS = 6  # (link_of: rounds of anchors added where the link's rule misses a note's place)
+
+
+def link_of(pl, ppq, ticks=None):
     """A rebar plan (notes/rebar.py plan(), after tempo_of: its "sound_spans" / "dense_map" filled in) as one link
     over the loaded MIDI's ticks (the SHOWN ticks before this change). Anchors: tick 0, each run's start, the bars'
     end (moving on by the ticks the bars grew); every tick of a span placed by when it sounds; each note a dense fix
     gave its own tick (with the ticks either side of it kept on the run's own rule, so the rest of the run isn't
-    bent). Between anchors rewrite's rule = the run's stretch."""
+    bent). Between anchors rewrite's rule = the run's stretch.
+    ticks (the loaded MIDI's note starts / ends in the bars, shown): each must land EXACTLY where the plan puts it
+    (the shapes' place, and when it sounds): where rewrite's rule between the anchors misses one (an anchor after a
+    dense spot bends the rest of the run by a tick or so: notes heard ~6 ms late, stage E), it gets an anchor of its
+    own, a few rounds until none is missed (only the missed ones: a link stays small)."""
+    link = _link_of(pl, ppq)
+    if ticks is None or not len(ticks):
+        return link
+    from notes.rebar import map_ticks as plan_ticks
+    t = np.unique(np.asarray(ticks, np.int64))
+    want = np.maximum.accumulate(np.asarray(plan_ticks(pl, t, ppq), np.int64))
+    n, f = unpack(link["n"]), unpack(link["f"])
+    for k in range(FIT_ROUNDS + 1):
+        miss = apply_link(n, f, t) != want
+        if not miss.any():
+            break
+        if k == FIT_ROUNDS:  # (still bending: every note an anchor)
+            miss[:] = True
+        nn = np.concatenate([t[miss], n])  # (a missed note's own place wins on its tick)
+        ff = np.concatenate([want[miss], f])
+        prio = np.concatenate([np.zeros(int(miss.sum())), np.ones(len(n))])
+        order = np.lexsort((prio, nn))
+        n, f = _rising(*_firsts(nn[order], ff[order]))
+    return make_link(n, f)
+
+
+def _link_of(pl, ppq):
     from notes.rebar import map_ticks as plan_ticks
     rn = [0] + [round(r[0] * ppq) for r in pl["runs"]] + [round(pl["b"] * ppq)]
     rf = [0] + [round(r[2] * ppq) for r in pl["runs"]] + [round(pl["new_b"] * ppq)]

@@ -7,6 +7,7 @@ already = that one is changed. Right-click on a mark: Change... / Remove (RIGHT-
 pane's rule). The first time signature (beat 0) can't be removed, only changed. Each change = one undo step."""
 
 import bisect
+import threading
 import tkinter as tk
 from tkinter import ttk
 
@@ -304,12 +305,14 @@ class ConductorMarks:
     def rebar_item(self, menu, span=None):
         """The right-click menu's "Change visual time signature…" (inside a kept Select box; user 2026-11-12: only
         from the Conductor pane's box): span = the box right-clicked (TempoPane.band_at; hunt, user: only its bars,
-        not every bar between two boxes); None = all the boxes. Greyed with a loaded MIDI holding notes after the
-        box's start; the status line says why while it's pointed at."""
+        not every bar between two boxes); None = all the boxes. A loaded MIDI's notes there move too (PLAN.md
+        2026-11-14), except a DAMAGED one's (its tempo is never written again, so its notes can't move in the export):
+        greyed then, the status line says why while it's pointed at."""
         lo, hi = span or self.bands_reach()
         lm = self.app.loaded
         from notes.loaded_shown import shown_end  # (as SHOWN: an earlier change moved the file's ticks)
-        busy = lm is not None and lm.notes and shown_end(self.app) / lm.ppq > bar_line(sigs_of(self.app.tempo), lo) + 1e-9
+        busy = (lm is not None and lm.notes and (lm.mf.damaged() or lm.ppq != self.app.ppq)
+                and shown_end(self.app) / lm.ppq > bar_line(sigs_of(self.app.tempo), lo) + 1e-9)
         menu.add_command(label=tr("conductor.rebar"), command=lambda: self.rebar(lo, hi),
                          state="disabled" if busy else "normal")
         if busy:
@@ -324,6 +327,45 @@ class ConductorMarks:
                     self.app.status.config(text=tr("conductor.rebar_loaded"))
             menu.bind("<<MenuSelect>>", said, add="+")
 
+    def loaded_ticks_wait(self, lo, hi):
+        """A loaded MIDI reaching these bars whose note ticks (LoadedMidi.anchors: "under a tick apart" counts them,
+        the short BPM changes keep them apart) aren't read yet: read on a thread (status line with the share done),
+        then the box opens. True = wait (the read runs); False = go on now."""
+        lm, app = self.app.loaded, self.app
+        if lm is None or not lm.notes or lm._anchors is not None:
+            return False
+        from notes.loaded_shown import shown_end
+        if shown_end(app) / lm.ppq <= bar_line(sigs_of(app.tempo), lo) + 1e-9:
+            return False
+        if getattr(self, "_ticks_job", None) is not None:
+            return True  # (asked again while reading: one read)
+        job = self._ticks_job = {"done": 0, "total": 1, "end": False, "error": None}
+
+        def run():
+            try:
+                lm.anchors(progress=lambda d, t: job.update(done=d, total=max(1, t)))
+            except Exception as e:  # (file changed / gone: said below)
+                job["error"] = e
+            job["end"] = True
+
+        def poll():
+            if not job["end"]:
+                pct = int(100 * job["done"] / job["total"])
+                app.status.config(text=tr("conductor.rebar_reading", pct=min(99, pct)))
+                self.after(100, poll)
+                return
+            self._ticks_job = None
+            if app.loaded is not lm:
+                return
+            if job["error"] is not None or lm._anchors is None:
+                app.status.config(text=tr("conductor.rebar_read_failed"))
+                return
+            app.status.config(text="")
+            self.rebar(lo, hi)
+        threading.Thread(target=run, daemon=True, name="loaded note ticks (bars)").start()
+        poll()
+        return True
+
     def rebar_why(self, got):
         """A refusal ({"why", "at"}) as the text the box / status line shows."""
         bar = where(sigs_of(self.app.tempo), max(0.0, got["at"]))[0] + 1
@@ -334,6 +376,8 @@ class ConductorMarks:
         from notes import rebar as R
         from notes.tempo import drawn_bpm
         from window import rebar_work
+        if self.loaded_ticks_wait(lo, hi):  # (the loaded MIDI's note ticks first, on a thread: the box then opens)
+            return
         tempo, base = self.app.tempo, self.base()
 
         def why_of(pl):
@@ -368,6 +412,8 @@ class ConductorMarks:
         n = sum(got["whys"].values())
         if n:
             text += " " + trn("conductor.rebar_plain", n, n=n)
+        if got.get("loaded"):
+            text += " " + tr("conductor.rebar_done_loaded")
         self.app.status.config(text=text)
         self.request_redraw()
         self.app.tips.show("rebar", wait=True)  # (the first time: what it did)

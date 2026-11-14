@@ -22,7 +22,7 @@ from notes.engine import (CHANNEL_MODES, OWN0, SHAPE_DEFAULTS, SPLITS, auto_coun
                           slot_track_channel, track_ids)
 from notes.hzbass import clean_hz
 from notes.loaded import (clean_link, conductor_line, extract_groups, extract_ports, file_tempos, own_hits, retime_for,
-                          same_conductor, tempo_new, tempo_tracks)
+                          moved_conductor, same_conductor, tempo_new, tempo_tracks)
 from notes.merge import has_colours
 from notes.hz_cc import slot_events
 from notes.hz_fine import fine_owners, finer_notes, swapped
@@ -1093,8 +1093,11 @@ class ProjectFiles:
         # (Rendered ahead, hunt 2026-11-03: made while stopped before the MIDI came in = without it; built again)
         self.ahead_play.mark_dirty()
         self.kick_ahead()
-        if retempo and not same_conductor(self.tempo, conductor_line(lm)):
-            self.tempo = conductor_line(lm)
+        # (bars changed over it: kept on the same bars, its tempos as shown, user 2026-11-14)
+        line = (moved_conductor(lm, self.loaded_map, self.tempo) if self.loaded_map else conductor_line(lm)) \
+            if retempo else None
+        if retempo and not same_conductor(self.tempo, line):
+            self.tempo = line
             self.tempo_pane.forget()
             self.tempo_changed()
         self.roll.forget_loaded()

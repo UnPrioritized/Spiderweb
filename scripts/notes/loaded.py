@@ -29,6 +29,7 @@ TEMPO, NAME, PORT, TIME_SIG, KEY_SIG = 0x51, 0x03, 0x21, 0x58, 0x59
 PAIRING = "fifo"  # how note-ons and note-offs are paired (first on, first off: Domino, user 2026-10-23); saved
 NO_LANES = (np.zeros(0, np.int64), np.zeros(0, np.int64))
 EXTRACT_ASK, EXTRACT_MOST = 1_000_000, 10_000_000  # Extract: asked past this many notes, refused past that many
+NO_SKIP = np.zeros(0, np.int64)  # (gather_box every=True: no notes left out)
 TAKEN_SPARE = 512 << 20  # bytes of Extract reads kept for boxes no shape holds now (undo / redo: no read again)
 
 
@@ -281,6 +282,20 @@ def conductor_line(lm):
                                if len(d) >= 2 and d[1] <= 7])
     line["keysigs"] = clean_keysigs([[round(tick / ppq, 9), int.from_bytes(d[:1], "big", signed=True), d[1] == 1]
                                      for tick, d in every(KEY_SIG) if len(d) >= 2])
+    return clean_tempo(line)
+
+
+def moved_conductor(lm, saved, tempo):
+    """conductor_line for a MIDI whose bars were changed (saved = app.loaded_map; "Use it as it is now" keeps those
+    changes on the same bars, user 2026-11-14): its tempos as SHOWN (loaded_map.heard: moved, stretched bars
+    scaled), the time / key signatures the project has now (they ARE the changes)."""
+    from notes.tempo import clean_tempo
+    line = conductor_line(lm)
+    ppq = lm.ppq or 480
+    line["points"] = [[tick / ppq, 60_000_000 / us, "hold", "", "lin", False, [0.5, 0.5]]
+                      for tick, us in loaded_map.heard(saved, file_tempos(lm))]
+    line["sigs"] = json.loads(json.dumps((tempo or {}).get("sigs") or line["sigs"]))
+    line["keysigs"] = json.loads(json.dumps((tempo or {}).get("keysigs") or line["keysigs"]))
     return clean_tempo(line)
 
 
@@ -559,7 +574,7 @@ def boxes_meet(a, b):
         not a[5] or not b[5] or bool(set(a[5]) & set(b[5])))
 
 
-def gather_box(lm, box, cancel=None, progress=None, most=None, held=False, chain=None):
+def gather_box(lm, box, cancel=None, progress=None, most=None, held=False, chain=None, every=False):
     """The notes an Extract box takes (note-on in ticks t0 .. t1 - 1, keys k0..k1, its tracks), each whole:
     {"trk", "s", "e", "lane" (channel x 256 + key), "vel", "on", "off" (byte places; off -1 = never let go, e =
     its track's end)} sorted by start; notes hidden already (another box) left out. Each track read from its
@@ -614,7 +629,7 @@ def gather_box(lm, box, cancel=None, progress=None, most=None, held=False, chain
             o[7] = np.zeros(size, np.uint8)
             st = np.zeros(midi_scan.GA_SIZE, np.int64)
             st[midi_scan.GA_TICK], st[midi_scan.GA_RUN] = t.cp_tick[j], t.cp_run[j]
-            skip = lm.skip_of(n)
+            skip = NO_SKIP if every else lm.skip_of(n)  # (every: hidden notes too, shown_grid)
             limit = t.limit - start
             reader = None
             if t.data is None:
@@ -854,6 +869,14 @@ def set_boxes(lm, boxes, found=None, chain=None):
     return True
 
 
+def unhide_all(lm):
+    """Nothing hidden (the boxes read again from scratch: loaded_shown.bind after another map)."""
+    empty = [np.zeros(0, np.int64) for _ in range(7)]
+    lm._set_hidden(*empty)
+    _hide_overview(lm, *empty[:4])
+    lm.hide_ver += 1
+
+
 def _bytes(got):
     return sum(a.nbytes for a in got.values())
 
@@ -879,8 +902,14 @@ def _hide_overview(lm, trk, s, e, lane):
         if not len(trk):
             return
         lm._level0 = tuple(a.copy() for a in lm.levels[0])
-    cnt, top = (a.copy() for a in lm._level0)
-    G, ng = lm.G, cnt.shape[1]
+    lm.levels = hidden_levels(lm._level0, lm.G, s, e, lane)
+
+
+def hidden_levels(level0, G, s, e, lane):
+    """The overview's levels from level0 (cnt, top: every note) without the notes s, e, lane (ticks of the grid's
+    own: the file's, or as SHOWN for shown_grid's)."""
+    cnt, top = (a.copy() for a in level0)
+    ng = cnt.shape[1]
     g0 = s // G
     ok = g0 < GRID_MOST - 1
     if ok.any():
@@ -901,7 +930,104 @@ def _hide_overview(lm, trk, s, e, lane):
         halve(cnt, top, c2, t2)
         levels.append((c2, t2))
         cnt, top = c2, t2
-    lm.levels = levels
+    return levels
+
+
+SHOWN_BYTES = 16 << 20  # (shown_grid reads a track this many bytes at a time at most: the notes' arrays stay small)
+
+
+def shown_grid(lm, chain, cancel=None):
+    """The overview's level 0 (cnt, top) + etop made again with every note's ticks moved by chain (Change visual
+    time signature over the loaded MIDI, user 2026-11-14: rebuilt in the background so far zoom matches the exported
+    file loaded): the loading pass's own rule (midi_index.index / close / grid) on the moved ticks: a note sounds over
+    the buckets from its start's to its end's (end at least start + 1, one never let go = its track's last tick),
+    edges in the buckets of its start and end; a bucket's count = notes sounding there, top = the highest track
+    sounding there, etop = the highest track with an edge there; notes starting past GRID_MOST buckets left out.
+    Every note counts (hidden ones too: hidden_levels takes them off, as for the file's grid). Each track read a
+    window of checkpoints (SHOWN_BYTES) at a time. cancel() True = Cancelled."""
+    G, nk = lm.G, lm.keys
+    G_MOST = GRID_MOST - 1
+    ng = max(1, int(loaded_map.map_ticks(chain, int(lm.end))) // G + 1)  # (grown below if an end lands later)
+    ng = min(ng, GRID_MOST)
+    cnt = np.zeros((nk, ng), np.int32)
+    top = np.full((nk, ng), -1, np.int32)
+    etop = np.full((nk, ng), -1, np.int32)
+    most, max_ee = 2147483647, 0
+    for n, t in enumerate(lm.tracks):
+        if not t.notes or not len(t.cp_off) or not lm.mf.tracks[n].whole:
+            continue
+        cuts = [0]  # (checkpoints SHOWN_BYTES apart: each window's notes = note-ons in its ticks)
+        for j in range(1, len(t.cp_off)):
+            if int(t.cp_off[j]) - int(t.cp_off[cuts[-1]]) >= SHOWN_BYTES:
+                cuts.append(j)
+        bounds = [int(t.cp_tick[j]) for j in cuts] + [1 << 62]
+        bounds[0] = 0
+        d = e_mark = None
+        for w0, w1 in zip(bounds[:-1], bounds[1:]):
+            if w1 <= w0:
+                continue
+            if cancel and cancel():
+                raise Cancelled()
+            got = gather_box(lm, {"t0": w0, "t1": w1, "k0": 0, "k1": nk - 1, "tracks": [n]}, cancel=cancel,
+                             every=True)
+            if not len(got["s"]):
+                continue
+            s = loaded_map.map_ticks(chain, got["s"])
+            e = loaded_map.map_ticks(chain, got["e"])
+            ee = np.maximum(e, s + 1)
+            max_ee = max(max_ee, int(ee.max()))
+            g0 = s // G
+            keep = g0 < G_MOST
+            if not keep.any():
+                continue
+            k = (got["lane"] & 255)[keep]
+            g0, g1 = g0[keep], np.minimum((ee[keep] - 1) // G + 1, G_MOST)
+            need = int(g1.max())  # (d holds a column past the grid for the ends)
+            if need > ng:  # (an end moved past the guess: the grid grows, as the loading pass's does)
+                more = need - ng
+                cnt = np.concatenate([cnt, np.zeros((nk, more), np.int32)], axis=1)
+                top = np.concatenate([top, np.full((nk, more), -1, np.int32)], axis=1)
+                etop = np.concatenate([etop, np.full((nk, more), -1, np.int32)], axis=1)
+                ng = need
+            if d is None or d.shape[1] < ng + 1:
+                d0, m0 = d, e_mark
+                d = np.zeros((nk, ng + 1), np.int64)
+                e_mark = np.zeros((nk, ng), bool)
+                if d0 is not None:
+                    d[:, :d0.shape[1]] = d0
+                    e_mark[:, :m0.shape[1]] = m0
+            np.add.at(d, (k, g0), 1)
+            np.add.at(d, (k, g1), -1)
+            e_mark[k, g0] = True
+            e_mark[k, g1 - 1] = True
+        if d is None:
+            continue
+        c = np.cumsum(d[:, :ng], axis=1)
+        on = c > 0
+        cnt[on] = np.minimum(cnt[on].astype(np.int64) + c[on], most).astype(np.int32)
+        top[on] = n
+        etop[e_mark[:, :ng]] = n
+    w = min(max(1, max_ee // G + 1), GRID_MOST) if max_ee else ng  # (the loading pass's width: the last end's bucket)
+    if w > ng:
+        more = w - ng
+        cnt = np.concatenate([cnt, np.zeros((nk, more), np.int32)], axis=1)
+        top = np.concatenate([top, np.full((nk, more), -1, np.int32)], axis=1)
+        etop = np.concatenate([etop, np.full((nk, more), -1, np.int32)], axis=1)
+    return cnt[:, :w], top[:, :w], etop[:, :w]
+
+
+def levels_of(cnt, top, etop):
+    """(levels, edges) of an overview from its level 0 (the loading pass's halving)."""
+    loops = speed.loops()
+    halve = loops.midi_halve if loops else midi_index.halve
+    levels = [(cnt, top)]
+    while cnt.shape[1] > 1:
+        n2 = (cnt.shape[1] + 1) // 2
+        c2, t2 = np.zeros((cnt.shape[0], n2), np.int32), np.zeros((cnt.shape[0], n2), np.int32)
+        halve(cnt, top, c2, t2)
+        levels.append((c2, t2))
+        cnt, top = c2, t2
+    return levels, edge_levels(etop, levels)
 
 
 def file_hash(mf):

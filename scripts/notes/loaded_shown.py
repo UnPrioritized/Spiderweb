@@ -93,6 +93,9 @@ def bind(lm, saved):
     lm._map_key = key
     lm._taken.clear()
     lm.boxes = None
+    if len(lm.h_on):  # (and nothing hidden until they're read again: gather_box leaves hidden notes out, so the
+        from notes.loaded import unhide_all  # boxes read under the new map found none of their own notes)
+        unhide_all(lm)
     return True
 
 
