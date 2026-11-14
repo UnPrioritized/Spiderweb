@@ -106,7 +106,7 @@ def ask_key_sig(parent, sharps, minor):
 
 
 def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=None, dense=True, between=False,
-              was=None):
+              was=None, orig=None):
     """Change visual time signature's box (user 2026-11-12): the new signature for the bars lo..hi grow to, with
     which bars and what the tempo becomes shown as it's typed. bpm_at(beat) = the tempo there; why_of(plan) = a
     refusal text or None. forecast_of(plan) = {reason: shapes} that will become plain notes (cheap, shown as typed),
@@ -115,7 +115,9 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
     when the change brings notes under a tick apart, forecast_of's "dense"); between: the same for notes landing
     between two ticks (its own line + tick, unticked at first: user 2026-11-14). The plan (rebar.plan, + "dense" /
     "between": the ticks) to do, or None (cancelled). was: (dense, between) an editable change was made with (its
-    Edit box): the same numbers with a tick changed is a real edit, not "the same" (hunt 2026-11-15)."""
+    Edit box): the same numbers with a tick changed is a real edit, not "the same" (hunt 2026-11-15). orig(plan) =
+    (the bars' ORIGINAL bpm, factors from the original bars) for an editable change's Edit box: its tempo line reads
+    original -> what these numbers make (user 2026-11-15), every factor 1 = "back to the original: removed"."""
     from notes import rebar as R
     now = at_beat(sigs, bar_line(sigs, lo))
 
@@ -212,9 +214,13 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
                 return
             first, last = pl["bars"][0] + 1, pl["bars"][1] + 1
             where.config(text=trn("conductor.rebar_bars", pl["count"], first=first, last=last))
-            fs = [r[4] for r in pl["runs"]]
-            if len(fs) == 1:
-                old = bpm_at(pl["a"])
+            fs, old = [r[4] for r in pl["runs"]], None
+            if orig is not None:
+                old, fs = orig(pl)
+            if orig is not None and all(abs(f - 1) < 1e-9 for f in fs):
+                bpm.config(text=tr("conductor.rebar_back_removes"))
+            elif len(fs) == 1:
+                old = bpm_at(pl["a"]) if old is None else old
                 bpm.config(text=tr("conductor.rebar_bpm", old=f"{old:g}", new=f"{old * fs[0]:.6g}"))
             else:
                 bpm.config(text=tr("conductor.rebar_times", times=", ".join(f"{f:.4g}" for f in fs)))

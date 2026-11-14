@@ -497,6 +497,7 @@
  "conductor.rebar_bars_one": "Bar {first}",
  "conductor.rebar_bpm": "Tempo {old} → {new} BPM",
  "conductor.rebar_times": "Tempo × {times} (each bar by its own length)",
+ "conductor.rebar_back_removes": "Back to the bars' own time signature: OK removes the change.",
  "conductor.rebar_type": "Type {lo} to {hi}",
  "conductor.rebar_same": "These bars are that long already: nothing would change.",
  "conductor.rebar_loaded": "Not with this loaded MIDI: it's damaged, so its notes can't be moved when it's exported.",

@@ -514,9 +514,23 @@ class RebarMarks:
                 if sum(got.values()) > sum(ahead.values()):
                     undo_test()  # (the box stays open: "Change anyway")
             return got
+        # (the box's tempo line = the ORIGINAL bpm -> what the typed numbers make from the ORIGINAL bars, user
+        # 2026-11-15: it read the changed bars, a ticks-only edit showed "Tempo 15 → 15")
+        cpl, lc = rebar_edit.plan_of(c["pl"]), bar_len(*c["sig"])
+        back = self.rebar_original(c)
+        was_bpm = (round(float(bpm_of(back[0], base, [cpl["a"]])[0]), 3) if back is not None else
+                   round(float(bpm_of(tempo, base, [cpl["a"]])[0]) / cpl["runs"][0][4], 3))
+
+        def orig(pl):
+            n, fs = bar_len(*pl["sig"]), []
+            for r in cpl["runs"]:
+                f = n * r[4] / lc
+                if not fs or abs(fs[-1] - f) > 1e-12:
+                    fs.append(f)
+            return was_bpm, fs
         pl = ask_rebar(self, sigs, lo, hi, lambda b: round(float(bpm_of(tempo, base, [b])[0]), 3),
                        lambda pl: None, forecast_of, test_kept, c["dense"], c["between"],
-                       was=(c["dense"], c["between"]))
+                       was=(c["dense"], c["between"]), orig=orig)
         if pl is None:
             undo_test()
             return
