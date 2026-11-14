@@ -130,12 +130,14 @@ def use_changed(app, lm):
     app.deleted, app.file_order, app.file_gone, app.file_props = [], None, [], {}
     app.reattach_midi(lm, retempo=True)
     kept = bool(app.loaded_map)  # (time signatures changed over it: kept on the same bars, user 2026-11-14)
-    if took or gone or moved or kept:
+    dropped = getattr(app, "map_dropped", None)  # (another PPQ they can't follow exactly: dropped, said)
+    if took or gone or moved or kept or dropped:
         app.shapes_changed()  # (the Shapes list's names: no longer Extracts)
         text = "\n\n".join(([trn("load.extract_released", len(took), n=len(took))] if took else [])
                            + ([tr("load.deleted_released")] if gone else [])
                            + ([tr("load.order_released")] if moved else [])
-                           + ([tr("load.map_kept")] if kept else []))
+                           + ([tr("load.map_kept")] if kept else [])
+                           + ([tr("load.map_dropped", old=dropped[0], new=dropped[1])] if dropped else []))
         messagebox.showinfo(tr("load.title"), text, parent=app)
 
 

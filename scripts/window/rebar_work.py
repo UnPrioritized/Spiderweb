@@ -104,16 +104,72 @@ def forecast(app, pl):
             out[r] = out.get(r, 0) + 1
     ppq, r = app.ppq, app.rendered  # (notes the change brings under a tick apart: "dense", counted apart)
     a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
-    starts = with_loaded(app, r[(r[:, 0] >= a_t) & (r[:, 0] < b_t), 0], a_t, b_t)
-    groups = R.dense_spots(pl, starts, ppq)
+    ticks, own, s, e = dense_ticks(app, pl)
+    groups = R.dense_spots(pl, ticks, ppq)
+    total = len(own) + len(s)  # (notes, a chord's each one: hunt 2026-11-14, a loaded MIDI's counted by ticks)
     if groups:
-        out["dense"] = n = int(np.isin(starts, np.concatenate([np.array(g, np.int64) for g in groups])).sum())
-        if n >= DENSE_MOST * len(starts):  # (user 2026-11-12: a 1-tick spam squashed = short BPM changes everywhere,
-            out["dense_most"] = ppq_times(pl, starts, ppq)  # undoing the change: say a higher PPQ is needed instead)
+        g = np.concatenate([np.array(x, np.int64) for x in groups])
+        out["dense"] = n = int(np.isin(own, g).sum()) + int((np.isin(s, g) | np.isin(e, g)).sum())
+        if n >= DENSE_MOST * total:  # (user 2026-11-12: a 1-tick spam squashed = short BPM changes everywhere,
+            out["dense_most"] = ppq_times(pl, ticks, ppq)  # undoing the change: say a higher PPQ is needed instead)
     n = between_count(app, pl)
     if n:  # (user 2026-11-14: notes landing between ticks, their own line + tick)
         out["between"] = n
+        if n >= DENSE_MOST * max(1, total):  # (user 2026-11-14: most notes = say the PPQ it needs too; the tick
+            out["between_most"] = between_times(app, pl)  # stays: short BPM changes still work there)
     return out
+
+
+def dense_ticks(app, pl):
+    """(ticks "under a tick apart" looks at + its short BPM changes keep apart, the shapes' note starts, the loaded
+    notes' starts, their ends that count): the shapes' starts + the loaded MIDI's starts / ends in the bars, except
+    an end that only meets its OWN note's start (a 1-tick note squeezed: it ends a tick later instead, link_of;
+    hunt 2026-11-14: they made the box say "most notes" and asked for short BPM changes)."""
+    ppq, r = app.ppq, app.rendered
+    a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
+    own = np.asarray(r[(r[:, 0] >= a_t) & (r[:, 0] < b_t), 0], np.int64)
+    s, e = loaded_pairs(app, a_t, b_t)
+    more = loaded_ticks(app, a_t, b_t)
+    if len(s):
+        new = np.asarray(R.map_ticks(dict(pl, dense_map=None), np.concatenate([s, e]), ppq), np.int64)
+        short = new[len(s):] <= new[:len(s)]
+        if short.any():
+            more = np.setdiff1d(more, np.setdiff1d(e[short], np.concatenate([s, e[~short]])))
+            e = e[~short]
+    ticks = np.concatenate([own, np.setdiff1d(more, own)]) if len(more) else own
+    return ticks, own, s, e
+
+
+def loaded_pairs(app, a_t, b_t, cancel=None):
+    """The loaded MIDI's notes starting in a_t .. b_t - 1 as SHOWN: (starts, ends) int64 arrays, each note once
+    (hidden ones left out: their Extract shape has them). Read once per bars + moves + hidden set (ConductorMarks.
+    loaded_ticks_wait reads it on a thread first); empty without a loaded MIDI there."""
+    lm = app.loaded
+    none = (np.zeros(0, np.int64), np.zeros(0, np.int64))
+    if lm is None or not lm.notes or not moves_loaded(app, a_t):
+        return none
+    from notes.loaded import gather_box
+    from notes.loaded_shown import chain_of, map_key, shown
+    key = (map_key(app.loaded_map), lm.hide_ver, int(a_t), int(b_t))
+    got = getattr(lm, "_rebar_pairs", None)
+    if got is not None and got[0] == key:
+        return got[1]
+    chain = chain_of(app)
+    box = {"t0": int(a_t), "t1": int(b_t), "k0": 0, "k1": 255, "tracks": list(range(len(lm.tracks)))}
+    g = gather_box(lm, box, cancel=cancel, chain=chain)
+    out = (np.asarray(shown(chain, g["s"]), np.int64), np.asarray(shown(chain, g["e"]), np.int64))
+    lm._rebar_pairs = (key, out)
+    return out
+
+
+def between_times(app, pl, most=16):
+    """How many times the PPQ the change needs so no note lands between ticks (2 = twice), or 0 (more than most)."""
+    u = between_ticks(app, pl)[1]
+    pl = dict(pl, sound=None, sound_spans=None)  # (the beat map only: by-sound spans are in this PPQ's ticks)
+    for k in range(2, most + 1):
+        if not len(R.between_spots(pl, np.asarray(u, np.int64) * k, app.ppq * k)):
+            return k
+    return 0
 
 
 def between_ticks(app, pl):
@@ -127,14 +183,16 @@ def between_ticks(app, pl):
 
 
 def between_count(app, pl):
-    """How many notes will land between two ticks (a note counted once, start or end; a loaded MIDI's by its
-    ticks)."""
+    """How many notes will land between two ticks (a note counted once, start or end; a loaded MIDI's each note
+    too, hunt 2026-11-14: a chord was one)."""
     rows, ticks = between_ticks(app, pl)
     offs = R.between_spots(pl, ticks, app.ppq)
     if not len(offs):
         return 0
     n = int((np.isin(rows[:, 0], offs) | np.isin(rows[:, 1], offs)).sum()) if len(rows) else 0
-    return n + int(len(np.setdiff1d(offs, rows.ravel())))
+    ppq = app.ppq
+    s, e = loaded_pairs(app, round(pl["a"] * ppq), round(pl["b"] * ppq))
+    return n + int((np.isin(s, offs) | np.isin(e, offs)).sum())
 
 
 DENSE_MOST = 0.5  # (share of the bars' notes under a tick apart from which the box says "most notes": my pick)
@@ -521,7 +579,7 @@ def _apply(app, pl, name, dry, dense, between=False):
     old_r = np.array(app.rendered[:, :6], np.int64)
     olds = rows_by_owner(old_r)
     a_t, b_t = round(pl["a"] * ppq), round(pl["b"] * ppq)
-    starts = with_loaded(app, old_r[(old_r[:, 0] >= a_t) & (old_r[:, 0] < b_t), 0], a_t, b_t)
+    starts = dense_ticks(app, pl)[0]
     pl["dense_map"] = None  # (user 2026-11-12: "Short BPM changes for exact timing" ticked = notes kept apart)
     pl["between_done"] = None  # (user 2026-11-14: the same for notes landing between ticks; first: dense_fix keeps
     between_n = (R.between_fix(app.tempo, new_tempo, app.tempo_pane.base(), ppq, pl,  # the times it finds there)
@@ -530,7 +588,8 @@ def _apply(app, pl, name, dry, dense, between=False):
     link, new_map = None, app.loaded_map
     was_map = list(app.loaded_map or [])
     if moves_loaded(app, a_t):  # (the loaded MIDI's notes: shown moved through one more link, same undo step)
-        link = loaded_map.link_of(pl, ppq, loaded_ticks(app, a_t, b_t + 1))  # (each of its notes exactly placed)
+        link = loaded_map.link_of(pl, ppq, loaded_ticks(app, a_t, b_t + 1),  # (each of its notes exactly placed,
+                                  loaded_pairs(app, a_t, b_t))               # never 0 ticks long)
         new_map = loaded_map.add(app.loaded_map, link)
     if new_map:  # (a Keep timing part in bars changed over the loaded MIDI: refused, user 2026-11-14)
         clash = loaded_map.keep_clash(new_map, new_tempo, ppq)

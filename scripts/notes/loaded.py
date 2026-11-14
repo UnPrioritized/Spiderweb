@@ -285,18 +285,60 @@ def conductor_line(lm):
     return clean_tempo(line)
 
 
-def moved_conductor(lm, saved, tempo):
+def moved_conductor(lm, saved, tempo, base=120.0):
     """conductor_line for a MIDI whose bars were changed (saved = app.loaded_map; "Use it as it is now" keeps those
-    changes on the same bars, user 2026-11-14): its tempos as SHOWN (loaded_map.heard: moved, stretched bars
-    scaled), the time / key signatures the project has now (they ARE the changes)."""
+    changes on the same bars, user 2026-11-14): OUTSIDE the changed bars the file's tempos at their shown ticks
+    (the moves only shift there); INSIDE them the project's own Conductor line kept (what the change made: tempo x
+    factor, short BPM changes, catch-ups), the file's tempo back on each changed stretch's end (hunt 2026-11-14,
+    user picked A: scaling the file's tempos there lost the factor and carried a scaled one on past the bars). The
+    time / key signatures the project has now (they ARE the changes)."""
+    from notes import tempo as T
     from notes.tempo import clean_tempo
     line = conductor_line(lm)
     ppq = lm.ppq or 480
-    line["points"] = [[tick / ppq, 60_000_000 / us, "hold", "", "lin", False, [0.5, 0.5]]
-                      for tick, us in loaded_map.heard(saved, file_tempos(lm))]
-    line["sigs"] = json.loads(json.dumps((tempo or {}).get("sigs") or line["sigs"]))
-    line["keysigs"] = json.loads(json.dumps((tempo or {}).get("keysigs") or line["keysigs"]))
+    tempo = tempo or {}
+    chain = loaded_map.links(saved)
+    ft = file_tempos(lm)
+    if chain and ft:
+        at = loaded_map.map_ticks(chain, np.array([x for x, _ in ft], np.int64)).tolist()
+        got = {}
+        for x, (_, us) in zip(at, ft):  # (two on one shown tick: the later one, as players read them)
+            got[x] = us
+        line["points"] = [[x / ppq, 60_000_000 / us, "hold", "", "lin", False, [0.5, 0.5]]
+                          for x, us in sorted(got.items())]
+        own = json.loads(json.dumps(tempo.get("points") or []))
+        catch = json.loads(json.dumps(tempo.get("catch") or []))
+        keep_catch = []
+        for a, b in loaded_map.changed_spans(chain):
+            line["points"] = _spliced(line["points"], own, a / ppq, b / ppq, base)
+            keep_catch += [c for c in catch if a / ppq - 1e-9 <= c[0] < b / ppq - 1e-9]
+        line["catch"] = sorted(keep_catch, key=lambda c: c[0])
+        T.drop_loose(line["points"])
+        if "every" in tempo:  # (the kept ramps' Interval)
+            line["every"] = tempo["every"]
+    line["sigs"] = json.loads(json.dumps(tempo.get("sigs") or line["sigs"]))
+    line["keysigs"] = json.loads(json.dumps(tempo.get("keysigs") or line["keysigs"]))
     return clean_tempo(line)
+
+
+def _spliced(pts, own, a, b, base):
+    """pts with beats a .. b taken from own (both lines cut there looking the same: tempo.split_at): pts before a,
+    own's last point on a and everything to b, own's first point on b (a glide arriving), then pts from b on."""
+    from notes import tempo as T
+    pts, own = json.loads(json.dumps(pts)), json.loads(json.dumps(own))
+    for x in (a, b):
+        T.split_at(pts, x, base)
+        T.split_at(own, x, base)
+    on_a = [p for p in own if abs(p[0] - a) < 1e-9]
+    on_b = [p for p in own if abs(p[0] - b) < 1e-9]
+    mid = [p for p in own if a + 1e-9 < p[0] < b - 1e-9]
+    return [p for p in pts if p[0] < a - 1e-9] + on_a[-1:] + mid + on_b[:1] + _from(pts, b)
+
+
+def _from(pts, b):
+    """pts' points from beat b on (on b: the last one, the tempo leaving b)."""
+    on = [p for p in pts if abs(p[0] - b) < 1e-9]
+    return on[-1:] + [p for p in pts if p[0] > b + 1e-9]
 
 
 CONDUCTOR_KEYS = ("points", "catch", "sigs", "keysigs")  # (what a Conductor line changes in the file)

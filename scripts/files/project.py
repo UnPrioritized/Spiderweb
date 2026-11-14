@@ -1095,9 +1095,20 @@ class ProjectFiles:
         # (Rendered ahead, hunt 2026-11-03: made while stopped before the MIDI came in = without it; built again)
         self.ahead_play.mark_dirty()
         self.kick_ahead()
-        # (bars changed over it: kept on the same bars, its tempos as shown, user 2026-11-14)
-        line = (moved_conductor(lm, self.loaded_map, self.tempo) if self.loaded_map else conductor_line(lm)) \
-            if retempo else None
+        self.map_dropped = None
+        try:
+            old_ppq = int(self.pvar["ppq"].get())
+        except (ValueError, TypeError):
+            old_ppq = lm.ppq
+        if self.loaded_map and lm.ppq != old_ppq:  # (a file saved at another PPQ: the moves follow it when they can
+            scaled = loaded_map.scaled(self.loaded_map, old_ppq, lm.ppq)  # land on whole ticks, else dropped + said,
+            if scaled is None:                                             # hunt 2026-11-14)
+                self.map_dropped = (old_ppq, lm.ppq)
+            self.loaded_map = scaled or []
+        # (bars changed over it: kept on the same bars, user 2026-11-14: the file's tempos outside them, the
+        # project's own inside)
+        line = (moved_conductor(lm, self.loaded_map, self.tempo, self.tempo_pane.base()) if self.loaded_map
+                else conductor_line(lm)) if retempo else None
         if retempo and not same_conductor(self.tempo, line):
             self.tempo = line
             self.tempo_pane.forget()

@@ -186,7 +186,7 @@ def heard(saved, file_tempo):
 FIT_ROUNDS = 6  # (link_of: rounds of anchors added where the link's rule misses a note's place)
 
 
-def link_of(pl, ppq, ticks=None):
+def link_of(pl, ppq, ticks=None, pairs=None):
     """A rebar plan (notes/rebar.py plan(), after tempo_of: its "sound_spans" / "dense_map" filled in) as one link
     over the loaded MIDI's ticks (the SHOWN ticks before this change). Anchors: tick 0, each run's start, the bars'
     end (moving on by the ticks the bars grew); every tick of a span placed by when it sounds; each note a dense fix
@@ -195,14 +195,22 @@ def link_of(pl, ppq, ticks=None):
     ticks (the loaded MIDI's note starts / ends in the bars, shown): each must land EXACTLY where the plan puts it
     (the shapes' place, and when it sounds): where rewrite's rule between the anchors misses one (an anchor after a
     dense spot bends the rest of the run by a tick or so: notes heard ~6 ms late, stage E), it gets an anchor of its
-    own, a few rounds until none is missed (only the missed ones: a link stays small)."""
+    own, a few rounds until none is missed (only the missed ones: a link stays small).
+    pairs ((starts, ends) of the loaded notes starting in the bars, shown): a note whose end would land on its own
+    start's tick (a 1-tick note in bars squeezed to half) ends a tick later when the next tick leaves room, like
+    drawn notes (cut_mapped; hunt 2026-11-14: they came out 0 ticks long, on screen and in the export)."""
     link = _link_of(pl, ppq)
     if ticks is None or not len(ticks):
         return link
     from notes.rebar import map_ticks as plan_ticks
-    t = np.unique(np.asarray(ticks, np.int64))
-    want = np.maximum.accumulate(np.asarray(plan_ticks(pl, t, ppq), np.int64))
     n, f = unpack(link["n"]), unpack(link["f"])
+    t = np.asarray(ticks, np.int64)
+    if pairs is not None and len(pairs[0]):
+        t = np.concatenate([t, pairs[0], pairs[1]])
+    t = np.unique(t)
+    want = np.maximum.accumulate(np.asarray(plan_ticks(pl, t, ppq), np.int64))
+    if pairs is not None and len(pairs[0]):
+        want = _ends_kept(t, want, pairs, n, f)
     for k in range(FIT_ROUNDS + 1):
         miss = apply_link(n, f, t) != want
         if not miss.any():
@@ -215,6 +223,31 @@ def link_of(pl, ppq, ticks=None):
         order = np.lexsort((prio, nn))
         n, f = _rising(*_firsts(nn[order], ff[order]))
     return make_link(n, f)
+
+
+def _ends_kept(t, want, pairs, n, f):
+    """want (t's new places, never falling) with each note end that lands on or before its own start's place moved
+    to one tick after it, where the next tick (t's next, or the link's next anchor) isn't placed before that."""
+    s, e = np.asarray(pairs[0], np.int64), np.asarray(pairs[1], np.int64)
+    ok = e > s
+    s, e = s[ok], e[ok]
+    if not len(s):
+        return want
+    i, j = np.searchsorted(t, s), np.searchsorted(t, e)
+    ws = want[i]
+    short = want[j] <= ws
+    if not short.any():
+        return want
+    j, goal = j[short], ws[short] + 1
+    room = np.where(j + 1 < len(t), want[np.minimum(j + 1, len(t) - 1)], np.iinfo(np.int64).max)
+    k = np.searchsorted(n, t[j], "right")  # (the link's next anchor after that end: the bars' end, a run start...)
+    room = np.minimum(room, np.where(k < len(n), f[np.minimum(k, len(n) - 1)], np.iinfo(np.int64).max))
+    fit = goal <= room
+    if not fit.any():
+        return want
+    want = want.copy()
+    np.maximum.at(want, j[fit], goal[fit])
+    return np.maximum.accumulate(want)
 
 
 def _link_of(pl, ppq):
@@ -265,6 +298,20 @@ def add(saved, link):
     if is_shift(n, f):
         return list(saved or [])
     return list(saved or []) + [link]
+
+
+def scaled(saved, old_ppq, new_ppq):
+    """The links for the same MIDI saved at another PPQ ("Use it as it is now", hunt 2026-11-14): every anchor and
+    move x new / old, when all land on whole ticks; None when one doesn't (the moves can't follow exactly)."""
+    out = []
+    for n, f in links(saved):
+        if n is None or f is None:
+            return None
+        nn, ff = n * new_ppq, f * new_ppq
+        if np.any(nn % old_ppq) or np.any(ff % old_ppq):
+            return None
+        out.append(make_link(nn // old_ppq, ff // old_ppq))
+    return out
 
 
 def export_bp(saved, keep_bp=None, ticks=None, loose=None):

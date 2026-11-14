@@ -150,7 +150,15 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
             near = counts.pop("dense", 0)
             most = counts.pop("dense_most", None)
             apart = counts.pop("between", 0)
-            if apart:  # (shown only when some notes would land between ticks)
+            far = counts.pop("between_most", None)
+            if apart and far is not None:  # (most notes between ticks: the PPQ it needs said too, the tick stays:
+                s = sig_text(sig) if sig else ""  # user 2026-11-14)
+                off.config(text=tr("conductor.rebar_between_most_2", sig=s) if far == 2 else
+                           tr("conductor.rebar_between_most", sig=s, k=far) if far else
+                           tr("conductor.rebar_between_most_far", sig=s))
+                off.grid(row=7, column=0, columnspan=3, sticky="w", pady=(4, 0))
+                etick.grid(row=8, column=0, columnspan=3, sticky="w")
+            elif apart:  # (shown only when some notes would land between ticks)
                 off.config(text=trn("conductor.rebar_between", apart, n=apart))
                 off.grid(row=7, column=0, columnspan=3, sticky="w", pady=(4, 0))
                 etick.grid(row=8, column=0, columnspan=3, sticky="w")
@@ -242,13 +250,14 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
             pl["between"] = bool(exact.get())
             key = (pl["a"], pl["b"], tuple(pl["sig"]))
             if test_of and state["anyway"] != key:
-                ahead = {k: v for k, v in fore.items() if k not in ("dense", "dense_most", "between")}
+                ahead = {k: v for k, v in fore.items() if k not in ("dense", "dense_most", "between", "between_most")}
                 got = test_of(pl)
                 if isinstance(got, str):  # (refused: a mask over the edge...)
                     hint.config(text=got)
                     return None
                 if sum(got.values()) > sum(ahead.values()):
-                    say(dict(got, **{k: v for k, v in fore.items() if k in ("dense", "dense_most", "between")}),
+                    say(dict(got, **{k: v for k, v in fore.items()
+                                     if k in ("dense", "dense_most", "between", "between_most")}),
                         pl["sig"])
                     hint.config(text=tr("conductor.rebar_found_more"))
                     ok_text(key)
@@ -328,6 +337,10 @@ class ConductorMarks:
         from notes.loaded_shown import shown_end  # (as SHOWN: an earlier change moved the file's ticks)
         busy = (lm is not None and lm.notes and (lm.mf.damaged() or lm.ppq != self.app.ppq)
                 and shown_end(self.app) / lm.ppq > bar_line(sigs_of(self.app.tempo), lo) + 1e-9)
+        # (the project's MIDI missing, "Go on without it": its notes can't be placed exactly, hunt 2026-11-14)
+        gone = lm is None and getattr(self.app, "midi_link", None) is not None
+        why = "conductor.rebar_missing" if gone else "conductor.rebar_loaded"
+        busy = busy or gone
         menu.add_command(label=tr("conductor.rebar"), command=lambda: self.rebar(lo, hi),
                          state="disabled" if busy else "normal")
         if busy:
@@ -339,26 +352,40 @@ class ConductorMarks:
                 except tk.TclError:
                     on = False
                 if on:
-                    self.app.status.config(text=tr("conductor.rebar_loaded"))
+                    self.app.status.config(text=tr(why))
             menu.bind("<<MenuSelect>>", said, add="+")
 
     def loaded_ticks_wait(self, lo, hi):
         """A loaded MIDI reaching these bars whose note ticks (LoadedMidi.anchors: "under a tick apart" counts them,
         the short BPM changes keep them apart) aren't read yet: read on a thread (status line with the share done),
-        then the box opens. True = wait (the read runs); False = go on now."""
+        then the box opens. True = wait (the read runs); False = go on now. Also the notes starting in the bars
+        (rebar_work.loaded_pairs: counted as notes, never 0 ticks long). The project changed while reading (Ctrl+Z, a
+        tempo edit: other bars now, hunt 2026-11-14) = no box, the status line says so."""
+        from notes.rebar import grow
+        from window import rebar_work
         lm, app = self.app.loaded, self.app
-        if lm is None or not lm.notes or lm._anchors is not None:
+        if getattr(self, "_ticks_job", None) is not None:  # (asked again while reading: one read, said)
+            app.status.config(text=tr("conductor.rebar_still_reading"))
+            return True
+        if lm is None or not lm.notes:
             return False
         from notes.loaded_shown import shown_end
         if shown_end(app) / lm.ppq <= bar_line(sigs_of(app.tempo), lo) + 1e-9:
             return False
-        if getattr(self, "_ticks_job", None) is not None:
-            return True  # (asked again while reading: one read)
+        a, b = grow(sigs_of(app.tempo), lo, hi)
+        a_t, b_t = round(a * app.ppq), round(b * app.ppq)
+        from notes.loaded_shown import map_key
+        pairs = getattr(lm, "_rebar_pairs", None)
+        if lm._anchors is not None and pairs is not None and pairs[0] == (map_key(app.loaded_map), lm.hide_ver,
+                                                                          a_t, b_t):
+            return False
         job = self._ticks_job = {"done": 0, "total": 1, "end": False, "error": None}
+        was = (app.last_step(), len(app.redo_stack), lm)
 
         def run():
             try:
                 lm.anchors(progress=lambda d, t: job.update(done=d, total=max(1, t)))
+                rebar_work.loaded_pairs(app, a_t, b_t)
             except Exception as e:  # (file changed / gone: said below)
                 job["error"] = e
             job["end"] = True
@@ -374,6 +401,9 @@ class ConductorMarks:
                 return
             if job["error"] is not None or lm._anchors is None:
                 app.status.config(text=tr("conductor.rebar_read_failed"))
+                return
+            if (app.last_step(), len(app.redo_stack), app.loaded) != was:
+                app.status.config(text=tr("conductor.rebar_changed_meanwhile"))
                 return
             app.status.config(text="")
             self.rebar(lo, hi)
