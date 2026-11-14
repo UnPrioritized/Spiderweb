@@ -48,18 +48,21 @@ def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds):
             if k[1] is not None and k not in kin and heard(j) is not None:
                 kin[k] = j
     for i, sh in enumerate(shapes):
+        src = i if heard(i) is not None else next(
+            (kin[k] for k in (("paste", sh.get("paste")), ("cut", cut_group(sh))) if k[1] is not None and k in kin),
+            None)
         # ("Repeated colours get new channels": made with its repeats like the real notes, so each kept note's track
         # names its colour AND its repeat, the same lifted notes the real ones come from; user 2026-11-14: a funnel
-        # past the keys showed one colour, its plain colour numbers never matched the real notes' repeat tracks)
-        notes, tracks = kept_tracks(dict(sh, _rounds=True) if rounds and has_colours(sh) else sh, make, keys, ppq)
+        # past the keys showed one colour, its plain colour numbers never matched the real notes' repeat tracks.
+        # A shape with no real notes to copy from (src None) = its plain colour numbers, as before: a repeat's track
+        # read as a slot is a huge number the painter took for an own track, and merges choked on it)
+        rep = rounds and src is not None and has_colours(sh)
+        notes, tracks = kept_tracks(dict(sh, _rounds=True) if rep else sh, make, keys, ppq)
         if not len(notes):
             continue
         notes = np.asarray(notes, np.int64).reshape(-1, 4)
         t = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64).ravel()
         slot = t if multi else np.zeros(len(notes), np.int64)
-        src = i if heard(i) is not None else next(
-            (kin[k] for k in (("paste", sh.get("paste")), ("cut", cut_group(sh))) if k[1] is not None and k in kin),
-            None)
         if src is not None:
             mine, other = heard(src), shapes[src]
             got = colour_slots_of(other, mine, make, rounds)
@@ -301,17 +304,18 @@ class AppOffrange:
         """Every shape's "Keep notes made there" notes as rendered rows (start, end, key, velocity, slot, owner): the
         piano roll paints them see-through (roll_draw OFF_BASE). Each colour on the slot its real notes are on
         (colour_slots), so they look like the rest of the shape; a shape with no real notes: its colour number
-        (Multi) or slot 0. Never part of rendered / drawn: nothing that leaves Spiderweb sees them."""
+        (Multi) or slot 0. Never part of rendered / drawn: nothing that leaves Spiderweb sees them. A colour step
+        being edited: made from the shapes as shown (edit_shapes, its later steps skipped), like the real notes."""
         if not self.keeps_offrange() or self.companion is not None or not self.shapes:
             return NO_NOTES
-        return kept_rows(self.shapes, self.rendered, self.notes_tracks, self.keys, self.ppq,
+        return kept_rows(self.edit_shapes(), self.rendered, self.notes_tracks, self.keys, self.ppq,
                          self.channel_mode.get() == "auto", self.rounds_apart())
 
     def offrange_wanted(self):
-        """What the notes thread needs to work out offrange_rows beside the notes (App._make_coming): (Multi
-        channel, Repeated colours get new channels), or None when it can't / needn't (Keep notes off, Draw on
-        Domino, a colour step being edited: the shown list isn't app.shapes). Read on Tk's thread only."""
-        if not self.keeps_offrange() or self.companion is not None or self.edit_shapes() is not self.shapes:
+        """What the notes thread needs to work out offrange_rows beside the notes (App._make_coming, whose shapes
+        are edit_shapes' too): (Multi channel, Repeated colours get new channels), or None when it can't / needn't
+        (Keep notes off, Draw on Domino). Read on Tk's thread only."""
+        if not self.keeps_offrange() or self.companion is not None:
             return None
         return self.channel_mode.get() == "auto", self.rounds_apart()
 
