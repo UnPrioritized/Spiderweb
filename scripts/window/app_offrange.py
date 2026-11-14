@@ -8,6 +8,7 @@ from notes.merge import has_colours
 from notes.mask import is_mask, mask_view, silent
 from notes.paths import rows_up_to
 from notes.app_layout import all_notes, landing_clashes, wrap_landing
+from notes.custom import ROUND
 
 
 def kept_tracks(sh, make, keys, ppq):
@@ -47,7 +48,10 @@ def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds):
             if k[1] is not None and k not in kin and heard(j) is not None:
                 kin[k] = j
     for i, sh in enumerate(shapes):
-        notes, tracks = kept_tracks(sh, make, keys, ppq)
+        # ("Repeated colours get new channels": made with its repeats like the real notes, so each kept note's track
+        # names its colour AND its repeat, the same lifted notes the real ones come from; user 2026-11-14: a funnel
+        # past the keys showed one colour, its plain colour numbers never matched the real notes' repeat tracks)
+        notes, tracks = kept_tracks(dict(sh, _rounds=True) if rounds and has_colours(sh) else sh, make, keys, ppq)
         if not len(notes):
             continue
         notes = np.asarray(notes, np.int64).reshape(-1, 4)
@@ -64,12 +68,45 @@ def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds):
             else:
                 real = make(dict(other, _rounds=True) if rounds and has_colours(other) else other)[1]
                 u = np.unique(np.asarray(real, np.int64)) if real is not None else np.zeros(1, np.int64)
-                at = np.clip(np.searchsorted(u, t), 0, len(u) - 1)
-                found = (u[at] == t) & (at < len(got))
-                slot = np.where(found, np.asarray(got, np.int64)[np.minimum(at, len(got) - 1)],
-                                int(np.bincount(mine[:, 4] - mine[:, 4].min()).argmax() + mine[:, 4].min()))
+                most = int(np.bincount(mine[:, 4] - mine[:, 4].min()).argmax() + mine[:, 4].min())
+                slot = repeat_slots(t, u, np.asarray(got, np.int64), most) if rounds and len(u) == len(got) else None
+                if slot is None:
+                    at = np.clip(np.searchsorted(u, t), 0, len(u) - 1)
+                    found = (u[at] == t) & (at < len(got))
+                    slot = np.where(found, np.asarray(got, np.int64)[np.minimum(at, len(got) - 1)], most)
         parts.append(np.column_stack([notes, slot, np.full(len(notes), i, np.int64)]))
     return np.concatenate(parts) if parts else NO_NOTES
+
+
+SHIFT = ROUND.bit_length() - 1  # (a track = colour + ROUND x repeat: custom.with_rounds)
+MOST_TABLE = 1 << 22
+
+
+def repeat_slots(t, u, got, most):
+    """Kept notes' slots with "Repeated colours get new channels" (user 2026-11-14): t = each kept note's track
+    (colour + ROUND x repeat), u = the real notes' tracks (sorted, unique), got = u's slots. A track the real notes
+    have = its slot; a repeat only the kept part reaches = the slot of the LOWEST real repeat of the same colour (a
+    slot shows colour = slot % channels, so the colours carry on across the edge); a colour the real notes never
+    have = most. One look-up table over (repeat, colour), a gather per note (two searches over every note took a
+    third longer). None when the table would be too big (the caller searches instead)."""
+    mask = ROUND - 1
+    ub, ur = u & mask, u >> SHIFT
+    tr, tb = t >> SHIFT, t & mask
+    r0, r1 = min(int(ur.min()), int(tr.min())), max(int(ur.max()), int(tr.max()))
+    b = max(int(ub.max()), int(tb.max())) + 1
+    if (r1 - r0 + 1) * b > MOST_TABLE:
+        return None
+    lowest = np.full(b, most, np.int64)
+    o = np.lexsort((ur, ub))
+    first = np.ones(len(o), bool)
+    first[1:] = ub[o][1:] != ub[o][:-1]
+    lowest[ub[o][first]] = got[o][first]
+    table = np.tile(lowest, r1 - r0 + 1)
+    table[(ur - r0) * b + ub] = got
+    tr -= r0
+    tr *= b
+    tr += tb
+    return table[tr]
 
 
 def colour_slots_of(sh, mine, make, rounds):
