@@ -2866,7 +2866,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 if job["stop"]:
                     raise Stopped
                 if off_for is not None:  # (App.offrange_rows' work, off Tk's thread: ~70 ms at 1 M kept notes)
-                    job["off"] = kept_rows(shapes, got[2], notes_tracks, key[2], key[1], *off_for)
+                    job["off"] = kept_rows(shapes, got[2], notes_tracks, key[2], key[1], *off_for, got[1])
                 # (the piano roll's orders for painting them too: roll_draw.start_order / paint_order)
                 rendered, order = got[2], None
                 start = np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable")

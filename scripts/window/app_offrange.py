@@ -5,7 +5,7 @@ from roll.roll_draw import GHOST_FADE
 from notes.engine import NO_NOTES, off_part, past_edges, track_ids
 from notes.sliced import cut_group
 from notes.merge import has_colours
-from notes.mask import is_mask, mask_view, silent
+from notes.mask import as_used, is_mask, mask_view, pinned_slots, silent, slot_rule
 from notes.paths import rows_up_to
 from notes.app_layout import all_notes, landing_clashes, wrap_landing
 from notes.custom import ROUND
@@ -27,10 +27,10 @@ def kept_tracks(sh, make, keys, ppq):
     return off_part(notes, tracks, up, keys, round(later * ppq))
 
 
-def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds):
+def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds, use10=False):
     """App.offrange_rows' work (Keep notes on), from plain data only, so the notes thread can do it beside the notes
     (App._make_coming): shapes = app.shapes as the notes were made, rendered = their notes, make = a notes_tracks,
-    multi = Multi channel, rounds = App.rounds_apart()."""
+    multi = Multi channel, rounds = App.rounds_apart(), use10 = the rendered notes' slot rule (App.picture_use10)."""
     if not shapes:
         return NO_NOTES
     parts = []
@@ -56,14 +56,20 @@ def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds):
         # past the keys showed one colour, its plain colour numbers never matched the real notes' repeat tracks.
         # A shape with no real notes to copy from (src None) = its plain colour numbers, as before: a repeat's track
         # read as a slot is a huge number the painter took for an own track, and merges choked on it)
-        rep = rounds and src is not None and has_colours(sh)
+        # (a shape whose tracks ARE its channels (Merged notes, Merge leftovers, Turn into plain notes, Apply mask's
+        # copies, pictures: mask.pinned_slots) = exact, nothing guessed; user 2026-11-14: a merged paste's rows left
+        # over the top key all fell onto its most-used channel, right again once dragged onto the keys)
+        pin = pinned_slots(sh, "auto" if multi else "single")
+        rep = not pin and rounds and src is not None and has_colours(sh)
         notes, tracks = kept_tracks(dict(sh, _rounds=True) if rep else sh, make, keys, ppq)
         if not len(notes):
             continue
         notes = np.asarray(notes, np.int64).reshape(-1, 4)
         t = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64).ravel()
         slot = t if multi else np.zeros(len(notes), np.int64)
-        if src is not None:
+        if pin and tracks is not None:
+            slot = np.asarray(as_used(t, slot_rule(sh), use10), np.int64)
+        elif src is not None:
             mine, other = heard(src), shapes[src]
             got = colour_slots_of(other, mine, make, rounds)
             if len(got) == 1:
@@ -309,7 +315,7 @@ class AppOffrange:
         if not self.keeps_offrange() or self.companion is not None or not self.shapes:
             return NO_NOTES
         return kept_rows(self.edit_shapes(), self.rendered, self.notes_tracks, self.keys, self.ppq,
-                         self.channel_mode.get() == "auto", self.rounds_apart())
+                         self.channel_mode.get() == "auto", self.rounds_apart(), self.picture_use10)
 
     def offrange_wanted(self):
         """What the notes thread needs to work out offrange_rows beside the notes (App._make_coming, whose shapes
