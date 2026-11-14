@@ -594,6 +594,11 @@ class TempoBox(ttk.Frame):
             if moved:
                 self.app.status.config(text=tr("tempo.keep_in_moved_refused"))
                 return self.sync()
+            from window import rebar_edit  # (in an editable time signature change: never both, user 2026-11-14)
+            clash = rebar_edit.keep_clash(self.app, [(pts[i][0], e2) for i, e2 in zip(idx, ends)])
+            if clash is not None:
+                self.app.status.config(text=tr("tempo.keep_in_change_refused", bar=clash))
+                return self.sync()
         self.app.push_undo(name=tr("tempo.step_keep"))
         picked = [pts[i] for i in idx]
         newly = set()

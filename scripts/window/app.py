@@ -560,6 +560,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.loaded_map = []
         from window.rebar_edit import EMPTY as NO_REBAR  # (editable time signature changes: window/rebar_edit.py)
         self.rebar = NO_REBAR
+        self._rebar_job = None  # (rebar_watch: the check after an edit, waiting for idle / the mouse to let go)
+        self._rebar_seen = None  # (the undo step it last looked at: checked once)
+        self.rebar_bake_skip = False  # (its heads-up ticked off: this session only, user 2026-11-14)
         # this project's own mark (a new one at New / Open): Ctrl+C's copies carry it, so a copy laid on tracks keeps
         # them only when pasted back into the same project (put_into_current; hunt 2026-10-26)
         self.project_token = os.urandom(8).hex()
@@ -2135,6 +2138,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if now and now != "late":
             self._bg_notes = False  # (being made now: what's read on the way is read as it is, not waited for)
         self.shapes_gen += 1
+        self.rebar_watch()  # (an edit inside an editable time signature change: asked once it's done)
         if self._late_notes:
             self.after_cancel(self._late_notes)
             self._late_notes = None
@@ -3654,6 +3658,19 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             parts.append(tr("app.selected_notes", shapes=shapes, notes=trn("n.notes", n, n=n)))
         self.status.show("     ".join(parts))
 
+    def rebar_watch(self, later=False):
+        """An edit may have touched an editable time signature change: checked once the window is idle and the
+        mouse let go (rebar_edit.check_edit: heads-up, then permanent). Nothing to do without such changes."""
+        rb = getattr(self, "rebar", None)
+        if getattr(self, "_rebar_job", None) is not None or rb is None or not rb.changes:
+            return
+
+        def run():
+            from window import rebar_edit
+            self._rebar_job = None
+            rebar_edit.check_edit(self)
+        self._rebar_job = self.after(150, run) if later else self.after_idle(run)
+
     def box_drawn(self):
         """A Select box being drawn on the main piano roll: shortcuts do nothing until it's let go (user: like many
         MIDI programs)."""
@@ -3698,6 +3715,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if hasattr(self, "tempo_pane") and not restoring:
             self.tempo_pane.write_heard()  # (Draw: Heard tempo: the edited line back into its Keep timing part)
         tempo_edited()
+        if not restoring:
+            self.rebar_watch()  # (an edit inside an editable time signature change: asked once it's done)
         self.tempo_count = getattr(self, "tempo_count", 0) + 1  # (Fill with tempo jumps' preview: made again)
         if not hasattr(self, "tempo_box"):
             return

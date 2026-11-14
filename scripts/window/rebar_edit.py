@@ -863,9 +863,239 @@ def move(app, cid, first, last, name, dry=False):
     return redo_as(app, cid, name, bars=(first, last), dry=dry)
 
 
+# ------------------------------------------------------------------ made permanent by an edit inside (stage B)
+# (user 2026-11-14: editing notes / shapes / the tempo INSIDE a change, or drawing a new shape there, makes it
+# permanent after a heads-up; its tick lasts until Spiderweb restarts; Cancel = the edit doesn't happen. Checked
+# ONCE per new undo step, after the mouse lets go: the step's state before vs now)
+
+def keep_clash(app, spans):
+    """The first bar (from 1) of an editable change that one of spans [(first beat, end beat)] (Keep timing parts)
+    reaches into, else None (user 2026-11-14: Keep timing and a change never share bars)."""
+    for c in changes(app):
+        a, b = c["pl"]["a"], c["pl"]["new_b"]
+        if any(lo < b - 1e-9 and hi > a + 1e-9 for lo, hi in spans):
+            return bars_now(app, c)[0] + 1
+    return None
+
+
+def _shape_key(sh):
+    """A shape as text, its big texts (pasted notes) as their string's identity: the same in an undo step's copy
+    (load_state shares the very strings) and in the project."""
+    from window.history import _big_texts
+    places = _big_texts(sh)
+    texts = [d[k] for d, k in places]
+    for (d, k), t in zip(places, texts):
+        d[k] = "\x00big" + str(id(t))
+    try:
+        return json.dumps(sh, sort_keys=True)
+    finally:
+        for (d, k), t in zip(places, texts):
+            d[k] = t
+
+
+def _shape_span(app, sh, ppq):
+    """(first, last) tick a shape reaches: its notes, its points, its Extract boxes. None: nothing."""
+    lo, hi = [], []
+    try:
+        notes = np.asarray(app.notes_of(sh), np.int64).reshape(-1, 4)
+    except Exception:  # (a shape the program can't make: its points still say where it is)
+        notes = np.zeros((0, 4), np.int64)
+    if len(notes):
+        lo.append(int(notes[:, 0].min()))
+        hi.append(int(notes[:, 1].max()))
+    bs = [p[0] for p in sh.get("pts") or () if isinstance(p, (list, tuple)) and p]
+    if bs:
+        lo.append(math.floor(min(bs) * ppq))
+        hi.append(math.ceil(max(bs) * ppq))
+    if sh.get("extract") is not None:
+        from notes.loaded import extract_groups
+        for g in extract_groups(sh["extract"]):
+            for b in g.get("boxes") or ():
+                lo.append(int(b[0]))
+                hi.append(int(b[1]))
+    return (min(lo), max(hi)) if lo else None
+
+
+def _tempo_beats(kind, item):
+    out = [item[0]]
+    if kind == "points":
+        out += [q[0] for q in T.heard_line(item)]
+    elif kind == "catch":
+        for k in (3, 4):
+            v = T.catch_get(item, k)
+            if v is not None:
+                out.append(v)
+    return out
+
+
+def _tempo_edits(before, now):
+    """The beats of the tempo line's items an edit changed / added / removed (each list: the same start and end
+    left out, what's between them counted)."""
+    out = []
+    for kind in LISTS:
+        a, b = list(before.get(kind) or []), list(now.get(kind) or [])
+        if a == b:
+            continue
+        p = 0
+        while p < len(a) and p < len(b) and a[p] == b[p]:
+            p += 1
+        s = 0
+        while s < len(a) - p and s < len(b) - p and a[len(a) - 1 - s] == b[len(b) - 1 - s]:
+            s += 1
+        for x in a[p:len(a) - s] + b[p:len(b) - s]:
+            out += _tempo_beats(kind, x)
+    return out
+
+
+def inside_ids(app, step):
+    """The editable changes the newest edit (undo step `step` = the project before it) touched: something in their
+    bars changed (shapes / notes, a new shape there, tempo points, catch-ups, signatures, Delete loaded notes'
+    boxes), or a shape one of them made (a piece of a cut paste, anywhere: its record would be stale). Set of ids."""
+    from window.history import as_state, load_state, undo_state
+    from notes.tempo import snap_line, tempo_snap
+    rb = of(app)
+    if not rb.changes or app.step_rebar(step) is not rb:  # (no changes, or the step made / took back one itself)
+        return set()
+    ppq = app.ppq
+    spans = [(c["id"], c["pl"]["a"], c["pl"]["new_b"]) for c in rb.changes]
+    hit = set()
+
+    def beats_in(xs):
+        for cid, a, b in spans:
+            if any(a - 1e-6 <= x <= b + 1e-6 for x in xs):
+                hit.add(cid)
+
+    def ticks_in(lo, hi):  # (a shape / box reaching from tick lo to hi)
+        for cid, a, b in spans:
+            if hi > round(a * ppq) and lo < round(b * ppq):
+                hit.add(cid)
+    was, now = app.step_tempo(step), tempo_snap(app.tempo)
+    if was != now:  # (both read back the same way: items compared as the step keeps them)
+        beats_in(_tempo_edits(snap_line(was), snap_line(now)))
+    if app.step_deleted(step) != json.dumps(app.deleted):
+        from notes.loaded import extract_groups
+        old = {json.dumps(list(b)) for g in extract_groups(json.loads(app.step_deleted(step))) for b in g.get("boxes")
+               or ()}
+        new = {json.dumps(list(b)) for g in app.deleted or () for b in g.get("boxes") or ()}
+        for t in old ^ new:
+            b = json.loads(t)
+            ticks_in(b[0], b[1])
+    before = as_state(step[0], app.shapes)
+    if before != undo_state(app.shapes):
+        from collections import Counter
+        old = load_state(before)
+        ko, kn = [_shape_key(s) for s in old], [_shape_key(s) for s in app.shapes]
+        gone, came = Counter(ko) - Counter(kn), Counter(kn) - Counter(ko)
+        changed = set(gone) | set(came)
+        for g in rb.groups:  # (a shape a change made, edited anywhere: that change)
+            if any(m is not GONE and _shape_key(m) in changed for m in g["made"]):
+                hit.update(g["recs"])
+        for keys, shapes, extra in ((ko, old, gone), (kn, app.shapes, came)):
+            left = dict(extra)
+            for k, sh in zip(keys, shapes):
+                if left.get(k):
+                    left[k] -= 1
+                    span = _shape_span(app, sh, ppq)
+                    if span is not None:
+                        ticks_in(*span)
+    return hit
+
+
+def busy(app):
+    """The mouse holds something (a drag, a box being drawn, a held number box), or a pop-up holds the window: the
+    check waits for it to end (asked once, after the edit, never mid-drag)."""
+    tl = getattr(app, "track_list", None)
+    sc = getattr(app, "_scrub", None)
+    return bool(app.roll.drag or getattr(app.tempo_pane, "drag", None) or app.vel.edit or app.held_scrub
+                or (sc and sc.get("active")) or (tl is not None and app.tracks_shown() and tl.busy())
+                or app.grabbed_elsewhere())
+
+
+def bars_text(app, ids):
+    """"bar 5" / "bars 5–6, bar 9": where these changes are now."""
+    from files.lang import tr
+    sigs = meter.sigs_of(app.tempo)
+    out = []
+    for c in changes(app):
+        if c["id"] in ids:
+            first, last = bars_now(app, c, sigs)
+            out.append(tr("conductor.rebar_bars_at_one", first=first + 1) if first == last else
+                       tr("conductor.rebar_bars_at", first=first + 1, last=last + 1))
+    return ", ".join(out)
+
+
+def check_edit(app):
+    """After an edit (App.rebar_watch, at idle): the changes it touched made permanent after a heads-up; Cancel =
+    the edit taken back (not kept for redo). Changes made at another PPQ: permanent at once (their ticks no longer
+    fit; Undo brings them back with the old PPQ)."""
+    rb = of(app)
+    if not rb.changes:
+        return
+    odd = {c["id"] for c in rb.changes if c["ppq"] != app.ppq}
+    if odd:
+        bake_ids(app, odd)
+        rb = of(app)
+    step = app.last_step()
+    if step is None or step is getattr(app, "_rebar_seen", None):
+        return
+    if busy(app):
+        app.rebar_watch(later=True)
+        return
+    app._rebar_seen = step
+    ids = inside_ids(app, step)
+    if not ids:
+        return
+    from files.lang import tr
+    ids = _sharing(rb, ids)
+    where = bars_text(app, ids)
+    many = len(ids) > 1
+    if not getattr(app, "rebar_bake_skip", False):
+        from window import big_ask
+        q = tr("conductor.rebar_bake" if many else "conductor.rebar_bake_one", bars=where)
+        go, skip = big_ask.dialog(app, tr("big_ask.title"), q + "\n\n" + tr("conductor.rebar_bake_text"), False,
+                                  tick=tr("conductor.rebar_bake_tick"), yes=tr("conductor.rebar_bake_yes"),
+                                  no=tr("conductor.rebar_bake_no"))
+        if not go:
+            undo_edit(app)
+            return
+        if skip:
+            app.rebar_bake_skip = True  # (this session only, user 2026-11-14: back after a restart)
+    bake_ids(app, ids)
+    app.tempo_pane.request_redraw()
+    app.status.config(text=tr("conductor.rebar_baked" if many else "conductor.rebar_baked_one", bars=where))
+
+
+def _sharing(rb, ids):
+    """ids with every change sharing a group with them (made permanent together, bake_ids)."""
+    ids = set(ids)
+    while True:
+        more = {r for g in rb.groups if ids & set(g["recs"]) for r in g["recs"]} - ids
+        if not more:
+            return ids
+        ids |= more
+
+
+def undo_edit(app):
+    """The newest step taken back and forgotten (not kept for redo): the steps undone before it and the oldest ones
+    the 300 limit dropped come back (App.take_back_scrub's way)."""
+    if not app.undo_stack:
+        return
+    kept, trimmed = getattr(app, "_redo_kept", None), getattr(app, "_trimmed", None)
+    at = len(app.undo_stack)
+    app._restore(app.undo_stack, app.redo_stack)
+    app.redo_stack.pop()
+    if kept and kept[1] == at:
+        app.redo_stack[:] = kept[0]
+    if trimmed:
+        app.undo_stack[:0] = trimmed
+    app._edit_key = app._scrub = None
+    app._rebar_seen = app.last_step()
+    app.sync_history()
+
+
 # ------------------------------------------------------------------ saved in the project
 
-GONE = {"kind": "_gone"}  # (a group's shape not found in the project when read back: that change can't be taken back)
+GONE ={"kind": "_gone"}  # (a group's shape not found in the project when read back: that change can't be taken back)
 
 
 def _key(sh):

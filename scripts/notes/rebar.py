@@ -188,8 +188,8 @@ def check(tempo, base, pl):
         hi = pts[i + 1][0] if i + 1 < len(pts) else math.inf
         if hi <= a + EPS or lo > b + EPS:
             continue
-        if _inside_run(pl, lo, hi) and not any(abs(lo - oa) <= EPS for oa, *_ in pl["runs"]):
-            continue
+        if lo < b - EPS:  # (user 2026-11-14: Keep timing and a time signature change never share bars, even a part
+            return {"why": "keep_in", "at": max(lo, a)}  # wholly inside one bar run that would keep its sound)
         return {"why": "keep", "at": lo}
     return None
 

@@ -624,6 +624,7 @@ class HistoryPanel:
         if len(picked) > 18 and isinstance(picked[18], rebar_edit.Rebar):
             self.rebar = picked[18]
         self._edit_key = self._scrub = None
+        self._rebar_seen = self.last_step()  # (undo / redo isn't an edit: its time signature changes as they were)
         self.sync_panel()
         self.shapes_changed()
         if mutes:
