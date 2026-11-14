@@ -1,5 +1,13 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+## Version 1.7.4
+
+What's new:
+
+• Fixed: Kestrel (GPU) could freeze when you switched MIDI outs quickly, or when several things used the graphics card at once (Rendered ahead, the Hz bass preview, playback, changing soundfonts). Everything that uses the graphics card now takes turns, one at a time.
+
+• Changed: the settings backup made when a new version first starts is now one zip file (in the backups folder inside the user folder) instead of a copied folder. Open folder shows the zip. See [page:about|About].
+
 ## Version 1.7.3
 ^^ 2026/11/14 01:46:38 UTC+07:00 · abaf527
 
