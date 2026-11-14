@@ -467,24 +467,31 @@ def _bern(v, n, slopes):
 
 def _net(C, x, y, slopes=False):
     """The offsets at spots (x, y) of the box from the control net C (NET; sums in fastloops._net_at's order);
-    slopes: (value, d/dx, d/dy), exact, 0 past the box."""
+    slopes: (value, d/dx, d/dy), exact, 0 past the box. Each way (x / y offset) on its own with flat lookups
+    (np.take): ~2x quicker without the compiled loops, the very same sums in the same order (same bits;
+    dev/scratch/warp_net_try.py)."""
     c, r = (C.shape[1] - 1) // 3, (C.shape[0] - 1) // 3
     i, wx, dx = _bern(x, c, slopes)
     j, wy, dy = _bern(y, r, slopes)
-    i3, j3 = 3 * i, 3 * j
-    val = ddx = ddy = 0.0
-    for b in range(4):
-        e = [C[j3 + b, i3 + a] for a in range(4)]
-        rb = ((e[0] * wx[0][..., None] + e[1] * wx[1][..., None]) + e[2] * wx[2][..., None]) + e[3] * wx[3][..., None]
-        val = val + rb * wy[b][..., None]
-        if slopes:
-            sb = (((e[0] * dx[0][..., None] + e[1] * dx[1][..., None]) + e[2] * dx[2][..., None])
-                  + e[3] * dx[3][..., None])
-            ddx = ddx + sb * wy[b][..., None]
-            ddy = ddy + rb * dy[b][..., None]
+    W = C.shape[1]
+    rows = [3 * j * W + 3 * i + b * W for b in range(4)]
+    got = []
+    for way in (0, 1):
+        F = np.ascontiguousarray(C[..., way]).ravel()
+        val = ddx = ddy = 0.0
+        for b in range(4):
+            e = [F.take(rows[b] + a) for a in range(4)]
+            rb = ((e[0] * wx[0] + e[1] * wx[1]) + e[2] * wx[2]) + e[3] * wx[3]
+            val = val + rb * wy[b]
+            if slopes:
+                sb = ((e[0] * dx[0] + e[1] * dx[1]) + e[2] * dx[2]) + e[3] * dx[3]
+                ddx = ddx + sb * wy[b]
+                ddy = ddy + rb * dy[b]
+        got.append((val, ddx, ddy))
+    val = np.stack([got[0][0], got[1][0]], -1)
     if not slopes:
         return val
-    return val, ddx, ddy
+    return val, np.stack([got[0][1], got[1][1]], -1), np.stack([got[0][2], got[1][2]], -1)
 
 
 def _eased(P, x, y, slopes=False):
