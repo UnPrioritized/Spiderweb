@@ -146,7 +146,7 @@ class FunnelPanel:
         self._loading = False
         # a reverse funnel's wall comes first: "one more column" is before it, ending on it
         texts = [tr("panel_funnel.notes_end_on_it"), tr("panel_funnel.notes_start_on_it")]
-        if placed and funnel_reversed(t):
+        if placed and funnel_reversed(t, self.ppq):
             texts.reverse()
         for b, text in zip(self.funnel_radios["wall"], texts):
             b.config(text=text)

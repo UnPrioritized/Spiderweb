@@ -569,12 +569,45 @@ def funnel_key_spans(sh, main=True):
     return out
 
 
-def funnel_axis(sh, spans):
+def wall_meet(sh):
+    """Where the (endless) first line meets the (endless) wall, (beat, pitch); None without a wall or when they
+    run side by side (or the line is a point)."""
+    pts = sh["pts"]
+    if len(pts) < 4:
+        return None
+    (ax, ay), (bx, by), (cx, cy), (dx, dy) = pts[:4]
+    d1, d2 = (bx - ax, by - ay), (dx - cx, dy - cy)
+    det = d1[0] * d2[1] - d1[1] * d2[0]
+    if not abs(det) > 1e-6 * math.hypot(*d1) * math.hypot(*d2) > 0:
+        return None
+    t = ((cx - ax) * d2[1] - (cy - ay) * d2[0]) / det
+    return ax + t * d1[0], ay + t * d1[1]
+
+
+def axis_ref(sh, ppq):
+    """The beat the note grid runs to from the line start: where the line MEETS the wall (user 2026-11-14: measured
+    to the wall's middle, a leaning wall squeezed the Range or flipped the funnel round), else the wall's middle;
+    None = an upright line (turned funnel): the grid runs left to right across it instead. Upright = the line
+    reaches the wall less than a tick, or less than 1/32 of how far its straight parts spread in time, from its
+    start (a hair off upright left only a sliver of a Range, hunt)."""
+    pts = sh["pts"]
+    if len(pts) < 4:
+        ref = pts[1][0]
+    else:
+        m = wall_meet(sh)
+        ref = m[0] if m else (pts[2][0] + pts[3][0]) / 2
+    beats = [p[0] for p in pts]
+    if abs(ref - pts[0][0]) < max(1.0 / ppq, (max(beats) - min(beats)) / 32):
+        return None
+    return ref
+
+
+def funnel_axis(sh, spans, ppq):
     """(t0, sign) in beats: the note grid starts at the line start and runs towards the wall (sign -1 =
     backwards in time: reverse funnel), and how far (beats) the wall is from the start."""
     pts = sh["pts"]
-    ref = (pts[2][0] + pts[3][0]) / 2 if len(pts) >= 4 else pts[1][0]
-    if abs(ref - pts[0][0]) > 1e-9:
+    ref = axis_ref(sh, ppq)
+    if ref is not None:
         return pts[0][0], (1 if ref > pts[0][0] else -1), abs(ref - pts[0][0])
     lo = min(a for s in spans.values() for a, _ in s)
     hi = max(b for s in spans.values() for _, b in s)
@@ -583,10 +616,10 @@ def funnel_axis(sh, spans):
     return lo, 1, hi - lo  # the line and the wall start at the same time (turned funnel): left to right
 
 
-def funnel_reversed(sh):
+def funnel_reversed(sh, ppq):
     """Does the wall come before the line start in time?"""
-    pts = sh["pts"]
-    return len(pts) >= 4 and (pts[2][0] + pts[3][0]) / 2 < pts[0][0] - 1e-9
+    ref = axis_ref(sh, ppq) if len(sh["pts"]) >= 4 else None
+    return ref is not None and ref < sh["pts"][0][0]
 
 
 def funnel_layout(sh, ppq, main=True):
@@ -596,7 +629,7 @@ def funnel_layout(sh, ppq, main=True):
     spans = funnel_key_spans(sh, main)
     if not spans:
         return None
-    t0, sign, length = funnel_axis(sh, spans)
+    t0, sign, length = funnel_axis(sh, spans, ppq)
     t0 *= ppq
 
     def dist(beat):
