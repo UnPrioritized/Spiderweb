@@ -103,7 +103,7 @@ from window.app_playback import GROUP_DEFAULT, Playback
 from window.app_kestrel import KestrelSetup
 from window.app_clip import AppClip
 from window.app_transform import AppTransform
-from window.app_offrange import AppOffrange
+from window.app_offrange import AppOffrange, colour_slots_of, kept_rows
 from window.app_keys import AppKeys
 from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
@@ -319,6 +319,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.wrap_version = 0  # (+1 each time wrapped_rows' answer changes: the roll's picture key)
         self._outgoing = None  # (App.outgoing's last (key, notes))
         self.off_all = self.off_drawn = NO_NOTES  # (offrange_rows; off_drawn = the ones the piano roll shows)
+        self._job_off = None  # (offrange_rows made by the notes thread: notes_made -> shapes_changed)
         # (off_all as the masks' preview shows it: ghosts (velocity -1) + the parts that show; None = no mask over
         # them; off_paint = that, filtered like off_drawn: what roll_draw.off_rects paints; App.masked_offrange)
         self.off_masked = self.off_paint = None
@@ -2206,7 +2207,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots, _, self.cut_emptied = made
         self.edit_shown = shown is not self.shapes  # (these notes skip a colour step's later steps: App.outgoing)
         self.forget_old_notes()
-        self.off_all = self.offrange_rows()  # (before play_changed: App.outgoing reads them)
+        # (before play_changed: App.outgoing reads them; made by the notes thread when these notes came from there,
+        # nothing changed since and they were made for these very notes, not laid again: lay_again)
+        job_off, self._job_off = self._job_off, None
+        if (job_off is not None and job_off[2] is not None and job_off[1] is self.rendered
+                and job_off[0] == self.offrange_wanted()):
+            self.off_all = job_off[2]
+        else:
+            self.off_all = self.offrange_rows()
         self.made_version += 1
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
             self.tempo_pane.dense_now()
@@ -2634,40 +2642,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         Notes of several colours on one start + key (stacked pasted tracks) count for each of those slots, shared
         out; a colour whose best slot another colour took goes on its next best one if that's about as good (a
         tester's 32-track paste, 2026-10-31: tracks lying on others were laid onto their tracks and merged)."""
-        vals, counts = np.unique(mine[:, 4], return_counts=True)
-        most = int(vals[counts.argmax()])
-        n, t = self.notes_tracks(dict(sh, _rounds=True) if self.rounds_apart() and has_colours(sh) else sh)
-        n = np.asarray(n, np.int64).reshape(-1, 4)
-        colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None
-                  else np.zeros(len(n), np.int64))
-        if not len(colour) or colour.max() == 0:
-            return [most]
-        have = mine[:, 0] * 1024 + mine[:, 2]
-        o = np.argsort(have, kind="stable")
-        have, slot = have[o], mine[o, 4]
-        want = n[:, 0] * 1024 + n[:, 2]
-        lo, hi = np.searchsorted(have, want), np.searchsorted(have, want, side="right")
-        many = hi - lo  # (rendered notes on each note's start + key)
-        each = np.repeat(lo, many) + np.arange(int(many.sum())) - np.repeat(np.cumsum(many) - many, many)
-        colours = int(colour.max()) + 1
-        pair = np.repeat(colour, many) * len(vals) + np.searchsorted(vals, slot[each])
-        weight = np.bincount(pair, 1.0 / np.repeat(many, many), colours * len(vals)).reshape(colours, len(vals))
-        best = weight.max(axis=1)
-        out, taken = [most] * colours, set()
-        for k in sorted(range(colours), key=lambda k: -best[k]):  # (the surest colours first)
-            if best[k] <= 0:
-                continue  # (none of its notes found: the slot most notes are on)
-            order = np.argsort(-weight[k], kind="stable")
-            pick = order[0]
-            for j in order:
-                if weight[k, j] < best[k] * 0.5:
-                    break
-                if int(vals[j]) not in taken:
-                    pick = j
-                    break
-            out[k] = int(vals[pick])
-            taken.add(out[k])
-        return out
+        return colour_slots_of(sh, mine, self.notes_tracks, self.rounds_apart())
 
     def into_target(self):
         """The track highlighted in the track list new shapes are laid on (placed_on's entry: a track added by
@@ -2807,6 +2782,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         sels, fast, rule = frozenset(self.sels), speed.loops(), stack_rule(self)
         voiced, wide = self.channel_mode.get() == "auto", self.all16()
         heard = (self.channel_mode.get(), self.heard_rule())
+        job["off_for"] = off_for = self.offrange_wanted()  # (the notes kept past the edges made here too)
 
         def notes_tracks(sh, keys=None, edges=True):
             if job["stop"]:
@@ -2856,6 +2832,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 job["time"] = time.perf_counter() - started
                 if job["stop"]:
                     raise Stopped
+                if off_for is not None:  # (App.offrange_rows' work, off Tk's thread: ~70 ms at 1 M kept notes)
+                    job["off"] = kept_rows(shapes, got[2], notes_tracks, key[2], key[1], *off_for)
                 # (the piano roll's orders for painting them too: roll_draw.start_order / paint_order)
                 rendered, order = got[2], None
                 start = np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable")
@@ -2945,6 +2923,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._make_time = job["time"]
         self.roll.ready_order(job["got"][2], *job["drawn"])
         self._job_stash = job["stash"]
+        self._job_off = (job["off_for"], job["got"][2], job.get("off"))  # (shapes_changed: used when still right)
         return job["got"]
 
     def catch_up_notes(self, late=True):

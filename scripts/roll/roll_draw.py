@@ -1046,6 +1046,19 @@ class RollDrawing:
             r = self.create_rectangle(bx[0] - 4, bx[1] - 2, bx[2] + 4, bx[3] + 2, fill=look.LABEL_BG, outline=look.LABEL_EDGE)
             self.tag_lower(r, t)
 
+    def off_selected(self, off):
+        """The selected shapes' rows of off (kept notes past the edges), None when there are none; remembered per
+        array + selection (ring_now asks at every paint: 1 M kept notes looked through each time)."""
+        sels = self.app.sels
+        if not sels or off is None or not len(off):
+            return None
+        key = frozenset(sels)
+        got = getattr(self, "_off_sel", None)
+        if got is None or got[0]() is not off or got[1] != key:
+            pick = off[np.isin(off[:, 5], list(key))]
+            got = self._off_sel = (weakref.ref(off), key, pick if len(pick) else None)
+        return got[2]
+
     def ring_now(self):
         """The red line round the selected shapes' notes (user: the notes keep their colours, even with short
         gates): ring_parts, worked out once per selection / notes / zoom, or None. Only for the notes from a screen
@@ -1055,8 +1068,7 @@ class RollDrawing:
         from window.load_extract import box_notes  # (it imports this file)
         boxed = box_notes(app)  # (a kept box over a loaded MIDI: the loaded notes Delete would take, group D)
         off = None if getattr(app, "export_held", False) else getattr(app, "off_drawn", None)  # (W: hidden)
-        offsel = off[np.isin(off[:, 5], list(app.sels))] if app.sels and off is not None and len(off) else None
-        offsel = offsel if offsel is not None and len(offsel) else None  # (their notes kept past the keys: ringed too)
+        offsel = self.off_selected(off)  # (their notes kept past the keys: ringed too)
         if not (app.sels and len(app.drawn) or boxed is not None or offsel is not None) or not app.show_notes.get():
             return None
         if app._bg_notes and getattr(self, "_hide_sels", False):  # (their notes are carried along while made in the background)
@@ -1709,6 +1721,45 @@ class RollDrawing:
         x0, x1 = np.maximum(x0[on], left).astype(np.int64), np.minimum(x1[on], right).astype(np.int64)
         return on, x0, y0[on].astype(np.int64), np.maximum(x1 - 1, x0), y1[on].astype(np.int64) - 1
 
+    def off_prep(self, off, pics, use10):
+        """What off_rects needs of one kept notes array, made once per array (1 M kept notes: every paint went
+        through all their columns, ~45 ms): a start order (which rows can reach a stretch of time), the columns as
+        plain floats, owners, and each row's colour number (per picture owners / channel 10 use)."""
+        got = getattr(self, "_off_prep", None)
+        if got is None or got[0]() is not off:
+            order = np.argsort(off[:, 0], kind="stable")
+            p = {"order": order, "starts": np.ascontiguousarray(off[order, 0]),
+                 "longest": int((off[:, 1] - off[:, 0]).max()) if len(off) else 0,
+                 "s": off[:, 0].astype(np.float64), "e": off[:, 1].astype(np.float64),
+                 "k": off[:, 2].astype(np.float64), "owner": np.ascontiguousarray(off[:, 5]), "code": None}
+            got = self._off_prep = (weakref.ref(off), p)
+        p = got[1]
+        if p["code"] is None or p["code"][0] is not pics or p["code"][1] != use10:
+            slot = off[:, 4]
+            group = note_colours(slot, slot_colours(use10))
+            if len(pics) and pics.any():  # (a placed picture's notes: its own colours, as main_rects)
+                group = np.where(pics[np.clip(off[:, 5], 0, len(pics) - 1)], PICTURE_GROUP + np.minimum(slot, 15),
+                                 group)
+            vel = off[:, 3]  # (-1 = a mask's ghost: faint like the real notes it covers)
+            code = off_code(group, vel) if not (vel < 0).any() else np.where(vel < 0, ghost_code(group, vel),
+                                                                             off_code(group, vel))
+            p["code"] = (pics, use10, np.asarray(code, np.int64))
+        return p
+
+    def off_near(self, p, t_lo, t_hi):
+        """The rows (indices, IN THEIR OWN ORDER: painted in it, the same pixels as all of them) of an off_prep that
+        can reach ticks t_lo..t_hi; None = all of them."""
+        starts, order = p["starts"], p["order"]
+        lo = np.searchsorted(starts, math.floor(t_lo) - p["longest"] - 1)
+        hi = np.searchsorted(starts, math.ceil(t_hi) + 1, "right")
+        if lo == 0 and hi == len(starts):
+            return None
+        if (hi - lo) * 8 < len(starts):  # (a few: sorted back; many: picked by a mask, no sort)
+            return np.sort(order[lo:hi])
+        pick = np.zeros(len(starts), bool)
+        pick[order[lo:hi]] = True
+        return np.flatnonzero(pick)
+
     def off_rects(self, w, h, clip=None, area=None, only=None, draft="with"):
         """The App.off_drawn notes on screen as main_rects' rectangles, in their see-through colours (off_code);
         None when there are none."""
@@ -1721,31 +1772,46 @@ class RollDrawing:
         if only is None and app._bg_notes and getattr(self, "_hide_sels", False):
             only = False
         lifted = self.on_top()
-        if only is not None and lifted:
-            off = off[np.isin(off[:, 5], list(lifted)) == only]
-        ppq = app.ppq
+        pics = getattr(app, "picture_owners", ())
+        use10 = getattr(app, "picture_use10", False)
+        # (the same rectangles asked again at the same view: a let go's redraw, then its exact repaint, the drag
+        # pictures; ~25 ms each at 700,000 kept notes on screen)
+        key = (w, h, clip, area, only, frozenset(lifted) if only is not None and lifted else None, use10, app.ppq,
+               self.sx, self.sy, self.view_t, self.view_top, self.kb_w, self.ruler_h, self.note_x_shift)
+        memo = getattr(self, "_off_memo", None)
+        if memo is None or memo[0]() is not off or memo[1] is not pics:
+            memo = self._off_memo = (weakref.ref(off), pics, {})
+        if key in memo[2]:
+            return memo[2][key]
+        if len(memo[2]) > 8:
+            memo[2].clear()
+        got = memo[2][key] = self._off_rects(off, w, h, clip, area, only, lifted, pics, use10)
+        return got
+
+    def _off_rects(self, off, w, h, clip, area, only, lifted, pics, use10):
+        """off_rects' work (not remembered)."""
+        ppq = self.app.ppq
         ax, bx = self.sx / ppq, self.kb_w - self.view_t * self.sx + self.note_x_shift
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
         kb, top, w, h = area or (self.kb_w, self.ruler_h, w, h)
-        x0, x1 = np.round(off[:, 0] * ax + bx), np.round(off[:, 1] * ax + bx)
-        y0 = np.round((off[:, 2] + 0.5) * ay + by)
-        y1 = np.maximum(np.round((off[:, 2] - 0.5) * ay + by), y0 + 1)
+        p = self.off_prep(off, pics, use10)
+        idx = self.off_near(p, (kb - 2 - bx) / ax, (w + 2 - bx) / ax)  # (only the ones that can be on screen)
+        if only is not None and lifted:
+            mine = np.isin(p["owner"] if idx is None else p["owner"][idx], list(lifted)) == only
+            idx = np.flatnonzero(mine) if idx is None else idx[mine]
+        s, e, k = (p[c] for c in "sek") if idx is None else (p[c][idx] for c in "sek")
+        x0, x1 = np.round(s * ax + bx), np.round(e * ax + bx)
+        y0 = np.round((k + 0.5) * ay + by)
+        y1 = np.maximum(np.round((k - 0.5) * ay + by), y0 + 1)
         on = ~((x1 < kb) | (x0 > w) | (y1 < top) | (y0 > h))
         if clip:
             on &= ~((x1 < clip[0]) | (x0 >= clip[2]) | (y1 < clip[1]) | (y0 >= clip[3]))
         on = np.flatnonzero(on)
         if not len(on):
             return None
-        slot = off[on, 4]
-        group = note_colours(slot, slot_colours(getattr(app, "picture_use10", False)))
-        pics = getattr(app, "picture_owners", ())
-        if len(pics) and pics.any():  # (a placed picture's notes: its own colours, as main_rects)
-            group = np.where(pics[np.clip(off[on, 5], 0, len(pics) - 1)], PICTURE_GROUP + np.minimum(slot, 15), group)
+        code = p["code"][2][on if idx is None else idx[on]]
         left, right = int(kb) - 2, int(w) + 2
         x0, x1 = np.maximum(x0[on], left).astype(np.int64), np.minimum(x1[on], right).astype(np.int64)
-        vel = off[on, 3]  # (-1 = a mask's ghost: faint like the real notes it covers)
-        code = off_code(group, vel) if not (vel < 0).any() else np.where(vel < 0, ghost_code(group, vel),
-                                                                         off_code(group, vel))
         return x0, y0[on].astype(np.int64), np.maximum(x1 - 1, x0), y1[on].astype(np.int64) - 1, code
 
     def main_rects(self, w, h, clip=None, area=None, only=None, draft="with"):

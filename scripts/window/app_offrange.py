@@ -10,6 +10,107 @@ from notes.paths import rows_up_to
 from notes.app_layout import all_notes, landing_clashes, wrap_landing
 
 
+def kept_tracks(sh, make, keys, ppq):
+    """App.offrange_tracks' work (Keep notes on): make = a notes_tracks (App's, or the notes thread's own)."""
+    empty = np.zeros((0, 4), np.int64), None
+    if sh.get("hz") or silent(sh):  # (a mask whose own notes don't sound: none there either, like all_notes)
+        return empty
+    out = past_edges(sh, keys, ppq)
+    if out is None:
+        return empty
+    lifted, up, room, later = out
+    with rows_up_to(room - 1):
+        notes, tracks = make(lifted, room)
+    if not len(notes):
+        return empty
+    return off_part(notes, tracks, up, keys, round(later * ppq))
+
+
+def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds):
+    """App.offrange_rows' work (Keep notes on), from plain data only, so the notes thread can do it beside the notes
+    (App._make_coming): shapes = app.shapes as the notes were made, rendered = their notes, make = a notes_tracks,
+    multi = Multi channel, rounds = App.rounds_apart()."""
+    if not shapes:
+        return NO_NOTES
+    parts = []
+    owners = rendered[:, 5]
+    order = np.argsort(owners, kind="stable") if len(rendered) else None
+
+    def heard(i):  # (shape i's real notes as rendered, or None)
+        if order is None:
+            return None
+        lo, hi = np.searchsorted(owners, i, sorter=order), np.searchsorted(owners, i, "right", sorter=order)
+        return rendered[order[lo:hi]] if hi > lo else None
+    kin = {}  # (pieces of one paste / one cut shape: a piece wholly out there takes its colours from one heard)
+    for j, s in enumerate(shapes):
+        for k in (("paste", s.get("paste")), ("cut", cut_group(s))):
+            if k[1] is not None and k not in kin and heard(j) is not None:
+                kin[k] = j
+    for i, sh in enumerate(shapes):
+        notes, tracks = kept_tracks(sh, make, keys, ppq)
+        if not len(notes):
+            continue
+        notes = np.asarray(notes, np.int64).reshape(-1, 4)
+        t = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64).ravel()
+        slot = t if multi else np.zeros(len(notes), np.int64)
+        src = i if heard(i) is not None else next(
+            (kin[k] for k in (("paste", sh.get("paste")), ("cut", cut_group(sh))) if k[1] is not None and k in kin),
+            None)
+        if src is not None:
+            mine, other = heard(src), shapes[src]
+            got = colour_slots_of(other, mine, make, rounds)
+            if len(got) == 1:
+                slot = np.full(len(notes), got[0], np.int64)
+            else:
+                real = make(dict(other, _rounds=True) if rounds and has_colours(other) else other)[1]
+                u = np.unique(np.asarray(real, np.int64)) if real is not None else np.zeros(1, np.int64)
+                at = np.clip(np.searchsorted(u, t), 0, len(u) - 1)
+                found = (u[at] == t) & (at < len(got))
+                slot = np.where(found, np.asarray(got, np.int64)[np.minimum(at, len(got) - 1)],
+                                int(np.bincount(mine[:, 4] - mine[:, 4].min()).argmax() + mine[:, 4].min()))
+        parts.append(np.column_stack([notes, slot, np.full(len(notes), i, np.int64)]))
+    return np.concatenate(parts) if parts else NO_NOTES
+
+
+def colour_slots_of(sh, mine, make, rounds):
+    """App.colour_slots without the App (its docstring says what): make = a notes_tracks (the notes thread's own
+    too), rounds = App.rounds_apart()."""
+    vals, counts = np.unique(mine[:, 4], return_counts=True)
+    most = int(vals[counts.argmax()])
+    n, t = make(dict(sh, _rounds=True) if rounds and has_colours(sh) else sh)
+    n = np.asarray(n, np.int64).reshape(-1, 4)
+    colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None
+              else np.zeros(len(n), np.int64))
+    if not len(colour) or colour.max() == 0:
+        return [most]
+    have = mine[:, 0] * 1024 + mine[:, 2]
+    o = np.argsort(have, kind="stable")
+    have, slot = have[o], mine[o, 4]
+    want = n[:, 0] * 1024 + n[:, 2]
+    lo, hi = np.searchsorted(have, want), np.searchsorted(have, want, side="right")
+    many = hi - lo  # (rendered notes on each note's start + key)
+    each = np.repeat(lo, many) + np.arange(int(many.sum())) - np.repeat(np.cumsum(many) - many, many)
+    colours = int(colour.max()) + 1
+    pair = np.repeat(colour, many) * len(vals) + np.searchsorted(vals, slot[each])
+    weight = np.bincount(pair, 1.0 / np.repeat(many, many), colours * len(vals)).reshape(colours, len(vals))
+    best = weight.max(axis=1)
+    out, taken = [most] * colours, set()
+    for k in sorted(range(colours), key=lambda k: -best[k]):  # (the surest colours first)
+        if best[k] <= 0:
+            continue  # (none of its notes found: the slot most notes are on)
+        order = np.argsort(-weight[k], kind="stable")
+        pick = order[0]
+        for j in order:
+            if weight[k, j] < best[k] * 0.5:
+                break
+            if int(vals[j]) not in taken:
+                pick = j
+                break
+        out[k] = int(vals[pick])
+        taken.add(out[k])
+    return out
+
+
 class AppOffrange:
     def keeps_offrange(self):
         """Settings "Keep notes made there" on AND some space to keep them in (user 2026-11-08: the tick is greyed
@@ -21,18 +122,9 @@ class AppOffrange:
         made there" is on; empty otherwise. KEPT APART from notes_tracks: the real notes (export, playback, Copy to
         Domino, note count...) never hold them. Made from the same remembered lifted notes as edge_made's, so this
         costs no note making of its own. Nothing to save: they come from the shape's drawing again."""
-        empty = np.zeros((0, 4), np.int64), None
-        if not self.keeps_offrange() or sh.get("hz") or silent(sh):  # (a mask whose own notes don't sound: none
-            return empty                                                  # there either, like all_notes)
-        out = past_edges(sh, self.keys, self.ppq)
-        if out is None:
-            return empty
-        lifted, up, room, later = out
-        with rows_up_to(room - 1):
-            notes, tracks = self.notes_tracks(lifted, room)
-        if not len(notes):
-            return empty
-        return off_part(notes, tracks, up, self.keys, round(later * self.ppq))
+        if not self.keeps_offrange():
+            return np.zeros((0, 4), np.int64), None
+        return kept_tracks(sh, self.notes_tracks, self.keys, self.ppq)
 
     def kept_notes(self, sh):
         """sh's (start, end, key, velocity) notes for the tools: with "Keep notes made there" on, its notes past the
@@ -175,45 +267,16 @@ class AppOffrange:
         (Multi) or slot 0. Never part of rendered / drawn: nothing that leaves Spiderweb sees them."""
         if not self.keeps_offrange() or self.companion is not None or not self.shapes:
             return NO_NOTES
-        rendered, parts = self.rendered, []
-        owners = rendered[:, 5]
-        order = np.argsort(owners, kind="stable") if len(rendered) else None
+        return kept_rows(self.shapes, self.rendered, self.notes_tracks, self.keys, self.ppq,
+                         self.channel_mode.get() == "auto", self.rounds_apart())
 
-        def heard(i):  # (shape i's real notes as rendered, or None)
-            if order is None:
-                return None
-            lo, hi = np.searchsorted(owners, i, sorter=order), np.searchsorted(owners, i, "right", sorter=order)
-            return rendered[order[lo:hi]] if hi > lo else None
-        kin = {}  # (pieces of one paste / one cut shape: a piece wholly out there takes its colours from one heard)
-        for j, s in enumerate(self.shapes):
-            for k in (("paste", s.get("paste")), ("cut", cut_group(s))):
-                if k[1] is not None and k not in kin and heard(j) is not None:
-                    kin[k] = j
-        for i, sh in enumerate(self.shapes):
-            notes, tracks = self.offrange_tracks(sh)
-            if not len(notes):
-                continue
-            notes = np.asarray(notes, np.int64).reshape(-1, 4)
-            t = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64).ravel()
-            slot = t if self.channel_mode.get() == "auto" else np.zeros(len(notes), np.int64)
-            src = i if heard(i) is not None else next(
-                (kin[k] for k in (("paste", sh.get("paste")), ("cut", cut_group(sh))) if k[1] is not None and k in kin),
-                None)
-            if src is not None:
-                mine, other = heard(src), self.shapes[src]
-                got = self.colour_slots(other, mine)
-                if len(got) == 1:
-                    slot = np.full(len(notes), got[0], np.int64)
-                else:
-                    real = self.notes_tracks(dict(other, _rounds=True) if self.rounds_apart() and has_colours(other)
-                                             else other)[1]
-                    u = np.unique(np.asarray(real, np.int64)) if real is not None else np.zeros(1, np.int64)
-                    at = np.clip(np.searchsorted(u, t), 0, len(u) - 1)
-                    found = (u[at] == t) & (at < len(got))
-                    slot = np.where(found, np.asarray(got, np.int64)[np.minimum(at, len(got) - 1)],
-                                    int(np.bincount(mine[:, 4] - mine[:, 4].min()).argmax() + mine[:, 4].min()))
-            parts.append(np.column_stack([notes, slot, np.full(len(notes), i, np.int64)]))
-        return np.concatenate(parts) if parts else NO_NOTES
+    def offrange_wanted(self):
+        """What the notes thread needs to work out offrange_rows beside the notes (App._make_coming): (Multi
+        channel, Repeated colours get new channels), or None when it can't / needn't (Keep notes off, Draw on
+        Domino, a colour step being edited: the shown list isn't app.shapes). Read on Tk's thread only."""
+        if not self.keeps_offrange() or self.companion is not None or self.edit_shapes() is not self.shapes:
+            return None
+        return self.channel_mode.get() == "auto", self.rounds_apart()
 
     def kept_mask_world(self, pattern=None):
         """The masks worked out over the kept notes past the keys (hunt 2026-11-08, user: masks work on them like on
