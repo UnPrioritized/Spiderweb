@@ -303,15 +303,18 @@ def tempo_new(lm, tempo):
     return not same_conductor(tempo, conductor_line(lm), ("points", "catch"))
 
 
-def retime_for(lm, tempo, plan, targets):
+def retime_for(lm, tempo, plan, targets, bp=False):
     """midi_copy.Retime for exporting lm with a changed Conductor line (plan = tempo_file.file_plan's). A changed
     tempo: the file's tempo events left out, the new list put into each of targets (track numbers). Changed time /
     key signatures (or Keep timing moving the bars): the file's left out, the new ones put into the first track
-    that had any (else targets' first). With Keep timing every event moved by the plan's map. What didn't change
-    stays exactly as the file has it."""
+    that had any (else targets' first). With Keep timing every event moved by the plan's map; bp (given): the map
+    to use instead (loaded_map.export_bp: Change visual time signature's moves + Keep timing's; None = none). What
+    didn't change stays exactly as the file has it."""
     from files.midi_copy import Retime
-    keep_map = plan["bp"] is not None
-    tempo_on = tempo_new(lm, tempo)
+    if bp is False:
+        bp = plan["bp"]
+    keep_map = bp is not None
+    tempo_on = tempo_new(lm, tempo) or keep_map  # (events moved: the file's tempos would land wrong)
     sigs_on = not same_conductor(tempo, conductor_line(lm), ("sigs", "keysigs")) or keep_map
     drop = ([TEMPO] if tempo_on else []) + ([TIME_SIG, KEY_SIG] if sigs_on else [])
     inserts = {}
@@ -327,7 +330,7 @@ def retime_for(lm, tempo, plan, targets):
                        for t, sf, mi in plan["keys"]]
     for events in inserts.values():
         events.sort(key=lambda e: e[0])  # (stable: on one tick the tempo first)
-    return Retime(plan["bp"] if keep_map else None, drop, inserts, tempo_tracks(lm, tuple(drop)) if drop else [])
+    return Retime(bp if keep_map else None, drop, inserts, tempo_tracks(lm, tuple(drop)) if drop else [])
 
 
 def own_hits(lm, s, e, lane, cancel=None, progress=None):

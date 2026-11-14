@@ -10,6 +10,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.own_tracks import clean_file_gone, clean_file_order, clean_file_props, clean_own_tracks
+from notes import loaded_map
 from notes.loaded import extract_groups
 from notes.engine import BIG_MARK, BIG_TEXT, with_big
 from notes.merge import merge_parts
@@ -195,6 +196,7 @@ class HistoryPanel:
                 and self.step_file_order(self.undo_stack[-1]) == json.dumps(self.file_order)
                 and self.step_file_gone(self.undo_stack[-1]) == json.dumps(self.file_gone)
                 and self.step_file_props(self.undo_stack[-1]) == json.dumps(self.file_props)
+                and self.step_loaded_map(self.undo_stack[-1]) == json.dumps(self.loaded_map)
                 and (len(self.undo_stack[-1][2]) <= 16 or self.undo_stack[-1][2][16] == self.start_track)
                 and not boxes_mark(self.undo_stack[-1])):  # (New with nothing to clear still set the boxes)
             kept = getattr(self, "_redo_kept", None)
@@ -370,7 +372,14 @@ class HistoryPanel:
                 json.dumps(self.file_order), json.dumps(self.file_gone), json.dumps(self.file_props),
                 # (the track list's Select boxes: back with the notes they held, hunt 2026-10-26)
                 json.dumps(getattr(getattr(self, "track_list", None), "boxes", [])),
-                self.start_track)  # (a new project's empty Track 1: back after an undone Remove Track)
+                self.start_track,  # (a new project's empty Track 1: back after an undone Remove Track)
+                json.dumps(self.loaded_map))  # (the loaded MIDI's ticks as shown: Change visual time signature)
+
+    def step_loaded_map(self, step):
+        """The loaded MIDI's tick links (JSON) an undo step kept; the ones now for a step made without them."""
+        sel = step[2]
+        return sel[17] if len(sel) > 17 and isinstance(sel[17], str) and sel[17][:1] == "[" else json.dumps(
+            self.loaded_map)
 
     def step_tempo(self, step):
         """The tempo line (JSON) an undo step kept; the one now for a step made without it."""
@@ -592,6 +601,8 @@ class HistoryPanel:
             tl._box = None
         if len(picked) > 16 and type(picked[16]) is bool:
             self.start_track = picked[16]
+        if len(picked) > 17 and isinstance(picked[17], str) and picked[17][:1] == "[":
+            self.loaded_map = loaded_map.clean(json.loads(picked[17]))
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()

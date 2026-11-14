@@ -44,6 +44,7 @@ from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
 from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts
 from notes.text import TEXT_DEFAULTS, clean_text, rejoin_old, tag_texts
 from notes import engine  # (engine.edo_lanes: 31-EDO "Overlaps keep their pitch")
+from notes import loaded_map  # (a loaded MIDI's ticks as shown after Change visual time signature)
 from files import clipboard, notes_clip
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
                                conductor_clip, dms_path, get_from_clipboard, put_on_clipboard, read_notes,
@@ -344,6 +345,7 @@ class ProjectFiles:
             **({"file_order": self.file_order} if self.file_order else {}),  # (the loaded tracks as dragged)
             **({"file_gone": self.file_gone} if self.file_gone else {}),  # (the loaded tracks removed)
             **({"file_props": {str(n): v for n, v in self.file_props.items()}} if self.file_props else {}),
+            **({"loaded_map": self.loaded_map} if self.loaded_map else {}),  # (its ticks as shown: time signatures)
             # (the loaded MIDI's tracks shapes are drawn into: their name + channel, for opening without it)
             **({"file_tracks": {str(n): self.file_tracks()[n] for n in self.file_into()}} if self.file_into() else {}),
             "shapes": self.shapes, "view": self.roll.view_state(), "playhead": self.playhead,
@@ -531,6 +533,7 @@ class ProjectFiles:
         self.file_order = clean_file_order(data.get("file_order"))
         self.file_gone = clean_file_gone(data.get("file_gone"))
         self.file_props = clean_file_props(data.get("file_props"))
+        self.loaded_map = loaded_map.clean(data.get("loaded_map"))
         nxt =data.get("own_next")  # (ids never used twice in a project: own_tracks.new_id)
         self.own_next = new_id(own, nxt if type(nxt) is int and 0 <= nxt < ID_MOST else 0)
         if not quiet:  # (another project: copies from the one before aren't laid on these tracks)
@@ -1055,6 +1058,7 @@ class ProjectFiles:
         data.pop("file_order", None)
         data.pop("file_gone", None)
         data.pop("file_props", None)
+        data.pop("loaded_map", None)
         if lm.keys > 128:
             data["keys"] = KEYS[1]
         self.load_file(None, quiet=True, text=json.dumps(data))
@@ -1198,7 +1202,8 @@ class ProjectFiles:
                           + ([{"start_track": True}] if self.start_track else [])
                           + ([{"file_order": self.file_order}] if self.file_order else [])
                           + ([{"file_gone": self.file_gone}] if self.file_gone else [])
-                          + ([{"file_props": {str(n): v for n, v in self.file_props.items()}}] if self.file_props else []))
+                          + ([{"file_props": {str(n): v for n, v in self.file_props.items()}}] if self.file_props else [])
+                          + ([{"loaded_map": self.loaded_map}] if self.loaded_map else []))
 
     def may_replace(self, name):
         """Before Open project replaces the shapes (Undo can't bring them back): if they (or the tempo line, the own
@@ -1287,7 +1292,8 @@ class ProjectFiles:
         except MidiError:
             messagebox.showerror(tr("project.spiderweb"), tr("load.export_gone", path=lm.path), parent=self)
             return
-        retimed = not same_conductor(self.tempo, conductor_line(lm))
+        moved = list(self.loaded_map)  # (Change visual time signature over it: every event moved like the screen)
+        retimed = not same_conductor(self.tempo, conductor_line(lm)) or bool(moved)
         if retimed and lm.mf.damaged():  # (its tempo events can't all be read: written as they are or not at all)
             messagebox.showerror(tr("project.spiderweb"), tr("load.tempo_damaged", tracks=", ".join(
                 str(t.number + 1) for t in lm.mf.damaged()[:10])), parent=self)
@@ -1321,7 +1327,8 @@ class ProjectFiles:
                 notes, cc = out.copy(), self.cc_messages(lm.ppq, self.read_project()[1])
                 own = [dict(t) for t in self.own_written()]
         targets = []
-        if retimed and tempo_new(lm, self.tempo):  # (signatures changed alone: the tempo stays as it is, no question)
+        # (signatures changed alone: the tempo stays as it is, no question; moved bars: always written anew)
+        if retimed and (tempo_new(lm, self.tempo) or moved):
             lists = tempo_tracks(lm)
             targets = lists[:1] or [0]  # (no tempo in the file: the first track gets it)
             if len(lists) > 1:  # (a list copied into several tracks, user 2026-10-23: warned + picked)
@@ -1365,7 +1372,8 @@ class ProjectFiles:
         props = self.copy_props()  # (Track Properties' new names / channels: those tracks written again; parts)
         mixed = self.track_list.mixed_note()  # (tracks holding several channels by your doing, PLAN #11 E1)
         tempo, ppq, beats = copy.deepcopy(self.tempo), lm.ppq, self.beats
-        heard = file_tempos(lm)  # (Keep timing: the notes keep the time they have in the file, user 2026-10-24)
+        # (Keep timing: the notes keep the time they have in the file, user 2026-10-24; as SHOWN when moved)
+        heard = loaded_map.heard(moved, file_tempos(lm))
         keeps = any(len(p) > 5 and p[5] is True for p in tempo["points"])
 
         def run():
@@ -1374,16 +1382,22 @@ class ProjectFiles:
                 retime = None
                 if retimed:
                     ticks = loose = np.zeros(0, np.int64)
-                    if keeps:  # (Keep timing: every note start / end of the file keeps its time, one read first)
-                        job["step"] = "load.reading_ticks"
-                        ticks, loose = lm.anchors(cancel=lambda: job["cancel"],
-                                                  progress=lambda d, n: job.update(done=d, total=n))
+                    fticks = floose = None  # (the file's own ticks, for a map made of several moves)
+                    if keeps or len(moved) > 1:  # (Keep timing: every note start / end of the file keeps its
+                        job["step"] = "load.reading_ticks"  # time, one read first)
+                        fticks, floose = lm.anchors(cancel=lambda: job["cancel"],
+                                                    progress=lambda d, n: job.update(done=d, total=n))
+                    if keeps:
+                        chain = loaded_map.links(moved)
                         # (the shapes' notes keep their time too: anchors of their own)
-                        ticks = np.union1d(ticks, np.concatenate([notes[:, 0], notes[:, 1]]))
-                        loose = np.union1d(loose, np.array([m[0] for ms in cc.values() for m in ms], np.int64))
+                        ticks = np.union1d(loaded_map.map_ticks(chain, fticks),
+                                           np.concatenate([notes[:, 0], notes[:, 1]]))
+                        loose = np.union1d(loaded_map.map_ticks(chain, floose),
+                                           np.array([m[0] for ms in cc.values() for m in ms], np.int64))
                     job.update(step="project.tempo_working", done=0, total=0)  # (no progress inside: a busy bar)
                     plan = job["plan"] = file_plan(tempo, 120, ppq, beats, ticks, ticks, None, loose, heard)
-                    retime = retime_for(lm, tempo, plan, targets)
+                    retime = retime_for(lm, tempo, plan, targets,
+                                        loaded_map.export_bp(moved, plan["bp"], fticks, floose))
                     if keeps and len(notes):
                         notes, cc = timed_ticks(plan, notes, cc)
                 added = None

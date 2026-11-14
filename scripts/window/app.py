@@ -550,6 +550,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.file_order = None
         self.file_gone = []  # (its tracks removed in the track list, group E: not listed nor written; saved + undone)
         self.file_props = {}  # (its tracks' new names / channels, Track Properties: {number: {"name", "ch"}}; the same)
+        # where its ticks are SHOWN after Change visual time signature (notes/loaded_map.py links, oldest first;
+        # [] = as in the file); saved + undone like the others, replaced (never changed in place)
+        self.loaded_map = []
         # this project's own mark (a new one at New / Open): Ctrl+C's copies carry it, so a copy laid on tracks keeps
         # them only when pasted back into the same project (put_into_current; hunt 2026-10-26)
         self.project_token = os.urandom(8).hex()
@@ -3241,7 +3244,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.start_track = True  # (one empty Track 1, nothing highlighted: user 2026-10-26)
         # (the old song's deleted notes, dragged track order and track names: nothing to do with the new one, hunt)
         self.deleted, self.file_order, self.file_saved, self.midi_missing = [], None, {}, False
-        self.file_gone, self.file_props = [], {}
+        self.file_gone, self.file_props, self.loaded_map = [], {}, []
         self.project_token = os.urandom(8).hex()  # (copies from before New: not laid on these tracks)
         self.tempo_pane.forget()
         self.roll.box_kept = None
