@@ -39,9 +39,11 @@ def _inside(spans):
     return lambda x: any(lo - 1e-9 <= x < hi - 1e-9 for lo, hi in spans)
 
 
-def clip_of(app, spans):
+def clip_of(app, spans, editable=True):
     """What a copy of the spans holds: the Conductor pane's copy ({"from", "length", "points", "catch", "spans"})
-    + "sigs" / "keys" [[beat from the copy's start, ...]]; None when nothing changes there."""
+    + "sigs" / "keys" [[beat from the copy's start, ...]] (+ "rebar": editable time signature changes starting
+    inside, made fresh where pasted, rebar_paste); None when nothing changes there. editable False (a box moved, not
+    copied): every signature as a plain mark, no changes (an editable one moved that way = an edit inside it)."""
     if not spans:
         return None
     clip = visual(app).clip_of(spans=spans)
@@ -52,6 +54,14 @@ def clip_of(app, spans):
     tempo = app.tempo
     clip["sigs"] = [[m[0] - lo, *m[1:]] for m in sigs_of(tempo) if inside(m[0])]
     clip["keys"] = [[m[0] - lo, *m[1:]] for m in tempo.get("keysigs") or [] if inside(m[0])]
+    clip.pop("rebar", None)
+    if editable:
+        from window import rebar_paste
+        more = rebar_paste.extras(app, joined(spans))
+        if more["rebar"]:
+            own = {round(r["a"], 6) for r in more["rebar"]}
+            clip["rebar"] = more["rebar"]
+            clip["sigs"] = [m for m in clip["sigs"] if round(m[0], 6) not in own]
     if not (clip["points"] or clip["catch"] or clip["sigs"] or clip["keys"]):
         return None
     return clip
@@ -90,8 +100,13 @@ def empty(app, spans, name):
 
 def put(app, clip, at, name, backs=None):
     """clip laid from beat at (in the caller's undo step): its stretch's tempo replaced, its signatures on the bar
-    lines there (the Conductor pane's paste from Domino rule; backs: put_domino_sigs')."""
+    lines there (the Conductor pane's paste from Domino rule; backs: put_domino_sigs'). Editable changes along:
+    made fresh where they land (rebar_paste)."""
     pane = visual(app)
+    if clip.get("rebar"):
+        from window import rebar_paste
+        rebar_paste.put(app, clip, at, name, push=False)
+        return
     if clip["points"] or clip["catch"]:
         pane.put_copies(clip, at, name, push=False)
     if clip.get("sigs") or clip.get("keys"):
@@ -133,7 +148,7 @@ def _backs(app, spans, end):
 def move(app, spans, dt, copying, name):
     """The spans' tempo moved dt beats (copying: copied there, the old stays), in the caller's undo step. Nothing
     changing inside them: nothing (a held stretch laid elsewhere would change the tempo there)."""
-    clip = clip_of(app, spans)
+    clip = clip_of(app, spans, editable=copying)
     if clip is None or not changes(app, spans):
         return
     at = max(0.0, clip["from"] + dt)

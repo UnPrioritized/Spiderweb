@@ -2002,7 +2002,11 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
                 laid = self.copies_at(d)
                 for key in ("points", "catch"):  # (the copies only showed it: laid in like a paste, hunt 2026-10-22)
                     tempo[key][:] = [it for it in tempo[key] if id(it) not in cop]
-                if laid is not None:
+                from window import rebar_paste
+                if laid is not None and rebar_paste.count(laid[0]):  # (signatures / editable changes along)
+                    self.app.tempo_changed()
+                    rebar_paste.put(self.app, *laid, tr("tempo.step_copy_drag"), push=False)
+                elif laid is not None:
                     self.put_copies(*laid, None, push=False)
                 else:
                     self.bands = list(d["band"] or [])
@@ -2634,9 +2638,17 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
 
     def clip_of(self, spans=None, items=None):
         """What Ctrl+C keeps: {"length", "points", "catch", "spans"}, beats from the copy's start. spans: boxes
-        (the line cut at their edges, every catch-up inside); items: picked points / catch-up lines (their own
-        first .. last beat). None when nothing's there."""
+        (the line cut at their edges, every catch-up inside; + "sigs" / "keys" / "rebar": the time / key
+        signatures whose mark is inside and the editable changes starting inside, rebar_paste.extras, user
+        2026-11-15); items: picked points / catch-up lines (their own first .. last beat). None when nothing's
+        there."""
         tempo, base = self.ed(), self.ed_base()
+        more = None
+        if spans:
+            from window import rebar_paste
+            more = rebar_paste.extras(self.app, joined(spans))
+            if not rebar_paste.count(more):
+                more = None
         if spans:
             spans = joined(spans)
             src = copy.deepcopy(tempo["points"])
@@ -2667,7 +2679,7 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
             spans = [(lo, hi)]
         pid = ids(tempo["points"])
         cs = [c for c in cs if id(c) not in pid]
-        if not pts and not cs:
+        if not pts and not cs and more is None:
             return None
         lo = spans[0][0]
         clip_c = []
@@ -2683,8 +2695,11 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
             shift_heard(p, -lo, None)
         # ("every": the Interval box's value now: pasted after the box changed, the copy's ramps without their own
         # still step as copied, user 2026-11-12; paste_clip stamps them then)
-        return {"from": lo, "length": spans[-1][1] - lo, "points": out, "catch": clip_c,
+        clip = {"from": lo, "length": spans[-1][1] - lo, "points": out, "catch": clip_c,
                 "spans": [(a - lo, b - lo) for a, b in spans], "every": self.app.tempo.get("every", EVERY)}
+        if more is not None:
+            clip.update(more)
+        return clip
 
     def copy(self, domino=None):
         """Ctrl+C after clicking the pane: the Select boxes (or what's picked, or the part picked: its two
@@ -2707,7 +2722,9 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
         self.app.tempo_clip = clip
         self.app.drop_own_copy()  # (Spiderweb's older copy off the clipboard, like a stroke copy: hunt 2026-10-29)
         n = len(clip["points"]) + len(clip["catch"])
-        self.app.status.config(text=trn("tempo.copied", n, n=n))
+        from window.rebar_paste import count
+        m = count(clip)
+        self.app.status.config(text=trn("tempo.copied_marks", n + m, n=n + m) if m else trn("tempo.copied", n, n=n))
         if domino or domino is None and self.app.copy_domino.get():
             self.app.tempo_to_domino(clip, quiet=not domino)
         return True
@@ -2760,7 +2777,12 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
             at, sb = self.app.playhead, self.app.snap_beats()
             if sb:
                 at = round(at / sb) * sb
-        self.put_copies(clip, self.tick_beat(at, skip=self.ed()["points"]), tr("tempo.step_paste"))
+        at = self.tick_beat(at, skip=self.ed()["points"])
+        from window import rebar_paste
+        if rebar_paste.count(clip):  # (signatures / editable changes along, user 2026-11-15)
+            rebar_paste.put(self.app, clip, at, tr("tempo.step_paste"))
+            return
+        self.put_copies(clip, at, tr("tempo.step_paste"))
 
     def put_copies(self, clip, at, name, push=True, stay=False, teal=True):
         """clip's items placed from beat at, replacing what's in its boxes there (push: its own undo step). A clip
