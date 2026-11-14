@@ -103,7 +103,7 @@ from window.app_playback import GROUP_DEFAULT, Playback
 from window.app_kestrel import KestrelSetup
 from window.app_clip import AppClip
 from window.app_transform import AppTransform
-from window.app_offrange import AppOffrange, colour_slots_of, exact_kept, kept_rows
+from window.app_offrange import AppOffrange, colour_slots_of, kept_rows
 from window.app_keys import AppKeys
 from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
@@ -316,7 +316,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # ("Exact colours past the keys", off: kept notes' channels worked out with the whole project in the
         # background, app_offrange.exact_kept / App.exact_soon; user 2026-11-14)
         self.exact_offrange = tk.BooleanVar(self, value=False)
-        self._exact_job = None
+        self._exact_job = self._exact_retry = None
         # ("Show wrapped notes": settings.WRAP_SHOWN "selected" / "always" / "off"; App.wrapped_rows)
         self.show_wrapped = tk.StringVar(self, value="selected")
         self._wrapped = None  # (App.wrapped_rows' last answer, keyed)
@@ -2250,12 +2250,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if (job_off is not None and job_off[2] is not None and job_off[1] is self.rendered
                 and job_off[0] == self.offrange_wanted()):
             self.off_all = job_off[2]
-            if self._exact_job is not None:  # (these are exact already when it's on)
-                self._exact_job["stop"] = True
-                self._exact_job = None
         else:
             self.off_all = self.offrange_rows()
-            self.after_idle(self.exact_soon)  # ("Exact colours past the keys": worked out in the background)
+        self.after_idle(self.exact_soon)  # ("Exact colours past the keys": worked out in the background)
         self.made_version += 1
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
             self.tempo_pane.dense_now()
@@ -2787,43 +2784,30 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """all_notes' busy for these shapes (cc_busy)."""
         return cc_busy(self.shapes if shapes is None else shapes, self.ppq, mode)
 
-    def _make_coming(self, show, follow=False):
-        """follow: shown when made even if the shapes have moved on since (then the next spot's are made)."""
-        self.stale_ok += 1  # (what it reads of the notes on screen: as they are, never waited for)
-        try:
-            self._start_coming(show, follow)
-        finally:
-            self.stale_ok -= 1
-
-    def _start_coming(self, show, follow):
-        self._late_notes = None
-        show = show or not (self.roll.drag or self.scrubbing)  # (the drag called off: no let go to wait for)
-        job, key = self._coming, self.notes_key()
-        if job and job["key"] == key and (job["got"] is not None or not job["done"]):  # (made / being made already)
-            if not job["done"]:
-                job["show"] = job["show"] or show
-            elif show:
-                self.shapes_changed(now=True)
-            return
-        if job:  # (made for another spot: it stops at its next shape, these start at once)
-            job["stop"] = True
-        shapes = [from_key(s) for s in key[0]]  # (the thread's own copy: the drag goes on with the real ones)
+    def thread_shapes(self, key):
+        """A background job's own copy of the shapes in notes_key key (the drag goes on with the real ones)."""
+        shapes = [from_key(s) for s in key[0]]
         for sh, st in zip(shapes, key[10]):
             if st != "null":  # (Channel per strip, left out of shape_key)
                 sh["strips"] = json.loads(st)
         for sh in shapes:
             if "cut" in sh and moved_by(as_made(sh)) is None:
                 completed(sh)
-        job = self._coming = {"key": key, "show": show, "done": False, "got": None, "own": {}, "stop": False,
-                              "follow": follow, "stash": {}, "used": [], "top": [], "depth": 0, "asked": [],
-                              "deps": {}}
-        # (stash: all_notes' own, for lay_again; top / depth / asked / deps: as App.notes_tracks' _notes_top /
-        # _notes_depth / _notes_asked / _notes_deps)
+        return shapes
+
+    @staticmethod
+    def thread_job(key, **more):
+        """A background job's dict (own: its new notes; used / top / depth / asked / deps: as App.notes_tracks'
+        _notes_used / _notes_top / _notes_depth / _notes_asked / _notes_deps)."""
+        return dict({"key": key, "done": False, "got": None, "own": {}, "stop": False, "used": [], "top": [],
+                     "depth": 0, "asked": [], "deps": {}}, **more)
+
+    def thread_maker(self, job, key):
+        """notes_tracks for a background job (read on Tk's thread, used in the job's): App.notes_tracks' way, the
+        remembered notes only read, its own new ones in job["own"]; stops at the next shape once job["stop"]."""
         known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
-        sels, fast, rule = frozenset(self.sels), speed.loops(), stack_rule(self)
         voiced, wide = self.channel_mode.get() == "auto", self.all16()
         heard = (self.channel_mode.get(), self.heard_rule())
-        job["off_for"] = off_for = self.offrange_wanted()  # (the notes kept past the edges made here too)
 
         def notes_tracks(sh, keys=None, edges=True):
             if job["stop"]:
@@ -2859,6 +2843,34 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if not job["depth"]:
                 job["top"].append(k)
             return got
+        return notes_tracks
+
+    def _make_coming(self, show, follow=False):
+        """follow: shown when made even if the shapes have moved on since (then the next spot's are made)."""
+        self.stale_ok += 1  # (what it reads of the notes on screen: as they are, never waited for)
+        try:
+            self._start_coming(show, follow)
+        finally:
+            self.stale_ok -= 1
+
+    def _start_coming(self, show, follow):
+        self._late_notes = None
+        show = show or not (self.roll.drag or self.scrubbing)  # (the drag called off: no let go to wait for)
+        job, key = self._coming, self.notes_key()
+        if job and job["key"] == key and (job["got"] is not None or not job["done"]):  # (made / being made already)
+            if not job["done"]:
+                job["show"] = job["show"] or show
+            elif show:
+                self.shapes_changed(now=True)
+            return
+        if job:  # (made for another spot: it stops at its next shape, these start at once)
+            job["stop"] = True
+        shapes = self.thread_shapes(key)
+        job = self._coming = self.thread_job(key, show=show, follow=follow, stash={})
+        # (stash: all_notes' own, for lay_again)
+        sels, fast, rule = frozenset(self.sels), speed.loops(), stack_rule(self)
+        job["off_for"] = off_for = self.offrange_wanted()  # (the notes kept past the edges made here too)
+        notes_tracks = self.thread_maker(job, key)
 
         def work():
             started = time.perf_counter()
@@ -2878,16 +2890,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                         made = all_notes(some, key[1], k, *key[3:6], make, rounds=key[6], order=key[7],
                                          own=own)
                         return made[1], made[2]
-                    multi, rounds, exact = off_for
+                    multi, rounds, _ = off_for  # (Exact colours: a job of its own afterwards, App.exact_soon; in
+                    # here every click after an edit on a big project waited for it too, hunt 2026-11-14)
                     job["off"] = kept_rows(shapes, got[2], notes_tracks, key[2], key[1], multi, rounds, got[1],
                                            alone)
-                    if exact:  # ("Exact colours past the keys": the whole project's channels on a taller keyboard)
-                        def run(some, k, make):  # (no Remove overlaps: it cuts notes after the channels, ~25 %)
-                            made = all_notes(some, key[1], k, *key[3:6], make, rounds=key[6], order=key[7],
-                                             keep=key[8], own=own)
-                            return made[1], made[2]
-                        job["off"] = exact_kept(shapes, job["off"], got[2], notes_tracks, key[2], key[1], got[1],
-                                                run)
                 # (the piano roll's orders for painting them too: roll_draw.start_order / paint_order)
                 rendered, order = got[2], None
                 start = np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable")

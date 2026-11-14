@@ -453,7 +453,7 @@ class SettingsWindow(tk.Toplevel):
             good(e)
             if v != app.offrange_opacity.get():
                 app.offrange_opacity.set(v)
-                app.offrange_changed()
+                app.offrange_changed(remake=False)  # (only painted again: the colours stay, Exact ones too)
                 app.schedule_autosave()
         self.take_opacity = took  # (tests)
         e.bind("<Return>", lambda ev: (took(), "break")[1])
@@ -463,10 +463,14 @@ class SettingsWindow(tk.Toplevel):
         Scrub(app, [(e, self.opacity_var, took)], (1, 10, 1), lo, hi, label=self.opacity_label, no_undo=True)
 
         def wrapped():  # ("Wrap them around", user 2026-11-08: exports, playback and Domino copies; App.outgoing)
-            app.offrange_changed()
+            app.offrange_changed(remake=False)
             app.schedule_autosave()
             self.sync_keep()
-        self.exact_tick = f.row(None, self.tick(f.page, "settings.exact_offrange", app.exact_offrange, wrapped))
+
+        def exact():  # ("Exact colours": on = worked out in the background, off = the quick ones back)
+            app.offrange_changed()
+            app.schedule_autosave()
+        self.exact_tick = f.row(None, self.tick(f.page, "settings.exact_offrange", app.exact_offrange, exact))
         Tooltip(self.exact_tick, tr("settings.exact_offrange_tip"))
         self.wrap_tick = f.row(None, self.tick(f.page, "settings.wrap_offrange", app.wrap_offrange, wrapped))
         Tooltip(self.wrap_tick, tr("settings.wrap_offrange_tip"))
