@@ -1676,7 +1676,8 @@ def _stairs(marks, k, pts, lines, bar):
     """The marks from k on that make stairs (held steps in a row, one way, small, within a bar of each other, no
     catch-up line between them; lines sorted); fewer than STAIR_MIN = not stairs."""
     run, way = [], 0
-    for m in marks[k:]:
+    for x in range(k, len(marks)):  # (by index: marks[k:] copied the rest of the list on every call, = slow
+        m = marks[x]                # with thousands of points, e.g. short BPM changes)
         i, before, at = m[0], m[1], m[2]
         if before is None or pts[i][2] != "hold" or m[3] is not None:
             break
