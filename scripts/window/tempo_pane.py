@@ -795,6 +795,7 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
         self.bind("<Motion>", self.on_motion)
         self.bind("<Leave>", lambda e: (self.rebar_hover(None), self.drag or self.placing or self.box.pick_tool_hint()))
         bind_double_right(self, self.on_right, self.on_double_right)
+        self.winfo_toplevel().bind("<Escape>", self.rebar_escape, add="+")  # (a held time signature change dropped)
         self.menu_wait = None  # a right-click on empty space: its menu, waiting to see if it's a double click
         self.menu_shut = 0.0  # when the right-click menu last closed (perf_counter)
         self.bind("<ButtonPress-2>", self.start_pan)
@@ -1553,11 +1554,14 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
                 self.place_catch(e)
             return
         live_end = self.live_end_at(e.x, e.y)  # (a line just drawn may end outside the parts)
-        if live_end is None and self.point_at(e.x, e.y) is None and self.handle_at(e.x, e.y) is None \
-                and (self.sig_mark_at(e.x, e.y) is not None  # (a signature's mark: a double-click opens its box,
-                     or self.rebar_at(e.x, e.y) is not None):  # an editable change's line too)
-            self.drag = None                                    # so the first click draws / moves nothing)
-            return
+        if live_end is None and self.point_at(e.x, e.y) is None and self.handle_at(e.x, e.y) is None:
+            got = self.rebar_at(e.x, e.y)  # (an editable change's line / end: held = dragged, rebar_marks)
+            if got is not None:
+                self.drag = self.rebar_press(got, e)
+                return
+            if self.sig_mark_at(e.x, e.y) is not None:  # (a signature's mark: a double-click opens its box, so
+                self.drag = None                         # the first click draws / moves nothing)
+                return
         if self.box.mode == "heard" and live_end is None:  # (Heard tempo: inside the Keep timing parts; a press
             run = self.run_at(roll.x2t(e.x))                # picks the run)
             if run is None and self.box.tool.get() in DRAWS:  # (drawing may start anywhere: only what lands in
@@ -1717,6 +1721,8 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
         d = self.drag
         if not d:
             return
+        if d["kind"] == "rebar":  # (an editable time signature change held: rebar_marks)
+            return self.rebar_drag(d, e)
         roll = self.app.roll
         if d["kind"] == "view":
             lo, hi = d["view"]
@@ -1945,6 +1951,8 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
         d, self.drag = self.drag, None
         if not d:
             return
+        if d["kind"] == "rebar":  # (an editable time signature change let go: rebar_marks)
+            return self.rebar_let_go(d)
         roll = self.app.roll  # (the ruler's tempo marks, kept as they were while a big tempo map was dragged)
         self.after_idle(lambda: roll.draw_tempo_marks(roll.kept_box() or []))
         live = self.live_line()

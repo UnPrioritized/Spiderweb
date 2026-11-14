@@ -362,12 +362,13 @@ class ConductorMarks:
                     self.app.status.config(text=tr(why))
             menu.bind("<<MenuSelect>>", said, add="+")
 
-    def loaded_ticks_wait(self, lo, hi):
+    def loaded_ticks_wait(self, lo, hi, then=None):
         """A loaded MIDI reaching these bars whose note ticks (LoadedMidi.anchors: "under a tick apart" counts them,
         the short BPM changes keep them apart) aren't read yet: read on a thread (status line with the share done),
         then the box opens. True = wait (the read runs); False = go on now. Also the notes starting in the bars
         (rebar_work.loaded_pairs: counted as notes, never 0 ticks long). The project changed while reading (Ctrl+Z, a
-        tempo edit: other bars now, hunt 2026-11-14) = no box, the status line says so."""
+        tempo edit: other bars now, hunt 2026-11-14) = no box, the status line says so. then: run instead of the
+        box (a dragged change let go, rebar_marks)."""
         from notes.rebar import grow
         from window import rebar_work
         lm, app = self.app.loaded, self.app
@@ -413,7 +414,7 @@ class ConductorMarks:
                 app.status.config(text=tr("conductor.rebar_changed_meanwhile"))
                 return
             app.status.config(text="")
-            self.rebar(lo, hi)
+            then() if then is not None else self.rebar(lo, hi)
         threading.Thread(target=run, daemon=True, name="loaded note ticks (bars)").start()
         poll()
         return True

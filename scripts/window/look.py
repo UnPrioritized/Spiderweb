@@ -306,11 +306,11 @@ TEMPO_BASE = pick("#8fa6c8", "#7a7a80")  # the project's BPM across the pane
 SIG_MARK = pick("#5a5a5a", "#b8b8bc")  # the Conductor pane's time / key signature marks (short lines from the top)
 # an editable time signature change (PLAN.md 2026-11-14, user: darker purple than Keep timing's): its mark's line,
 # its two bar lines in the piano roll (faint), the piano roll over its bars while pointed at (gray12 dots), its
-# original tempo (dashed)
+# original tempo (dotted purple); a dragged change's place (REBAR_MARK stippled)
 REBAR_MARK = pick("#55248f", "#dcc2ff")
 REBAR_EDGE = pick("#a585d6", "#7d5fae")
 REBAR_TINT = pick("#55248f", "#b896ec")
-REBAR_WAS = pick("#8c8c8c", "#a0a0a4")
+REBAR_WAS = REBAR_MARK  # (the original tempo dotted in the change's purple, user 2026-11-15; was grey)
 RANGE_BAR, RANGE_BAR_HOT = pick("#4a90e2"), pick("#1f5fb0", "#7ab4ff")  # Range…: notes per gate, the one pointed at
 RANGE_NONE = pick("#e0503c")  # gates with none
 PAT_BORDER = pick("#c0c0c0", "#5c5c5f")  # Pattern window: round the drawing
