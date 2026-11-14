@@ -27,6 +27,7 @@ import bisect
 import copy
 import json
 import math
+from fractions import Fraction
 
 import numpy as np
 
@@ -36,6 +37,7 @@ from notes import tempo as T
 
 EPS = 1e-9
 LISTS = ("points", "catch", "sigs", "keysigs")
+NICE_DEN = 1 << 18  # (_nice: ticks of any PPQ up to this)
 
 
 class Rebar(tuple):
@@ -257,8 +259,20 @@ def _fwd(kind, item, pl):
     return it
 
 
+def _nice(x):
+    """The simple fraction (a tick of any PPQ) x is, when it is one (else x): moved there and back, a beat like
+    245758/960 can come back a last digit off, and both map onto the same moved beat."""
+    if x != x or x in (math.inf, -math.inf) or x == int(x):
+        return x
+    return float(Fraction(x).limit_denominator(NICE_DEN))
+
+
 def _inv(y, f, guess):
-    """x with f(x) == y, nearest to guess (a few steps of the last digit), else guess."""
+    """x with f(x) == y, nearest to guess (a few steps of the last digit), else guess. A simple fraction (a tick)
+    that maps there wins (check-in 2026-11-15: two beats a digit apart map onto one: the tick is the one it was)."""
+    nice = _nice(guess)
+    if nice != guess and abs(nice - guess) < 1e-9 and f(nice) == y:
+        return nice
     if f(guess) == y:
         return guess
     up = dn = guess
@@ -324,23 +338,58 @@ def _close(a, b):
     return a == b or _round(plain(a)) == _round(plain(b))
 
 
+def _tail_same(kind, a, b, pl):
+    """b (after the change) is a (before it) moved: (True, None) exactly by _back; (True, [b's beat, a's beat]) when
+    only the beat comes back a last digit off (a "fix": tempo_back puts a's beat back); else (False, None)."""
+    back = _back(kind, b, pl)
+    if back == a:
+        return True, None
+    if len(back) == len(a) and back[1:] == a[1:] and abs(back[0] - a[0]) < 1e-6 and _fwd(kind, a, pl)[0] == b[0]:
+        return True, [b[0], a[0]]
+    return False, None
+
+
 def tempo_pieces(old, new, pl):
-    """{list: {"m0", "m1", "s1", "pb"}}: of each tempo list, the part the change replaced (m0) by what (m1); before
-    it the lists are the same, after it new = old moved (exactly: _back of new = old). s1: the first item after it
-    (where m1 goes when it's empty), pb: the last item before it's beat."""
+    """{list: {"m0", "m1", "s1", "pb", "fix"}}: of each tempo list, the part the change replaced (m0) by what (m1);
+    before it the lists are the same, after it new = old moved (_back of new = old; "fix" = [[moved beat, beat]] for
+    the few whose beat comes back a last digit off). s1: the first item after it (where m1 goes when it's empty),
+    pb: the last item before it's beat. (Check-in 2026-11-15: one such beat stopped the match there and the whole
+    rest of a 35k-point line was kept twice per change: 6 MB, and a later change after it moved those = "edited".)"""
     out = {}
     for kind in LISTS:
         a, b = list(old.get(kind) or []), list(new.get(kind) or [])
         p = 0
         while p < len(a) and p < len(b) and a[p] == b[p]:
             p += 1
-        s = 0
-        while s < len(a) - p and s < len(b) - p and _back(kind, b[len(b) - 1 - s], pl) == a[len(a) - 1 - s]:
+        s, fix = 0, []
+        while s < len(a) - p and s < len(b) - p:
+            ok, f = _tail_same(kind, a[len(a) - 1 - s], b[len(b) - 1 - s], pl)
+            if not ok:
+                break
+            if f:
+                fix.append(f)
             s += 1
         out[kind] = {"m0": copy.deepcopy(a[p:len(a) - s]), "m1": copy.deepcopy(b[p:len(b) - s]),
                      "s1": copy.deepcopy(b[len(b) - s]) if s else None,
-                     "pb": _beat(kind, b[p - 1]) if p else None}
+                     "pb": _beat(kind, b[p - 1]) if p else None, "fix": fix}
     return out
+
+
+def _trimmed(kind, piece, pl):
+    """A piece read back from a project made before the fix above: its m0 / m1 shared tail (the rest of the line,
+    moved) taken off, like tempo_pieces does now."""
+    m0, m1 = piece.get("m0") or [], piece.get("m1") or []
+    s, fix = 0, list(piece.get("fix") or [])
+    while s < len(m0) and s < len(m1):
+        ok, f = _tail_same(kind, m0[len(m0) - 1 - s], m1[len(m1) - 1 - s], pl)
+        if not ok:
+            break
+        if f:
+            fix.append(f)
+        s += 1
+    if not s:
+        return piece
+    return dict(piece, m0=m0[:len(m0) - s], m1=m1[:len(m1) - s], s1=m1[len(m1) - s], fix=fix)
 
 
 def _locate(kind, items, piece, pl):
@@ -348,17 +397,20 @@ def _locate(kind, items, piece, pl):
     m1, s1 = piece["m1"], piece["s1"]
     anchor = m1[0] if m1 else s1
     beats = [_beat(kind, x) for x in items]
-    if anchor is None:  # (nothing made, nothing after: right after the last item before it)
-        pb = piece["pb"]
-        return 0 if pb is None else bisect.bisect_right(beats, pb + 1e-7)
-    at = _beat(kind, anchor)
-    i = bisect.bisect_left(beats, at - 1e-6)
-    while i < len(items) and beats[i] <= at + 1e-6:
-        if _close(items[i], anchor) and all(_close(x, y) for x, y in zip(items[i:i + len(m1)], m1)) \
-                and len(items) - i >= len(m1):
-            return i
-        i += 1
-    return None
+    pb = piece["pb"]
+    if anchor is not None:
+        at = _beat(kind, anchor)
+        i = bisect.bisect_left(beats, at - 1e-6)
+        while i < len(items) and beats[i] <= at + 1e-6:
+            if _close(items[i], anchor) and all(_close(x, y) for x, y in zip(items[i:i + len(m1)], m1)) \
+                    and len(items) - i >= len(m1):
+                return i
+            i += 1
+        if m1:
+            return None
+    # (nothing made: right after the last item before it. s1 = the first one after it is only a hint: a later change
+    # after this one's bars moves it on (check-in 2026-11-15: a key signature far after both = "edited"))
+    return 0 if pb is None else bisect.bisect_right(beats, pb + 1e-7)
 
 
 def tempo_back(tempo, pieces, pl):
@@ -372,7 +424,14 @@ def tempo_back(tempo, pieces, pl):
         i = _locate(kind, items, piece, pl)
         if i is None:
             return None
-        rest = [_back(kind, x, pl) for x in items[i + len(piece["m1"]):]]
+        tail = items[i + len(piece["m1"]):]
+        rest = [_back(kind, x, pl) for x in tail]
+        fix = {round(m, 9): o for m, o in piece.get("fix") or ()}
+        if fix:
+            for x, y in zip(tail, rest):
+                o = fix.get(round(_beat(kind, x), 9))
+                if o is not None and abs(o - y[0]) < 1e-6:
+                    y[0] = o
         out[kind] = items[:i] + copy.deepcopy(piece["m0"]) + rest
     return out
 
@@ -384,7 +443,9 @@ def tempo_slid(pieces, pl, fwd=True):
         f = (lambda x: _fwd(kind, x, pl)) if fwd else (lambda x: _back(kind, x, pl))
         out[kind] = {"m0": [f(x) for x in p["m0"]], "m1": [f(x) for x in p["m1"]],
                      "s1": f(p["s1"]) if p["s1"] is not None else None,
-                     "pb": p["pb"] if p["pb"] is None else _slid_beat(kind, p["pb"], pl, fwd)}
+                     "pb": p["pb"] if p["pb"] is None else _slid_beat(kind, p["pb"], pl, fwd),
+                     "fix": [[_slid_beat(kind, m, pl, fwd), _slid_beat(kind, o, pl, fwd)]
+                             for m, o in p.get("fix") or ()]}
     return out
 
 
@@ -824,8 +885,9 @@ def _rebuild(app, cid, name, new=None, dry=False):
         sigs = meter.sigs_of(app.tempo)
         lo, hi = bars_beats(sigs, first, last)
         pl = R.plan(sigs, lo, hi, top, bottom)
-        if sid == cid and _same_lengths(sigs, pl):  # (edited back to what the bars were: refused like the box)
-            return back({"why": "same", "at": pl["a"]})
+        if sid == cid and _same_lengths(sigs, pl):  # (edited back to what the bars were = Remove, user 2026-11-15)
+            out = {"ok": True, "removed": True}
+            continue
         got = W.apply(app, pl, name, dense=dense, between=between, push=False)
         if "why" in got:
             return back(got)
@@ -1124,7 +1186,11 @@ def saved(app):
         if g["base"] is not None:
             out["base"] = "before" if g.get("base_same") else plain(g["base"])
         groups.append(out)
-    return {"changes": [plain(c) for c in rb.changes], "groups": groups}
+    got = getattr(app, "_rebar_saved", None)  # (the changes never change in place: copied once per new tuple)
+    if got is None or got[0] is not rb.changes:
+        got = (rb.changes, [plain(c) for c in rb.changes])
+        app._rebar_saved = got
+    return {"changes": got[1], "groups": groups}
 
 
 def loaded(data, shapes=()):
@@ -1137,10 +1203,11 @@ def loaded(data, shapes=()):
         chs = []
         for c in data.get("changes") or []:
             d = c["pl"]
-            plan_of(d)
+            pl = plan_of(d)
             assert isinstance(c["id"], int) and len(c["sig"]) == 2
             assert all(k in c["tempo"] for k in LISTS)
-            chs.append(c)
+            # (records saved before 2026-11-15 kept the whole rest of a long tempo line twice: trimmed)
+            chs.append(dict(c, tempo={k: _trimmed(k, p, pl) for k, p in c["tempo"].items()}))
         groups = []
         for g in data.get("groups") or []:
             before = [clean_shape(s) for s in g["before"]]

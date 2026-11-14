@@ -198,10 +198,12 @@ class RebarMarks:
         if xb - xa < 2:
             return
         xs = np.arange(xa, xb, dtype=float)  # (its end bar line belongs to what comes after)
-        beats = np.array([roll.x2t(x) for x in xs])
+        pl = rebar_edit.plan_of(c["pl"])
+        # (the first pixel can round to just before the change: it read the tempo before it, "was 120" over a
+        # line at 144: check-in 2026-11-15)
+        beats = np.clip(np.array([roll.x2t(x) for x in xs]), pl["a"], math.nextafter(pl["new_b"], -math.inf))
         orig = self.rebar_original(c)
         base = self.base()
-        pl = rebar_edit.plan_of(c["pl"])
         olds = np.array([rebar_edit._unmap(pl, float(b)) for b in beats])
         if orig is not None:
             vs = drawn_bpm(orig[0], base, olds)
@@ -214,10 +216,13 @@ class RebarMarks:
         self.create_line(*pts, fill=look.REBAR_WAS, dash=(2, 3), width=lw + 1, tags="rebar_was")
         s, y = self.scale, float(ys[0])
         below = y + 16 * s < self.winfo_height()  # (under the line: the tip sits above it)
+        lo, hi = float(np.min(vs)), float(np.max(vs))
+        # (the original tempo changed inside the bars: its first and last value, "was 120 → 144")
+        text = tr("conductor.rebar_was", bpm=bpm_text(vs[0])) if hi - lo < 0.005 else \
+            tr("conductor.rebar_was_range", first=bpm_text(vs[0]), last=bpm_text(vs[-1]))
         self._rebar_was_label = self.create_text(
             xa + 4 * s, y + 3 * s if below else y - 3 * s, anchor="nw" if below else "sw",
-            text=tr("conductor.rebar_was", bpm=bpm_text(vs[0])), fill=look.REBAR_WAS, font=look.font(7, "bold"),
-            tags="rebar_was")
+            text=text, fill=look.REBAR_WAS, font=look.font(7, "bold"), tags="rebar_was")
 
     # ------------------------------------------------------------ pointed at
 
@@ -457,10 +462,15 @@ class RebarMarks:
                        lambda pl: None, None, test_of, c["dense"], c["between"])
         if pl is None:
             return
+        where = rebar_edit.bars_text(app, {cid})
         got = rebar_edit.edit(app, cid, pl["sig"][0], pl["sig"][1], name, dense=pl.get("dense", c["dense"]),
                               between=pl.get("between", c["between"]))
         if "why" in got:
             app.status.config(text=self.rebar_why_any(got))
+            return
+        if got.get("removed"):  # (back to the bars' own signature = the change removed)
+            self.rebar_done()
+            app.status.config(text=tr("conductor.rebar_removed", bars=where))
             return
         text = tr("conductor.rebar_done", bars=self.rebar_where(cid), sig=sig_text(pl["sig"]))
         n = sum((got.get("whys") or {}).values())

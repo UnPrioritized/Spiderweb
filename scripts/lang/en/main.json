@@ -530,6 +530,7 @@
  "conductor.rebar_hover_now_one": "Bar {first}: now {new} · tempo × {times}",
  "conductor.rebar_hover_now": "Bars {first}–{last}: now {new} · tempo × {times}",
  "conductor.rebar_was": "was {bpm}",
+ "conductor.rebar_was_range": "was {first} → {last}",
  "conductor.rebar_edit": "Edit this change…",
  "conductor.rebar_remove": "Remove this change",
  "conductor.rebar_make_permanent": "Make permanent",
