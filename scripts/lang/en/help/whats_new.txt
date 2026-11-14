@@ -4,6 +4,7 @@ What changed in each version, newest first. This page opens by itself the first 
 
 What's new:
 
+• Change visual time signature… can now be changed later: its mark becomes a purple line in the Conductor pane. Drag its ends to cover other bars, drag the line to move it, or right-click it to edit the numbers, remove it, or make it permanent. Pointing at it shows the tempo those bars had before. Copy and paste in the Conductor pane carries it too. See [page:rebar#Changing it later|Change visual time signature].
 • Change visual time signature… now works over a loaded MIDI too: its notes move and play with the bars, and Export MIDI writes them exactly where the piano roll shows them (the file itself stays as it is until then). Extract boxes move with the bars. See Help → Change visual time signature.
 • Change visual time signature…: notes that would land between two ticks (going to 5/4, say) get their own "Short BPM changes for exact timing" tick in the box, so they can play exactly on time instead of up to half a tick off.
 
