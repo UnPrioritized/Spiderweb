@@ -1360,10 +1360,11 @@ class RollDrawing:
     def draw_playhead(self, keep=False):
         """keep: left as it is when it's already there (redraw with the keyboard + ruler kept)."""
         self.draw_ahead_grey()
+        self.draw_rebar_tint()
         x = round(self.t2x(self.app.playhead))
-        if keep and self._playhead_x == x and self.find_withtag("playhead&&!ahead"):
+        if keep and self._playhead_x == x and self.find_withtag("playhead&&!ahead&&!rebartint"):
             return
-        self.delete("playhead&&!ahead")
+        self.delete("playhead&&!ahead&&!rebartint")
         self._playhead_x = x
         w, h = self.winfo_width(), self.winfo_height()
         if self.kb_w <= x <= w:
@@ -1375,6 +1376,27 @@ class RollDrawing:
         if x is not None and self.kb_w <= x <= w:  # right-drag listening: a line of its own, no arrow (the play
             self.create_line(x, self.ruler_h, x, h, fill=look.PLAY_LINE,  # line stays put; user)
                              width=max(1, round(self.scale)), tags="playhead")
+
+    def draw_rebar_tint(self):
+        """An editable time signature change pointed at in the Conductor pane (rebar_marks.py): faint purple dots
+        over its bars (gray12, like Rendered ahead's grey). Tagged "playhead" so a redraw keeps it; the canvas is
+        only changed when it moved by a pixel."""
+        span = getattr(self, "rebar_span", None)
+        w, h = self.winfo_width(), self.winfo_height()
+        box = None
+        if span is not None and self.sx is not None and w > self.kb_w:
+            a, b = max(round(self.t2x(span[0])), int(self.kb_w)), min(round(self.t2x(span[1])), w)
+            box = (a, b) if b > a else None
+        key = (box, self.ruler_h, h)
+        if key == getattr(self, "_rebar_tint_key", None) and (bool(self.find_withtag("rebartint")) or box is None):
+            return
+        self._rebar_tint_key = key
+        self.delete("rebartint")
+        if box is not None:
+            self.create_rectangle(box[0], self.ruler_h, box[1], h, fill=look.REBAR_TINT, outline="",
+                                  stipple="gray12", tags=("playhead", "rebartint"))
+            if self.find_withtag("playhead&&!ahead&&!rebartint"):  # (under the play line)
+                self.tag_lower("rebartint", "playhead&&!ahead&&!rebartint")
 
     def draw_ahead_grey(self):
         """Rendered ahead (PLAN R4): a REALLY faint grey (user: must not disturb the piano roll; fainter than the Hz
@@ -1505,6 +1527,11 @@ class RollDrawing:
         sigs = sigs_of(self.app.tempo)  # (bars and beats by the time signatures: 6/8 = a line each eighth)
         cols += [(round(self.t2x(b)), look.GRID_BEAT) for b in beat_lines(sigs, max(0.0, b_lo), b_hi, 5 / self.sx)]
         cols += [(round(self.t2x(b)), look.GRID_BAR) for b, _ in bar_lines(sigs, max(0.0, b_lo), b_hi, 6 / self.sx)]
+        from window.rebar_edit import changes as rebar_changes  # (an editable time signature change's two bar
+        for c in rebar_changes(self.app):                       # lines: faint purple, over the bar line; PLAN.md C)
+            for b in (c["pl"]["a"], c["pl"]["new_b"]):
+                if b_lo <= b <= b_hi:
+                    cols.append((round(self.t2x(b)), look.REBAR_EDGE))
         if b_lo < 0:  # (Space before the start: the first bar's beats and bars go on backwards)
             first = sigs[0] if sigs else (0, 4, 4)
             beat, bar = 4 / first[2], first[1] * 4 / first[2]

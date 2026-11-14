@@ -286,13 +286,15 @@ class ConductorMarks:
         roll, s = self.app.roll, self.scale
         kb, w = roll.kb_w, self.winfo_width()
         font = look.font(7, "bold")
+        own = self.rebar_mark_beats()  # (an editable change's own mark: its purple line instead, rebar_marks.py)
         for beat, row, text, _ in self.sig_marks():
             x = roll.t2x(beat)
-            if x < kb - 1 or x > w:
+            if x < kb - 1 or x > w or row == 0 and round(beat, 6) in own:
                 continue
             y0 = row * ROW * s
             self.create_line(x, y0, x, y0 + MARK_LEN * s, fill=look.SIG_MARK, width=max(1, round(s)))
             self.create_text(x + 3 * s, y0 + MARK_LEN * s / 2, text=text, anchor="w", fill=look.SIG_MARK, font=font)
+        self.draw_rebar_marks()
 
     def sig_mark_at(self, x, y):
         """The signature mark (its list, row) the mouse at x, y is on, or None: its line or its text, the key row
@@ -309,7 +311,12 @@ class ConductorMarks:
         return max(got, key=lambda g: g[0])[1:] if got else None  # (the last one starting before the mouse)
 
     def sig_menu_items(self, menu, e):
-        """The right-click menu's signature items: a mark's Change / Remove, else Add ... here."""
+        """The right-click menu's signature items: an editable change's Edit / Remove / Make permanent, a mark's
+        Change / Remove, else Add ... here."""
+        hit = self.rebar_at(e.x, e.y)
+        if hit is not None:
+            self.rebar_menu_items(menu, hit)
+            return True
         got = self.sig_mark_at(e.x, e.y)
         beat = self.app.roll.x2t(e.x)
         if got is not None:

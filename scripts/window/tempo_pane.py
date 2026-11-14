@@ -50,6 +50,7 @@ from window import look
 from window.notes_wait import stale_ok
 from window.canvas_keep import KeepsItems
 from window.conductor_marks import ROW, ConductorMarks
+from window.rebar_marks import RebarMarks
 from window.melody_window import open_melody
 from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, ShortLabel, Tooltip, centre_over, unit_word
 
@@ -759,7 +760,7 @@ class TempoBox(ttk.Frame):
         self.app.tempo_changed()
 
 
-class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
+class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
     def __init__(self, parent, box, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0)
         self.box, self.app, self.scale = box, app, scale
@@ -792,7 +793,7 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         self.bind("<ButtonRelease-1>", self.on_release)
         self.bind("<Double-Button-1>", self.on_double)
         self.bind("<Motion>", self.on_motion)
-        self.bind("<Leave>", lambda e: self.drag or self.placing or self.box.pick_tool_hint())
+        self.bind("<Leave>", lambda e: (self.rebar_hover(None), self.drag or self.placing or self.box.pick_tool_hint()))
         bind_double_right(self, self.on_right, self.on_double_right)
         self.menu_wait = None  # a right-click on empty space: its menu, waiting to see if it's a double click
         self.menu_shut = 0.0  # when the right-click menu last closed (perf_counter)
@@ -1553,7 +1554,8 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             return
         live_end = self.live_end_at(e.x, e.y)  # (a line just drawn may end outside the parts)
         if live_end is None and self.point_at(e.x, e.y) is None and self.handle_at(e.x, e.y) is None \
-                and self.sig_mark_at(e.x, e.y) is not None:  # (a signature's mark: a double-click opens its box,
+                and (self.sig_mark_at(e.x, e.y) is not None  # (a signature's mark: a double-click opens its box,
+                     or self.rebar_at(e.x, e.y) is not None):  # an editable change's line too)
             self.drag = None                                    # so the first click draws / moves nothing)
             return
         if self.box.mode == "heard" and live_end is None:  # (Heard tempo: inside the Keep timing parts; a press
@@ -2050,6 +2052,10 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         if n is not None:  # (the bend handle: straight / the catch-up's own curve again)
             self.drag = None
             return self.unbend(n)
+        hit = self.rebar_at(e.x, e.y) if i is None else None
+        if hit is not None:  # (an editable time signature change: Edit this change…)
+            self.drag = None
+            return self.rebar_edit(hit[0])
         mark = self.sig_mark_at(e.x, e.y) if i is None else None
         if mark is not None:  # (a time / key signature: its box, user 2026-10-26)
             self.drag = None
@@ -2458,7 +2464,8 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         if pin is not None:  # (a thick line: forget it, hunt 2026-10-24)
             return self.pin_menu(e, *pin)
         on_edge = item is None and self.edge_at(e.x) is not None
-        on_edge = on_edge or item is None and self.sig_mark_at(e.x, e.y) is not None  # (a signature's mark)
+        on_edge = on_edge or item is None and (self.sig_mark_at(e.x, e.y) is not None  # (a signature's mark, an
+                                               or self.rebar_at(e.x, e.y) is not None)  # editable change's line)
         if item is None and not on_edge and not self.in_band(e.x):  # (empty space: the menu waits to see if it's
             self.drop_menu_wait()                                    # a double right-click, user)
             self.menu_wait = self.after(DOUBLE_MS, lambda: self.right_menu(e, None))
@@ -2959,6 +2966,7 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         hint = None
         handle = self.handle_at(e.x, e.y)
         self.handle_hover(None if self.point_at(e.x, e.y) is not None or self.placing else handle, e)
+        rebar = self.rebar_hover(None if self.drag or self.placing else e)  # (an editable time signature change)
         w = self.edges_on()
         if e.x < roll.kb_w:
             want, hint = "sb_v_double_arrow", "numbers"
@@ -2983,6 +2991,8 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
             want, hint = "fleur", "on_point"
         elif handle is not None:
             want, hint = "fleur", "on_handle" if handle[0] == "part" else "on_catch_handle"
+        elif rebar is not None:  # (its ends: a sideways arrow, they drag; its line: a hand)
+            want, hint = ("sb_h_double_arrow" if rebar[1] != "line" else "hand2"), "on_rebar"
         elif self.sig_mark_at(e.x, e.y) is not None:  # (a time / key signature, user 2026-10-26: wasn't obvious)
             mark, row = self.sig_mark_at(e.x, e.y)
             want, hint = "hand2", "on_key_sig" if row else "on_time_sig" if mark[0] > 0 else "on_first_sig"
@@ -3607,6 +3617,7 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         lines = [(xs, ys)] + [(hx, hy) for hx, _, hy, _ in heard]
         self.draw_limits(lines, kb, w, h, lw)
         self._draw_numbers(kb, h)
+        self.draw_rebar_tip()  # (an editable time signature change pointed at: its tip, over everything)
         self.draw_playhead()
         for bar in self.bars:
             bar.refresh()
@@ -3701,7 +3712,8 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         by = roll.tick_by() or 1.0
         for x, c in roll.grid_cols(w):
             if x >= kb:
-                if c not in (look.GRID_BEAT, look.GRID_BAR):  # (tick / snap lines: a shade of the area they're on)
+                if c not in (look.GRID_BEAT, look.GRID_BAR, look.REBAR_EDGE):  # (tick / snap lines: a shade of the
+                    # area they're on; an editable time signature change's bar lines: their own faint purple)
                     c = next((area_shade(f, by) if f else c for x0, x1, f in reversed(areas) if x0 <= x < x1), c)
                 elif x < dark:
                     c = look.space_shade(c)

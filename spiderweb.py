@@ -62,6 +62,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     tempo_pane.py    the Tempo pane (under the velocity pane): tempo points, curves, catch-up lines
     rebar_work.py    Change visual time signature on the project: tempo, signatures + every shape, one step
     rebar_edit.py    its changes kept editable: records, taken back / edited / moved later
+    rebar_marks.py   the Conductor pane's purple line of each editable change: pointed at, its menu
     hz_window.py     the Hz bass window: a small piano roll where its notes are placed
     hz_view.py       the Hz bass window's zoom, scrolling and drawing
     hz_sound.py      the Hz bass window's sound: the key held, the preview
