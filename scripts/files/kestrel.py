@@ -165,27 +165,37 @@ def read_voices(text):
     return int(round(v))
 PART_TYPE = 0xF5  # (the connector's own status: data1 = channel, data2 = 0 melodic / 1 drums; lib.rs PART_TYPE)
 UNKNOWN_LEN = 0xFFFFFFFF  # (push lens: a note whose length isn't known)
-# (one Kestrel starting at a time, whatever asks: two starting together in one program can hang on the graphics
-# card, seen in the connector's tests 2026-10-27)
+# THE GRAPHICS CARD QUEUE (_OPENING): one thing reaching the graphics drivers at a time, whatever asks: two Kestrels
+# starting together in one program can hang on the card (connector's tests 2026-10-27), the drivers' card list
+# crashed beside other card work (2026-11-13 / 11-14). In it: the card check, soundfonts sent to / freed from the
+# card, a live Kestrel opened / closed, Max voices' top, the fonts' longest release, and a Rendered ahead PIECE FOR
+# ITS WHOLE LIFE (Merlin opens its own device on the card for each piece, kmgpu.rs open_device_info).
 class _OpenLock:
-    """One Kestrel start at a time (the card check too), used as `with _OPENING:`. A card check stuck inside the
-    graphics drivers past CARD_STUCK_S is LET GO (2026-11-14: a hung check held the lock and every start after it
-    waited forever): a fresh lock replaces the one it holds, cards are never asked again this run."""
+    """The graphics card queue (see above), used as `with _OPENING:` or acquire() / release(lk). The same thread may
+    take it again while holding it (a piece's thread asking loaded_for: never stuck on itself). A card check stuck
+    inside the drivers past CARD_STUCK_S is LET GO (2026-11-14: a hung check held it and every start after it waited
+    forever): a fresh lock replaces the one it holds, cards are never asked again this run."""
 
     def __init__(self):
-        self._swap = threading.Lock()  # (guards _lock + cards_since)
+        self._swap = threading.Lock()  # (guards _lock, _owner, _depth, cards_since)
         self._lock = threading.Lock()
+        self._owner, self._depth = None, 0  # (the thread holding _lock, how many times it took it)
         self._mine = threading.local()  # (each thread's taken locks, newest last)
         self.cards_since = None  # (time.monotonic() the card check got the lock; None = no check in)
 
     def acquire(self, cards=False):
-        """Take it; returns the lock taken (hand it to release)."""
+        """Wait for its turn; returns the lock taken (hand it to release, from any thread)."""
+        me = threading.get_ident()
         while True:
             with self._swap:
                 lk = self._lock
+                if self._owner == me:
+                    self._depth += 1
+                    return lk
             if lk.acquire(timeout=0.25):
                 with self._swap:
                     if lk is self._lock:
+                        self._owner, self._depth = me, 1
                         if cards:
                             self.cards_since = time.monotonic()
                         return lk
@@ -196,8 +206,15 @@ class _OpenLock:
     def release(self, lk):
         with self._swap:
             if lk is self._lock:
-                self.cards_since = None
+                self._depth -= 1
+                if self._depth > 0:
+                    return
+                self._owner, self.cards_since = None, None
         lk.release()
+
+    def busy(self):
+        """Something is on the card queue now (a piece being made, a start, the card check)."""
+        return self._lock.locked()
 
     def drop_stuck(self):
         """A card check holding the lock past CARD_STUCK_S = let go (see the class)."""
@@ -207,7 +224,7 @@ class _OpenLock:
             if since is None or time.monotonic() - since <= CARD_STUCK_S:
                 return
             self._lock = threading.Lock()
-            self.cards_since = None
+            self._owner, self._depth, self.cards_since = None, 0, None
             _cards_broken = True
             _cards_seen = []
 
@@ -667,6 +684,8 @@ class Piece:
         o = dict(block=PIECE_BLOCK, limiter=0, dc_blocker=False)
         o.update(opts)
         self._opts = _options(**o)  # (kept alive while the call reads it)
+        self._lock = threading.Lock()
+        self.handle, self._queue = None, None
         if loaded is None or not loaded.handle:
             raise SynthError("playback.kestrel_failed", err="no soundfonts loaded")
         if isinstance(midi, (bytes, bytearray)) and not hasattr(d, "kb_piece_start_bytes"):
@@ -674,19 +693,31 @@ class Piece:
             with os.fdopen(fd, "wb") as f:
                 f.write(midi)
             self.midi, self.delete_midi, midi = path, True, path
-        if isinstance(midi, (bytes, bytearray)):  # (the piece's MIDI never on disk: the connector copies it)
-            self.midi = None
-            # (a bytearray handed over in place, never copied first: the connector makes its own copy, M1)
-            held = (ctypes.c_char * len(midi)).from_buffer(midi) if isinstance(midi, bytearray) else midi
-            self.handle = d.kb_piece_start_bytes(loaded.handle, held, len(midi), ctypes.byref(self._opts),
-                                                 ENGINES[engine], int(skip), int(most))
-            del held
-        else:
-            self.handle = d.kb_piece_start(loaded.handle, os.fsdecode(midi).encode("utf-8"), ctypes.byref(self._opts),
-                                           ENGINES[engine], int(skip), int(most))
-        if not self.handle:
-            raise SynthError("playback.kestrel_failed", err=_error(d))
-        self._lock = threading.Lock()
+        # (the card queue held until close(): Merlin opens its own device on the card for the piece)
+        self._queue = _OPENING.acquire()
+        try:
+            if not loaded.handle:  # (let go while it waited its turn)
+                raise SynthError("playback.kestrel_failed", err="no soundfonts loaded")
+            if isinstance(midi, (bytes, bytearray)):  # (the piece's MIDI never on disk: the connector copies it)
+                self.midi = None
+                # (a bytearray handed over in place, never copied first: the connector makes its own copy, M1)
+                held = (ctypes.c_char * len(midi)).from_buffer(midi) if isinstance(midi, bytearray) else midi
+                self.handle = d.kb_piece_start_bytes(loaded.handle, held, len(midi), ctypes.byref(self._opts),
+                                                     ENGINES[engine], int(skip), int(most))
+                del held
+            else:
+                self.handle = d.kb_piece_start(loaded.handle, os.fsdecode(midi).encode("utf-8"),
+                                               ctypes.byref(self._opts), ENGINES[engine], int(skip), int(most))
+            if not self.handle:
+                raise SynthError("playback.kestrel_failed", err=_error(d))
+        except BaseException:
+            self._let_queue_go()
+            raise
+
+    def _let_queue_go(self):
+        q, self._queue = self._queue, None
+        if q is not None:
+            _OPENING.release(q)
 
     def status(self):
         """{"state": RUNNING / DONE / FAILED / CANCELLED, "frames": kept so far (Merlin: at the end), "progress":
@@ -741,6 +772,8 @@ class Piece:
             h, self.handle = self.handle, None
         if h:
             self.dll.kb_piece_free(h)
+        if getattr(self, "_queue", None) is not None:  # (its turn on the card ends once its thread has ended)
+            self._let_queue_go()
         if self.delete_midi:
             try:
                 os.remove(self.midi)
@@ -891,8 +924,10 @@ class Kestrel:
             self.bass.BASS_StreamFree(self.stream)
             self.stream = 0
         if self.handle:
-            self.dll.kb_close(self.handle)
-            self.handle = None
+            with _OPENING:  # (its part of the card freed in turn, never beside a start)
+                if self.handle:
+                    self.dll.kb_close(self.handle)
+                    self.handle = None
 
 
 LEAD = 0.2  # seconds the player sends ahead of the sound (more than the blocks made ahead: AHEAD x BLOCK = 64 ms)

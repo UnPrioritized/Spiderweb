@@ -1014,6 +1014,11 @@ class Playback:
             self.out.close()
         from files import kestrel  # (Kestrel's kept soundfonts: only ones no longer listed / picked again read anew)
         kestrel.stop_starts()  # (a start reading the old list: given up, never read again for nothing)
+        # (Rendered ahead's + the Hz preview's pieces on the card stopped first: a piece holds the card queue,
+        # drop_loaded waits for it; the Hz preview makes them again with the new soundfonts)
+        self.ahead_play.drop()
+        if self.hz_window:
+            self.hz_window.preview.clear()
         kestrel.drop_loaded()
         kestrel.forget(keep=font_list(self.hz_preview))
         if again and added:
