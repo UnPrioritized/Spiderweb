@@ -69,6 +69,7 @@ from window.tempo_pane import ask_domino
 from roll.roll_draw import GHOST_FADE, STACK_MODES
 
 AUTOSAVE = os.path.join(USER, "autosave.json")
+AFTER_STOP_S = 4.0  # (the autosave waits this long after Stop: a quick Stop -> Play stays smooth)
 OUTPUT_DIR = os.path.join(HERE, "output")
 
 
@@ -986,7 +987,17 @@ class ProjectFiles:
         self.sync_window_title()
         if self._autosave_job:
             self.after_cancel(self._autosave_job)
-        self._autosave_job = self.after(1500, self.autosave)
+        self._autosave_job = self.after(1500, self.autosave_timed)
+
+    def autosave_timed(self):
+        """The timer's autosave: never while playing, nor right after Stop (a save there could make the sound hitch).
+        A direct autosave() call saves at once."""
+        self._autosave_job = None
+        wait = self.autosave_wait()
+        if wait:
+            self._autosave_job = self.after(wait, self.autosave_timed)
+            return
+        self.autosave()
 
     def autosave(self):
         self._autosave_job = None
@@ -1004,6 +1015,19 @@ class ProjectFiles:
             if not self._autosave_failed:  # (told once, again only if it worked in between)
                 self._autosave_failed = True
                 self.after_idle(lambda e=e: self.tell_autosave_failed(e))
+
+    def autosave_wait(self):
+        """ms the autosave should wait yet: 0 = save now. Waits while the main playback, Rendered ahead or the Hz
+        preview plays, then AFTER_STOP_S after the last Stop (a quick Stop -> Play stays smooth). Closing never waits."""
+        player = getattr(self, "player", None)
+        ahead = getattr(self, "ahead_play", None)
+        hz = getattr(self, "hz_window", None)
+        if (player is not None and (player.running or player.thread is not None)
+                or ahead is not None and ahead.playing()
+                or hz is not None and hz.preview.playing()):
+            return 1500
+        left = getattr(self, "stopped_at", -1e9) + AFTER_STOP_S - time.monotonic()
+        return max(1, int(left * 1000) + 1) if left > 0 else 0
 
     def tell_autosave_failed(self, e):
         if self.roll.drag:  # (not in the middle of a drag)

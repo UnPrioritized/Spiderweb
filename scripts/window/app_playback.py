@@ -683,6 +683,7 @@ class Playback:
             self.playhead = self.player.position()
             self.player.stop()
             self.roll.show_playhead()
+            self.stopped_at = time.monotonic()  # (the autosave waits a few quiet seconds after Stop: project.autosave)
             self.schedule_autosave()
         self.ahead_play.stop()  # (fades out; what's made is kept for the next Play)
         self.ahead_play.forget_closed()  # (... unless its MIDI was closed: New closes it first, hunt 2026-11-03)
