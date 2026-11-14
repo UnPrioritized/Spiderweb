@@ -1660,9 +1660,10 @@ def kept_bpms(tempo, base, ppq, beats):
     switches it off): the ruler's purple brackets after a visual mark (user 2026-10-29, "120 → 60 (120)")."""
     lay, out = layout(tempo, base, ppq), []
     keeps = lay["keeps"]
+    if not keeps:  # (no Keep timing part: none anywhere; the ruler asks for every point's beat)
+        return [None] * len(beats)
     starts = [a for _, a, _, _ in keeps]  # (in the points' order = by tick)
-    for b in beats:
-        t = beat_tick(b, ppq)
+    for t in _first_ticks(beats, ppq):  # (beat_tick of each, all at once)
         n = bisect.bisect_right(starts, t) - 1
         if n < 0 or (keeps[n][2] is not None and t >= keeps[n][2]):
             out.append(None)

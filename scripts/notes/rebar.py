@@ -524,19 +524,23 @@ def dense_spots(pl, ticks, ppq):
     ticks = np.unique(np.asarray(ticks, np.int64))
     if len(ticks) < 2:
         return []
-    new = map_ticks(dict(pl, dense_map=None), ticks, ppq).tolist()
-    out, run, last, prev = [], None, None, None
-    for o, n in zip(ticks.tolist(), new):
-        if last is not None and n <= last:  # (on or before the tick the note before took: pushed on by one)
-            if run is None:
-                run = [prev]
-                out.append(run)
-            run.append(o)
-            last += 1
-        else:
-            run, last = None, n
-        prev = o
-    return out
+    new = np.asarray(map_ticks(dict(pl, dense_map=None), ticks, ppq))
+    # (all at once: the tick each note ends up on = the later of its own and one past the one before's, i.e.
+    # k + the running max of new - k; a note is pushed on when that isn't its own. A Python loop per note took
+    # most of a squeeze over a dense loaded MIDI)
+    k = np.arange(len(new))
+    took = k + np.maximum.accumulate(new - k)
+    pushed = np.zeros(len(new), bool)
+    pushed[1:] = new[1:] <= took[:-1]
+    if not pushed.any():
+        return []
+    edge = np.diff(pushed.astype(np.int8))
+    starts = np.flatnonzero(edge == 1) + 1  # (each run of pushed notes, with the note before it)
+    ends = np.flatnonzero(edge == -1) + 1
+    if len(ends) < len(starts):
+        ends = np.append(ends, len(new))
+    old = ticks.tolist()
+    return [old[s - 1:e] for s, e in zip(starts.tolist(), ends.tolist())]
 
 def dense_fix(old, new, base, ppq, pl, ticks):
     """Notes the change brings under a tick apart each keep a tick of their own, with SHORT BPM CHANGES right there
@@ -709,44 +713,49 @@ def between_fix(old, new, base, ppq, pl, ticks):
     lone = sorted(b for b in pt_beats if abs(b * ppq - round(b * ppq)) >= 1e-6)  # (points between ticks)
     edge = {a_t, b_new} | {t for t in whole if a_t <= t <= b_new}
     is_off = np.isin(inside, offs) & ~np.isin(nn, list(edge))  # (a note on a point's tick: that point holds it)
-    seq = sorted(set(nn.tolist()) | edge)
-    off_at = dict(zip(nn[is_off].tolist(), inside[is_off].tolist()))  # (new tick -> its old tick)
+    seq = np.union1d(nn, np.array(sorted(edge), np.int64))  # (every new tick there, sorted, each once)
+    off_new, off_old = nn[is_off], inside[is_off]  # (new tick -> its old tick; nn rises with inside)
+    on = np.isin(seq, off_new)  # (seq's between notes)
+    old_of = np.zeros(len(seq), np.int64)
+    old_of[on] = off_old[np.searchsorted(off_new, seq[on])]
     ro = heard(old, base, ppq, b_t + 2)
     rn = heard(new, base, ppq, b_new + ppq)
-    tn = dict(zip(seq, seconds_at(rn, ppq, np.array(seq, float)).tolist()))
-    so = dict(zip(off_at.values(), seconds_at(ro, ppq, np.array(list(off_at.values()), float)).tolist()))
-    chains, run = [], []
-    for k, t in enumerate(seq):  # (each run of between notes with the exact ticks either side)
-        if t in off_at:
-            if not run and k:
-                run = [seq[k - 1]]
-            if run:
-                run.append(t)
-        elif run:
-            chains.append(run + [t])
-            run = []
-    keep = [c for c in chains if _chain_ok(pts, pt_beats, lone, c, ppq)]
+    tn = seconds_at(rn, ppq, seq.astype(float))
+    want = tn.copy()  # (each tick's second to keep: a between note's old one, the rest as the new line has it)
+    want[on] = seconds_at(ro, ppq, old_of[on].astype(float))
+    # (each run of between notes with the exact ticks either side, as seq places: [first, last + 1])
+    step = np.diff(on.astype(np.int8))
+    s_at = np.flatnonzero(step == 1)  # (the exact tick before a run)
+    e_at = np.flatnonzero(step == -1) + 1  # (the exact tick after it)
+    s_at = s_at[:len(e_at)]  # (a run with nothing after it: none, as before; seq ends on the bars' end)
+    seq_l = seq.tolist()
+    chains = [(s, e) for s, e in zip(s_at.tolist(), e_at.tolist())
+              if _chain_ok(pts, pt_beats, lone, seq_l[s:e + 1], ppq)]
+    keep = chains
     for _ in range(3):  # (spots that don't come out exact (a catch-up reading the tempo there...) left rounded)
         if not keep:
             break
         trial = copy.deepcopy(new)
-        puts = [_chain_us(c, tn, so, off_at, ppq) for c in keep]
+        puts = _chains_us(keep, seq, want, ppq)
         keep = [c for c, p in zip(keep, puts) if p is not None]
         _put_chains(trial["points"], [p for p in puts if p is not None], ppq, base)
-        fixed = {t for c in keep for t in c[1:-1]}
+        fixed = np.zeros(len(seq), bool)
+        for s, e in keep:
+            fixed[s + 1:e] = True
         rn2 = heard(trial, base, ppq, b_new + ppq)
-        got = seconds_at(rn2, ppq, np.array(seq, float)).tolist()
-        miss = {t for t, g in zip(seq, got) if abs(g - (so[off_at[t]] if t in fixed else tn[t])) > BETWEEN_SEC}
-        if not miss:
+        got = seconds_at(rn2, ppq, seq.astype(float))
+        miss = np.abs(got - np.where(fixed, want, tn)) > BETWEEN_SEC
+        if not miss.any():
             if not keep:
                 break
             new["points"][:] = trial["points"]
-            done = sorted(off_at[t] for t in fixed)
-            pl["between_done"] = np.array(done, np.int64)
+            done = np.sort(old_of[fixed])
+            pl["between_done"] = done.astype(np.int64)
             if pl.get("sound_spans"):
                 _sound_map(old, new, base, ppq, pl)
             return len(done)
-        keep = [c for c in keep if not (miss & set(c))]
+        hit = np.concatenate([[0], np.cumsum(miss)])  # (a chain with a miss anywhere on it: left rounded)
+        keep = [(s, e) for s, e in keep if hit[e + 1] == hit[s]]
     return 0
 
 
@@ -763,20 +772,42 @@ def _chain_ok(pts, beats, lone, c, ppq):
     return i + 1 >= len(pts) or pts[i + 1][0] >= hi - EPS
 
 
-def _chain_us(c, tn, so, off_at, ppq):
-    """One spot's held microseconds a beat [(tick, us)] from its first tick on, counted on a running total, or None
-    (past what a file holds / the notes out of order in time)."""
-    times = [tn[c[0]]] + [so[off_at[t]] for t in c[1:-1]] + [tn[c[-1]]]
-    if any(b <= a for a, b in zip(times, times[1:])):
-        return None
-    out, now = [], times[0]
-    for t0, t1, want in zip(c, c[1:], times[1:]):
-        us = round((want - now) * ppq * 1e6 / (t1 - t0))
-        if not 1 <= us <= 0xFFFFFF or not T.MIN_BPM <= 60_000_000 / us <= T.MAX_BPM:
-            return None
-        out.append((t0, us))
-        now += (t1 - t0) * us / (ppq * 1e6)
-    return out, c[-1]
+def _chains_us(chains, seq, want, ppq):
+    """Each spot's held microseconds a beat [(tick, us)] from its first tick on, counted on a running total, as
+    (that list, its last tick), or None (past what a file holds / the notes out of order in time). chains = [(s, e)]
+    places in seq (its ticks seq[s..e]); want = the second each tick of seq must sound at. Every spot's step k
+    worked out at once (spots are a few ticks long; the same sums in the same order as one at a time)."""
+    if not chains:
+        return []
+    s = np.array([c[0] for c in chains], np.int64)
+    n = np.array([c[1] - c[0] for c in chains], np.int64)  # (steps in each spot)
+    ok = np.ones(len(s), bool)
+    now = want[s].copy()
+    us_all = np.zeros((len(s), int(n.max())), np.int64)
+    for k in range(int(n.max())):
+        go = ok & (k < n)
+        i = s[go] + k
+        t0, t1, w = seq[i], seq[i + 1], want[i + 1]
+        bad = w <= want[i]  # (out of order in time)
+        with np.errstate(all="ignore"):
+            us = np.rint((w - now[go]) * ppq * 1e6 / (t1 - t0))
+            fine = (~bad) & (us >= 1) & (us <= 0xFFFFFF)
+            u = np.where(fine, us, 1).astype(np.int64)
+            bpm = 60_000_000 / u
+        fine &= (bpm >= T.MIN_BPM) & (bpm <= T.MAX_BPM)
+        sub = ok[go]
+        sub &= fine
+        ok[go] = sub
+        us_all[go, k] = u
+        now[go] = now[go] + (t1 - t0) * u / (ppq * 1e6)
+    seq_l = seq.tolist()
+    out = []
+    for j, (a, e) in enumerate(chains):
+        if not ok[j]:
+            out.append(None)
+            continue
+        out.append((list(zip(seq_l[a:e], us_all[j, :e - a].tolist())), seq_l[e]))
+    return out
 
 
 def _put_chains(pts, puts, ppq, base):
