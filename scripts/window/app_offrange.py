@@ -5,7 +5,7 @@ from roll.roll_draw import GHOST_FADE
 from notes.engine import NO_NOTES, off_part, past_edges, track_ids
 from notes.sliced import cut_group
 from notes.merge import has_colours
-from notes.mask import as_used, is_mask, mask_view, pinned_slots, silent, slot_rule
+from notes.mask import SKIP10, as_used, is_mask, mask_view, pinned_slots, silent, slot_rule
 from notes.paths import rows_up_to
 from notes.app_layout import all_notes, landing_clashes, wrap_landing
 from notes.custom import ROUND
@@ -27,10 +27,62 @@ def kept_tracks(sh, make, keys, ppq):
     return off_part(notes, tracks, up, keys, round(later * ppq))
 
 
-def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds, use10=False):
+def alone_slots(sh, notes, alone, keys, ppq, use10, real):
+    """Slots for sh's kept notes (start, end, key, ...) from sh's channels worked out ALONE, made whole on a taller
+    keyboard (past_edges' lifted shape; alone(shapes, keys) -> (channel 10 used, rendered rows) = all_notes with the
+    project's settings), each alone slot -> the slot most of sh's real notes (real: rendered rows, or None) with that
+    alone slot are on; one never on the keys moves by the shift most of them made. -1 = not found; None = no lift."""
+    got = past_edges(sh, keys, ppq)
+    if got is None:
+        return None
+    lifted, up, room, later = got
+    with rows_up_to(room - 1):
+        used10, rows = alone([lifted], room)
+    rows = np.array(rows, np.int64, copy=True)
+    if rows.ndim != 2 or not len(rows):
+        return None
+    rows[:, 2] -= up
+    if later:
+        rows[:, :2] -= round(later * ppq)
+    a = rows[:, 4]
+    if use10 and not used10:  # (made with channel 10 skipped: the same channels in the project's numbering)
+        a = a // 15 * 16 + np.asarray(SKIP10, np.int64)[a % 15]
+
+    def code(r):  # (start + key as one number; keys stay inside -8192 .. 8191)
+        return r[:, 0] * 16384 + (r[:, 2] + 8192)
+    rc = code(rows)
+    o = np.argsort(rc, kind="stable")
+    rc, a = rc[o], a[o]
+
+    def look(r):
+        c = code(r)
+        at = np.minimum(np.searchsorted(rc, c), len(rc) - 1)
+        return np.where(rc[at] == c, a[at], -1)
+    out = look(np.asarray(notes, np.int64))
+    if real is None or not len(real):
+        return out
+    pair = np.column_stack([look(real), real[:, 4]])
+    pair = pair[pair[:, 0] >= 0]
+    if not len(pair):
+        return out
+    pairs, counts = np.unique(pair, axis=0, return_counts=True)
+    best = {}
+    for (k, v), c in zip(pairs.tolist(), counts.tolist()):
+        if c > best.get(k, (None, 0))[1]:
+            best[k] = (v, c)
+    d = pairs[:, 1] - pairs[:, 0]
+    ds, dc = np.unique(np.repeat(d, counts), return_counts=True)
+    shift = int(ds[dc.argmax()])
+    kinds, back = np.unique(out, return_inverse=True)  # (a few alone slots: one look-up each, not per note)
+    return np.array([best[k][0] if k in best else k + shift if k >= 0 else -1 for k in kinds.tolist()],
+                    np.int64)[back.ravel()]
+
+
+def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds, use10=False, alone=None):
     """App.offrange_rows' work (Keep notes on), from plain data only, so the notes thread can do it beside the notes
     (App._make_coming): shapes = app.shapes as the notes were made, rendered = their notes, make = a notes_tracks,
-    multi = Multi channel, rounds = App.rounds_apart(), use10 = the rendered notes' slot rule (App.picture_use10)."""
+    multi = Multi channel, rounds = App.rounds_apart(), use10 = the rendered notes' slot rule (App.picture_use10),
+    alone = alone_slots' all_notes for one shape (None: guesses stay)."""
     if not shapes:
         return NO_NOTES
     parts = []
@@ -67,6 +119,7 @@ def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds, use10=False):
         notes = np.asarray(notes, np.int64).reshape(-1, 4)
         t = np.zeros(len(notes), np.int64) if tracks is None else np.asarray(tracks, np.int64).ravel()
         slot = t if multi else np.zeros(len(notes), np.int64)
+        guessed = None  # (kept notes whose slot is only a guess: nothing on the keys to copy it from)
         if pin and tracks is not None:
             slot = np.asarray(as_used(t, slot_rule(sh), use10), np.int64)
         elif src is not None:
@@ -79,10 +132,22 @@ def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds, use10=False):
                 u = np.unique(np.asarray(real, np.int64)) if real is not None else np.zeros(1, np.int64)
                 most = int(np.bincount(mine[:, 4] - mine[:, 4].min()).argmax() + mine[:, 4].min())
                 slot = repeat_slots(t, u, np.asarray(got, np.int64), most) if rounds and len(u) == len(got) else None
-                if slot is None:
+                if slot is not None:
+                    guessed = ~np.isin(t & (ROUND - 1), u & (ROUND - 1))  # (a colour never on the keys)
+                else:
                     at = np.clip(np.searchsorted(u, t), 0, len(u) - 1)
                     found = (u[at] == t) & (at < len(got))
                     slot = np.where(found, np.asarray(got, np.int64)[np.minimum(at, len(got) - 1)], most)
+                    guessed = ~found
+        elif multi and tracks is not None:
+            guessed = np.ones(len(notes), bool)
+        # (those from the shape's channels worked out ALONE on a taller keyboard, lined up with its real notes; user
+        # 2026-11-14: a shape with more than 15 colours wholly past the keys showed them off by a few channels)
+        if alone is not None and guessed is not None and guessed.any() and (src is None or src == i):
+            got = alone_slots(sh, notes[guessed], alone, keys, ppq, use10, heard(i))
+            if got is not None:
+                slot = slot.copy()
+                slot[guessed] = np.where(got >= 0, got, slot[guessed])
         parts.append(np.column_stack([notes, slot, np.full(len(notes), i, np.int64)]))
     return np.concatenate(parts) if parts else NO_NOTES
 
@@ -315,7 +380,21 @@ class AppOffrange:
         if not self.keeps_offrange() or self.companion is not None or not self.shapes:
             return NO_NOTES
         return kept_rows(self.edit_shapes(), self.rendered, self.notes_tracks, self.keys, self.ppq,
-                         self.channel_mode.get() == "auto", self.rounds_apart(), self.picture_use10)
+                         self.channel_mode.get() == "auto", self.rounds_apart(), self.picture_use10,
+                         self.alone_maker(self.notes_tracks))
+
+    def alone_maker(self, make, own=None):
+        """kept_rows' alone: all_notes for some shapes on keys keys with the project's channel settings now ->
+        (channel 10 used, rendered rows). make = a notes_tracks; own = own_channels() (the notes thread passes its
+        copy). Read on Tk's thread only (the thread gets it made there: offrange_wanted)."""
+        mode, split, ppq = self.channel_mode.get(), self.channel_split, self.ppq
+        all16, rounds, order = self.all16(), self.rounds_apart(), self.in_order()
+        own = self.own_channels() if own is None else own
+
+        def alone(shapes, keys):
+            got = all_notes(shapes, ppq, keys, mode, split, all16, make, rounds=rounds, order=order, own=own)
+            return got[1], got[2]
+        return alone
 
     def offrange_wanted(self):
         """What the notes thread needs to work out offrange_rows beside the notes (App._make_coming, whose shapes
