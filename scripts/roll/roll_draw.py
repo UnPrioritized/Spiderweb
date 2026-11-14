@@ -1728,7 +1728,9 @@ class RollDrawing:
         got = getattr(self, "_off_prep", None)
         if got is None or got[0]() is not off:
             order = np.argsort(off[:, 0], kind="stable")
+            korder = np.argsort(off[:, 2], kind="stable")  # (by key too: a pan's strip along the time = a few keys)
             p = {"order": order, "starts": np.ascontiguousarray(off[order, 0]),
+                 "korder": korder, "keys": np.ascontiguousarray(off[korder, 2]),
                  "longest": int((off[:, 1] - off[:, 0]).max()) if len(off) else 0,
                  "s": off[:, 0].astype(np.float64), "e": off[:, 1].astype(np.float64),
                  "k": off[:, 2].astype(np.float64), "owner": np.ascontiguousarray(off[:, 5]), "code": None}
@@ -1746,12 +1748,19 @@ class RollDrawing:
             p["code"] = (pics, use10, np.asarray(code, np.int64))
         return p
 
-    def off_near(self, p, t_lo, t_hi):
+    def off_near(self, p, t_lo, t_hi, k_lo=None, k_hi=None):
         """The rows (indices, IN THEIR OWN ORDER: painted in it, the same pixels as all of them) of an off_prep that
-        can reach ticks t_lo..t_hi; None = all of them."""
+        can reach ticks t_lo..t_hi (and keys k_lo..k_hi when given: whichever picks fewer rows is used); None = all
+        of them. The caller still checks each row's own rectangle."""
         starts, order = p["starts"], p["order"]
         lo = np.searchsorted(starts, math.floor(t_lo) - p["longest"] - 1)
         hi = np.searchsorted(starts, math.ceil(t_hi) + 1, "right")
+        if k_lo is not None:  # (a pan's strip along the time: only a few keys' rows, user 2026-11-14: panning
+            keys = p["keys"]  # stuttered with 1 M kept notes, every strip went through all of the screen's)
+            a = np.searchsorted(keys, math.floor(k_lo) - 1)
+            b = np.searchsorted(keys, math.ceil(k_hi) + 1, "right")
+            if b - a < hi - lo:
+                lo, hi, order = a, b, p["korder"]
         if lo == 0 and hi == len(starts):
             return None
         if (hi - lo) * 8 < len(starts):  # (a few: sorted back; many: picked by a mask, no sort)
@@ -1795,7 +1804,12 @@ class RollDrawing:
         ay, by = -self.sy, self.ruler_h + self.view_top * self.sy
         kb, top, w, h = area or (self.kb_w, self.ruler_h, w, h)
         p = self.off_prep(off, pics, use10)
-        idx = self.off_near(p, (kb - 2 - bx) / ax, (w + 2 - bx) / ax)  # (only the ones that can be on screen)
+        # (only the ones that can be on screen, in the clip when there is one: a pan step paints thin strips)
+        xa, xb, ya, yb = kb - 2, w + 2, top - 2, h + 2
+        if clip:
+            xa, xb, ya, yb = max(xa, clip[0] - 2), min(xb, clip[2] + 2), max(ya, clip[1] - 2), min(yb, clip[3] + 2)
+        k_lo, k_hi = sorted(((ya - by) / ay, (yb - by) / ay))
+        idx = self.off_near(p, (xa - bx) / ax, (xb - bx) / ax, k_lo - 1, k_hi + 1)
         if only is not None and lifted:
             mine = np.isin(p["owner"] if idx is None else p["owner"][idx], list(lifted)) == only
             idx = np.flatnonzero(mine) if idx is None else idx[mine]
