@@ -2231,7 +2231,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                              self.all16(), self.notes_tracks, rounds=self.rounds_apart(), order=self.in_order(),
                              keep=self.keep_colours.get(),
                              busy=self.cc_busy(self.channel_mode.get()), own=self.own_channels(), stash=stash,
-                             overlaps=self.overlap_rule())
+                             overlaps=self.overlap_rule(), kept=self.keeps_offrange())
         if made is None:
             made = make()
             self._make_time = time.perf_counter() - started  # (every time: late_ok goes by it)
@@ -2263,7 +2263,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             # makes = the pattern as it sounds without them, user)
             self.pattern = all_notes(shown, self.ppq, self.keys, "single", self.channel_split, self.all16(),
                                      self.notes_tracks, quiet=True, own=self.own_channels(),
-                                     overlaps=self.overlap_rule())[2]
+                                     overlaps=self.overlap_rule(), kept=self.keeps_offrange())[2]
         if self.mask_preview.get():
             self.drawn, self.mask_covered = mask_view(self.rendered, self.shapes, self.ppq, self.keys, self.notes_of,
                                                       self.pattern, GHOST_FADE[0] > 0)
@@ -2337,7 +2337,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.rounds_apart(), self.in_order(), self.keep_colours.get(), cc_texts(self.shapes, mode),
                 tuple(json.dumps(sh.get("strips")) for sh in self.shapes),  # (Channel per strip: not in shape_key)
                 tuple(sorted(self.own_channels().items())), tuple(sorted(self.own_channels().fixed)),
-                tuple(sorted((self.overlap_rule() or {}).items())))
+                tuple(sorted((self.overlap_rule() or {}).items())),
+                self.keeps_offrange())  # (14: laid shapes count their colours past the keys too, all_notes kept)
 
     def own_channels(self):
         """{id: channel} of the tracks added by hand (all_notes own), and of the loaded MIDI's tracks shapes are
@@ -2880,7 +2881,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 own = Channels(key[11])  # (as own_channels: the loaded tracks given a channel too)
                 own.fixed = frozenset(key[12])
                 got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6], order=key[7], keep=key[8],
-                                busy=busy, own=own, overlaps=dict(key[13]) or None, stash=job["stash"])
+                                busy=busy, own=own, overlaps=dict(key[13]) or None, stash=job["stash"], kept=key[14])
                 # (the same time as shapes_changed's: making the notes only, not the orders below)
                 job["time"] = time.perf_counter() - started
                 if job["stop"]:

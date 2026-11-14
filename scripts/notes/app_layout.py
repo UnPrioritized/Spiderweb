@@ -211,8 +211,27 @@ def wrapped_in(sh, notes, tracks, ppq, keys, notes_tracks):
         None if tt is None else tt[order]
 
 
+def whole_tracks(sh, tracks, ppq, keys, notes_tracks):
+    """A laid shape's colours (sorted tracks) counting its notes kept past the keys too ("Keep notes made there"):
+    tracks = its real notes' (or None); its kept notes' from the same remembered lifted notes as wrapped_in. None
+    when it has none past the keys."""
+    out = past_edges(sh, keys, ppq)
+    if out is None:
+        return None
+    lifted, up, room, later = out
+    with rows_up_to(room - 1):
+        n, t = notes_tracks(lifted, room)
+    if not len(n) or t is None:
+        return None
+    n, t = off_part(n, t, up, keys, round(later * ppq))
+    if not len(n):
+        return None
+    parts = [np.asarray(t, np.int64).ravel()] + ([np.asarray(tracks, np.int64).ravel()] if tracks is not None else [])
+    return np.unique(np.concatenate(parts))
+
+
 def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,
-              keep=False, busy=None, own=None, stash=None, overlaps=None, wrap=False):
+              keep=False, busy=None, own=None, stash=None, overlaps=None, wrap=False, kept=False):
     """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
     (slot k = channel k, slot_track_channel), rendered, slot count, {Hz bass's number: {voice: slot}} for those with
     their own channel per note (render voice_slots)). all16: the project's "Use channel 10" (every
@@ -226,7 +245,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     (Single channel; As drawn: kept), other shapes' never (Domino lets two notes share a key in a track); the other
     shapes never step round them (nor take tracks added by hand). Also returns {shape's number: how many colours
     it has} for those (App.fit_into). stash: a dict given = what lay_again needs kept in it. overlaps: how overlaps
-    are fixed (App.overlap_rule: Single's split around, Multi's Remove overlaps; render overlaps)."""
+    are fixed (App.overlap_rule: Single's split around, Multi's Remove overlaps; render overlaps). kept: "Keep notes
+    made there" on: a laid shape's colours counted with its notes past the keys too (whole_tracks)."""
     team_laps = []
     across = bool(overlaps and overlaps.get("across")) and mode == "auto"  # (Multi channel's Remove overlaps)
     teams = between_turns(shapes, team_laps)
@@ -272,6 +292,10 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
               and got[i][1] is not None else got[i] for i, p in enumerate(into) if p}
     got = [(n[:0], None if t is None else t[:0]) if i in inside else (n, t) for i, (n, t) in enumerate(got)]
     laps = [lap[:0] if i in inside and lap is not None else lap for i, lap in enumerate(laps)]
+    # ("Keep notes made there": a laid shape's colours counted over its notes past the keys too, so it gets a track
+    # for each and a colour keeps its track wherever its notes are; user 2026-11-14, hunt: wholly past the keys it
+    # showed one colour, and partly past them its colours slid onto the first tracks)
+    whole = {i: whole_tracks(asked[i], inside[i][1], ppq, keys, notes_tracks) for i in inside} if kept else None
     # a shape never has more than 15 colours (user: a MIDI player shows no more either): the extra ones are
     # merged into the last (pasted notes keep their tracks)
     # (a Hz bass layer's notes clashing with another's: another channel, not another colour asked for)
@@ -330,11 +354,13 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     way = (overlaps or {}).get("way", "stretch")
     if stash is not None:  # (App.fit_into's laying again: lay_again)
         stash.update(inside=inside, rendered=rendered, slots=slots, base10=any(r is True for r in rules),
-                     all16=all16, mode=mode, overlaps=overlaps if across else None, way=way)
-    rendered, slots, need, laid = lay_inside(rendered, slots, inside, shapes, own, use10 or all16, mode, way)
+                     all16=all16, mode=mode, overlaps=overlaps if across else None, way=way, whole=whole)
+    rendered, slots, need, laid, only_kept = lay_inside(rendered, slots, inside, shapes, own, use10 or all16, mode,
+                                                        way, whole)
     emptied = frozenset()
     if across and len(rendered):  # (Remove overlaps: after the laid shapes are in, so your tracks take part too)
         rendered, emptied = cut_across(rendered, shapes, overlaps)
+    emptied = emptied | only_kept  # (tracks with only notes past the keys: listed + written like emptied ones)
     voice_slots.update(laid)
     for i, s in note_slots.items():  # (Channel per strip with CCs: each strip's slot + time, App.cc_messages)
         if s is not None and len(s):
@@ -360,19 +386,27 @@ def cut_across(rendered, shapes, overlaps):
     return out, frozenset(int(s) for s in gone.tolist() if s < OWN0)
 
 
-def lay_inside(rendered, slots, inside, shapes, own, use10, mode, way="stretch"):
+def lay_inside(rendered, slots, inside, shapes, own, use10, mode, way="stretch", whole=None):
     """all_notes' last part: the shapes laid on tracks ({number: (notes, colours)}) put on them, after the other
     shapes' rendered notes: (rendered, slot count, {number: how many colours it has}, {number: {pasted track: slot}}
-    for laid pasted notes with CC events: render's voice_slots, Multi channel only, App.cc_messages)."""
-    need, laid = {}, {}
+    for laid pasted notes with CC events: render's voice_slots, Multi channel only, App.cc_messages). whole: {number:
+    its colours (sorted tracks) counting its notes past the keys too} (whole_tracks), or None."""
+    need, laid, past = {}, {}, set()
     if not inside:
-        return rendered, slots, need, laid
+        return rendered, slots, need, laid, frozenset()
     parts, together = [rendered], []
     for i, (n, t) in inside.items():
         sh = shapes[i]
-        colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None and len(n)
-                  else np.zeros(len(n), np.int64))
-        need[i] = int(colour.max()) + 1 if len(n) else 0
+        every = None if whole is None else whole.get(i)
+        if every is not None and len(every) and t is not None:  # (colour = place among ALL its colours)
+            colour = np.searchsorted(every, np.asarray(t, np.int64)).astype(np.int64)
+            need[i] = len(every)
+        else:
+            colour = (np.unique(np.asarray(t, np.int64), return_inverse=True)[1].ravel() if t is not None and len(n)
+                      else np.zeros(len(n), np.int64))
+            need[i] = int(colour.max()) + 1 if len(n) else 0
+            if every is not None and len(every):  # (all its notes on the keys one colour, more past them)
+                need[i] = max(need[i], len(every))
         ids = placed_on(sh, own)
         if not ids:
             continue
@@ -382,6 +416,8 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode, way="stretch")
         kept = colours_apart(sh, mode)
         if not kept:
             colour = np.zeros_like(colour)
+        if every is not None and len(every):  # (the automatic tracks its colours past the keys go on)
+            past.update(int(on[min(k, len(ids) - 1) if kept else 0]) for k in range(len(every)))
         if kept and "cc" in sh and t is not None and len(n):  # (each pasted track's events: its colour's)
             tracks = np.unique(np.asarray(t, np.int64))
             laid[i] = {int(u): int(on[min(k, len(ids) - 1)]) for k, u in enumerate(tracks.tolist())}
@@ -403,7 +439,11 @@ def lay_inside(rendered, slots, inside, shapes, own, use10, mode, way="stretch")
             together = np.concatenate([rendered[there], together])
         parts.append(fix_rows(together, way))
     rendered = np.concatenate(parts)
-    return rendered, max(slots, auto_count(rendered[:, 4])), need, laid  # (automatic tracks shapes were pinned on, B11)
+    # (automatic tracks holding only a laid shape's notes past the keys: counted as having notes, like the ones
+    # Remove overlaps empties, so the list and exports keep them and the shape keeps its tracks; user 2026-11-14)
+    only_kept = frozenset(s for s in past if 0 <= s < OWN0) - set(np.unique(rendered[:, 4]).tolist())
+    return rendered, max(slots, auto_count(rendered[:, 4])), need, laid, only_kept  # (automatic tracks shapes were
+    # pinned on, B11)
 
 
 def lay_again(made, stash, shapes, own):
@@ -416,11 +456,13 @@ def lay_again(made, stash, shapes, own):
     use10 = stash["base10"] or any(shapes[i].get("slots10") is True for i in inside)
     if (use10 or stash["all16"]) != made[1]:
         return None
-    rendered, slots, need, laid = lay_inside(stash["rendered"], stash["slots"], inside, shapes, own, made[1],
-                                             stash["mode"], stash.get("way", "stretch"))
+    rendered, slots, need, laid, only_kept = lay_inside(stash["rendered"], stash["slots"], inside, shapes, own,
+                                                        made[1], stash["mode"], stash.get("way", "stretch"),
+                                                        stash.get("whole"))
     emptied = frozenset()
     if stash.get("overlaps") and len(rendered):  # (Remove overlaps after laying again too: hunt 2026-11-06, the
         rendered, emptied = cut_across(rendered, shapes, stash["overlaps"])  # overlaps stayed till the next edit)
+    emptied = emptied | only_kept
     return made[0], made[1], rendered, slots, {**made[4], **laid}, need, emptied
 
 

@@ -1059,6 +1059,7 @@ class Companion(DominoBar):
         rows = all_notes(shapes, app.ppq, app.keys, "raw" if mode == "single" else mode, app.channel_split,
                          app.all16(), app.notes_tracks, rounds=app.rounds_apart(), order=app.in_order(),
                          keep=app.keep_colours.get(), busy=app.cc_busy(mode, shapes), overlaps=way,
+                         kept=app.keeps_offrange(),
                          wrap=app.wraps_offrange())[2]
         rows = np.array(rows, np.int64)
         if mode == "single" and len(rows):

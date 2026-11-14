@@ -714,7 +714,8 @@ class JoinSplit:
         _, use10, multi, _, _, _, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, all16,
                                        self.notes_tracks, rounds=self.new_rounds.get(),
                                        order=all16 and self.ch10_order.get(), keep=self.keep_colours.get(),
-                                       busy=self.cc_busy("auto"), own=self.own_channels())
+                                       busy=self.cc_busy("auto"), own=self.own_channels(),
+                                       kept=self.keeps_offrange())
         return use10, multi
 
     def own_slots(self, i, use10):
@@ -729,7 +730,8 @@ class JoinSplit:
         all16 = self.use_ch10.get()
         _, used10, rows, _, _, _, _ = all_notes(alone, self.ppq, self.keys, "auto", self.channel_split, all16, self.notes_tracks,
                                        rounds=self.new_rounds.get(), order=all16 and self.ch10_order.get(),
-                                       busy=self.cc_busy("auto", alone), own=self.own_channels())
+                                       busy=self.cc_busy("auto", alone), own=self.own_channels(),
+                                       kept=self.keeps_offrange())
         rows = rows[rows[:, 5] == next(k for k, s in enumerate(alone) if s is sh)].copy()
         rows[:, 5] = i
         if use10 and not used10 and not self.in_own_track(sh):  # (made with channel 10 skipped: the same channels in the project's numbering)

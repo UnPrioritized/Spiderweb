@@ -373,6 +373,8 @@ class AppOffrange:
         from roll.roll_draw import OFF_FADE
         OFF_FADE[0] = min(100, max(1, int(self.offrange_opacity.get())))
         if remake or not self.keeps_offrange():
+            if any(sh.get("into") for sh in self.shapes):  # (laid shapes count their kept colours: their notes
+                self.shapes_changed(now=True)              # may go on other tracks now, all_notes kept)
             self.off_all = self.offrange_rows()
             self.after_idle(self.exact_soon)
         self.made_version += 1
@@ -412,7 +414,8 @@ class AppOffrange:
         mode = self.channel_mode.get()
         got = all_notes(self.shapes, self.ppq, self.keys, mode, self.channel_split, self.all16(), self.notes_tracks,
                         rounds=self.rounds_apart(), order=self.in_order(), keep=self.keep_colours.get(),
-                        busy=self.cc_busy(mode), own=self.own_channels(), overlaps=self.overlap_rule(), wrap=wrap)
+                        busy=self.cc_busy(mode), own=self.own_channels(), overlaps=self.overlap_rule(), wrap=wrap,
+                        kept=self.keeps_offrange())  # (laid shapes on the same tracks as shown)
         self._outgoing = (key, (got[2], got[4]))
         return self._outgoing[1]
 
