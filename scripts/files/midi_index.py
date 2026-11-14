@@ -332,7 +332,7 @@ C_SIZE = 5
 
 
 def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx, W, k_lo, colour, tab, nx, filled,
-          marks, sq, sa, sb, sv):
+          marks, sq, sa, sb, sv, bd):
     """One track's notes painted onto a key x pixel table, reading its events in b[p:end] (from a checkpoint:
     cnt_q = notes sounding per channel + key there, first_q = since when, vel_q = the velocity of the one that
     began it). A key sounds while any note on it does (first on, first off doesn't change that), so a key's spans
@@ -342,7 +342,11 @@ def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx
     track above, or one of a stack ending while the key sounds on). Pixel x of tick t = round(t * ax + bx).
     Reads up to tick t1; close_at >= 0 = the end: what still sounds is painted up to that tick. b[0] = the track's
     byte base; skip = its hidden events (Extract, midi_scan). Returns where it stopped in b. A colour < 0 = that
-    channel's spans left out (not painted, not covering anything)."""
+    channel's spans left out (not painted, not covering anything).
+    bd (not empty: a loaded MIDI whose ticks were moved by Change visual time signature, notes/loaded_view.py):
+    bd[c] = the first file tick on pixel c or later, so a tick's pixel = the last c with bd[c] <= tick (-1 before the
+    first), instead of round(t * ax + bx); t1 is then a file tick too. Empty = as before."""
+    nbd = len(bd)
     tick = st[C_TICK]
     run = st[C_RUN]
     si = st[C_SKIP]
@@ -396,7 +400,10 @@ def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx
                             vel_q[qq] = v
                         cnt_q[qq] += 1
                         kk = k - k_lo
-                        x = np.int64(np.floor(t * ax + bx + 0.5))
+                        if nbd:
+                            x = np.int64(np.searchsorted(bd, t, "right")) - 1
+                        else:
+                            x = np.int64(np.floor(t * ax + bx + 0.5))
                         if 0 <= kk < nk and 0 <= x < W:
                             marks[kk, x] |= 1 if tab[kk, x] < 0 else 4
                     elif cnt_q[qq] > 0:
@@ -409,7 +416,10 @@ def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx
                             n += 1
                         else:  # (one of a stack ends, the key sounds on: hidden)
                             kk = k - k_lo
-                            x = np.int64(np.floor(t * ax + bx + 0.5))
+                            if nbd:
+                                x = np.int64(np.searchsorted(bd, t, "right")) - 1
+                            else:
+                                x = np.int64(np.floor(t * ax + bx + 0.5))
                             if 0 <= kk < nk and 0 <= x < W:
                                 marks[kk, x] |= 4
                 q += need
@@ -457,8 +467,12 @@ def cover(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx
             kk = (qq & 255) - k_lo
             if kk < 0 or kk >= nk:
                 continue
-            xa = np.int64(np.floor(sa[i] * ax + bx + 0.5))
-            xb = np.int64(np.floor(sb[i] * ax + bx + 0.5))
+            if nbd:
+                xa = np.int64(np.searchsorted(bd, sa[i], "right")) - 1
+                xb = np.int64(np.searchsorted(bd, sb[i], "right")) - 1
+            else:
+                xa = np.int64(np.floor(sa[i] * ax + bx + 0.5))
+                xb = np.int64(np.floor(sb[i] * ax + bx + 0.5))
             if xb <= xa:
                 xb = xa + 1
             if xb <= 0 or xa >= W:

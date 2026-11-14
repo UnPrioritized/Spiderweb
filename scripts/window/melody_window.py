@@ -17,6 +17,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.engine import snap_name, snap_name_beats
 from notes.loaded import gather_box
+from notes.loaded_shown import chain_of, map_key, shown
 from notes.melody import (CATCH_LEAST, CATCH_SHAPES, HOLD, HOWS, MOST_ANCHORS, REST, SHAPES, SHORTEST, anchor_count,
                           anchor_keys, fill_clip, heard_points, melody_runs, pitch_sizes, snap_runs, step_runs,
                           top_notes)
@@ -443,7 +444,7 @@ class MelodyWindow(tk.Toplevel):
                 return ()
         else:
             boxes = [(max(0, round(a * app.ppq * scale)), round(b * app.ppq * scale), 0, lm.keys - 1)]
-        return (id(lm), lm.hide_ver, tuple(boxes), n, tuple(chs), top)
+        return (id(lm), (lm.hide_ver, map_key(app.loaded_map)), tuple(boxes), n, tuple(chs), top)
 
     def loaded_notes(self, key):
         """(starts, ends, keys) in beats of the loaded track's notes for key; None = still being read (on a
@@ -464,9 +465,13 @@ class MelodyWindow(tk.Toplevel):
             got = job["got"]
             scale = self.app.loaded.ppq
 
+            chain = job["chain"]  # (Change visual time signature: the file's ticks as SHOWN, then in beats)
+
             def joined(name, by=None):
                 v = np.concatenate([g[name] for g in got]) if got else np.zeros(0, np.int64)
-                return v / scale if by is None else v & 255
+                if by is None:
+                    return shown(chain, v) / scale
+                return v & 255
             s, e, k = joined("s"), joined("e"), joined("lane", 255)
             held = (joined("held_s"), joined("held_e"), joined("held_lane", 255)) if key[5] else None
             self.loaded_got = (key, s, e, k, held)
@@ -475,13 +480,15 @@ class MelodyWindow(tk.Toplevel):
             job["cancel"] = True
         lm = self.app.loaded
         _, _, boxes, n, chs, top = key
-        job = self.reading = {"key": key, "got": None, "error": None, "finished": False, "cancel": False}
+        chain = chain_of(self.app)
+        job = self.reading = {"key": key, "got": None, "error": None, "finished": False, "cancel": False,
+                              "chain": chain}
 
         def run():
             try:
                 job["got"] = [gather_box(lm, {"t0": t0, "t1": t1, "k0": k0, "k1": k1, "tracks": list(n),
                                               **({"chans": list(chs)} if chs else {})},
-                                         cancel=lambda: job["cancel"], most=MOST_LOADED, held=top)
+                                         cancel=lambda: job["cancel"], most=MOST_LOADED, held=top, chain=chain)
                               for t0, t1, k0, k1 in boxes]
                 if sum(len(g["s"]) for g in job["got"]) > MOST_LOADED:
                     raise MemoryError

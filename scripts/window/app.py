@@ -1867,7 +1867,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return None
         from notes.loaded import edo_rows
         try:
-            return edo_rows(self.loaded, self.track_list.loaded_mutes(), self.ppq)
+            return edo_rows(self.loaded, self.track_list.loaded_mutes(), self.ppq, self.loaded_map)
         except Exception:  # (a file that changed / went: plays nothing of it, said when drawing / exporting)
             errors.write_log(*sys.exc_info(), "(a loaded MIDI's notes for 31-EDO)")
             return None
@@ -1880,7 +1880,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return None
         from notes.loaded import edo_events
         try:
-            return edo_events(self.loaded, self.track_list.loaded_mutes(), self.ppq)
+            return edo_events(self.loaded, self.track_list.loaded_mutes(), self.ppq, self.loaded_map)
         except Exception:  # (as edo_loaded_rows)
             errors.write_log(*sys.exc_info(), "(a loaded MIDI's controllers for 31-EDO)")
             return None

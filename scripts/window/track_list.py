@@ -33,6 +33,7 @@ from notes.mask import pinned_slots
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
 from notes.tempo import bpm_text, tempo_text
 from notes.tempo_file import heard_tempo, kept_drawn
+from notes import loaded_shown as LS, loaded_view as LV
 from roll import roll_loaded as RL
 from roll.roll_draw import TRACK_FADE
 from roll.roll_shared import (BOX_STILL, COLOURS_16, MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, PlayFollow,
@@ -1008,7 +1009,8 @@ class TrackList(tk.Canvas):
         end = int(n[:, 1].max()) / self.app.ppq if len(n) else 0.0
         lm = self.app.loaded
         if lm is not None:
-            end = max(end, lm.end / lm.ppq)
+            from notes.loaded_shown import shown_end  # (as SHOWN: Change visual time signature)
+            end = max(end, shown_end(self.app) / lm.ppq)
         return max(end, 16.0)
 
     def fit(self):
@@ -1502,7 +1504,8 @@ class TrackList(tk.Canvas):
         end = int(n[:, 1].max()) / ppq if len(n) else 0.0
         lm = self.app.loaded
         if lm is not None:
-            end = max(end, lm.end / lm.ppq)
+            from notes.loaded_shown import shown_end  # (as SHOWN: Change visual time signature)
+            end = max(end, shown_end(self.app) / lm.ppq)
         return end
 
     def box_rects(self):
@@ -3393,7 +3396,8 @@ class TrackList(tk.Canvas):
         pad = round(PAD * self.scale)
         inner = max(1, self.row_h - 2 * pad - 1)
         ax = self.sx / lm.ppq  # (pixel c of the song = tick t * ax)
-        place = (id(lm), lm.hide_ver, self.sx)  # (notes extracted / back: read again)
+        chain = LS.chain_of(self.app)  # (the file's ticks moved by Change visual time signature: shown here)
+        place = (id(lm), lm.hide_ver, self.sx, LS.map_key(self.app.loaded_map))  # (notes extracted / back: read again)
         if self._row_place != place:
             self._row_place = place
             self._tiles.clear()
@@ -3401,7 +3405,8 @@ class TrackList(tk.Canvas):
             self.stop_rows()
         self.take_rows()
         j0, j1 = cx // TILE, (cx + aw - 1) // TILE
-        end_j = int(lm.end * ax) // TILE + 1  # (blocks from here on are past the song: empty, never read nor kept)
+        end_j = int(LS.shown_span(chain, lm)[1] * ax) // TILE + 1  # (blocks from here on are past the song: empty,
+        # never read nor kept)
         # (the picture's own blocks: never pushed out by reading ahead, hunt 2026-10-25)
         self._shown_tiles = {(r, j, c) for _, r, c in shown for j in range(j0, min(j1 + 1, end_j))}
         rate = RL.rate_of(lm)
@@ -3418,8 +3423,8 @@ class TrackList(tk.Canvas):
                     continue
                 got = self._tiles.get((r, j, c))
                 if got is None:
-                    if time.perf_counter() + RL.view_bytes(lm, (r,), ax, -float(j * TILE), TILE) / rate <= until:
-                        got = row_mask(lm, r, ax, -float(j * TILE), TILE, c)
+                    if time.perf_counter() + RL.view_bytes(lm, (r,), ax, -float(j * TILE), TILE, chain) / rate <= until:
+                        got = row_mask(lm, r, ax, -float(j * TILE), TILE, c, chain)
                         self.keep_tile((r, j, c), got)
                     else:
                         waiting.append((r, j, c))
@@ -3429,7 +3434,7 @@ class TrackList(tk.Canvas):
             if all(isinstance(p, np.ndarray) for p in parts):
                 got = np.concatenate(parts, axis=1)[:, cx - j0 * TILE:cx - j0 * TILE + aw]
             else:  # (blocks not read yet / unreadable (False): the small picture there, a sub-row nothing)
-                small = small_mask(lm, t, cx, aw, self.sx) if c is None else None
+                small = small_mask(lm, t, cx, aw, self.sx, chain) if c is None else None
                 if c is not None:  # (a Ch row / part still being read: grey there meanwhile, user 2026-10-28)
                     band = img[max(0, line * self.row_h - cy + pad):max(0, line * self.row_h - cy + pad + inner)]
                     for j, p in enumerate(parts, j0):
@@ -3471,8 +3476,8 @@ class TrackList(tk.Canvas):
                 self._shown_tiles.add((r, j, None))
                 if (r, j, None) in self._tiles:
                     self._tiles.move_to_end((r, j, None))
-                elif time.perf_counter() + RL.view_bytes(lm, (r,), ax, -float(j * TILE), TILE) / rate <= until:
-                    self.keep_tile((r, j, None), row_mask(lm, r, ax, -float(j * TILE), TILE))
+                elif time.perf_counter() + RL.view_bytes(lm, (r,), ax, -float(j * TILE), TILE, chain) / rate <= until:
+                    self.keep_tile((r, j, None), row_mask(lm, r, ax, -float(j * TILE), TILE, None, chain))
                 else:
                     waiting.append((r, j, None))
         if RL.changed(self, lm):  # (the file changed / went: said once, the small pictures stay)
@@ -3493,7 +3498,7 @@ class TrackList(tk.Canvas):
         job = self._row_job
         if todo and (job is None or waiting):  # (blocks shown blocky: read those first, now)
             self.stop_rows()
-            job = self._row_job = RowJob(lm, place, todo, ax, set(waiting))
+            job = self._row_job = RowJob(lm, place, todo, ax, set(waiting), chain)
             threading.Thread(target=job.run, daemon=True, name="track rows").start()
             self.after(RL.POLL_MS, self._poll_rows)
 
@@ -3506,7 +3511,8 @@ class TrackList(tk.Canvas):
         """Loaded track r's exact keys x cw pixels from pixel cx of the song, from its read blocks; None while one
         isn't read (or can't be)."""
         lm, parts = self.app.loaded, []
-        end_j = int(lm.end * self.sx / lm.ppq) // TILE + 1  # (paint_loaded_rows': past the song = empty)
+        end_j = int(LS.shown_span(LS.chain_of(self.app), lm)[1] * self.sx / lm.ppq) // TILE + 1  # (paint_loaded_rows':
+        # past the song = empty)
         for j in range(cx // TILE, (cx + cw - 1) // TILE + 1):
             got = self._tiles.get((r, j, None))
             if j >= end_j:
@@ -3787,7 +3793,8 @@ class TrackList(tk.Canvas):
         Made in SQUARE-wide blocks along the song, kept while what they show stays (Shinki 2026-10-28: a mute or a
         scroll to the picture's edge painted all 2788 tracks again, ~0.4-0.6 s)."""
         cut = set(self.cut_tracks(lm))  # (notes taken out: read exactly from the rows' blocks)
-        place = (id(lm), lm.hide_ver, self.sx, span, tuple(loaded), frozenset(cut))
+        chain = LS.chain_of(self.app)  # (the file's ticks moved by Change visual time signature: shown here)
+        place = (id(lm), lm.hide_ver, self.sx, span, tuple(loaded), frozenset(cut), LS.map_key(self.app.loaded_map))
         if self._all_place != place:
             self._all_place, self._all_blocks = place, OrderedDict()
         blocks, parts = self._all_blocks, []
@@ -3797,6 +3804,12 @@ class TrackList(tk.Canvas):
             if got is None:
                 got, whole = np.full((span, SQUARE), -1, np.int32), True
                 t0, t1 = j * SQUARE * tpp, (j * SQUARE + SQUARE + 2) * tpp  # (+ the one pixel more, rounding room)
+                # (moved ticks, Change visual time signature: the w + 2 pixel edges as FILE ticks, small_mask's own;
+                # the prune below in the file's ticks too)
+                edges = (LV.file_edges(chain, (np.arange(SQUARE + 2) + j * SQUARE) * tpp) if chain else
+                         np.zeros(0))
+                if chain:
+                    t0, t1 = edges[0], edges[-1] + tpp
                 fast, run = RL.speed.loops(), []
                 if fast is not None:  # (compiled: ~0.2 ms a track a block the plain way, user 2026-10-28 fast scrolls)
                     pics = self.small_pics(lm)
@@ -3806,7 +3819,7 @@ class TrackList(tk.Canvas):
                             run.append(r)
                             continue
                         if run:
-                            fast.all_tops(got, *pics, np.array(run, np.int64), j * SQUARE, tpp, lm.G)
+                            fast.all_tops(got, *pics, np.array(run, np.int64), j * SQUARE, tpp, lm.G, edges)
                             run = []
                     if r is None:
                         break
@@ -3817,11 +3830,11 @@ class TrackList(tk.Canvas):
                     if m is None:
                         if r in cut:
                             whole = False  # (its blocks not read yet: blocky for now, not kept)
-                        elif t.pic_cols and not (t.pic_glo * lm.G < t1 and t0 < (t.pic_glo + t.pic_cols * t.pic_pf)
-                                                 * lm.G + tpp):
+                        elif t.pic_cols and not (
+                                t.pic_glo * lm.G < t1 and t0 < (t.pic_glo + t.pic_cols * t.pic_pf) * lm.G + tpp):
                             continue  # (nothing of it in this block)
                         # (one pixel more: the block's last pixel reaches as far as in one wide picture)
-                        m = small_mask(lm, t, j * SQUARE, SQUARE + 1, self.sx)
+                        m = small_mask(lm, t, j * SQUARE, SQUARE + 1, self.sx, chain)
                     if m is not None:
                         got[t.klo:t.khi + 1][m[:span - t.klo, :SQUARE]] = r
                 if whole:

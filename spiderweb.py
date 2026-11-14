@@ -179,6 +179,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     tempo_safe.py    Domino-safe tempo values: which ones survive Domino's save, whole values adding up exactly
     loaded.py        a loaded MIDI file (Load MIDI): the loading pass's results, run on several cores
     loaded_map.py    a loaded MIDI's ticks as shown after Change visual time signature (export writes the same)
+    loaded_shown.py  what every reader of a loaded MIDI shares for those moved ticks (there and back)
+    loaded_view.py   drawing a loaded MIDI through those moved ticks: each pixel's first file tick
     tempo_file.py    the tempo line in a MIDI file: Keep timing moves notes exactly, bar lines fitted, warnings
     melody.py        Fill with tempo jumps: where the jumps go (melody note starts, rests, snap steps)
     rebar.py         Change visual time signature: bars + tempo stretched together, the same sound
@@ -208,6 +210,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     midi_index.py    Load MIDI's loops: notes paired, the index to read a track anywhere, the overview, painting
     midi_play.py     the loops playing a loaded MIDI: tracks read up to a tick, put in order, thinned per synth
     play_loaded.py   playing a loaded MIDI along with the shapes: read ahead from the file, sent to the synths
+    play_map.py      playing a loaded MIDI under a changed visual time signature: its ticks as shown
     play_dense.py    Kestrel (GPU): a loaded MIDI's parts too dense to read live, read once ahead, copies collapsed
     domino_clip.py   Copy to / Paste from Domino (notes on the clipboard in Domino's own format)
     domino_view.py   Domino companion: where a running Domino's piano roll is on the screen and what it shows

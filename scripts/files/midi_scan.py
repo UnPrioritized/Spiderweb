@@ -502,13 +502,17 @@ BH_TICK, BH_RUN, BH_STOP, BH_SKIP = range(4)
 BH_SIZE = 4
 
 
-def busy_hits(b, p, end, base, skip, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top, hit):
+def busy_hits(b, p, end, base, skip, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top, hit, bp_n, bp_f,
+              use_map):
     """Spiderweb's own notes sounding at the same time as this track's notes on the same channel + key: hit[i] = 1.
     Own notes by lane (channel x 256 + key): lane_at[q] .. lane_at[q + 1], sorted by start (own_s), own_e their
     ends, own_top the latest end so far in the lane. cnt[q] = the track's notes sounding on lane q, since[q] = from
     when (a track walk() read without BAD, from a checkpoint: its open counts). b[0] = the track's byte base;
     skip = its hidden events (Extract). Stops at the first event at or after t_stop (st[BH_STOP] = 1) or one not
-    wholly in b; returns where. Lanes still sounding: the caller ends them."""
+    wholly in b; returns where. Lanes still sounding: the caller ends them.
+    use_map (Change visual time signature over a loaded MIDI): the track's ticks go through the map bp_n -> bp_f
+    first, EXACTLY rewrite's rule, so every tick compared (t_stop, since, own_s / own_e) is a SHOWN one = the ones
+    of the file exported with the change and loaded again; the tick walked on stays the file's."""
     tick = st[BH_TICK]
     run = st[BH_RUN]
     si = st[BH_SKIP]
@@ -533,7 +537,27 @@ def busy_hits(b, p, end, base, skip, t_stop, st, cnt, since, lane_at, own_s, own
         if not whole:
             break
         t = tick + d
-        if t >= t_stop:
+        nt = t
+        if use_map:  # (the map: written out here, the compiled loop can't call a helper; = rewrite's)
+            ml = 0
+            mh = len(bp_n)
+            while ml < mh:
+                mm = (ml + mh) // 2
+                if bp_n[mm] <= t:
+                    ml = mm + 1
+                else:
+                    mh = mm
+            mi = max(ml - 1, 0)
+            nt = bp_f[mi] + (t - bp_n[mi])
+            mj = min(mi + 1, len(bp_n) - 1)
+            gd = bp_n[mj] - bp_n[mi]
+            fd = bp_f[mj] - bp_f[mi]
+            if mj > mi and t > bp_n[mi] and gd > 0 and fd != gd:
+                share = bp_f[mi] + np.int64(np.rint((t - bp_n[mi]) * fd / gd))
+                if share == bp_f[mi]:
+                    share = bp_f[mi] + min(fd, 1)
+                nt = share
+        if nt >= t_stop:
             st[BH_STOP] = 1
             break
         s = np.int64(b[q])
@@ -552,17 +576,17 @@ def busy_hits(b, p, end, base, skip, t_stop, st, cnt, since, lane_at, own_s, own
                 ln = (s & 15) * 256 + np.int64(b[q])
                 if hi == 0x9 and b[q + 1] > 0:
                     if cnt[ln] == 0:
-                        since[ln] = t
+                        since[ln] = nt
                     cnt[ln] += 1
                 elif cnt[ln] > 0:
                     cnt[ln] -= 1
-                    if cnt[ln] == 0 and t > since[ln]:  # (a stretch of time this lane sounded: own notes in it)
+                    if cnt[ln] == 0 and nt > since[ln]:  # (a stretch of time this lane sounded: own notes in it)
                         a = since[ln]
                         lo = lane_at[ln]
                         top = lane_at[ln + 1]
-                        while lo < top:  # (own notes starting before t)
+                        while lo < top:  # (own notes starting before nt)
                             mid = (lo + top) // 2
-                            if own_s[mid] < t:
+                            if own_s[mid] < nt:
                                 lo = mid + 1
                             else:
                                 top = mid

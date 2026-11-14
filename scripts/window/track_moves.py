@@ -18,6 +18,7 @@ from notes.custom import notes_shape
 from notes.engine import slot_track_channel, track_ids
 from notes.loaded import (EXTRACT_MOST, box_groups, box_key, boxes_meet, drop_extract, extract_groups, gather_box,
                           held_extract)
+from notes.loaded_shown import chain_of, map_key, shown
 from window.load_extract import hidden_boxes, sync_extract
 
 
@@ -157,12 +158,13 @@ def box_job(app, boxes, kind, dt=0.0, drow=0, extra=None, tempo=None):
         return False
     lm = app.loaded
     job = app._extracting = {"done": 0, "total": 1, "got": None, "error": None, "finished": False, "cancel": False}
+    chain, mkey = chain_of(app), map_key(app.loaded_map)  # (the boxes are SHOWN ticks: loaded_shown)
 
     def run():
         try:
             got = job["got"] = []
             for b in files:
-                got.append(gather_box(lm, b, cancel=lambda: job["cancel"], most=EXTRACT_MOST - sum(
+                got.append(gather_box(lm, b, cancel=lambda: job["cancel"], chain=chain, most=EXTRACT_MOST - sum(
                     len(g["s"]) for g in got), progress=lambda d, n: job.update(done=d, total=max(n, 1))))
                 if sum(len(g["s"]) for g in got) > EXTRACT_MOST:
                     break
@@ -188,6 +190,8 @@ def box_job(app, boxes, kind, dt=0.0, drow=0, extra=None, tempo=None):
             return
         if e is not None:
             raise e
+        if mkey != map_key(app.loaded_map):  # (the time signature was changed while it read: read for the old one)
+            return
         got = job["got"]
         n = sum(len(g["s"]) for g in got)
         if n > EXTRACT_MOST:
@@ -240,7 +244,7 @@ def finish_job(app, boxes, kind, dt, drow, lm=None, files=(), got=(), extra=None
 
 
 def loaded_boxes(app, boxes):
-    """The loaded MIDI's notes in the list's boxes as Extract boxes (file ticks, every key, the loaded tracks on
+    """The loaded MIDI's notes in the list's boxes as Extract boxes (SHOWN ticks, every key, the loaded tracks on
     their rows that have notes), less what's hidden already (another Extract's / deleted notes: a note is only ever
     in one box)."""
     lm = app.loaded
@@ -302,6 +306,8 @@ def loaded_shape(app, lm, files, got, copying):
         _, first = np.unique(np.column_stack([trk, on]), axis=0, return_index=True)
         first.sort()
         trk, s, e, lane, vel = (a[first] for a in (trk, s, e, lane, vel))
+    chain = chain_of(app)  # (Change visual time signature: the shape's notes are the SHOWN ones)
+    s, e = shown(chain, s), shown(chain, e)
     pairs, colour = np.unique(trk * 16 + (lane >> 8), return_inverse=True)
     scale = app.ppq / lm.ppq
     rows = np.column_stack([np.rint(s * scale), np.maximum(1, np.rint((e - s) * scale)), lane & 255, vel,

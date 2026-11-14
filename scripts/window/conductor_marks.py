@@ -308,7 +308,8 @@ class ConductorMarks:
         box's start; the status line says why while it's pointed at."""
         lo, hi = span or self.bands_reach()
         lm = self.app.loaded
-        busy = lm is not None and lm.notes and lm.end / lm.ppq > bar_line(sigs_of(self.app.tempo), lo) + 1e-9
+        from notes.loaded_shown import shown_end  # (as SHOWN: an earlier change moved the file's ticks)
+        busy = lm is not None and lm.notes and shown_end(self.app) / lm.ppq > bar_line(sigs_of(self.app.tempo), lo) + 1e-9
         menu.add_command(label=tr("conductor.rebar"), command=lambda: self.rebar(lo, hi),
                          state="disabled" if busy else "normal")
         if busy:

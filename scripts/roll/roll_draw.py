@@ -22,6 +22,7 @@ from notes.gliss import pen_shape
 from notes.mask import mask_joined, mask_units, unit_of
 from notes.merge import preview_parts, slid_preview
 from notes.funnel import funnel_curves, funnel_handle_lines, funnel_lines, funnel_note_count, funnel_origins
+from notes.loaded_shown import chain_of, map_key, shown
 from notes.paths import KEYS
 from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
 from notes.sustain import is_sustained, sustain_on
@@ -2723,13 +2724,14 @@ class RollDrawing:
             self._loaded_cc = None  # (never holding a MIDI let go of: New, Open; hunt 2026-10-29)
             return NO_CC
         rows = tl.tracks()
-        key = (lm, rows, tl.current, tl.shown_ch(), lm.hide_ver, id(lm.rechannel))
+        key = (lm, rows, tl.current, tl.shown_ch(), lm.hide_ver, id(lm.rechannel), map_key(self.app.loaded_map))
         memo = getattr(self, "_loaded_cc", None)
         if memo is not None and memo[0][0] is lm and memo[0][1] is rows and memo[0][2:] == key[2:]:
             return memo[1]
         ids = [tl.current] if tl.current is not None else [s for s in rows.tolist() if s < 0]
         ch = tl.shown_ch() if tl.current is not None else None
         moved, out = lm.rechannel, []
+        chain = chain_of(self.app)  # (Change visual time signature: the events' ticks as SHOWN)
         for s in ids:
             if s >= 0:
                 continue
@@ -2745,7 +2747,7 @@ class RollDrawing:
             if keep is not None:
                 ticks, codes = ticks[keep], codes[keep]
             if len(ticks):
-                out.append((k, ticks, codes, to))
+                out.append((k, shown(chain, ticks), codes, to))
         self._loaded_cc = (key, out)
         return out
 

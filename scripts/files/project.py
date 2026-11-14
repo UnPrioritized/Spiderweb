@@ -1365,8 +1365,10 @@ class ProjectFiles:
                  if slot_port(s, use10)} if took else None
         lanes = slot_lanes(notes, use10)
         # (own notes exactly where the file had them, extracted and left alone: an overlap the file already had)
+        # (Change visual time signature: the hidden file notes as SHOWN, like the extracted shape's notes are)
+        h_s, h_e = (loaded_map.map_ticks(loaded_map.links(moved), a) if moved else a for a in (hid.h_s, hid.h_e))
         mine = ~same_rows(np.column_stack([notes[:, 0], notes[:, 1], lanes]),
-                          np.column_stack([hid.h_s, hid.h_e, hid.h_lane]))
+                          np.column_stack([h_s, h_e, hid.h_lane]))
         before = notes
         order = self.file_rows()  # (the file's tracks as the track list shows them: dragged, D4)
         props = self.copy_props()  # (Track Properties' new names / channels: those tracks written again; parts)
@@ -1379,7 +1381,7 @@ class ProjectFiles:
         def run():
             nonlocal notes, cc
             try:
-                retime = None
+                retime = own_bp = None
                 if retimed:
                     ticks = loose = np.zeros(0, np.int64)
                     fticks = floose = None  # (the file's own ticks, for a map made of several moves)
@@ -1394,6 +1396,8 @@ class ProjectFiles:
                                            np.concatenate([notes[:, 0], notes[:, 1]]))
                         loose = np.union1d(loaded_map.map_ticks(chain, floose),
                                            np.array([m[0] for ms in cc.values() for m in ms], np.int64))
+                    if moved:  # (the overlap count compares own notes with the loaded ones as SHOWN, before Keep timing)
+                        own_bp = loaded_map.export_bp(moved, None, fticks, floose)
                     job.update(step="project.tempo_working", done=0, total=0)  # (no progress inside: a busy bar)
                     plan = job["plan"] = file_plan(tempo, 120, ppq, beats, ticks, ticks, None, loose, heard)
                     retime = retime_for(lm, tempo, plan, targets,
@@ -1408,7 +1412,7 @@ class ProjectFiles:
                     if len(notes):
                         job["hits"] = own_hits(hid, before[mine, 0], before[mine, 1], lanes[mine],
                                                cancel=lambda: job["cancel"],
-                                               progress=lambda d, n: job.update(done=d, total=n))
+                                               progress=lambda d, n: job.update(done=d, total=n), bp=own_bp)
                     # (shapes drawn into the file's own tracks, group D: their notes go INTO those tracks, only those
                     # written again)
                     tid = track_ids(notes[:, 4])

@@ -3749,7 +3749,7 @@ midi_merge_loud = njit(nogil=True)(_index.merge_loud)
 @njit(nogil=True)
 def midi_cover_many(faint, klo, khi, starts, ends, e0s, e1s, cp_tick, cp_run, limits, lasts, buf, pos, eq, ec, ev,
                     skip, t1, ax, bx, W, k_lo, normal, behind, tab, nx, filled, marks, sq, sa, sb, sv, cnt_q, first_q,
-                    vel_q, st, covered):
+                    vel_q, st, covered, bd):
     """roll_loaded.TrackReader.read for many small tracks in one go (roll_loaded.read_small: everything per track
     worked out before, their bytes end to end in buf from pos), in the same order with the same covered check
     (exact_tab). Returns how many tracks went into covered (read later, read_covered)."""
@@ -3780,10 +3780,10 @@ def midi_cover_many(faint, klo, khi, starts, ends, e0s, e1s, cp_tick, cp_run, li
         st[_index.C_RUN] = cp_run[i]
         colour = behind if faint[i] else normal
         p = midi_cover(b8, 0, size, starts[i], skip, st, cnt_q, first_q, vel_q, t1, -1, ax, bx, W, k_lo, colour, tab,
-                       nx, filled, marks, sq, sa, sb, sv)
+                       nx, filled, marks, sq, sa, sb, sv, bd)
         close = t1 + 1 if st[_index.C_STOP] == 1 or ends[i] < limits[i] else max(st[_index.C_TICK], lasts[i])
         midi_cover(b8, p, p, starts[i], skip, st, cnt_q, first_q, vel_q, t1, close, ax, bx, W, k_lo, colour, tab, nx,
-                   filled, marks, sq, sa, sb, sv)
+                   filled, marks, sq, sa, sb, sv, bd)
     return nc
 play_read = njit(nogil=True)(midi_play.read)
 play_order = njit(nogil=True)(midi_play.order)
@@ -3841,14 +3841,22 @@ def loaded_pixels(img, x0, y0, tab, marks, c0, c1, kb, row0, row1, rgb):
 
 
 @njit(nogil=True)
-def all_tops(top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, ids, x0, tpp, G):
+def all_tops(top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, ids, x0, tpp, G, edges):
     """track_list.loaded_tops' block for the loaded tracks ids in order (a later one over an earlier one): each key x
     pixel of top the track whose loading-pass small picture has a note there, read like track_list.small_mask with
     one pixel more past the block (each pixel's columns run up to the next pixel's first). The same tracks.
-    used[uoff[r] + c] = track r's picture column c has a note on any key (pixels without one skipped at once)."""
+    used[uoff[r] + c] = track r's picture column c has a note on any key (pixels without one skipped at once).
+    edges (not empty: the loaded MIDI's ticks moved by Change visual time signature): the w + 2 pixel edges as FILE
+    ticks (loaded_view.file_edges of the shown ones), pixel x = edges[x] .. edges[x + 1]; empty = (x0 + x) * tpp."""
     span, w = top.shape
     c0 = np.empty(w + 1, np.int64)
     c1 = np.empty(w + 1, np.int64)
+    moved = len(edges) > 0
+    narrow = tpp
+    if moved:
+        narrow = edges[1] - edges[0]
+        for x in range(1, w + 1):
+            narrow = min(narrow, edges[x + 1] - edges[x])
     for q in range(len(ids)):
         r = ids[q]
         n = cols[r]
@@ -3856,13 +3864,16 @@ def all_tops(top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, id
             continue
         step = G * pf[r]
         base = glo[r] * G
-        if math.floor((x0 * tpp - base) / step) >= n or math.ceil(((x0 + w) * tpp + tpp - base) / step) <= 0:
+        e_lo = edges[0] if moved else x0 * tpp
+        e_hi = edges[w + 1] if moved else (x0 + w) * tpp + tpp
+        if math.floor((e_lo - base) / step) >= n or math.ceil((e_hi - base) / step) <= 0:
             continue  # (its picture ends before the block / starts after it: the columns only grow along x)
         first, last = -1, -1
         for x in range(w + 1):
-            ta = (x0 + x) * tpp
+            ta = edges[x] if moved else (x0 + x) * tpp
+            tb = edges[x + 1] if moved else ta + tpp
             a = np.int64(math.floor((ta - base) / step))
-            b = max(np.int64(math.ceil((ta + tpp - base) / step)), a + 1)
+            b = max(np.int64(math.ceil((tb - base) / step)), a + 1)
             c0[x], c1[x] = a, b
             if b > 0 and a < n:
                 if first < 0:
@@ -3870,7 +3881,7 @@ def all_tops(top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, id
                 last = x
         if first < 0:
             continue
-        joined = tpp >= step
+        joined = narrow >= step
         o, nb, k0 = offs[r], nbytes[r], pklo[r]
         for x in range(first, min(last + 1, w)):
             a = min(max(c0[x], 0), n - 1)
@@ -3972,7 +3983,7 @@ def warm():
                  u8[:0], u8.copy(), 0, np.zeros(midi_scan.RW_SIZE, np.int64), 0, i1[:0], -1, 0xFFFF, 1)
     midi_note_ticks(u8, 0, 0, True, u8.copy(), 0, np.zeros(midi_scan.NT_SIZE, np.int64))
     midi_busy_hits(u8, 0, 0, 0, i1[:0], 1, np.zeros(midi_scan.BH_SIZE, np.int64), i1.copy(), i1.copy(),
-                   np.zeros(2, np.int64), i1.copy(), i1.copy(), i1.copy(), u8.copy())
+                   np.zeros(2, np.int64), i1.copy(), i1.copy(), i1.copy(), u8.copy(), i1.copy(), i1.copy(), False)
     midi_gather(u8, 0, 0, 0, i1[:0], 0, 1, 0, 127, u8.copy(), np.zeros(midi_scan.GA_SIZE, np.int64), i1.copy(),
                 i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(), i1.copy(),
                 i1.copy(), u8.copy())
@@ -3991,14 +4002,14 @@ def warm():
     t2, m2 = np.full((1, 2), -1, np.int64), np.zeros((1, 2), np.uint8)
     midi_cover(u8, 0, 0, 0, i1[:0], np.zeros(_index.C_SIZE, np.int64), q, q.copy(), q.copy(), 1, 0, 1.0, 0.0, 2, 0,
                np.zeros((16, 32), np.int64), t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(),
-               z.copy(), z.copy())
+               z.copy(), z.copy(), i1[:0])
     midi_cover_many(np.zeros(1, bool), i1, i1, i1, i1, i1, i1, i1, i1, i1, i1, u8, i1, np.zeros(1, np.int16), i1,
                     u8.copy(), i1[:0], 1, 1.0, 0.0, 2, 0, np.zeros((16, 32), np.int64), np.zeros((16, 32), np.int64),
                     t2, np.zeros((1, 3), np.int64), np.zeros(1, np.int64), m2, z, z.copy(), z.copy(), z.copy(), q,
-                    q.copy(), q.copy(), np.zeros(_index.C_SIZE, np.int64), i1.copy())
+                    q.copy(), q.copy(), np.zeros(_index.C_SIZE, np.int64), i1.copy(), i1[:0])
     loaded_pixels(np.zeros((1, 1, 3), np.uint8), 0, 0, t2, m2, 0, 1, 0, i1, i1 + 1, np.zeros((1, 2, 3), np.uint8))
     all_tops(np.full((1, 1), -1, np.int32), np.zeros(1, np.uint8), i1, i1 + 1, i1 + 1, i1.copy(), i1.copy(), i1 + 1,
-             i1 + 1, np.zeros(1, bool), i1.copy(), i1.copy(), 0, 1.0, 1)
+             i1 + 1, np.zeros(1, bool), i1.copy(), i1.copy(), 0, 1.0, 1, np.zeros(0))
     midi_merge_loud(t2, m2, t2.copy(), m2.copy(), np.zeros((1, 3), np.int64), np.zeros(1, np.int64), 1 << 20)
     i32 = np.zeros(1, np.int32)
     play_read(u8, i1, i1.copy(), 1, i1.copy(), i1.copy(), i1.copy(), i1.copy(), i32, i1.copy(), i32.copy(),

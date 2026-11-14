@@ -16,7 +16,7 @@ from collections import OrderedDict
 
 import numpy as np
 
-from files import midi_piece
+from files import midi_piece, play_map
 from files.midi_bytes import vlq as _vlq
 from files.ahead_pieces import HELD_PRE, PIECE_MOST, POST_S, PRE, PieceMidi, Song
 from files.synth import RATE, SynthError
@@ -72,13 +72,20 @@ class LoadedSong:
 
     def counted_here(self):
         """Merlin pieces of this song go counted (PLAN D2): our connector reads repeat marks, and no shapes of your
-        own ride along (their tracks can't be ordered against counted notes). The Maker sizes them bigger."""
+        own ride along (their tracks can't be ordered against counted notes). The Maker sizes them bigger. Not with
+        the file's ticks moved by Change visual time signature: its counted runs are made from the file's own ticks,
+        so those pieces go plain (every note exact, a dense wall's piece bigger)."""
         from files import kestrel
-        return not len(self.own) and kestrel.repeat_marks()
+        return not len(self.own) and not self.shown.on and kestrel.repeat_marks()
 
-    def __init__(self, lm, own, muted=()):
+    def __init__(self, lm, own, muted=(), chain=()):
         from files.play_loaded import mute_masks, track_ports
         self.lm, self.own = lm, own
+        # (Change visual time signature over the loaded MIDI, loaded_map.links(app.loaded_map): everything here that
+        # leaves this class is in SHOWN ticks, the clock's; the file's ticks are moved at each place they come in:
+        # the early ticks of a piece = file_start / _f_hi, the ticks read = shown, the copied bytes = _moved)
+        self.shown = play_map.Shown(chain)
+        self.counts_notes = not self.shown.on
         self._starts = {}  # (piece_start per frame: asked again by bytes_in / spans / midi)
         self._led = set()  # (ticks a lead-up was tried for, PLAN E: once each)
         self.ppq, self.tempo, self.map, self.edo_first = own.ppq, own.tempo, own.map, own.edo_first
@@ -94,9 +101,9 @@ class LoadedSong:
                         and len(t.cp_off) and (t.notes or len(t.c_tick) or t.c_kinds is not None and len(t.c_kinds))]
         # (what decides the loaded part's sound: any change = made again, L3)
         self.key = (id(lm), lm.hide_ver, tuple(self.masks.tolist()), tuple(self.newch.tolist()),
-                    tuple(self.tport.tolist()), tuple(sorted(lm.gone)))
-        ends = [lm.tracks[j].end for j in self.playing if lm.tracks[j].notes]
-        firsts = [lm.tracks[j].first for j in self.playing if lm.tracks[j].notes]
+                    tuple(self.tport.tolist()), tuple(sorted(lm.gone)), self.shown.key())
+        ends = [self.shown.shown(int(lm.tracks[j].end)) for j in self.playing if lm.tracks[j].notes]
+        firsts = [self.shown.shown(int(lm.tracks[j].first)) for j in self.playing if lm.tracks[j].notes]
         self.end_tick = max([int(e) for e in ends] + ([int(own.end.max())] if len(own) else []) + [0])
         first = min([int(f) for f in firsts] + ([int(own.start[0])] if len(own) else []) + [FAR])
         self.first = self.frame(first) if first < FAR else 0
@@ -112,6 +119,47 @@ class LoadedSong:
 
     def tick_at(self, frame):
         return self.own.tick_at(frame)
+
+    # (the file's ticks and the shown ones, play_map.Shown: with nothing moved every one of these hands its argument
+    # back and nothing changes)
+    def _f_lo(self, t):
+        """The first file tick shown at tick t or later (the file's ticks before it are the ones shown before t)."""
+        return t if not self.shown.on or t >= FAR else self.shown.file_start(t)
+
+    def _f_hi(self, t):
+        """The last file tick shown at tick t or before (the file's ticks after it are the ones shown after t)."""
+        return t if not self.shown.on or t >= FAR else self.shown.file_start(t + 1) - 1
+
+    def _moved(self, body, f_from, shown_from, f_to):
+        """A copied track body (piece_track's bytes: waits in the FILE's ticks from file tick f_from) written again
+        with every wait in shown ticks from shown tick shown_from (midi_scan.rewrite, the very rule Export MIDI
+        writes with: loaded_map.apply_link). f_to = the file tick of its last event at most. No moves: body."""
+        if not self.shown.on or not body:
+            return body
+        from files import midi_scan, speed
+        chain = self.shown.chain
+        if len(chain) == 1:
+            bp_n, bp_f = chain[0]
+        else:  # (stacked changes: a tick each, every one exact through the whole chain)
+            bp_n = np.arange(f_from, max(f_to, f_from) + 1, dtype=np.int64)
+            bp_f = self.shown.shown(bp_n)
+        fast = speed.loops()
+        rw = fast.midi_rewrite if fast is not None else midi_scan.rewrite
+        src = np.frombuffer(body, np.uint8) if fast is not None else memoryview(body)  # (the NumPy twin wants ints)
+        st = np.zeros(midi_scan.RW_SIZE, np.int64)
+        st[midi_scan.RW_TICK], st[midi_scan.RW_DONE], st[midi_scan.RW_WRUN] = f_from, shown_from, -1
+        drop, none = np.zeros(128, np.uint8), np.zeros(0, np.int64)
+        parts, p = [], 0
+        while p < len(src):
+            end = min(len(src), p + (16 << 20))
+            out = np.empty(3 * (end - p) + 64, np.uint8) if fast is not None else bytearray(3 * (end - p) + 64)
+            used, o = rw(src[p:end], 0, end - p, end == len(src), bp_n, bp_f, True, drop, none, np.zeros(1, np.int64),
+                         np.zeros(0, np.uint8), out, 0, st, 0, none)
+            parts.append(bytes(out[:o]))
+            if used <= 0:  # (nothing taken: the body ends in a broken event; what is written stays)
+                break
+            p += used
+        return b"".join(parts)
 
     # ------------------------------------------------------------ a piece
 
@@ -147,7 +195,8 @@ class LoadedSong:
         want = dict(zip(keys.tolist(), ends.tolist()))
         loop, skip = _loop(), self.lm.skip_of(j)
         m = c - 1
-        while todo and m >= 0 and t.cp_tick[m + 1] > floor:
+        fl = self._f_hi(floor)  # (the file's ticks past it are the ones shown past floor)
+        while todo and m >= 0 and t.cp_tick[m + 1] > fl:
             e0, e1 = int(t.cp_ent[m]), int(t.cp_ent[m + 1])
             here = dict(zip(t.e_q[e0:e1].astype(np.int64).tolist(), t.e_end[e0:e1].astype(np.int64).tolist()))
             gone = [q for q in todo if here.get(q) != want[q]]
@@ -162,7 +211,7 @@ class LoadedSong:
                      *_NO_EVENTS)
                 for q in gone:
                     if ontk[q] >= 0:
-                        out[todo[q]] = max(floor, int(ontk[q]))
+                        out[todo[q]] = max(floor, int(self.shown.shown(int(ontk[q]))))
                     del todo[q]
             m -= 1
         return out
@@ -195,13 +244,14 @@ class LoadedSong:
             if got.any():  # (a ring's first got places are filled, wrapped or not)
                 cum = np.cumsum(got)
                 idx = np.repeat(off[:-1], got) + np.arange(int(cum[-1])) - np.repeat(cum - got, got)
-                parts.append((tk[idx], np.repeat(np.arange(midi_piece.QS), got), vl[idx]))
+                parts.append((self.shown.shown(tk[idx]), np.repeat(np.arange(midi_piece.QS), got), vl[idx]))
             return got
 
-        rest = need - take(b, lo, int(t.cp_tick[c]), int(t.cp_run[c]), t_pre, sk, need)
+        rest = need - take(b, lo, int(t.cp_tick[c]), int(t.cp_run[c]), self._f_lo(t_pre), sk, need)
         skip = self.lm.skip_of(j)
         m = c - 1
-        while rest.any() and m >= 0 and t.cp_tick[m + 1] > floor:
+        fl = self._f_hi(floor)
+        while rest.any() and m >= 0 and t.cp_tick[m + 1] > fl:
             e0, e1 = int(t.cp_ent[m + 1]), int(t.cp_ent[m + 2])
             there = np.zeros(midi_piece.QS, np.int64)  # (sounding at checkpoint m + 1: begun before it at most)
             there[t.e_q[e0:e1].astype(np.int64)] = t.e_cnt[e0:e1]
@@ -288,12 +338,14 @@ class LoadedSong:
             nonlocal read
             want_g = limit > 0
             rows = []
+            f_from, f_to, f_from_hi, f_to_hi = (self._f_lo(w_from), self._f_lo(w_to), self._f_hi(w_from),
+                                                self._f_hi(w_to))  # (the file's own ticks of the same places)
             for j in self.playing:
                 t = lm.tracks[j]
-                if not t.notes or t.first >= w_to or t.last_tick < w_from:
+                if not t.notes or t.first >= f_to or t.last_tick < f_from:
                     continue
-                m0 = max(0, int(np.searchsorted(t.cp_tick, w_from, "right")) - 1)
-                c = max(0, int(np.searchsorted(t.cp_tick, w_to, "right")) - 1)
+                m0 = max(0, int(np.searchsorted(t.cp_tick, f_from_hi, "right")) - 1)
+                c = max(0, int(np.searchsorted(t.cp_tick, f_to_hi, "right")) - 1)
                 lo = int(t.cp_off[m0])
                 hi = int(t.cp_off[c + 1]) if c + 1 < len(t.cp_off) else int(t.limit)
                 read += hi - lo
@@ -309,9 +361,11 @@ class LoadedSong:
                 skip = lm.skip_of(j)
                 n = len(b) // 3 + 1
                 tk, qq, vv = np.zeros(n, np.int64), np.zeros(n, np.int64), np.zeros(n, np.int64)
-                k = ons(b, lo, int(t.cp_tick[m0]), int(t.cp_run[m0]), w_to, skip[(skip >= lo) & (skip < hi)],
+                k = ons(b, lo, int(t.cp_tick[m0]), int(t.cp_run[m0]), f_to, skip[(skip >= lo) & (skip < hi)],
                         int(self.masks[j]), want, tk, qq, vv)
                 del b
+                if self.shown.on:
+                    tk[:k] = self.shown.shown(tk[:k])
                 m = tk[:k] >= w_from
                 tk, qq, vv = tk[:k][m], qq[:k][m], vv[:k][m]
                 if not len(tk):
@@ -405,8 +459,8 @@ class LoadedSong:
             t = self.lm.tracks[j]
             if not len(t.c_tick):
                 continue
-            a = int(np.searchsorted(t.c_tick, t_from, "left")) if t_from > 0 else 0
-            k = int(np.searchsorted(t.c_tick, t_to, "left"))
+            a = int(np.searchsorted(t.c_tick, self._f_lo(t_from), "left")) if t_from > 0 else 0
+            k = int(np.searchsorted(t.c_tick, self._f_lo(t_to), "left"))
             if k <= a:
                 continue
             c = t.c_code[a:k].astype(np.int64)
@@ -418,7 +472,7 @@ class LoadedSong:
             if nc >= 0:
                 c = (c & ~np.int64(15)) | nc
             codes.append(c | (np.int64(self.tport[j]) << 24))
-            ticks.append(t.c_tick[a:k][keep].astype(np.int64))
+            ticks.append(self.shown.shown(t.c_tick[a:k][keep].astype(np.int64)))
             tracks.append(np.full(len(c), n, np.int64))
         if not codes:
             return np.zeros(0, np.int64), np.zeros(0, np.int64)
@@ -472,14 +526,14 @@ class LoadedSong:
     def _curve(self):
         """(ticks, bytes so far) of all playing tracks together, straight between each track's checkpoints (the
         index only; kept on the LoadedMidi per set of playing tracks: a Play with the same mutes reuses it)."""
-        key = tuple(self.playing)
+        key = (tuple(self.playing), self.shown.key())
         kept = getattr(self.lm, "_ahead_curve", None)
         if kept is not None and kept[0] == key:
             return kept[1]
         tk, ds, jp = [], [], []  # (each span: its start tick + slope, its end tick - slope; no ticks = a jump)
         for j in self.playing:
             t = self.lm.tracks[j]
-            a = np.append(t.cp_tick.astype(np.int64), max(int(t.last_tick), int(t.cp_tick[-1])))
+            a = self.shown.shown(np.append(t.cp_tick.astype(np.int64), max(int(t.last_tick), int(t.cp_tick[-1]))))
             o = np.append(t.cp_off.astype(np.float64), float(t.limit))
             da, do = np.diff(a), np.diff(o)
             flat = da <= 0
@@ -564,7 +618,8 @@ class LoadedSong:
                 chn = getattr(tr, "chn", None)
                 chans = [nc] if nc >= 0 else (np.flatnonzero(chn).tolist() if chn is not None else range(16))
                 for ch in chans:
-                    spans.setdefault(int(self.tport[j]) * 16 + ch, []).append((int(tr.first), int(tr.end)))
+                    spans.setdefault(int(self.tport[j]) * 16 + ch, []).append(
+                        (int(self.shown.shown(int(tr.first))), int(self.shown.shown(int(tr.end)))))
             self._pc_spans = spans
             ev = self._pedals = (t[keep], slot[keep], ((code >> 16) & 127)[keep] >= 64)
         t, slot, on = ev
@@ -622,7 +677,7 @@ class LoadedSong:
             t = self.lm.tracks[j]
             if not t.notes or not len(t.cp_tick):
                 continue
-            c = max(0, int(np.searchsorted(t.cp_tick, tick, "left")) - 1)
+            c = max(0, int(np.searchsorted(t.cp_tick, self._f_lo(tick), "left")) - 1)
             n += int(t.e_cnt[int(t.cp_ent[c]):int(t.cp_ent[c + 1])].sum())
         return n
 
@@ -689,6 +744,8 @@ class LoadedSong:
         if cancel is not None and cancel.is_set():
             return None, 0
         lm = self.lm
+        if self.shown.on:  # (moved ticks: plain pieces, see counted_here)
+            counted = False
         t_copy = self.tick_at(f1 + int(POST_S * RATE))
         t0, t_pre = self.piece_start(f0)
         # (past the last note the piece starts PRE before it: the floor from there too, never after t_pre; a
@@ -697,6 +754,7 @@ class LoadedSong:
         t_on = self.tick_at(f1)  # (past it only the offs of notes still open, PLAN B2)
         opn = np.zeros(midi_piece.QS, np.int64)
         loop = _loop()
+        f_pre, f_copy, f_on = self._f_lo(t_pre), self._f_hi(t_copy), self._f_hi(t_on)  # (the file's own ticks there)
         # (your own shapes ride in tracks of their own, unordered against the counted notes: those pieces plain)
         runs = None
         can = counted and not len(self.own) and floor < t_pre
@@ -734,12 +792,12 @@ class LoadedSong:
                 if cancel is not None and cancel.is_set():  # (stopped: let go now, hunt 11-04)
                     return None, 0
                 t = lm.tracks[j]
-                if t.last_tick < t_pre or (t.notes and t.first > t_copy and not len(t.c_tick)):
+                if t.last_tick < f_pre or (t.notes and t.first > f_copy and not len(t.c_tick)):
                     continue
                 # (the checkpoint BEFORE t_pre: one on t_pre can sit amid that tick's events, the notes struck there
                 # before it then held copies on t_pre = order against the counted notes lost, Shinki 458 s)
-                c = max(0, int(np.searchsorted(t.cp_tick, t_pre, "left")) - 1)
-                k = int(np.searchsorted(t.cp_tick, t_copy, "right"))
+                c = max(0, int(np.searchsorted(t.cp_tick, f_pre, "left")) - 1)
+                k = int(np.searchsorted(t.cp_tick, f_copy, "right"))
                 lo = int(t.cp_off[c])
                 hi = int(t.cp_off[k]) if k < len(t.cp_off) else int(t.limit)
                 skip = lm.skip_of(j)
@@ -771,11 +829,15 @@ class LoadedSong:
                     if runs is not None:
                         evs = runs.room(len(b) // 3 + 1)
                     # (the copy's waits count from t_pre: the held notes / controllers are written before it)
-                    w, _, bad = loop(b, lo, int(t.cp_tick[c]), int(t.cp_run[c]), t_pre, t_copy, sk, cnt, vel, ontk,
-                                     mask, int(self.newch[j]), t_pre, out, t_on, opn, int(self.tport[j]), floor, *evs)
+                    # (moved ticks: the walk is in the FILE's ticks, its limits the file ticks shown there; the copied
+                    # waits are written again in shown ticks below, _moved)
+                    w, _, bad = loop(b, lo, int(t.cp_tick[c]), int(t.cp_run[c]), f_pre, f_copy, sk, cnt, vel, ontk,
+                                     mask, int(self.newch[j]), f_pre, out, f_on, opn, int(self.tport[j]), floor, *evs)
                     if runs is not None:
                         runs.took()
                     body = None
+                if self.shown.on:  # (the notes begun before the piece: their note-on ticks as shown)
+                    ontk = np.where(ontk >= 0, self.shown.shown(np.maximum(ontk, 0)), -1)
                 held = np.flatnonzero(cnt > 0)
                 if use is not None and len(held):  # (handed over by the piece before: not found track by track)
                     nc = int(self.newch[j])
@@ -789,7 +851,7 @@ class LoadedSong:
                     own = self._held_copies(f, j, c, b, lo, None if b is None else sk, cnt, held, vel, floor, t_pre,
                                             mask)
                 if body is None:  # (its own small copy: the walk's buffer (1.67x the read) and the read let go, M1)
-                    body = out[:w].tobytes()
+                    body = self._moved(out[:w].tobytes(), f_pre, t_pre, f_copy)
                 del out, b
                 got.append([j, body, None, None, None, None])
                 pend[j] = (c, held, cnt[held], vel[held], ontk[held], ends[held], own)
@@ -827,6 +889,7 @@ class LoadedSong:
             sysex = {}  # port -> [(tick, track order, bytes)]
             for n, j in enumerate(self.playing):
                 for tk, ev in self._sysex(f, j):
+                    tk = int(self.shown.shown(int(tk)))
                     if tk < t_pre:
                         sysex.setdefault(int(self.tport[j]), []).append((tk, n, ev))
         origin = min([t0] + [int(g[2].min()) for g in got if len(g[2])])
@@ -1389,9 +1452,9 @@ def _sysex_before_notes(b):
     return out, False
 
 
-def song_for(lm, own, muted=()):
+def song_for(lm, own, muted=(), chain=()):
     """A LoadedSong (lm not None) or own itself."""
-    return own if lm is None else LoadedSong(lm, own, muted)
+    return own if lm is None else LoadedSong(lm, own, muted, chain)
 
 
 __all__ = ["LoadedSong", "song_for", "POST_S", "PRE", "Song"]

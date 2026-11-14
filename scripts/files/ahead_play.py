@@ -274,7 +274,9 @@ class AheadPlay:
             own = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo, edo, one_sound=one,
                        drums=drums)
         lm = self._loaded()
-        return song_for(lm, own, self.app.track_list.loaded_mutes() if lm is not None else ())
+        from notes.loaded_map import links
+        return song_for(lm, own, self.app.track_list.loaded_mutes() if lm is not None else (),
+                        links(self.app.loaded_map) if lm is not None else ())
 
     def _loaded(self):
         """The loaded MIDI made from its own bytes, or None: none loaded, or 31-EDO's Loaded MIDI tick (its notes

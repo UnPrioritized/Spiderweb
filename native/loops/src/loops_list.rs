@@ -128,7 +128,8 @@ py_loops! {
                     => crate::midi_scan::note_ticks;
     midi_busy_hits(b: &[u8], p: i64, end: i64, base: i64, skip: &[i64], t_stop: i64, st: &mut [i64],
                    cnt: &mut [i64], since: &mut [i64], lane_at: &[i64], own_s: &[i64], own_e: &[i64],
-                   own_top: &[i64], hit: &mut [u8]) => crate::midi_scan::busy_hits;
+                   own_top: &[i64], hit: &mut [u8], bp_n: &[i64], bp_f: &[i64], use_map: bool)
+                   => crate::midi_scan::busy_hits;
     midi_gather(b: &[u8], p: i64, end: i64, base: i64, skip: &[i64], t0: i64, t1: i64, k0: i64, k1: i64,
                 chans: &[u8], st: &mut [i64], old: &mut [i64], newer: &mut [i64], head: &mut [i64],
                 tail: &mut [i64], nxt: &mut [i64], o_s: &mut [i64], o_e: &mut [i64], o_k: &mut [i64],
@@ -151,7 +152,8 @@ py_loops! {
     midi_cover(b: &[u8], p: i64, end: i64, base: i64, skip: &[i64], st: &mut [i64], cnt_q: &mut [i64],
                first_q: &mut [i64], vel_q: &mut [i64], t1: i64, close_at: i64, ax: f64, bx: f64, w: i64, k_lo: i64,
                colour: Nd<i64, 2>, tab: NdMut<i64, 2>, nx: NdMut<i64, 2>, filled: &mut [i64], marks: NdMut<u8, 2>,
-               sq: &mut [i64], sa: &mut [i64], sb: &mut [i64], sv: &mut [i64]) => crate::midi_index::cover;
+               sq: &mut [i64], sa: &mut [i64], sb: &mut [i64], sv: &mut [i64], bd: &[i64])
+               => crate::midi_index::cover;
     midi_merge_loud(tab: NdMut<i64, 2>, marks: NdMut<u8, 2>, ttab: NdMut<i64, 2>, tmarks: NdMut<u8, 2>,
                     tnx: NdMut<i64, 2>, tfilled: &mut [i64], ghost: i64) => crate::midi_index::merge_loud;
     midi_cover_many(faint: &[Flag], klo: &[i64], khi: &[i64], starts: &[i64], ends: &[i64], e0s: &[i64],
@@ -160,12 +162,12 @@ py_loops! {
                     k_lo: i64, normal: Nd<i64, 2>, behind: Nd<i64, 2>, tab: NdMut<i64, 2>, nx: NdMut<i64, 2>,
                     filled: &mut [i64], marks: NdMut<u8, 2>, sq: &mut [i64], sa: &mut [i64], sb: &mut [i64],
                     sv: &mut [i64], cnt_q: &mut [i64], first_q: &mut [i64], vel_q: &mut [i64], st: &mut [i64],
-                    covered: &mut [i64]) => crate::midi_index::cover_many;
+                    covered: &mut [i64], bd: &[i64]) => crate::midi_index::cover_many;
     loaded_pixels(img: NdMut<u8, 3>, x0: i64, y0: i64, tab: Nd<i64, 2>, marks: Nd<u8, 2>, c0: i64, c1: i64, kb: i64,
                   row0: &[i64], row1: &[i64], rgb: Nd<u8, 3>) => crate::midi_index::loaded_pixels;
     all_tops(top: NdMut<i32, 2>, data: &[u8], offs: &[i64], nrows: &[i64], nbytes: &[i64], pklo: &[i64],
              glo: &[i64], pf: &[i64], cols: &[i64], used: &[Flag], uoff: &[i64], ids: &[i64], x0: i64, tpp: f64,
-             g_: i64) => crate::midi_index::all_tops;
+             g_: i64, edges: &[f64]) => crate::midi_index::all_tops;
     // ---- playing a loaded MIDI (play.rs)
     play_read(b: &[u8], at: &[i64], size: &[i64], t1: i64, tick: &mut [i64], run: &mut [i64], nxt: &mut [i64],
               used: &mut [i64], kn: &[i32], out_t: &mut [i64], out_m: &mut [i32], out_k: &mut [i32], n: i64,

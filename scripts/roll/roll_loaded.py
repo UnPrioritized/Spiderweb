@@ -23,6 +23,7 @@ from files import midi_index, speed
 from files.midi_index import C_SIZE, C_STOP, C_TICK, C_RUN, QS
 from files.midi_read import MidiError
 from files.own_tracks import key_track
+from notes import loaded_shown as LS, loaded_view as LV
 from roll.roll_draw import GHOST_BASE, TRACK_FADE, note_tables
 from roll.roll_shared import COLOURS_16
 
@@ -71,7 +72,8 @@ class LoadedNotes:
         pal = getattr(self.app, "picture_pal", None)
         order, faint = shown_tracks(self.app, lm)
         key = (id(lm), lm.hide_ver, W, kb, top, h, round(ax, 12), round(bx, 6), p_lo, p_hi, tuple(pal or ()), order,
-               frozenset(faint), TRACK_FADE[0], shown_only(self.app, lm), loud_on(self.app))
+               frozenset(faint), TRACK_FADE[0], shown_only(self.app, lm), loud_on(self.app),
+               LS.map_key(self.app.loaded_map))
         return lm, key, (ax, bx, W, p_lo, p_hi, kb, top, order, faint)
 
     def loaded_mark(self):
@@ -81,7 +83,7 @@ class LoadedNotes:
             return None
         order, faint = shown_tracks(self.app, lm)
         return (id(lm), lm.hide_ver, getattr(self, "loaded_version", 0), order, faint, TRACK_FADE[0],
-                shown_only(self.app, lm), loud_on(self.app))
+                shown_only(self.app, lm), loud_on(self.app), LS.map_key(self.app.loaded_map))
 
     def paint_loaded(self, img, region):
         """The loaded notes into img, the picture of region = (x0, y0, x1, y1) of the screen (paint_region)."""
@@ -117,12 +119,14 @@ class LoadedNotes:
     def loaded_style(self, lm, order, faint):
         """What an exact picture depends on besides its place (Exact.style; the velocity pane looks pictures up by
         it too, hunt 2026-10-25). loud_on stays LAST (ExactJob reads style[-1]), the one channel shown just before it
-        (style_only)."""
-        return id(lm), lm.hide_ver, order, frozenset(faint), TRACK_FADE[0], shown_only(self.app, lm), loud_on(self.app)
+        (style_only). The moved ticks (Change visual time signature) are part of it: the key of the map's links."""
+        return (id(lm), lm.hide_ver, LS.map_key(self.app.loaded_map), order, frozenset(faint), TRACK_FADE[0],
+                shown_only(self.app, lm), loud_on(self.app))
 
     def loaded_tabs(self, lm, key, ax, bx, W, p_lo, nk, order, faint):
         """(tab, marks) of the view: keys p_lo .. + nk x W columns."""
         style = self.loaded_style(lm, order, faint)
+        chain = LS.chain_of(self.app)  # (the file's ticks moved by Change visual time signature; [] = none)
         rows = slice(p_lo, p_lo + nk)
         got = self._exact_for(style, ax, bx, W)
         if got is not None:
@@ -137,11 +141,11 @@ class LoadedNotes:
             e, d = got
             self._keep_ahead(lm, style, e, d, ax, bx, W, order, faint)
             return cut(e, rows, d, W)
-        if now_ok and guess_bytes(lm, order, ax, bx + M, W + 2 * M) / rate <= INLINE_S:
+        if now_ok and guess_bytes(lm, order, ax, bx + M, W + 2 * M, chain) / rate <= INLINE_S:
             e = self._make_now(lm, style, ax, bx + M, W + 2 * M, order, faint)
             if e is not None:
                 return cut(e, rows, M, W)
-        slow = guess_bytes(lm, order, ax, bx, W) / rate
+        slow = guess_bytes(lm, order, ax, bx, W, chain) / rate
         if changed(self, lm):  # (the file changed / went: what's made stays, nothing more is read)
             slow = EXACT_MOST_S if any(e.style == style for e in getattr(self, "_loaded_exact", ())) else math.inf
         elif now_ok and slow <= INLINE_S:
@@ -151,8 +155,8 @@ class LoadedNotes:
                 return cut(e, rows, 0, W)
         over = getattr(self, "_loaded_over", None)
         if over is None or over[0] != key:
-            made = (overview_tab(lm, ax, bx, W, p_lo, nk) if order is None else
-                    pictures_tab(lm, order, faint, ax, bx, W, p_lo, nk))
+            made = (overview_tab(lm, ax, bx, W, p_lo, nk, chain) if order is None else
+                    pictures_tab(lm, order, faint, ax, bx, W, p_lo, nk, chain))
             over = self._loaded_over = (key, *made)
         self._loaded_rough = True  # (not exact on screen: painted again when an exact picture comes, _poll_exact)
         if slow > EXACT_MOST_S:
@@ -190,12 +194,13 @@ class LoadedNotes:
                 continue
             r = int(r)
             s0, s1 = (r - W // 8, 0) if r < 0 else (e.W, r + W + W // 8)
-            if guess_bytes(lm, order, ax, e.bx - s0, s1 - s0) / rate > STRIP_S:
+            chain = LS.chain_of(self.app)
+            if guess_bytes(lm, order, ax, e.bx - s0, s1 - s0, chain) / rate > STRIP_S:
                 return None
             began, took = time.perf_counter(), [0]
             try:
                 tab, marks = exact_tab(lm, ax, e.bx - s0, s1 - s0, 0, lm.keys, tracks=order, faint=faint, took=took,
-                                       loud=style[-1], only=style_only(style))
+                                       loud=style[-1], only=style_only(style), chain=chain)
             except Exception:
                 write_log_now()
                 return None
@@ -223,7 +228,7 @@ class LoadedNotes:
         began, took = time.perf_counter(), [0]
         try:
             tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order, faint=faint, took=took, loud=style[-1],
-                                   only=style_only(style))
+                                   only=style_only(style), chain=LS.chain_of(self.app))
         except Exception:  # (a file that changed / went: the overview stays; told when exporting)
             write_log_now()
             return None
@@ -237,12 +242,13 @@ class LoadedNotes:
     def _keep_ahead(self, lm, style, e, d, ax, bx, W, order, faint):
         """The next wide picture started before the view reaches this one's edge (where notes go on past it)."""
         soon = int(W * MARGIN) * 3 // 4
-        short_left = d < soon and -e.bx / ax > lm.first
-        short_right = e.W - d - W < soon and (e.W - e.bx) / ax < lm.end
+        first, end = LS.shown_span(LS.chain_of(self.app), lm)  # (as shown: the file's ticks moved)
+        short_left = d < soon and -e.bx / ax > first
+        short_right = e.W - d - W < soon and (e.W - e.bx) / ax < end
         if self.app.player.running:  # (playing: only ahead matters, and a page turn moves the view a little over a
             # screen at once, so the picture must reach past it beforehand, else the overview shows first and the
             # notes shift when the exact one comes: user 2026-10-25, Lagtester bars ~150 / 199)
-            if e.W - d - W < W + W // 4 and (e.W - e.bx) / ax < lm.end:
+            if e.W - d - W < W + W // 4 and (e.W - e.bx) / ax < end:
                 self._want(lm, style, ax, bx, W, order, faint, rest=False, ahead=1)
             return
         if short_left != short_right:  # (reaching further the way the view goes)
@@ -267,7 +273,8 @@ class LoadedNotes:
         parts = [(bx + (M // 2 if ahead > 0 else M * 3 // 2 if ahead < 0 else M), W + 2 * M)]
         if rest:  # (slow: this view first, so it's exact as soon as can be)
             parts.insert(0, (bx, W))
-        go = lambda: self._start_exact(ExactJob(lm, style, ax, parts, order, faint))
+        chain = LS.chain_of(self.app)
+        go = lambda: self._start_exact(ExactJob(lm, style, ax, parts, order, faint, chain))
         if rest:
             self._loaded_timer = self.after(REST_MS, go)
         else:
@@ -377,13 +384,12 @@ def spread(lm):
     return got
 
 
-def guess_bytes(lm, order, ax, bx, W):
-    """About how many bytes an exact picture of W columns reads."""
+def guess_bytes(lm, order, ax, bx, W, chain=None):
+    """About how many bytes an exact picture of W columns reads (chain: the file's ticks moved, loaded_view)."""
     if order is not None:
-        return view_bytes(lm, order, ax, bx, W)
+        return view_bytes(lm, order, ax, bx, W, chain)
     step, cum, first, end, lead = spread(lm)
-    t0 = int(np.floor((-0.5 - bx) / ax))
-    t1 = int(np.ceil((W + 0.5 - bx) / ax))
+    t0, t1 = LV.span(chain, ax, bx, W)
     n = len(cum) - 1
     g0, g1 = min(max(t0 // step, 0), n), min(max(t1 // step + 1, 0), n)
     return float(cum[g1] - cum[g0]) + float(lead[(first <= t1) & (end > t0)].sum())
@@ -503,10 +509,9 @@ def shown_tracks(app, lm):
     return order, frozenset(n for n in faint if n < len(lm.tracks))
 
 
-def view_bytes(lm, order, ax, bx, W):
+def view_bytes(lm, order, ax, bx, W, chain=None):
     """About how many bytes these tracks hold in the view (checkpoint to checkpoint)."""
-    t0 = int(np.floor((-0.5 - bx) / ax))
-    t1 = int(np.ceil((W + 0.5 - bx) / ax))
+    t0, t1 = LV.span(chain, ax, bx, W)
     n = 0
     for k in order:
         t = lm.tracks[k]
@@ -518,13 +523,21 @@ def view_bytes(lm, order, ax, bx, W):
     return n
 
 
-def pictures_tab(lm, order, faint, ax, bx, W, k_lo, nk):
+def pictures_tab(lm, order, faint, ax, bx, W, k_lo, nk, chain=None):
     """(tab, marks) from the tracks' own small pictures (the loading pass's: each track's keys x up to PIC_COLS
-    columns), order = top first, a pixel taken by the first that has a note there."""
+    columns), order = top first, a pixel taken by the first that has a note there. chain (the file's ticks moved,
+    loaded_view): each pixel column reads the picture columns of the FILE ticks it shows (the pictures are made in the
+    file's ticks, so this is rough where the moves don't fall on their columns, as any picture from them is)."""
     tab = np.full((nk, W), -1, np.int64)
-    tpp = 1 / ax
     c = np.arange(W)
-    ta = (c - 0.5 - bx) * tpp
+    if chain:
+        edges = LV.float_edges(chain, ax, bx, W)
+        ta, tb = edges[:W], edges[1:W + 1]  # (a column's file ticks ta .. tb)
+        wide = tb - ta
+    else:
+        tpp = 1 / ax
+        ta = (c - 0.5 - bx) * tpp
+        tb = ta + tpp
     for n in order:
         t = lm.tracks[n]
         if not t.notes or not t.pic_cols or n in lm.gone:  # (removed in the track list: not drawn)
@@ -535,13 +548,13 @@ def pictures_tab(lm, order, faint, ax, bx, W, k_lo, nk):
         bits = np.unpackbits(t.pic, axis=1, count=t.pic_cols).astype(bool)[kk0 - t.pic_klo:kk1 - t.pic_klo + 1]
         step = lm.G * t.pic_pf  # (ticks a picture column)
         c0 = np.floor((ta - t.pic_glo * lm.G) / step).astype(np.int64)
-        c1 = np.maximum(np.ceil((ta + tpp - t.pic_glo * lm.G) / step).astype(np.int64), c0 + 1)
+        c1 = np.maximum(np.ceil((tb - t.pic_glo * lm.G) / step).astype(np.int64), c0 + 1)
         on = (c1 > 0) & (c0 < t.pic_cols)
         if not on.any():
             continue
         idx = np.flatnonzero(on)
         a = np.clip(c0[idx], 0, t.pic_cols - 1)
-        if tpp >= step:  # (several columns a pixel: any of them)
+        if (wide >= step).all() if chain else tpp >= step:  # (several columns a pixel: any of them)
             got = np.logical_or.reduceat(bits[:, :int(np.clip(c1[idx[-1]], 1, t.pic_cols))], a, axis=1)
         else:
             got = bits[:, a]
@@ -554,21 +567,33 @@ def pictures_tab(lm, order, faint, ax, bx, W, k_lo, nk):
     return tab, np.zeros((nk, W), np.uint8)
 
 
-def overview_tab(lm, ax, bx, W, k_lo, nk):
+def overview_tab(lm, ax, bx, W, k_lo, nk, chain=None):
     """(tab, marks) from the loading pass's grid: each key x pixel = the highest track sounding there, in its
     channel's colour; marks from its edges (lm.edges: 2 = the top track's note starts / ends there = edge colour,
-    1 = only a track under it = the shade)."""
-    tpp = 1 / ax
+    1 = only a track under it = the shade). chain (the file's ticks moved, loaded_view): the grid is in the FILE's
+    ticks, so each pixel column reads the buckets of the file ticks it shows (loaded_view.view's bounds); the level
+    is the coarsest one every column still covers a whole bucket of. Rough, as the overview always is: a bucket the
+    moves cut is taken whole."""
     L = 0
+    if chain:
+        edges = LV.float_edges(chain, ax, bx, W)
+        lo, hi = edges[:W], edges[1:W + 1]
+        tpp = float((hi - lo).min()) if W else 1.0  # (the narrowest column, in file ticks)
+    else:
+        tpp = 1 / ax
     while L + 1 < len(lm.levels) and (lm.G << (L + 1)) <= tpp:
         L += 1
     cnt, top = lm.levels[L]
     GL = lm.G << L
     ng = top.shape[1]
     c = np.arange(W)
-    ta = (c - 0.5 - bx) * tpp
+    if chain:
+        ta, tb = lo, hi
+    else:
+        ta = (c - 0.5 - bx) * tpp
+        tb = ta + tpp
     b0 = np.floor(ta / GL).astype(np.int64)
-    b1 = np.maximum(np.ceil((ta + tpp) / GL).astype(np.int64), b0 + 1)
+    b1 = np.maximum(np.ceil(tb / GL).astype(np.int64), b0 + 1)
     out = np.full((nk, W), -1, np.int64)
     edge = np.zeros((nk, W), np.uint8)
     for grid, got in ((top, out), (lm.edges[L], edge)):
@@ -597,27 +622,29 @@ SCRUB_S = 0.04  # ... exactly when that's guessed this quick, else from the over
 _GROUP_CH = np.argsort(COLOURS_16)  # (channel colour group -> channel)
 
 
-def scrub_notes(lm, order, lo, hi, at, loud=False, only=()):
+def scrub_notes(lm, order, lo, hi, at, loud=False, only=(), chain=None):
     """Right-drag listening on a loaded MIDI (user 2026-10-25): {(channel, key): (start, velocity)} of what's drawn
     on top: the keys sounding at tick `at` (start None) and notes starting in ticks lo..hi (start = about their
     tick; the latest per key). order = the tracks shown (shown_tracks; faint ones too unless Faint is 0 %), None = all; loud =
     louder notes on top (Settings → Look). Velocity
     as drawn (to within 4); the overview (where reading exactly is slow) has no starts nor velocities (100).
-    Returns (that, rough): rough = from the overview (the status line says so)."""
+    Returns (that, rough): rough = from the overview (the status line says so). lo / hi / at are SHOWN ticks (the
+    file's moved by Change visual time signature, chain = loaded_view.chain_of(app); none = the file's own)."""
     lo, hi = int(lo), int(hi)
     if order == () or getattr(lm, "changed", False) or hi < lo:
         return {}, False
     W = int(min(SCRUB_COLS, hi - lo + 1))
     ax = W / (hi - lo + 1)
     bx = -lo * ax
-    slow = speed.loops() is None or guess_bytes(lm, order, ax, bx, W) / rate_of(lm) > SCRUB_S
+    slow = speed.loops() is None or guess_bytes(lm, order, ax, bx, W, chain) / rate_of(lm) > SCRUB_S
     try:
         if not slow:
-            tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order, loud=loud, only=dict(only) or None)
+            tab, marks = exact_tab(lm, ax, bx, W, 0, lm.keys, tracks=order, loud=loud, only=dict(only) or None,
+                                   chain=chain)
         elif order is None:
-            tab, marks = overview_tab(lm, ax, bx, W, 0, lm.keys)
+            tab, marks = overview_tab(lm, ax, bx, W, 0, lm.keys, chain)
         else:
-            tab, marks = pictures_tab(lm, order, frozenset(), ax, bx, W, 0, lm.keys)
+            tab, marks = pictures_tab(lm, order, frozenset(), ax, bx, W, 0, lm.keys, chain)
     except Exception:  # (a file that changed / went: silent, told when drawing / exporting)
         write_log_now()
         return {}, False
@@ -672,8 +699,9 @@ class ExactJob:
     """Exact pictures made on a background thread: parts = [(bx, W)] in order, each finished one put in .made for
     the window to take (stop = give up)."""
 
-    def __init__(self, lm, style, ax, parts, order, faint):
+    def __init__(self, lm, style, ax, parts, order, faint, chain=None):
         self.lm, self.style, self.ax, self.parts, self.order, self.faint = lm, style, ax, parts, order, faint
+        self.chain = chain  # (the file's ticks moved, loaded_view)
         self.stop = False
         self.done = False
         self.made = []
@@ -690,7 +718,7 @@ class ExactJob:
                 began, took = time.perf_counter(), [0]
                 tab, marks = exact_tab(self.lm, self.ax, bx, W, 0, self.lm.keys, stop=lambda: self.stop,
                                        tracks=self.order, faint=self.faint, took=took, loud=self.style[-1],
-                                       only=style_only(self.style))
+                                       only=style_only(self.style), chain=self.chain)
                 if tab is None or self.stop:
                     break
                 learn_rate(self.lm, took[0], time.perf_counter() - began)
@@ -718,16 +746,18 @@ def merge_loud(tab, marks, ttab, tmarks, tnx, tfilled, ghost):
         tfilled[k] = 0
 
 
-def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=(), took=None, loud=False, only=None):
+def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=(), took=None, loud=False, only=None,
+              chain=None):
     """(tab, marks) of every note on screen: tracks (numbers, the one drawn on top first; default all, the last
     track on top), read from their checkpoints before the view. None if stopped. took = [bytes read] (added to).
     loud: louder notes on top (Settings → Look; each track painted alone, then merge_loud). only = {track: channel}:
-    those tracks read with that channel alone (the others left out as if not there)."""
+    those tracks read with that channel alone (the others left out as if not there). chain (loaded_view.chain_of:
+    the file's ticks moved by Change visual time signature; ax / bx are in SHOWN ticks): every note is drawn where
+    the file exported with those moves, loaded, would draw it. None / [] = the file's ticks as they are."""
     if loud:
-        return loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took, only)
+        return loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took, only, chain)
     fast = speed.loops()
-    t0 = int(np.floor((-0.5 - bx) / ax))
-    t1 = int(np.ceil((W + 0.5 - bx) / ax))
+    t0, t1, bd = LV.view(chain, ax, bx, W)
     tab = np.full((nk, W), -1, np.int64)
     marks = np.zeros((nk, W), np.uint8)
     nx = np.tile(np.arange(W + 1, dtype=np.int64), (nk, 1))
@@ -736,7 +766,7 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
     if lm.mode != "memory" and not still_same(lm):
         return None, None
     covered = []  # (tracks whose every row is painted already: they only shade, read on other cores)
-    rd = TrackReader(lm, ax, bx, W, k_lo, t0, t1, faint, only)
+    rd = TrackReader(lm, ax, bx, W, k_lo, t0, t1, faint, only, bd)
     run = []  # (small tracks waiting to be read together, in order: read_small)
     try:
         for n in order:
@@ -770,14 +800,13 @@ def exact_tab(lm, ax, bx, W, k_lo, nk, stop=lambda: False, tracks=None, faint=()
     return tab, marks
 
 
-def loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took, only=None):
+def loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took, only=None, chain=None):
     """exact_tab with louder notes on top: each track painted alone into its own tables, then merged in. Blocks of
     neighbouring tracks (about the same bytes each) merged on several cores, the blocks then merged in order (the
     same picture: merging is the same in any grouping, kept in track order)."""
     fast = speed.loops()
     merge = fast.midi_merge_loud if fast else merge_loud
-    t0 = int(np.floor((-0.5 - bx) / ax))
-    t1 = int(np.ceil((W + 0.5 - bx) / ax))
+    t0, t1, bd = LV.view(chain, ax, bx, W)
     order = tracks if tracks is not None else range(len(lm.tracks) - 1, -1, -1)
     busy = [n for n in order if lm.tracks[n].notes and n not in lm.gone and lm.tracks[n].end > t0
             and lm.tracks[n].first <= t1 and lm.tracks[n].khi >= k_lo and lm.tracks[n].klo < k_lo + nk]
@@ -785,12 +814,12 @@ def loud_tab(lm, ax, bx, W, k_lo, nk, stop, tracks, faint, took, only=None):
         return None, None
     n_threads = min(len(busy), max(1, (os.cpu_count() or 2) // 2)) if fast else 1
     if n_threads > 1:  # (blocks of about the same bytes)
-        size = np.array([view_bytes(lm, (n,), ax, bx, W) for n in busy], np.float64)
+        size = np.array([view_bytes(lm, (n,), ax, bx, W, chain) for n in busy], np.float64)
         cut = np.searchsorted(np.cumsum(size), np.arange(1, n_threads) * size.sum() / n_threads)
         blocks = [b for b in np.split(np.array(busy, np.int64), cut) if len(b)]
     else:
         blocks = [busy]
-    readers = [TrackReader(lm, ax, bx, W, k_lo, t0, t1, faint, only) for _ in blocks]
+    readers = [TrackReader(lm, ax, bx, W, k_lo, t0, t1, faint, only, bd) for _ in blocks]
     made = [None] * len(blocks)
     bad = []
 
@@ -854,7 +883,7 @@ def read_covered(lm, covered, first, tab, marks, stop):
                 bad.append(True)
                 return
     readers = [first] + [TrackReader(lm, first.ax, first.bx, W, first.k_lo, first.t0, first.t1, first.faint,
-                                     first.only)
+                                     first.only, first.bd)
                          for _ in range(n_threads - 1)]
     owns = [marks] + [np.zeros_like(marks) for _ in range(n_threads - 1)]
     threads = [threading.Thread(target=work, args=(rd, own), daemon=True, name="loaded notes")
@@ -954,7 +983,7 @@ def read_small(rd, ns, tab, nx, filled, marks, stop, covered):
                                   sm["cp_tick"][j[c]], sm["cp_run"][j[c]], sm["limit"][ii[c]], sm["last"][ii[c]], buf,
                                   pos, sm["eq"], sm["ec"], sm["ev"], skip, rd.t1, rd.ax, rd.bx, rd.W, rd.k_lo,
                                   rd.normal, rd.behind, tab, nx, filled, marks, rd.sq, rd.sa, rd.sb, rd.sv, rd.cnt_q,
-                                  rd.first_q, rd.vel_q, rd.st, out)
+                                  rd.first_q, rd.vel_q, rd.st, out, rd.bd)
         covered.extend(ns[c][out[:nc]].tolist())
     return True
 
@@ -963,8 +992,10 @@ class TrackReader:
     """One track at a time painted into an exact picture's tables (cover from its checkpoint before t0), with its
     own scratch arrays and file handle, so several can read side by side."""
 
-    def __init__(self, lm, ax, bx, W, k_lo, t0, t1, faint, only=None):
+    def __init__(self, lm, ax, bx, W, k_lo, t0, t1, faint, only=None, bd=LV.EMPTY):
         self.lm, self.ax, self.bx, self.W, self.k_lo, self.t0, self.t1, self.faint = lm, ax, bx, W, k_lo, t0, t1, faint
+        self.bd = bd  # (loaded_view.view's pixel bounds in file ticks; empty = the file's ticks as they are; t0 / t1
+        # are file ticks then too)
         self.only = only or {}  # {track: the one channel read, or a frozenset of them (a part)} (exact_tab)
         fast = speed.loops()
         self.cover = fast.midi_cover if fast else midi_index.cover
@@ -1023,7 +1054,8 @@ class TrackReader:
             want = self.only[n]
             colour = np.where(np.isin(np.arange(16), list(want) if isinstance(want, frozenset) else [want])[:, None],
                               colour, -1)
-        args =(self.ax, self.bx, self.W, self.k_lo, colour, tab, nx, filled, marks, self.sq, self.sa, self.sb, self.sv)
+        args = (self.ax, self.bx, self.W, self.k_lo, colour, tab, nx, filled, marks, self.sq, self.sa, self.sb, self.sv,
+                self.bd)
         p = self.cover(b, 0, len(b), start, skip, st, cnt_q, first_q, vel_q, t1, -1, *args)
         close = t1 + 1 if st[C_STOP] == 1 or end < t.limit else max(int(st[C_TICK]), t.last_tick)
         self.cover(b, p, p, start, skip, st, cnt_q, first_q, vel_q, t1, close, *args)

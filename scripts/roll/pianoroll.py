@@ -717,7 +717,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             bs += [notes[:, 0].min() / self.app.ppq, notes[:, 1].max() / self.app.ppq]
         lm = self.app.loaded
         if lm is not None and lm.notes:  # (a loaded MIDI's first and last note too)
-            bs += [lm.first / lm.ppq, lm.end / lm.ppq]
+            from notes.loaded_shown import shown_end, shown_first  # (as SHOWN: Change visual time signature)
+            bs += [shown_first(self.app) / lm.ppq, shown_end(self.app) / lm.ppq]
         lo, hi = (float(min(bs)), float(max(bs))) if bs else (0, 4 * self.app.beats)
         span = max(hi - lo, 1)
         self.sx = (w - self.kb_w) / (span * 1.06)
@@ -768,7 +769,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if self._end_of is not notes:
             self._end_of, self._end = notes, (float(notes[:, 1].max()) if len(notes) else 0.0)
         lm = getattr(self.app, "loaded", None)  # (a loaded MIDI's notes count too, hunt 2026-10-24)
-        end = max(self._end, float(lm.end) if lm is not None and lm.notes else 0.0)
+        from notes.loaded_shown import shown_end
+        end = max(self._end, float(shown_end(self.app)) if lm is not None and lm.notes else 0.0)
         return end / self.app.ppq + 8 * self.app.beats
 
     def bar_view(self, across):

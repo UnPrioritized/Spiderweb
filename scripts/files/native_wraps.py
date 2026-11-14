@@ -447,8 +447,10 @@ class Wraps:
             return self.base.midi_note_ticks(b, p, end, final, mark, base, st)
         return got
 
-    def midi_busy_hits(self, b, p, end, base, skip, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top, hit):
-        args = (b, p, end, base, skip, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top, hit)
+    def midi_busy_hits(self, b, p, end, base, skip, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top, hit, bp_n,
+                       bp_f, use_map):
+        args = (b, p, end, base, skip, t_stop, st, cnt, since, lane_at, own_s, own_e, own_top, hit, bp_n, bp_f,
+                use_map)
         got = self._at("midi_busy_hits", args)
         return got if got is not None else self.base.midi_busy_hits(*args)
 
@@ -491,9 +493,9 @@ class Wraps:
             self.base.midi_halve(cnt, top, cnt2, top2)
 
     def midi_cover(self, b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx, W, k_lo, colour, tab,
-                   nx, filled, marks, sq, sa, sb, sv):
+                   nx, filled, marks, sq, sa, sb, sv, bd):
         args = (b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx, W, k_lo, colour, tab, nx,
-                filled, marks, sq, sa, sb, sv)
+                filled, marks, sq, sa, sb, sv, bd)
         got = self._at("midi_cover", args)
         return got if got is not None else self.base.midi_cover(*args)
 
@@ -504,10 +506,10 @@ class Wraps:
 
     def midi_cover_many(self, faint, klo, khi, starts, ends, e0s, e1s, cp_tick, cp_run, limits, lasts, buf, pos, eq,
                         ec, ev, skip, t1, ax, bx, W, k_lo, normal, behind, tab, nx, filled, marks, sq, sa, sb, sv,
-                        cnt_q, first_q, vel_q, st, covered):
+                        cnt_q, first_q, vel_q, st, covered, bd):
         args = (faint, klo, khi, starts, ends, e0s, e1s, cp_tick, cp_run, limits, lasts, buf, pos, eq, ec, ev, skip,
                 t1, ax, bx, W, k_lo, normal, behind, tab, nx, filled, marks, sq, sa, sb, sv, cnt_q, first_q, vel_q,
-                st, covered)
+                st, covered, bd)
         got = self._at("midi_cover_many", args)
         return got if got is not None else self.base.midi_cover_many(*args)
 
@@ -516,8 +518,8 @@ class Wraps:
         if not self._do("loaded_pixels", args):
             self.base.loaded_pixels(*args)
 
-    def all_tops(self, top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, ids, x0, tpp, G):
-        args = (top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, ids, x0, tpp, G)
+    def all_tops(self, top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, ids, x0, tpp, G, edges):
+        args = (top, data, offs, nrows, nbytes, pklo, glo, pf, cols, used, uoff, ids, x0, tpp, G, edges)
         if not self._do("all_tops", args):
             self.base.all_tops(*args)
 

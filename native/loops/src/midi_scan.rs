@@ -594,8 +594,8 @@ pub fn note_ticks(b: &[u8], p: i64, end: i64, _final: bool, mark: &mut [u8], bas
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
 pub fn busy_hits(b: &[u8], p: i64, end: i64, base: i64, skip: &[i64], t_stop: i64, st: &mut [i64], cnt: &mut [i64],
-                 since: &mut [i64], lane_at: &[i64], own_s: &[i64], own_e: &[i64], own_top: &[i64], hit: &mut [u8])
-                 -> i64 {
+                 since: &mut [i64], lane_at: &[i64], own_s: &[i64], own_e: &[i64], own_top: &[i64], hit: &mut [u8],
+                 bp_n: &[i64], bp_f: &[i64], use_map: bool) -> i64 {
     let mut p = p;
     let mut tick = st[0];
     let mut run = st[1];
@@ -607,7 +607,32 @@ pub fn busy_hits(b: &[u8], p: i64, end: i64, base: i64, skip: &[i64], t_stop: i6
         let hid = si < skip.len() && skip[si] == base + p;
         let Some((mut q, d)) = read_gap(b, p, end) else { break };
         let t = tick + d;
-        if t >= t_stop {
+        let mut nt = t;
+        if use_map {
+            // (the map, exactly rewrite's: the tick the track walks on stays the file's, the ones compared are shown)
+            let (mut ml, mut mh) = (0usize, bp_n.len());
+            while ml < mh {
+                let mm = (ml + mh) / 2;
+                if bp_n[mm] <= t {
+                    ml = mm + 1;
+                } else {
+                    mh = mm;
+                }
+            }
+            let mi = (ml as i64 - 1).max(0) as usize;
+            nt = bp_f[mi] + (t - bp_n[mi]);
+            let mj = (mi + 1).min(bp_n.len() - 1);
+            let gd = bp_n[mj] - bp_n[mi];
+            let fd = bp_f[mj] - bp_f[mi];
+            if mj > mi && t > bp_n[mi] && gd > 0 && fd != gd {
+                let mut share = bp_f[mi] + f2i(rint(((t - bp_n[mi]).wrapping_mul(fd)) as f64 / gd as f64));
+                if share == bp_f[mi] {
+                    share = bp_f[mi] + imin(fd, 1);
+                }
+                nt = share;
+            }
+        }
+        if nt >= t_stop {
             st[2] = 1;
             break;
         }
@@ -630,17 +655,17 @@ pub fn busy_hits(b: &[u8], p: i64, end: i64, base: i64, skip: &[i64], t_stop: i6
                 let ln = ((s & 15) * 256 + b[q as usize] as i64) as usize;
                 if hi == 0x9 && b[q as usize + 1] > 0 {
                     if cnt[ln] == 0 {
-                        since[ln] = t;
+                        since[ln] = nt;
                     }
                     cnt[ln] += 1;
                 } else if cnt[ln] > 0 {
                     cnt[ln] -= 1;
-                    if cnt[ln] == 0 && t > since[ln] {
+                    if cnt[ln] == 0 && nt > since[ln] {
                         let a = since[ln];
                         let (mut lo, mut top) = (lane_at[ln], lane_at[ln + 1]);
                         while lo < top {
                             let mid = fdiv(lo + top, 2);
-                            if own_s[mid as usize] < t {
+                            if own_s[mid as usize] < nt {
                                 lo = mid + 1;
                             } else {
                                 top = mid;

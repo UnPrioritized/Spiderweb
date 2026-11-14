@@ -21,6 +21,7 @@ from notes.custom import notes_shape
 from notes.engine import own_slot
 from notes.loaded import (EXTRACT_ASK, EXTRACT_MOST, box_groups, box_key, boxes_meet, gather_box, group_boxes, set_boxes,
                           shape_boxes)
+from notes.loaded_shown import bind, chain_of, map_key, shown
 from roll.roll_draw import TRACK_FADE
 from roll.roll_loaded import shown_tracks
 from roll.roll_shared import RULER_TOP
@@ -67,7 +68,9 @@ def can_extract(app):
 
 
 def boxes_now(app):
-    """The kept boxes as Extract boxes in the file's ticks / keys (a ruler band = every key)."""
+    """The kept boxes as Extract boxes in ticks / keys (a ruler band = every key). The ticks are the SHOWN ones (what
+    the piano roll draws); with Change visual time signature over the MIDI, gather_box (chain=) takes the file's notes
+    whose note-on is shown in the box."""
     lm = app.loaded
     ppq = lm.ppq / app.ppq
     out = []
@@ -92,13 +95,16 @@ def sync_extract(app, found=None):
         return
     boxes = hidden_boxes(app)
     found = dict(found or {})
+    # (another map = the boxes read under the old one may hold other notes: let go, read again; what's found now was
+    # read under the current one by its callers)
+    bind(lm, app.loaded_map)
     lm._taken.update(found)  # (an Extract's own read: kept even while other boxes are still read)
     need = {box_key(b): b for b in boxes if box_key(b) not in lm._taken}
     if need:
         read_boxes(app, lm, list(need.values()))
         return
     try:
-        changed = set_boxes(lm, boxes, found)
+        changed = set_boxes(lm, boxes, found, chain_of(app))
     except (OSError, MidiError):  # (the file changed / went: said when drawing / exporting; nothing more hidden)
         return
     if not changed:
@@ -159,13 +165,14 @@ def read_boxes(app, lm, boxes):
     if job is not None and job["lm"] is lm and not job["finished"]:
         job["again"] = True  # (the shapes changed meanwhile: looked at again once this read is done)
         return
+    chain, mkey = chain_of(app), map_key(app.loaded_map)  # (the map these boxes are read under)
     job = app._box_reading = {"lm": lm, "done": 0, "total": 1, "got": {}, "error": None, "finished": False,
                               "cancel": False, "again": False}
 
     def run():
         try:
             for b in boxes:
-                job["got"][box_key(b)] = gather_box(lm, b, cancel=lambda: job["cancel"],
+                job["got"][box_key(b)] = gather_box(lm, b, cancel=lambda: job["cancel"], chain=chain,
                                                     progress=lambda d, n: job.update(done=d, total=max(n, 1)))
         except BaseException as e:  # (said below: nothing more hidden)
             job["error"] = e
@@ -179,6 +186,9 @@ def read_boxes(app, lm, boxes):
         if getattr(app, "_box_reading", None) is job:  # (a newer read's record left alone)
             app._box_reading = None
         app.busy(None)
+        if app.loaded is lm and job["error"] is None and mkey != map_key(app.loaded_map):
+            sync_extract(app)  # (the map changed while it read: what it read is for the old map, read again)
+            return
         if job["again"] and app.loaded is lm and job["error"] is None:  # (shapes changed while it read)
             lm._taken.update(job["got"])
             sync_extract(app)
@@ -227,12 +237,13 @@ def extract_loaded(app):
         messagebox.showerror(tr("app.spiderweb_2"), tr("extract.overlap"), parent=app)
         return
     job = app._extracting = {"done": 0, "total": 1, "got": None, "error": None, "finished": False, "cancel": False}
+    chain, mkey = chain_of(app), map_key(app.loaded_map)
 
     def run():
         try:
             got = job["got"] = []
             for b in new:  # (all boxes together stop soon after EXTRACT_MOST: refused below)
-                got.append(gather_box(lm, b, cancel=lambda: job["cancel"], most=EXTRACT_MOST - sum(
+                got.append(gather_box(lm, b, cancel=lambda: job["cancel"], chain=chain, most=EXTRACT_MOST - sum(
                     len(g["s"]) for g in got), progress=lambda d, n: job.update(done=d, total=max(n, 1))))
                 if sum(len(g["s"]) for g in got) > EXTRACT_MOST:
                     break
@@ -259,6 +270,8 @@ def extract_loaded(app):
             return
         if e is not None:
             raise e
+        if mkey != map_key(app.loaded_map):  # (the time signature was changed while it read: read for the old one)
+            return
         finish(app, lm, new, job["got"])
     threading.Thread(target=run, daemon=True, name="extract loaded notes").start()
     poll()
@@ -280,6 +293,10 @@ def finish(app, lm, new, got):
     if not n:
         app.status.config(text=tr("extract.none"))
         return
+    # (Change visual time signature over the MIDI: the shape's notes are the ones SHOWN = the exported file's; the
+    # hidden set below keeps the file's own byte places)
+    chain = chain_of(app)
+    s, e = shown(chain, s), shown(chain, e)
     text = trn("extract.ask", n, n=f"{n:,}") + (tr("extract.ask_many") if n > EXTRACT_ASK else "")
     if not messagebox.askokcancel(tr("app.spiderweb_2"), text, parent=app, icon="warning" if n > EXTRACT_ASK
                                   else "question"):
@@ -330,7 +347,8 @@ def box_notes(app):
     if not boxes:
         return None
     groups = shown_groups(app, tracks)
-    key = (id(lm), lm.hide_ver, tuple(map(tuple, boxes)), repr(groups), app.ppq)
+    key = (id(lm), lm.hide_ver, tuple(map(tuple, boxes)), repr(groups), app.ppq, map_key(app.loaded_map))
+    chain = chain_of(app)
     job = getattr(app, "_box_notes", None)
     if job is not None and job["key"] == key:
         return job["cols"]
@@ -344,7 +362,7 @@ def box_notes(app):
         try:
             got, n = [], 0
             for b in new:
-                got.append(gather_box(lm, b, cancel=lambda: job["cancel"], most=BOX_RING_MOST - n))
+                got.append(gather_box(lm, b, cancel=lambda: job["cancel"], most=BOX_RING_MOST - n, chain=chain))
                 n += len(got[-1]["s"])
                 if n > BOX_RING_MOST:
                     break
@@ -352,7 +370,8 @@ def box_notes(app):
                 job["many"] = n
             elif n:
                 s, e, lane = (np.concatenate([g[k] for g in got]) for k in ("s", "e", "lane"))
-                job["cols"] = (np.rint(s * scale).astype(np.int64), np.rint(e * scale).astype(np.int64),
+                s, e = shown(chain, s), shown(chain, e)  # (the outline is drawn where the notes are SHOWN)
+                job["cols"] =(np.rint(s * scale).astype(np.int64), np.rint(e * scale).astype(np.int64),
                                (lane & 255).astype(np.int64))
         except BaseException:  # (stopped, or the file changed: no outline)
             job["cols"] = None
@@ -443,10 +462,11 @@ def delete_loaded(app, shapes_too=False):
         app.shapes_changed()
         step = app.undo_stack[-1]
     job = app._extracting = {"done": 0, "total": 1, "got": None, "error": None, "finished": False, "cancel": False}
+    chain, mkey = chain_of(app), map_key(app.loaded_map)
 
     def run():
         try:
-            job["got"] = [gather_box(lm, b, cancel=lambda: job["cancel"],
+            job["got"] = [gather_box(lm, b, cancel=lambda: job["cancel"], chain=chain,
                                      progress=lambda d, n: job.update(done=d, total=max(n, 1))) for b in new]
         except BaseException as e:  # (said below)
             job["error"] = e
@@ -470,6 +490,8 @@ def delete_loaded(app, shapes_too=False):
             return
         if e is not None:
             raise e
+        if mkey != map_key(app.loaded_map):  # (the time signature was changed while it read: read for the old one)
+            return
         finish_delete(app, lm, new, job["got"], step)
     threading.Thread(target=run, daemon=True, name="delete loaded notes").start()
     poll()

@@ -37,6 +37,8 @@ from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_
 from notes.tempo import changed as tempo_edited, keep_heard, FAR, hold as hold_tempo, version as tempo_version
 from notes.tempo import catch_step, copy_step, own_step, set_heard, set_step, stamp_steps, step_of
 from notes.loaded import file_tempos
+from notes.loaded_shown import anchors_shown, map_key
+from notes import loaded_map
 from notes.meter import bar_beat_tick, from_bar_beat_tick, sigs_of
 from notes.tempo_file import FileTempo, limit_spots, loaded_part, sorted_union
 from roll.roll_draw import screen_lines
@@ -2313,7 +2315,8 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
 
     def dense_key(self):
         app = self.app
-        return tempo_text(app.tempo), self.base(), app.ppq, app.beats, id(app.rendered), id(app.loaded)
+        return (tempo_text(app.tempo), self.base(), app.ppq, app.beats, id(app.rendered), id(app.loaded),
+                map_key(app.loaded_map))
 
     def dense_now(self):
         """Beats where notes in a Keep timing part are too close for its tempo (tempo_file.dense_spots), as last
@@ -2348,12 +2351,14 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
                 return
             # (its export writes the file's notes and CC messages + the shapes' (Load MIDI step 10), as there)
             cc = app.cc_messages(app.ppq, self.base())
-            ticks = sorted_union([lm._anchors[0], ticks.astype(np.int64)])  # (= np.union1d, quicker when sorted)
-            loose = sorted_union([lm._anchors[1], np.array([m[0] for ms in cc.values() for m in ms], np.int64)])
+            anchors = anchors_shown(lm, app.loaded_map)  # (Change visual time signature: as SHOWN, like own notes)
+            ticks = sorted_union([anchors[0], ticks.astype(np.int64)])  # (= np.union1d, quicker when sorted)
+            loose = sorted_union([anchors[1], np.array([m[0] for ms in cc.values() for m in ms], np.int64)])
         limits = {"dense": [], "gave": [], "unfit": [], "moved": []}
         if any(len(p) > 5 and p[5] is True for p in app.tempo["points"]):
             try:
-                heard = file_tempos(lm) if lm is not None else None  # (a loaded MIDI: its notes keep their file time)
+                # (a loaded MIDI: its notes keep their file time; its tempo as SHOWN when bars were changed over it)
+                heard = loaded_map.heard(app.loaded_map, file_tempos(lm)) if lm is not None else None
                 if loose is None:  # (CC messages: they give way a tick, said in orange)
                     cc = app.cc_messages(app.ppq, self.base())
                     loose = np.array([m[0] for ms in cc.values() for m in ms], np.int64)
@@ -3770,7 +3775,8 @@ class TempoPane(ConductorMarks, KeepsItems, tk.Canvas):
         the sound jumps at a part's end. Returns heard_lines' list."""
         # the tempo the Keep timing notes are heard at (dashed; drawn with Heard tempo: solid)
         dash = () if heard_mode else (6, 3)
-        loaded = file_tempos(app.loaded) if app.loaded is not None and keep_spans else None
+        loaded = (loaded_map.heard(app.loaded_map, file_tempos(app.loaded))
+                  if app.loaded is not None and keep_spans else None)  # (as SHOWN: the moved bars' tempo)
         heard = self.heard_lines(keep_spans, w, kb, preview and preview.get("heard"))
         lay = layout(tempo, base, ppq) if loaded is not None else None
         known = FileTempo(loaded, lay) if loaded is not None else None  # (one reading for every part shown)

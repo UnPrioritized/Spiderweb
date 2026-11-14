@@ -19,6 +19,7 @@ from files.midi_index import (CC_KINDS, CC_MOST, CP_LEAST, GO, GRID_MOST, MORE_C
                               MORE_META, MORE_POOL, META_KEEP, QS, X_CCOVER, X_END, X_FIRST, X_GHI, X_GLO, X_HANG, X_KHI,
                               X_KLO, X_LONG, X_NCC, X_NCP, X_NENT, X_NMETA, X_NOTES, X_ORPHAN, X_STOP, X_TICK, X_ZERO)
 from files.midi_read import PIECE, Cancelled, MidiError, MidiFile
+from notes import loaded_map
 
 PIC_COLS = 1024  # a track's own picture: this many columns at most across its notes (+ its key range)
 PLAIN_MOST = 16 << 20  # bytes a file may have to load without the speed-ups (plain Python: ~1-2 MB a second)
@@ -333,15 +334,27 @@ def retime_for(lm, tempo, plan, targets, bp=False):
     return Retime(bp if keep_map else None, drop, inserts, tempo_tracks(lm, tuple(drop)) if drop else [])
 
 
-def own_hits(lm, s, e, lane, cancel=None, progress=None):
+def own_hits(lm, s, e, lane, cancel=None, progress=None, bp=None):
     """How many of Spiderweb's own notes (starts s, ends e, lanes = channel x 256 + key; the file's ticks) sound at
     the same time as a loaded note on the same channel + key (the export's heads-up: players can cut those, plan
     step 10). Each track is read only over the own notes' time, from its checkpoint before. A track given a new
     channel in Track Properties (lm.rechannel) counts on it, removed ones (lm.gone) not at all. cancel() True =
-    Cancelled; progress(done, total) in bytes."""
+    Cancelled; progress(done, total) in bytes.
+    bp = (anchors, where they go) when Change visual time signature moved the loaded MIDI (loaded_map.export_bp with
+    no Keep timing: one link, or anchors at every note tick of the file): s / e are then SHOWN ticks, and the track's
+    ticks are compared through bp (busy_hits maps each event, rewrite's rule), so the count is the one the exported
+    file gives loaded again. None = the file's own ticks, the old path untouched."""
     n = len(s)
     if not n:
         return 0
+    use_map = bp is not None
+    if use_map:
+        bp_n, bp_f = (np.ascontiguousarray(a, np.int64) for a in bp)
+        chain = [(bp_n, bp_f)]
+        from notes.loaded_shown import first_at
+    else:
+        bp_n = bp_f = np.zeros(1, np.int64)
+        chain = None
 
     def prepared(s, e, lane):  # (sorted by lane, then start: (s, e, lane, lane_at, top, their order))
         order = np.lexsort((s, lane))
@@ -361,10 +374,17 @@ def own_hits(lm, s, e, lane, cancel=None, progress=None):
     moved = lm.rechannel
     jobs = []
     for num, t in enumerate(lm.tracks):
-        if (not t.notes or num in lm.gone or t.end <= t0 or t.first >= t1 or t.khi < k_lo or t.klo > k_hi
+        if use_map:  # (the track's span as shown: nothing of it can meet an own note outside t0 .. t1)
+            t_first, t_end = (int(loaded_map.apply_link(bp_n, bp_f, np.int64(x))) for x in (t.first, t.end))
+        else:
+            t_first, t_end = t.first, t.end
+        if (not t.notes or num in lm.gone or t_end <= t0 or t_first >= t1 or t.khi < k_lo or t.klo > k_hi
                 or not len(t.cp_off)):
             continue
-        j = max(0, int(np.searchsorted(t.cp_tick, t0, "right")) - 1)
+        if use_map:  # (a checkpoint strictly before the first file tick shown at t0: its shown tick is before t0)
+            j = max(0, int(np.searchsorted(t.cp_tick, first_at(chain, t0), "left")) - 1)
+        else:
+            j = max(0, int(np.searchsorted(t.cp_tick, t0, "right")) - 1)
         if moved is not None and num < len(moved) and moved[num] >= 0:
             # (its notes all on the new channel: the own notes there, read as if on each channel it was written on)
             mine = np.flatnonzero(lane >> 8 == moved[num])
@@ -384,7 +404,7 @@ def own_hits(lm, s, e, lane, cancel=None, progress=None):
             e0, e1 = t.cp_ent[j], t.cp_ent[j + 1]
             qs = t.e_q[e0:e1].astype(np.int64)
             cnt[qs] = t.e_cnt[e0:e1]
-            since[qs] = t.cp_tick[j]
+            since[qs] = (loaded_map.apply_link(bp_n, bp_f, t.cp_tick[j]) if use_map else t.cp_tick[j])
             lanes, counts = lm.hidden_open(num, start)  # (extracted: not sounding)
             cnt[lanes] -= counts
             skip = lm.skip_of(num)
@@ -393,7 +413,7 @@ def own_hits(lm, s, e, lane, cancel=None, progress=None):
             size = t.limit - start
             if t.data is not None:
                 b = t.data[start:t.limit]
-                busy(b, 0, len(b), start, skip, t1, st, cnt, since, lane_at, s, e, top, got)
+                busy(b, 0, len(b), start, skip, t1, st, cnt, since, lane_at, s, e, top, got, bp_n, bp_f, use_map)
                 done += size
             elif size > 0:
                 reader = mf.pieces_of(f, mf.tracks[num].start + start, size, buf, watch)
@@ -403,7 +423,8 @@ def own_hits(lm, s, e, lane, cancel=None, progress=None):
                     if cancel and cancel():
                         raise Cancelled()
                     view = np.frombuffer(buf, np.uint8, filled) if loops else memoryview(buf)[:filled]
-                    used = busy(view, 0, filled, at, skip, t1, st, cnt, since, lane_at, s, e, top, got)
+                    used = busy(view, 0, filled, at, skip, t1, st, cnt, since, lane_at, s, e, top, got, bp_n, bp_f,
+                                use_map)
                     del view
                     at += used
                     done += used
@@ -418,6 +439,8 @@ def own_hits(lm, s, e, lane, cancel=None, progress=None):
                 reader.close()
             # (still sounding: to the own notes' end, or to the track's end when it ran out: shown up to there)
             at = t1 if st[midi_scan.BH_STOP] else max(int(st[midi_scan.BH_TICK]), t.last_tick)
+            if use_map and not st[midi_scan.BH_STOP]:  # (the walk's own tick is the file's: as shown)
+                at = int(loaded_map.apply_link(bp_n, bp_f, np.int64(at)))
             for q in np.flatnonzero(cnt > 0).tolist():
                 a, z = int(lane_at[q]), int(lane_at[q + 1])
                 if z > a and at > since[q]:
@@ -536,7 +559,7 @@ def boxes_meet(a, b):
         not a[5] or not b[5] or bool(set(a[5]) & set(b[5])))
 
 
-def gather_box(lm, box, cancel=None, progress=None, most=None, held=False):
+def gather_box(lm, box, cancel=None, progress=None, most=None, held=False, chain=None):
     """The notes an Extract box takes (note-on in ticks t0 .. t1 - 1, keys k0..k1, its tracks), each whole:
     {"trk", "s", "e", "lane" (channel x 256 + key), "vel", "on", "off" (byte places; off -1 = never let go, e =
     its track's end)} sorted by start; notes hidden already (another box) left out. Each track read from its
@@ -544,8 +567,15 @@ def gather_box(lm, box, cancel=None, progress=None, most=None, held=False):
     in all (Extract refuses then: a box over a dense part never fills the memory first).
     held: also what's still sounding at t0 (Fill with tempo jumps' Top note, hunt 2026-10-29: a note held from
     before the area hid nothing): each track's notes taken from its checkpoint before t0 on, and the keys sounding
-    at that checkpoint as "held_s" (the checkpoint's tick), "held_e" (their latest end), "held_lane"."""
+    at that checkpoint as "held_s" (the checkpoint's tick), "held_e" (their latest end), "held_lane".
+    chain (loaded_shown.chain_of: Change visual time signature over this MIDI): the box's ticks are SHOWN ticks, the
+    notes taken those whose note-on is SHOWN in it (= file note-ons in first_at(t0) .. first_at(t1) - 1: the map
+    never falls). What comes back stays in the FILE's ticks (s, e, held_*; byte places): the hidden set + its
+    caches are the file's; readers that want them shown use loaded_shown.shown."""
     t0, t1, k0, k1, tracks, only = box_key(box)
+    if chain:
+        from notes.loaded_shown import first_at
+        t0, t1 = first_at(chain, t0), first_at(chain, t1)
     loops = speed.loops()
     run = loops.midi_gather if loops else midi_scan.gather
     mf = lm.mf
@@ -559,7 +589,8 @@ def gather_box(lm, box, cancel=None, progress=None, most=None, held=False):
         if (t is None or not t.notes or t.end <= t0 or t.first >= t1 or t.khi < k0 or t.klo > k1
                 or not len(t.cp_off) or not mf.tracks[n].whole):  # (a damaged track is only ever copied whole)
             continue
-        j = max(0, int(np.searchsorted(t.cp_tick, t0, "right")) - 1)
+        # (moved: a checkpoint strictly before, so its tick is shown before the area's start too, as held_s wants)
+        j = max(0, int(np.searchsorted(t.cp_tick, t0, "left" if chain else "right")) - 1)
         jobs.append((n, t, j, int(t.cp_off[j]), int(t.cp_tick[j]) if held else t0))
         if held:
             e0, e1 = t.cp_ent[j], t.cp_ent[j + 1]
@@ -692,12 +723,14 @@ def edo_left_out(lm):
     return out
 
 
-def edo_rows(lm, muted, ppq):
+def edo_rows(lm, muted, ppq, saved=None):
     """lm's notes as the player's rows (start, end, key row, velocity, slot, owner -1) in ppq's ticks, the muted
     tracks / channels (TrackList.loaded_mutes) left out. slot = OWN0 + the file channel, so engine.channels_of gives
     the channel it's played on (31-EDO's channel groups: playback.edo_code). Kept on lm until something it reads
-    changes."""
-    key = (lm.hide_ver, lm.gone, tuple(muted), ppq)
+    changes. saved = app.loaded_map (Change visual time signature): the rows' ticks are SHOWN ones (loaded_map)."""
+    from notes.loaded_shown import map_key, shown
+    chain = loaded_map.links(saved)
+    key = (lm.hide_ver, lm.gone, tuple(muted), ppq, map_key(saved))
     got = getattr(lm, "_edo_rows", None)
     if got is not None and got[0] == key:
         return got[1]
@@ -707,6 +740,8 @@ def edo_rows(lm, muted, ppq):
         mask = mute_masks(muted, len(lm.tracks)).astype(np.int64)
         keep = ((mask[trk] >> ch) & 1) == 0
         trk, s, e, k, ch, vel = (a[keep] for a in (trk, s, e, k, ch, vel))
+    if chain:  # (the file's ticks through the map: what the screen shows and the export writes)
+        s, e = shown(chain, s), shown(chain, e)
     if ppq != lm.ppq:  # (the project's ticks: the same beats)
         s, e = s * ppq // lm.ppq, e * ppq // lm.ppq
     from notes.engine import OWN0
@@ -719,13 +754,15 @@ EDO_EVENTS_MOST = 2_000_000  # controller events a loaded MIDI may have to be pl
 _RPN_TUNE = ((0, 1), (0, 2))  # (RPN fine / coarse tune: left out in 31-EDO, our tuning wins, user 2026-11-13)
 
 
-def edo_events(lm, muted, ppq):
+def edo_events(lm, muted, ppq, saved=None):
     """lm's instrument / controller / bend / pressure changes for playing it in 31-EDO WITH them (PLAN.md 2026-11-13):
     {OWN0 + file channel: [(tick in ppq's, status kind, data 1, data 2)]} as App.play_apart's messages (each then
     goes to every channel of its channel's group, playback.edo_fan), ports folded as edo_rows does, muted tracks /
     channels left out. The file's own fine / coarse tune (RPN 1 / 2 data) left out: our tuning wins (user). None =
     not kept (more than the index keeps, or past EDO_EVENTS_MOST). Kept on lm like edo_rows."""
-    key = (lm.gone, tuple(muted), ppq)
+    from notes.loaded_shown import map_key, shown
+    chain = loaded_map.links(saved)  # (saved = app.loaded_map: the events' ticks are SHOWN ones)
+    key = (lm.gone, tuple(muted), ppq, map_key(saved))
     got = getattr(lm, "_edo_events", None)
     if got is not None and got[0] == key:
         return got[1]
@@ -771,6 +808,8 @@ def edo_events(lm, muted, ppq):
                     sel[c, 101] = sel[c, 100] = None
                 elif (sel.get((c, 101)), sel.get((c, 100))) in _RPN_TUNE:
                     keep[i] = False
+        if chain:  # (the file's ticks through the map: where the screen shows them and the export writes them)
+            tick = shown(chain, tick)
         if ppq != lm.ppq:
             tick = tick * ppq // lm.ppq
         for c in np.unique(ch[keep]).tolist():
@@ -780,7 +819,7 @@ def edo_events(lm, muted, ppq):
     return out
 
 
-def set_boxes(lm, boxes, found=None):
+def set_boxes(lm, boxes, found=None, chain=None):
     """The loaded notes hidden = the ones these Extract boxes took (the shapes holding them now, in order); a box
     not seen before is gathered (found = {box_key: gather_box's} made already). The overview loses them too."""
     keys = [box_key(b) for b in boxes]
@@ -793,7 +832,7 @@ def set_boxes(lm, boxes, found=None):
             continue
         got = lm._taken.pop(k, None)
         if got is None:
-            got = gather_box(lm, b)
+            got = gather_box(lm, b, chain=chain)
         taken[k] = lm._taken[k] = got  # (newest used last: the ones dropped first are the longest unused)
     spare = sum(_bytes(g) for k, g in lm._taken.items() if k not in taken)
     for k in [k for k in lm._taken if k not in taken]:

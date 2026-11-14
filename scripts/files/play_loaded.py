@@ -25,7 +25,7 @@ from collections import deque
 
 import numpy as np
 
-from files import midi_play, speed
+from files import midi_play, play_map, speed
 from files.synth import GROUP_BUFFER, RATE
 from files.midi_scan import (C_BANK, C_BEND, C_BTICK, C_CC, C_CHANNELS, C_OFF, C_ON, C_ON0, C_POLY, C_PRESS,
                              C_PROG, C_PTICK, C_PVAL)
@@ -179,8 +179,12 @@ class LoadedPlayer:
     one message at a time). muted() = the track numbers not to play now, or (track number, channel) for one
     channel of it (asked every 100 ms)."""
 
-    def __init__(self, lm, player, out, sinks=None, kind="device", muted=lambda: ()):
+    def __init__(self, lm, player, out, sinks=None, kind="device", muted=lambda: (), chain=()):
         self.lm, self.player, self.out, self.sinks = lm, player, out, sinks
+        # (Change visual time signature over the loaded MIDI: loaded_map.links(app.loaded_map), [] = none. The reader
+        # works in SHOWN ticks, the player's clock; the file's own ticks are moved through it at the edges of
+        # _read / _last_ctl / _instruments, so the feeder and everything after never see a file tick)
+        self.shown = play_map.Shown(chain)
         self.synths = len(sinks) if sinks else 1
         # note-ons a second each synth may take (Built-in BASSMIDI's: then set by each one's load)
         self.budgets = np.full(self.synths, {"group": BUDGET_SYNTH, "kdmapi": BUDGET_KDMAPI}.get(kind, BUDGET_DEVICE),
@@ -293,6 +297,7 @@ class LoadedPlayer:
         counting = count is not None
         if count is None:
             count = NO_COUNT
+        t1 = self.shown.file_start(t1)  # (moved time signature: the file ticks shown before t1 are the ones before this)
         while len(slots):
             # (up to the first checkpoint at or past t1: every event before t1 is before it)
             j2 = np.searchsorted(self.cp_key, slots * self.M + t1, "left")
@@ -342,6 +347,8 @@ class LoadedPlayer:
                     return None
             slots = np.concatenate(more) if more else np.zeros(0, np.int64)
         self._rechannel(sc.m[:n], sc.k[:n])
+        if self.shown.on and n:  # (every event's tick as the project shows it, in place; their order stays)
+            sc.t[:n] = self.shown.shown(sc.t[:n])
         return sc.t[:n], sc.m[:n], sc.k[:n]
 
     def _read_side(self, slots, t1, most):
@@ -352,7 +359,8 @@ class LoadedPlayer:
         if len(slots) < 64 or not helpers:
             got = self._read(slots, t1, most)
             return None if got is None else [got]
-        j2 = np.searchsorted(self.cp_key, slots * self.M + t1, "left") if len(self.cp_key) else None
+        j2 = (np.searchsorted(self.cp_key, slots * self.M + self.shown.file_start(t1), "left")
+              if len(self.cp_key) else None)
         end = (np.where(j2 < self.seg1[slots], self.cp_off[np.minimum(j2, len(self.cp_off) - 1)], self.limit[slots])
                if j2 is not None else self.limit[slots])
         left = np.cumsum(np.maximum(end - self.pos[slots], 256))
@@ -440,7 +448,7 @@ class LoadedPlayer:
         if len(self.cp_key):
             # (the last checkpoint BEFORE t0: one on t0 itself can sit amid that tick's events, the ones before it
             # were lost: Shinki's beat 340, ~500 note-offs a key, 2026-10-27)
-            j = np.searchsorted(self.cp_key, slots * self.M + t0, "left") - 1
+            j = np.searchsorted(self.cp_key, slots * self.M + self.shown.file_start(t0), "left") - 1
             has = (j >= self.seg0[slots]) & (j < self.seg1[slots])
             jj, sh = j[has], slots[has]
             self.pos[sh], self.tick[sh], self.run[sh] = self.cp_off[jj], self.cp_tick[jj], self.cp_run[jj]
@@ -467,7 +475,7 @@ class LoadedPlayer:
         # (and every other controller set before the checkpoint: volume, pan, pedal, bend; the ones since it are
         # read, hunt 2026-10-30: a track's volume at its start was lost playing from mid-song)
         sh = slots[pos[slots] > 0]
-        got = self._last_ctl(sh, cp[sh] + 1)
+        got = self._last_ctl(sh, cp[sh] + 1, file=True)
         if got is not None:
             k = got[3] % CC_KINDS
             own = ~np.isin(k, (0, 32, K_PROGRAM) + RPN)  # (instruments: above; RPN steps: only as read)
@@ -537,15 +545,18 @@ class LoadedPlayer:
         place = (self.tport[ks] % (16 if self.kind == "kestrel" else 64)) * 16 + (m & 15)
         return np.where(kind >= 0, place * CC_KINDS + kind, -1)
 
-    def _last_ctl(self, slots, upto):
+    def _last_ctl(self, slots, upto, file=False):
         """The last CC-type event of each channel x kind of each slot before tick upto (one, or one per slot), from
         the index's kept ones (TrackInfo.c_tick / c_code): (ticks, messages as played, track numbers, keys =
         place x CC_KINDS + kind, place = port x 16 + channel), in tick order. A CC 121 (reset all controllers)
         drops the ones it puts back before it; 120-127 (sounds off, modes) and key pressure left out. None = not
-        kept (the MIDI has too many)."""
+        kept (the MIDI has too many). upto = a SHOWN tick (file = True: the file's own, a checkpoint's); the ticks
+        come back shown."""
         lm, P = self.lm, 16 if self.kind == "kestrel" else 64
         slots = np.asarray(slots, np.int64)
         upto = np.broadcast_to(np.asarray(upto, np.int64), slots.shape)
+        if self.shown.on and not file:
+            upto = self.shown.file_start(upto)
         has = self.ctl[slots]
         slots, upto = slots[has], upto[has]
         out = []
@@ -579,6 +590,8 @@ class LoadedPlayer:
         if not out:
             return np.zeros(0, np.int64), np.zeros(0, np.int32), np.zeros(0, np.int32), np.zeros(0, np.int64)
         got = [np.concatenate(a) for a in zip(*out)]
+        if self.shown.on:
+            got[0] = self.shown.shown(got[0])
         o = np.argsort(got[0], kind="stable")
         return tuple(a[o] for a in got)
 
@@ -694,7 +707,7 @@ class LoadedPlayer:
         if not out:
             return np.zeros(0, np.int64), np.zeros(0, np.int32), np.zeros(0, np.int32)
         a = np.array(out, np.int64)
-        return a[:, 0].copy(), a[:, 1].astype(np.int32), a[:, 2].astype(np.int32)
+        return self.shown.shown(a[:, 0].copy()), a[:, 1].astype(np.int32), a[:, 2].astype(np.int32)
 
     def _walk_programs(self, s, upto):
         """midi_play.programs over slot s's bytes before byte place upto (its checkpoint), a piece at a time. Each
@@ -761,7 +774,8 @@ class LoadedPlayer:
                 w0 = start
                 fresh = True  # (a part read ahead is taken part-way only where playing starts: its unheard offs
                 # counted above; joined part-way later (done meanwhile, a track unmuted) = read live to its end)
-                last = int(max((self.lm.tracks[int(n)].last_tick for n in self.num), default=0))
+                last = int(self.shown.shown(int(max((self.lm.tracks[int(n)].last_tick for n in self.num),
+                                                    default=0))))  # (the last file tick as shown)
                 unplaced = None  # (a part read ahead ended here: placed only when the reading goes live again)
                 while not self._stop.is_set() and self._jump is None:
                     if self._unpart is not None:  # (a mute changed while a part played: live from where it was)
@@ -823,7 +837,7 @@ class LoadedPlayer:
                     if cut is not None:
                         w1 = cut
                     began = time.perf_counter()
-                    todo = np.flatnonzero(~self.done & ~self.off & (self.nxt < w1))
+                    todo = np.flatnonzero(~self.done & ~self.off & (self.nxt < self.shown.file_start(w1)))
                     kept = [a.copy() for a in (self.pos, self.tick, self.run, self.nxt, self.want, self.done,
                                                self.sk_i)]
                     got = self._read_side(todo, w1, WINDOW_MOST)
@@ -900,7 +914,7 @@ class LoadedPlayer:
         """Kestrel (GPU): the loaded MIDI's read-ahead of its densest parts (files/play_dense.py) when it may be
         used now: as made for the file as it is, no track muted (it holds every track)."""
         d = self.lm.dense if self.kind == "kestrel" else None
-        if d is None or self.muted.any():
+        if d is None or self.muted.any() or self.shown.on:  # (its parts are in the file's ticks: read live when moved)
             return None
         from files.play_dense import key_of
         return d if d.key == key_of(self.lm) else None
@@ -1359,7 +1373,7 @@ class LoadedPlayer:
             no = self.lm._kb_no = _SONGS
         from files.play_dense import key_of
         return hash((no, len(tm[0]), float(tm[0].sum()), float(tm[2].sum()), self.muted.tobytes(), key_of(self.lm),
-                     getattr(self.player, "notes_ver", 0))) | 1
+                     getattr(self.player, "notes_ver", 0), self.shown.key())) | 1
 
     @staticmethod
     def _retime(kout, ahead, held, tm, base, new, base_new, align=0.0):

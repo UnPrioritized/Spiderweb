@@ -478,10 +478,26 @@ pub fn halve(cnt: Nd<i32, 2>, top: Nd<i32, 2>, cnt2: NdMut<i32, 2>, top2: NdMut<
     0
 }
 
-/// Pixel of tick t: floor(t * ax + bx + 0.5) as Numba makes it a whole number.
+/// Pixel of tick t: floor(t * ax + bx + 0.5) as Numba makes it a whole number. bd (not empty: the loaded MIDI's ticks
+/// moved by a changed time signature, notes/loaded_view.py) = bd[c] the first file tick on pixel c or later: the
+/// pixel is the last c with bd[c] <= t (-1 before the first one).
 #[inline(always)]
-fn px(t: i64, ax: f64, bx: f64) -> i64 {
-    f2i((t as f64 * ax + bx + 0.5).floor())
+fn px(t: i64, ax: f64, bx: f64, bd: &[i64]) -> i64 {
+    if bd.is_empty() {
+        f2i((t as f64 * ax + bx + 0.5).floor())
+    } else {
+        // (how many of bd are <= t, by halving; no closure in a hot loop)
+        let (mut lo, mut hi) = (0usize, bd.len());
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if bd[mid] <= t {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        lo as i64 - 1
+    }
 }
 
 /// midi_index.cover's arguments that stay the same between calls (the tables painted into).
@@ -492,6 +508,7 @@ pub struct Paint<'a> {
     pub nx: &'a mut [i64],
     pub filled: &'a mut [i64],
     pub marks: &'a mut [u8],
+    pub bd: &'a [i64],
     pub nk: i64,
     pub w: i64,
     pub tw: usize,
@@ -510,6 +527,7 @@ fn cover_in(b: &[u8], p: i64, end: i64, base: i64, skip: &[i64], st: &mut [i64],
     let mut run = st[C_RUN];
     let mut si = st[C_SKIP] as usize;
     let (nk, ww) = (pt.nk, pt.w);
+    let bd = pt.bd;
     let room = sq.len();
     let mut n = st[C_SPANS] as usize;
     let byte = |q: i64| b[q as usize] as i64;
@@ -569,7 +587,7 @@ fn cover_in(b: &[u8], p: i64, end: i64, base: i64, skip: &[i64], st: &mut [i64],
                         }
                         cnt_q[qq] += 1;
                         let kk = k - k_lo;
-                        let x = px(t, ax, bx);
+                        let x = px(t, ax, bx, bd);
                         if 0 <= kk && kk < nk && 0 <= x && x < ww {
                             let at = kk as usize * pt.mw + x as usize;
                             pt.marks[at] |= if pt.tab[kk as usize * pt.tw + x as usize] < 0 { 1 } else { 4 };
@@ -584,7 +602,7 @@ fn cover_in(b: &[u8], p: i64, end: i64, base: i64, skip: &[i64], st: &mut [i64],
                             n += 1;
                         } else {
                             let kk = k - k_lo;
-                            let x = px(t, ax, bx);
+                            let x = px(t, ax, bx, bd);
                             if 0 <= kk && kk < nk && 0 <= x && x < ww {
                                 pt.marks[kk as usize * pt.mw + x as usize] |= 4;
                             }
@@ -649,8 +667,8 @@ fn cover_in(b: &[u8], p: i64, end: i64, base: i64, skip: &[i64], st: &mut [i64],
             if kk < 0 || kk >= nk {
                 continue;
             }
-            let mut xa = px(sa[i], ax, bx);
-            let mut xb = px(sb[i], ax, bx);
+            let mut xa = px(sa[i], ax, bx, bd);
+            let mut xb = px(sb[i], ax, bx, bd);
             if xb <= xa {
                 xb = xa + 1;
             }
@@ -716,9 +734,9 @@ fn cover_in(b: &[u8], p: i64, end: i64, base: i64, skip: &[i64], st: &mut [i64],
 pub fn cover(b: &[u8], p: i64, end: i64, base: i64, skip: &[i64], st: &mut [i64], cnt_q: &mut [i64],
              first_q: &mut [i64], vel_q: &mut [i64], t1: i64, close_at: i64, ax: f64, bx: f64, w: i64, k_lo: i64,
              colour: Nd<i64, 2>, tab: NdMut<i64, 2>, nx: NdMut<i64, 2>, filled: &mut [i64], marks: NdMut<u8, 2>,
-             sq: &mut [i64], sa: &mut [i64], sb: &mut [i64], sv: &mut [i64]) -> i64 {
+             sq: &mut [i64], sa: &mut [i64], sb: &mut [i64], sv: &mut [i64], bd: &[i64]) -> i64 {
     let mut pt = Paint { colour: colour.d, cw: colour.sh[1], nk: tab.sh[0] as i64, w, tw: tab.sh[1], nxw: nx.sh[1],
-                         mw: marks.sh[1], tab: tab.d, nx: nx.d, filled, marks: marks.d };
+                         mw: marks.sh[1], tab: tab.d, nx: nx.d, filled, marks: marks.d, bd };
     cover_in(b, p, end, base, skip, st, cnt_q, first_q, vel_q, t1, close_at, ax, bx, k_lo, &mut pt, sq, sa, sb, sv)
 }
 
@@ -773,11 +791,11 @@ pub fn cover_many(faint: &[Flag], klo: &[i64], khi: &[i64], starts: &[i64], ends
                   eq: &[i16], ec: &[i64], ev: &[u8], skip: &[i64], t1: i64, ax: f64, bx: f64, w: i64, k_lo: i64,
                   normal: Nd<i64, 2>, behind: Nd<i64, 2>, tab: NdMut<i64, 2>, nx: NdMut<i64, 2>, filled: &mut [i64],
                   marks: NdMut<u8, 2>, sq: &mut [i64], sa: &mut [i64], sb: &mut [i64], sv: &mut [i64],
-                  cnt_q: &mut [i64], first_q: &mut [i64], vel_q: &mut [i64], st: &mut [i64], covered: &mut [i64])
-                  -> i64 {
+                  cnt_q: &mut [i64], first_q: &mut [i64], vel_q: &mut [i64], st: &mut [i64], covered: &mut [i64],
+                  bd: &[i64]) -> i64 {
     let nk = tab.sh[0] as i64;
     let mut pt = Paint { colour: normal.d, cw: normal.sh[1], nk, w, tw: tab.sh[1], nxw: nx.sh[1], mw: marks.sh[1],
-                         tab: tab.d, nx: nx.d, filled, marks: marks.d };
+                         tab: tab.d, nx: nx.d, filled, marks: marks.d, bd };
     let mut nc = 0usize;
     for i in 0..starts.len() {
         let a = imax(klo[i], k_lo) - k_lo;
@@ -876,11 +894,21 @@ pub fn loaded_pixels(img: NdMut<u8, 3>, x0: i64, y0: i64, tab: Nd<i64, 2>, marks
 #[inline(always)]
 pub fn all_tops(top: NdMut<i32, 2>, data: &[u8], offs: &[i64], nrows: &[i64], nbytes: &[i64], pklo: &[i64],
                 glo: &[i64], pf: &[i64], cols: &[i64], used: &[Flag], uoff: &[i64], ids: &[i64], x0: i64, tpp: f64,
-                g_: i64) -> i64 {
+                g_: i64, edges: &[f64]) -> i64 {
     let (span, w) = (top.sh[0] as i64, top.sh[1]);
     let top = top.d;
     let mut c0 = need!(zeros::<i64>(w + 1));
     let mut c1 = need!(zeros::<i64>(w + 1));
+    // (edges not empty: the loaded MIDI's ticks moved by Change visual time signature, the w + 2 pixel edges as file
+    // ticks; empty = (x0 + x) * tpp)
+    let moved = !edges.is_empty();
+    let mut narrow = tpp;
+    if moved {
+        narrow = edges[1] - edges[0];
+        for x in 1..=w {
+            narrow = narrow.min(edges[x + 1] - edges[x]);
+        }
+    }
     for &r in ids {
         let r = r as usize;
         let n = cols[r];
@@ -890,15 +918,17 @@ pub fn all_tops(top: NdMut<i32, 2>, data: &[u8], offs: &[i64], nrows: &[i64], nb
         let step = g_ * pf[r];
         let base = glo[r] * g_;
         let (stf, bf) = (step as f64, base as f64);
-        if f2i(((x0 as f64 * tpp - bf) / stf).floor()) >= n
-            || f2i((((x0 + w as i64) as f64 * tpp + tpp - bf) / stf).ceil()) <= 0 {
+        let e_lo = if moved { edges[0] } else { x0 as f64 * tpp };
+        let e_hi = if moved { edges[w + 1] } else { (x0 + w as i64) as f64 * tpp + tpp };
+        if f2i(((e_lo - bf) / stf).floor()) >= n || f2i(((e_hi - bf) / stf).ceil()) <= 0 {
             continue;
         }
         let (mut first, mut last) = (-1i64, -1i64);
         for x in 0..=w {
-            let ta = (x0 + x as i64) as f64 * tpp;
+            let ta = if moved { edges[x] } else { (x0 + x as i64) as f64 * tpp };
+            let tb = if moved { edges[x + 1] } else { ta + tpp };
             let a = f2i(((ta - bf) / stf).floor());
-            let b = imax(f2i(((ta + tpp - bf) / stf).ceil()), a + 1);
+            let b = imax(f2i(((tb - bf) / stf).ceil()), a + 1);
             c0[x] = a;
             c1[x] = b;
             if b > 0 && a < n {
@@ -911,7 +941,7 @@ pub fn all_tops(top: NdMut<i32, 2>, data: &[u8], offs: &[i64], nrows: &[i64], nb
         if first < 0 {
             continue;
         }
-        let joined = tpp >= stf;
+        let joined = narrow >= stf;
         let (o, nb, k0) = (offs[r], nbytes[r], pklo[r]);
         for x in first..imin(last + 1, w as i64) {
             let xu = x as usize;

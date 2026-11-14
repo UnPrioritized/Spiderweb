@@ -20,6 +20,7 @@ from files.synth import FONT_TYPES, LIVE_DRUMS_CODE, LIVE_PORTS, RATE, Live, Syn
 from notes.engine import slot_track_channel
 from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
 from notes.hzbass import RING_MOST, has_cc
+from notes import loaded_map
 from notes.tempo_file import heard_tempo
 from window.hz_preview import VOICES, font_list
 from window.widgets import bad, centre_over, good, read_number
@@ -256,7 +257,8 @@ class Playback:
         out = self.outgoing()  # (+ wrapped kept notes)
         last = (int(out[:, 1].max()) if len(out) else 0) / ppq
         if self.loaded is not None:
-            last = max(last, self.loaded.end / ppq)
+            # (the file's last tick as shown: Change visual time signature moves it)
+            last = max(last, int(loaded_map.map_ticks(loaded_map.links(self.loaded_map), int(self.loaded.end))) / ppq)
         return float(math.ceil(max(last, start) + 1.0 - 1e-9))
 
     def end_and_tempo(self, ppq, bpm, beats, start, device=None):
@@ -277,7 +279,9 @@ class Playback:
         """A loaded MIDI's own tempo for heard_tempo (its notes keep their file time in Keep timing parts), else
         None."""
         from notes.loaded import file_tempos
-        return file_tempos(self.loaded) if self.loaded is not None else None
+        if self.loaded is None:
+            return None
+        return loaded_map.heard(self.loaded_map, file_tempos(self.loaded))  # (the moved bars: as SHOWN)
 
     def start_loaded(self, t0):
         """The loaded MIDI plays along from tick t0, the play line (files/play_loaded.py): Built-in BASSMIDI = its
@@ -352,14 +356,14 @@ class Playback:
                 if gate is not None:
                     gate.set()
                 return
-        if kind == "kestrel":  # (its densest parts read ahead in the background, once: files/play_dense.py)
+        if kind == "kestrel" and not self.loaded_map:  # (its densest parts read ahead in the background, once: files/play_dense.py)
             from files.play_dense import ensure
             ensure(self.loaded)
             if getattr(self, "_ahead_job", None) is None:  # (asked after playing, never as Play is pressed)
                 self._ahead_job = self.after(1000, self.watch_ahead)
         tl = self.track_list
         lp = self.loaded_play = LoadedPlayer(self.loaded, self.player, self.out, sinks, kind,
-                                             muted=tl.loaded_mutes)
+                                             muted=tl.loaded_mutes, chain=loaded_map.links(self.loaded_map))
         if gate is None:
             self.player.ready = lp.ready
         else:  # (the line already waits on gate: opened once this one's first notes are read, or it's stopped)
@@ -836,7 +840,8 @@ class Playback:
         """Kestrel (GPU) picked with a MIDI loaded: its densest parts read ahead now, in the background (files/
         play_dense.py; ~20 s for Shinki), so the FIRST play has them too (user 2026-10-27; it was started by Play).
         Only once Kestrel has started on this PC (hunt 2026-10-28: a minute and ~3 GB for one that never could)."""
-        if self.loaded is not None and self.midi_device.get() == KESTREL and getattr(self, "kestrel_ok", False):
+        if self.loaded is not None and self.midi_device.get() == KESTREL and getattr(self, "kestrel_ok", False) \
+                and not self.loaded_map:  # (moved ticks: read live, the parts are the file's own ticks)
             from files.play_dense import ensure
             ensure(self.loaded)
             self.watch_ahead()
@@ -1261,8 +1266,9 @@ class Playback:
             if order is not None and not seen:  # (faint tracks at 0 %: not shown, not heard)
                 order = tuple(n for n in order if n not in faint)
             ppq_lm = self.loaded.ppq / self.ppq  # (its own ticks)
+            from notes.loaded_shown import chain_of  # (the sweep is in shown ticks: the file's moved by a changed
             got, rough = scrub_notes(self.loaded, order, lo * ppq_lm, hi * ppq_lm, t_to * ppq_lm, loud_on(self),
-                                     shown_only(self, self.loaded))
+                                     shown_only(self, self.loaded), chain_of(self))  # time signature)
             drums = out.name == BUILTIN  # (its channel 10 = drums, as playback plays it: Built-in BASSMIDI's
             edo = tuned and self.edo_loaded()  # own drum channel; other MIDI outs' channel 10 is drums already;
             for (ch, p), (s, v) in got.items():  # 31-EDO's Loaded MIDI tick: rows, like playback plays them)

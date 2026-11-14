@@ -18,13 +18,14 @@ TILE = 512  # px: a loaded MIDI's rows are read in blocks this wide along the so
 SQUARE = 256  # px: the rows, All tracks and Conductor rows are painted in squares this wide (paint, tiled)
 
 
-def row_mask(lm, r, ax, bx, W, ch=None):
+def row_mask(lm, r, ax, bx, W, ch=None, chain=None):
     """A loaded track's notes exactly: its keys klo..khi x W pixels, the colour group (COLOURS_16) of the channel
-    sounding there, -1 none (False: unreadable). ch: that channel alone (a folder's sub-row)."""
+    sounding there, -1 none (False: unreadable). ch: that channel alone (a folder's sub-row). chain: the file's ticks
+    moved by Change visual time signature (loaded_view.chain_of; ax / bx are in shown ticks)."""
     t = lm.tracks[r]
     try:
         tab, _ = RL.exact_tab(lm, ax, bx, W, t.klo, t.khi - t.klo + 1, tracks=(r,),
-                              only=None if ch is None else {r: ch})  # (ch: a channel or a part's set)
+                              only=None if ch is None else {r: ch}, chain=chain)  # (ch: a channel or a part's set)
     except Exception:  # (a file that changed / went: the small picture stays)
         RL.write_log_now()
         return False
@@ -38,20 +39,28 @@ def squares(o, n):
     return range(a, b), range(max(0, a - 1), b + 1)
 
 
-def small_mask(lm, t, cx, aw, sx):
-    """The same from the loading pass's small picture (keys klo.. x up to PIC_COLS columns), or None."""
+def small_mask(lm, t, cx, aw, sx, chain=None):
+    """The same from the loading pass's small picture (keys klo.. x up to PIC_COLS columns), or None. chain (the
+    file's ticks moved, loaded_view): each pixel column reads the picture columns of the file ticks it shows."""
     if not t.pic_cols:
         return None
     tpp = lm.ppq / sx  # (ticks a pixel)
     ta = (np.arange(aw) + cx) * tpp
     step = lm.G * t.pic_pf
+    if chain:  # (the column edges, shown ticks -> where they begin in the file)
+        from notes import loaded_view as LV
+        edge = LV.file_edges(chain, np.concatenate([ta, [ta[-1] + tpp]]))
+        ta, tb = edge[:-1], edge[1:]
+        joined = bool(((tb - ta) >= step).all())
+    else:
+        tb = ta + tpp
+        joined = tpp >= step
     c0 = np.floor((ta - t.pic_glo * lm.G) / step).astype(np.int64)
-    c1 = np.maximum(np.ceil((ta + tpp - t.pic_glo * lm.G) / step).astype(np.int64), c0 + 1)
+    c1 = np.maximum(np.ceil((tb - t.pic_glo * lm.G) / step).astype(np.int64), c0 + 1)
     on = np.flatnonzero((c1 > 0) & (c0 < t.pic_cols))
     if not len(on):
         return None
     a = np.clip(c0[on], 0, t.pic_cols - 1)
-    joined = tpp >= step
     end = int(np.clip(c1[on[-1]], 1, t.pic_cols)) if joined else int(a[-1]) + 1
     # (only the columns shown unpacked: the whole track's every redraw was most of the All tracks row's time at
     # 2788 tracks, Shinki 2026-10-28)
@@ -69,8 +78,9 @@ class RowJob:
     """A loaded MIDI's rows' blocks [(track, block, channel or None)] read exactly on a background thread, in order
     (stop = give up); shown = the ones on screen blocky."""
 
-    def __init__(self, lm, place, todo, ax, shown):
+    def __init__(self, lm, place, todo, ax, shown, chain=None):
         self.lm, self.place, self.todo, self.ax, self.shown = lm, place, todo, ax, shown
+        self.chain = chain  # (the file's ticks moved, loaded_view)
         self.stop = self.done = False
         self.out = deque()  # ((track, block, channel), mask) as read (TrackList.take_rows)
 
@@ -78,7 +88,7 @@ class RowJob:
         for r, j, c in self.todo:
             if self.stop:
                 break
-            self.out.append(((r, j, c), row_mask(self.lm, r, self.ax, -float(j * TILE), TILE, c)))
+            self.out.append(((r, j, c), row_mask(self.lm, r, self.ax, -float(j * TILE), TILE, c, self.chain)))
         self.done = True
 
 
