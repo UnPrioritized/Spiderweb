@@ -103,7 +103,7 @@ from window.app_playback import GROUP_DEFAULT, Playback
 from window.app_kestrel import KestrelSetup
 from window.app_clip import AppClip
 from window.app_transform import AppTransform
-from window.app_offrange import AppOffrange, colour_slots_of, kept_rows
+from window.app_offrange import AppOffrange, colour_slots_of, exact_kept, kept_rows
 from window.app_keys import AppKeys
 from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
@@ -313,6 +313,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.keep_offrange = tk.BooleanVar(self, value=False)
         self.offrange_opacity = tk.IntVar(self, value=50)  # (how see-through they're drawn, %: roll_draw.OFF_FADE)
         self.wrap_offrange = tk.BooleanVar(self, value=False)  # ("Wrap them around": App.outgoing)
+        # ("Exact colours past the keys", off: kept notes' channels worked out with the whole project in the
+        # background, app_offrange.exact_kept / App.exact_soon; user 2026-11-14)
+        self.exact_offrange = tk.BooleanVar(self, value=False)
+        self._exact_job = None
         # ("Show wrapped notes": settings.WRAP_SHOWN "selected" / "always" / "off"; App.wrapped_rows)
         self.show_wrapped = tk.StringVar(self, value="selected")
         self._wrapped = None  # (App.wrapped_rows' last answer, keyed)
@@ -2246,8 +2250,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if (job_off is not None and job_off[2] is not None and job_off[1] is self.rendered
                 and job_off[0] == self.offrange_wanted()):
             self.off_all = job_off[2]
+            if self._exact_job is not None:  # (these are exact already when it's on)
+                self._exact_job["stop"] = True
+                self._exact_job = None
         else:
             self.off_all = self.offrange_rows()
+            self.after_idle(self.exact_soon)  # ("Exact colours past the keys": worked out in the background)
         self.made_version += 1
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
             self.tempo_pane.dense_now()
@@ -2866,11 +2874,20 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 if job["stop"]:
                     raise Stopped
                 if off_for is not None:  # (App.offrange_rows' work, off Tk's thread: ~70 ms at 1 M kept notes)
-                    def alone(some, k):  # (App.alone_maker's, with this job's settings)
-                        made = all_notes(some, key[1], k, *key[3:6], notes_tracks, rounds=key[6], order=key[7],
+                    def alone(some, k, make=notes_tracks):  # (App.alone_maker's, with this job's settings)
+                        made = all_notes(some, key[1], k, *key[3:6], make, rounds=key[6], order=key[7],
                                          own=own)
                         return made[1], made[2]
-                    job["off"] = kept_rows(shapes, got[2], notes_tracks, key[2], key[1], *off_for, got[1], alone)
+                    multi, rounds, exact = off_for
+                    job["off"] = kept_rows(shapes, got[2], notes_tracks, key[2], key[1], multi, rounds, got[1],
+                                           alone)
+                    if exact:  # ("Exact colours past the keys": the whole project's channels on a taller keyboard)
+                        def run(some, k, make):  # (no Remove overlaps: it cuts notes after the channels, ~25 %)
+                            made = all_notes(some, key[1], k, *key[3:6], make, rounds=key[6], order=key[7],
+                                             keep=key[8], own=own)
+                            return made[1], made[2]
+                        job["off"] = exact_kept(shapes, job["off"], got[2], notes_tracks, key[2], key[1], got[1],
+                                                run)
                 # (the piano roll's orders for painting them too: roll_draw.start_order / paint_order)
                 rendered, order = got[2], None
                 start = np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable")

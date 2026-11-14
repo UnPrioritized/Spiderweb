@@ -466,6 +466,8 @@ class SettingsWindow(tk.Toplevel):
             app.offrange_changed()
             app.schedule_autosave()
             self.sync_keep()
+        self.exact_tick = f.row(None, self.tick(f.page, "settings.exact_offrange", app.exact_offrange, wrapped))
+        Tooltip(self.exact_tick, tr("settings.exact_offrange_tip"))
         self.wrap_tick = f.row(None, self.tick(f.page, "settings.wrap_offrange", app.wrap_offrange, wrapped))
         Tooltip(self.wrap_tick, tr("settings.wrap_offrange_tip"))
         # "Show wrapped notes" (user 2026-11-08): where they land, for the selected shapes / always / never. Read by place
@@ -497,6 +499,7 @@ class SettingsWindow(tk.Toplevel):
         self.opacity_box.state(["!disabled"] if on else ["disabled"])
         self.opacity_label.state(["!disabled"] if on else ["disabled"])
         self.wrap_tick.state(["!disabled"] if on else ["disabled"])
+        self.exact_tick.state(["!disabled"] if on else ["disabled"])
         wraps = on and app.wrap_offrange.get()  # ("Show wrapped notes": greyed while nothing wraps)
         self.wrapped_box.state(["!disabled"] if wraps else ["disabled"])  # (readonly stays)
         self.wrapped_label.state(["!disabled"] if wraps else ["disabled"])

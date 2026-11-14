@@ -44,9 +44,24 @@ def alone_slots(sh, notes, alone, keys, ppq, use10, real):
     rows[:, 2] -= up
     if later:
         rows[:, :2] -= round(later * ppq)
-    a = rows[:, 4]
-    if use10 and not used10:  # (made with channel 10 skipped: the same channels in the project's numbering)
-        a = a // 15 * 16 + np.asarray(SKIP10, np.int64)[a % 15]
+    return lined_up(rows, used10, notes, use10, real)
+
+
+def project_slots(a, used10, use10):
+    """Slots a made with channel 10 skipped (used10 False) in the project's numbering (use10)."""
+    if use10 and not used10:
+        return a // 15 * 16 + np.asarray(SKIP10, np.int64)[a % 15]
+    return a
+
+
+def lined_up(rows, used10, notes, use10, real):
+    """notes' slots from rows (rendered's columns, one shape's, worked out elsewhere: alone / on a taller keyboard;
+    used10 = their channel 10 rule) by start + key, each of those slots -> the slot most of the shape's real notes
+    (real: its rendered rows, or None) with it are on; one never on the keys moves by the shift most of them made.
+    -1 = not found."""
+    if not len(rows):
+        return np.full(len(notes), -1, np.int64)
+    a = project_slots(rows[:, 4], used10, use10)
 
     def code(r):  # (start + key as one number; keys stay inside -8192 .. 8191)
         return r[:, 0] * 16384 + (r[:, 2] + 8192)
@@ -76,6 +91,84 @@ def alone_slots(sh, notes, alone, keys, ppq, use10, real):
     kinds, back = np.unique(out, return_inverse=True)  # (a few alone slots: one look-up each, not per note)
     return np.array([best[k][0] if k in best else k + shift if k >= 0 else -1 for k in kinds.tolist()],
                     np.int64)[back.ravel()]
+
+
+def exact_kept(shapes, off, rendered, make, keys, ppq, use10, run):
+    """Settings → Piano roll "Exact colours past the keys" (off; user 2026-11-14: people work past the keys like on a
+    canvas): off (kept_rows' rows) with each slot worked out for the WHOLE project on a taller keyboard, every
+    shape's kept notes in it (other shapes' notes they'd clash with too), each shape's slots lined up with its real
+    notes (lined_up). run(shapes, keys, make) -> (channel 10 used, rendered rows) = all_notes with the project's
+    settings; make = a notes_tracks. Slow (all the channels again): only in the background (App.exact_soon)."""
+    if not len(off):
+        return off
+    lifts = [past_edges(sh, keys, ppq) for sh in shapes]
+    got = [g for g in lifts if g is not None]
+    if not got:
+        return off
+    up = max(g[1] for g in got)
+    up = -(-up // 12) * 12  # (whole octaves: a Glissando's picked keys stay real piano keys)
+    room = up + max([keys] + [g[2] - g[1] for g in got])
+    later = max(round(g[3] * ppq) for g in got)
+
+    def tall(s):  # (every shape's notes with those past the keys, up by `up` keys and `later` ticks: all >= 0)
+        n, t = make(s)
+        n, t = with_kept(s, n, t, ppq, keys, make)
+        n = np.array(n, np.int64, copy=True).reshape(-1, 4) if len(n) else np.zeros((0, 4), np.int64)
+        n[:, 2] += up
+        n[:, :2] += later
+        return n, t
+    used10, rows = run(shapes, room, tall)
+    rows = np.array(rows, np.int64, copy=True)
+    if rows.ndim != 2 or not len(rows):
+        return off
+    rows[:, 2] -= up
+    rows[:, :2] -= later
+    out = off.copy()
+    for i, (mine, sel) in zip(*by_owners(rows, rendered, off)):
+        slots = lined_up(mine[0], used10, out[sel], use10, mine[1])
+        out[sel, 4] = np.where(slots >= 0, slots, out[sel, 4])
+    return out
+
+
+def by_owners(rows, rendered, off):
+    """For each shape with kept rows in off: (its number list, [((its rows, its rendered rows), off's rows of it)])."""
+    def sliced(a):
+        o = np.argsort(a[:, 5], kind="stable")
+        s = a[o]
+        return lambda i: s[np.searchsorted(s[:, 5], i):np.searchsorted(s[:, 5], i, "right")]
+    of_rows, of_real = sliced(rows), sliced(rendered) if len(rendered) else (lambda i: rendered[:0])
+    owners = np.unique(off[:, 5])
+    o = np.argsort(off[:, 5], kind="stable")
+    at = np.searchsorted(off[o, 5], owners)
+    ends = np.append(at[1:], len(o))
+    return owners.tolist(), [((of_rows(i), of_real(i)), o[a:b]) for i, a, b in zip(owners.tolist(), at, ends)]
+
+
+def with_kept(sh, notes, tracks, ppq, keys, make):
+    """sh's (notes, tracks) with its notes past the keys / before beat 0 added where they really are (keys under 0 or
+    over the top, ticks under 0), from the same remembered lifted notes as kept_tracks; like all_notes' wrapped_in,
+    unwrapped (exact_kept)."""
+    out = past_edges(sh, keys, ppq)
+    if out is None:
+        return notes, tracks
+    lifted, up, room, later = out
+    with rows_up_to(room - 1):
+        n, t = make(lifted, room)
+    if not len(n):
+        return notes, tracks
+    n, t = off_part(n, t, up, keys, round(later * ppq))
+    n = np.asarray(n, np.int64)[:, :4]
+    if not len(n):
+        return notes, tracks
+    a = np.asarray(notes, np.int64).reshape(-1, 4) if len(notes) else np.zeros((0, 4), np.int64)
+    both = np.concatenate([a[:, :4], n])
+    if tracks is None and t is None:
+        tt = None
+    else:
+        tt = np.concatenate([np.zeros(len(a), np.int64) if tracks is None else np.asarray(tracks, np.int64).ravel(),
+                             np.zeros(len(n), np.int64) if t is None else np.asarray(t, np.int64).ravel()])
+    order = np.argsort(both[:, 0], kind="stable")
+    return both[order], None if tt is None else tt[order]
 
 
 def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds, use10=False, alone=None):
@@ -259,6 +352,7 @@ class AppOffrange:
         from roll.roll_draw import OFF_FADE
         OFF_FADE[0] = min(100, max(1, int(self.offrange_opacity.get())))
         self.off_all = self.offrange_rows()
+        self.after_idle(self.exact_soon)
         self.made_version += 1
         self.off_masked = self.masked_offrange() if self.mask_preview.get() else None
         self._outgoing = None
@@ -398,11 +492,47 @@ class AppOffrange:
 
     def offrange_wanted(self):
         """What the notes thread needs to work out offrange_rows beside the notes (App._make_coming, whose shapes
-        are edit_shapes' too): (Multi channel, Repeated colours get new channels), or None when it can't / needn't
-        (Keep notes off, Draw on Domino). Read on Tk's thread only."""
+        are edit_shapes' too): (Multi channel, Repeated colours get new channels, Exact colours past the keys), or
+        None when it can't / needn't (Keep notes off, Draw on Domino). Read on Tk's thread only."""
         if not self.keeps_offrange() or self.companion is not None:
             return None
-        return self.channel_mode.get() == "auto", self.rounds_apart()
+        return self.channel_mode.get() == "auto", self.rounds_apart(), bool(self.exact_offrange.get())
+
+    def exact_soon(self):
+        """After the notes are in (shapes_changed): with "Exact colours past the keys" on and kept notes the quick
+        way (offrange_rows), the notes made again in the background with the exact kept colours (exact_kept);
+        taken in when nothing changed meanwhile. Never waited for: a job of its own, not App._coming (notes_made
+        would wait for it), stopped by the next change."""
+        old, self._exact_job = self._exact_job, None
+        if old is not None:
+            old["stop"] = True
+        if not (self.exact_offrange.get() and len(self.off_all) and self.offrange_wanted()):
+            return
+        if self.roll.drag or self.scrubbing:  # (each mouse step's would be stopped by the next: at the let go)
+            return
+        if self._coming is not None and not self._coming["done"]:  # (the notes thread busy: the next change asks)
+            return
+        keep = self._coming
+        self._make_coming(False)
+        job, self._coming = self._coming, keep
+        self._exact_job = job
+        self.after(30, self._exact_check, job)
+
+    def _exact_check(self, job):
+        if job is not self._exact_job or job["stop"]:
+            return
+        if not job["done"]:
+            self.after(30, self._exact_check, job)
+            return
+        self._exact_job = None
+        off = job.get("off")
+        if job["got"] is None or off is None or self.notes_key() != job["key"]:
+            return
+        self.off_all = off
+        self.made_version += 1
+        self.off_masked = self.masked_offrange() if self.mask_preview.get() else None
+        self._outgoing = None
+        self.roll.request_redraw()
 
     def kept_mask_world(self, pattern=None):
         """The masks worked out over the kept notes past the keys (hunt 2026-11-08, user: masks work on them like on
