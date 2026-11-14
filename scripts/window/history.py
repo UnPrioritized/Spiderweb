@@ -11,6 +11,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.own_tracks import clean_file_gone, clean_file_order, clean_file_props, clean_own_tracks
 from notes import loaded_map
+from window import rebar_edit
 from notes.loaded import extract_groups
 from notes.engine import BIG_MARK, BIG_TEXT, with_big
 from notes.merge import merge_parts
@@ -197,6 +198,7 @@ class HistoryPanel:
                 and self.step_file_gone(self.undo_stack[-1]) == json.dumps(self.file_gone)
                 and self.step_file_props(self.undo_stack[-1]) == json.dumps(self.file_props)
                 and self.step_loaded_map(self.undo_stack[-1]) == json.dumps(self.loaded_map)
+                and self.step_rebar(self.undo_stack[-1]) is rebar_edit.of(self)
                 and (len(self.undo_stack[-1][2]) <= 16 or self.undo_stack[-1][2][16] == self.start_track)
                 and not boxes_mark(self.undo_stack[-1])):  # (New with nothing to clear still set the boxes)
             kept = getattr(self, "_redo_kept", None)
@@ -373,7 +375,13 @@ class HistoryPanel:
                 # (the track list's Select boxes: back with the notes they held, hunt 2026-10-26)
                 json.dumps(getattr(getattr(self, "track_list", None), "boxes", [])),
                 self.start_track,  # (a new project's empty Track 1: back after an undone Remove Track)
-                json.dumps(self.loaded_map))  # (the loaded MIDI's ticks as shown: Change visual time signature)
+                json.dumps(self.loaded_map),  # (the loaded MIDI's ticks as shown: Change visual time signature)
+                rebar_edit.of(self))  # (its editable changes: never changed in place, kept by reference)
+
+    def step_rebar(self, step):
+        """The editable time signature changes an undo step kept; the ones now for a step made without them."""
+        sel = step[2]
+        return sel[18] if len(sel) > 18 and isinstance(sel[18], rebar_edit.Rebar) else rebar_edit.of(self)
 
     def step_loaded_map(self, step):
         """The loaded MIDI's tick links (JSON) an undo step kept; the ones now for a step made without them."""
@@ -613,6 +621,8 @@ class HistoryPanel:
             self.start_track = picked[16]
         if len(picked) > 17 and isinstance(picked[17], str) and picked[17][:1] == "[":
             self.loaded_map = loaded_map.clean(json.loads(picked[17]))
+        if len(picked) > 18 and isinstance(picked[18], rebar_edit.Rebar):
+            self.rebar = picked[18]
         self._edit_key = self._scrub = None
         self.sync_panel()
         self.shapes_changed()

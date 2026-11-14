@@ -45,6 +45,7 @@ from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts
 from notes.text import TEXT_DEFAULTS, clean_text, rejoin_old, tag_texts
 from notes import engine  # (engine.edo_lanes: 31-EDO "Overlaps keep their pitch")
 from notes import loaded_map  # (a loaded MIDI's ticks as shown after Change visual time signature)
+from window import rebar_edit  # (its editable changes, saved with the project)
 from files import clipboard, notes_clip
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
                                conductor_clip, dms_path, get_from_clipboard, put_on_clipboard, read_notes,
@@ -348,6 +349,7 @@ class ProjectFiles:
             **({"file_gone": self.file_gone} if self.file_gone else {}),  # (the loaded tracks removed)
             **({"file_props": {str(n): v for n, v in self.file_props.items()}} if self.file_props else {}),
             **({"loaded_map": self.loaded_map} if self.loaded_map else {}),  # (its ticks as shown: time signatures)
+            **({"rebar": rebar_edit.saved(self)} if rebar_edit.saved(self) else {}),  # (editable time signatures)
             # (the loaded MIDI's tracks shapes are drawn into: their name + channel, for opening without it)
             **({"file_tracks": {str(n): self.file_tracks()[n] for n in self.file_into()}} if self.file_into() else {}),
             "shapes": self.shapes, "view": self.roll.view_state(), "playhead": self.playhead,
@@ -536,6 +538,7 @@ class ProjectFiles:
         self.file_gone = clean_file_gone(data.get("file_gone"))
         self.file_props = clean_file_props(data.get("file_props"))
         self.loaded_map = loaded_map.clean(data.get("loaded_map"))
+        self.rebar = rebar_edit.loaded(data.get("rebar"))
         nxt =data.get("own_next")  # (ids never used twice in a project: own_tracks.new_id)
         self.own_next = new_id(own, nxt if type(nxt) is int and 0 <= nxt < ID_MOST else 0)
         if not quiet:  # (another project: copies from the one before aren't laid on these tracks)
@@ -1063,6 +1066,7 @@ class ProjectFiles:
         data.pop("file_gone", None)
         data.pop("file_props", None)
         data.pop("loaded_map", None)
+        data.pop("rebar", None)
         if lm.keys > 128:
             data["keys"] = KEYS[1]
         self.load_file(None, quiet=True, text=json.dumps(data))
@@ -1220,7 +1224,8 @@ class ProjectFiles:
                 + ([{"file_order": self.file_order}] if self.file_order else [])
                 + ([{"file_gone": self.file_gone}] if self.file_gone else [])
                 + ([{"file_props": {str(n): v for n, v in self.file_props.items()}}] if self.file_props else [])
-                + ([{"loaded_map": self.loaded_map}] if self.loaded_map else []))
+                + ([{"loaded_map": self.loaded_map}] if self.loaded_map else [])
+                + ([{"rebar": rebar_edit.saved(self)}] if rebar_edit.saved(self) else []))
         # (= json.dumps of the whole list; the tempo line's text kept in pieces: tempo_text)
         return "[" + ", ".join([json.dumps(self.shapes), tempo_text(self.tempo) if self.tempo != empty_tempo()
                                 else "null"] + [json.dumps(x) for x in rest]) + "]"

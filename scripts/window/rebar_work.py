@@ -545,14 +545,20 @@ def spots_of(app, pl, old_r):
     return out
 
 
-def apply(app, pl, name, dry=False, dense=True, between=False):
+def apply(app, pl, name, dry=False, dense=True, between=False, push=True):
     """The change done on the project in one undo step: {"ok": True, "plain": shapes made plain notes by the safety
-    net, "cut": shapes cut at the edges, "off": shapes whose notes still differ} or {"why", "at"} (nothing changed).
-    dry: a test run (OK first, user 2026-11-12) taken back from its OWN copy, never through undo / redo, so Cancel
-    leaves the History, Ctrl+Y, a half-drawn shape and the tool windows' tries exactly as they were. dense /
-    between: "Short BPM changes for exact timing" for notes under a tick apart / landing between ticks."""
+    net, "cut": shapes cut at the edges, "off": shapes whose notes still differ, "id": its record (rebar_edit)} or
+    {"why", "at"} (nothing changed). dry: a test run (OK first, user 2026-11-12) taken back from its OWN copy, never
+    through undo / redo, so Cancel leaves the History, Ctrl+Y, a half-drawn shape and the tool windows' tries exactly
+    as they were. dense / between: "Short BPM changes for exact timing" for notes under a tick apart / landing between
+    ticks. push=False: the undo step is the caller's (rebar_edit: an edit = taken back + made again, one step).
+    Bars another editable change is on: refused (user 2026-11-14: two never overlap)."""
+    from window import rebar_edit
+    clash = rebar_edit.overlap(app, pl)
+    if clash:
+        return clash
     if not dry:
-        return _apply(app, pl, name, False, dense, between)
+        return _apply(app, pl, name, False, dense, between, push)
     kept = (list(app.shapes), json.dumps(app.tempo))
     try:
         return _apply(app, pl, name, True, dense, between)
@@ -566,7 +572,8 @@ def apply(app, pl, name, dry=False, dense=True, between=False):
             app.shapes_changed(now=True)
 
 
-def _apply(app, pl, name, dry, dense, between=False):
+def _apply(app, pl, name, dry, dense, between=False, push=True):
+    old_tempo = dict(app.tempo)  # (its lists as they are: replaced below, never changed in place; the record's)
     new_tempo = R.tempo_of(app.tempo, app.tempo_pane.base(), pl, app.ppq)
     if "why" in new_tempo:
         return new_tempo
@@ -612,12 +619,15 @@ def _apply(app, pl, name, dry, dense, between=False):
         track_tempo.visual(app)
         app.roll.end_typing()
         app.roll.cancel_draft()  # (a half-drawn shape goes, as with undo: the shapes change under it)
-        app.push_undo(name=name)
+        if push:
+            app.push_undo(name=name)
+    old_shapes, old_deleted = list(app.shapes), app.deleted
+    if not dry:
         if new_map is not app.loaded_map:
             app.loaded_map = new_map  # (sync_extract, from shapes_changed below, reads the boxes again under it)
         if app.deleted:  # (Delete loaded notes' boxes: on the same notes)
             app.deleted = moved_groups(app.deleted, pl, ppq, link)
-    shapes, extra, cut = list(app.shapes), [], 0
+    shapes, extra, cut, owners = list(app.shapes), [], 0, []
     was_plain = {i: not becomes_plain(sh) for i, sh in enumerate(app.shapes)}
     for i, k in kinds.items():
         sh = app.shapes[i]
@@ -629,6 +639,7 @@ def _apply(app, pl, name, dry, dense, between=False):
             pieces = cut_mapped(bases[i], pl, ppq, whole=bases[i].get("rebar_whole", False))
             shapes[i] = pieces[0]
             extra += pieces[1:]
+            owners += [i] * (len(pieces) - 1)
             cut += 1
     app.shapes[:] = shapes + extra
     if not dry:  # (Extract boxes: on the same loaded notes; a test run changes no notes by them)
@@ -655,6 +666,7 @@ def _apply(app, pl, name, dry, dense, between=False):
                     pieces = [with_boxes_moved(p, pl, ppq, link) for p in pieces]
                 app.shapes[i] = pieces[0]
                 more += pieces[1:]
+                owners += [i] * (len(pieces) - 1)
                 plain_n += 1
                 kinds.reasons[i] = "net"
         app.shapes.extend(more)
@@ -672,6 +684,11 @@ def _apply(app, pl, name, dry, dense, between=False):
            "loaded": link is not None and len(new_map) > len(was_map)}
     if dry:  # (a test run: put back by apply)
         return got
+    from window import rebar_edit  # (kept so it can be taken back / edited / moved later, user 2026-11-14)
+    added = link if link is not None and len(new_map) > len(was_map) else None
+    cut_from = {i: b for i, b in bases.items() if b is not None and (kinds[i] == "cut" or i in back)}
+    got["id"] = rebar_edit.record(app, pl, kinds, old_shapes, owners, cut_from, old_tempo, added, old_deleted, dense,
+                                  between)
     app.playhead = max(0.0, R.map_beat(pl, app.playhead))  # (on the same music)
     app.roll.show_playhead()
     app.tempo_changed()
