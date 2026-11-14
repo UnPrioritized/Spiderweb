@@ -2028,7 +2028,7 @@
  "updates.ok": "OK",
  "backup.title": "Settings backed up",
  "backup.head": "Older settings found",
- "backup.text": "Settings from an older Spiderweb ({old}) were found. A backup of them was made before this version uses them, in case you want them back:\n\n{folder}\n\nYour settings, palettes, saved shapes and presets are in it. Your projects and autosave are not touched.",
+ "backup.text": "Settings from an older Spiderweb ({old}) were found. A backup of them was packed into one zip file before this version uses them, in case you want them back:\n\n{folder}\n\nYour settings, palettes, saved shapes and presets are in it. Your projects and autosave are not touched.",
  "backup.open_folder": "Open folder",
  "backup.ok": "OK",
  "updates.popup_title": "Update available",

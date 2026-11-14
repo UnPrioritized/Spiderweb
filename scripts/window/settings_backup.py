@@ -1,17 +1,19 @@
-"""Settings backup on update (user 2026-11-08): the first start of a new version (not the very first start) copies
-the old version's app settings and the user's own saved presets into user/backups/<old version>-<its commit>/,
-before this version saves anything over them, and says so in a small window of its own (then What's new opens).
-Projects, autosaves, logs and saved MIDI indexes are left alone. Every backup is kept (user's pick: never deleted).
-Copies only (shutil), nothing is moved. A copy that fails is logged; with nothing copied, nothing is said."""
+"""Settings backup on update (user 2026-11-08): the first start of a new version (not the very first start) packs
+the old version's app settings and the user's own saved presets into ONE compressed zip,
+user/backups/<old version>-<its commit>.zip (user 2026-11-14; was a copied folder), before this version saves
+anything over them, and says so in a small window of its own (then What's new opens). Projects, autosaves, logs and
+saved MIDI indexes are left alone. Every backup is kept (user's pick: never deleted). Read only, nothing is moved.
+A file that can't be read is logged; with nothing packed, nothing is said."""
 
+import io
 import os
 import re
-import shutil
 import sys
 import tkinter as tk
+import zipfile
 from tkinter import ttk
 
-from files import settings, system
+from files import safefile, settings, system
 from files.errors import write_log
 from files.lang import tr
 from window import look
@@ -41,32 +43,52 @@ def label(version, build=""):
     return f"{name}-{commit}" if commit else name
 
 
+def _files(name, path):
+    """(name inside the zip, path) of a source file, or of every file inside a source folder."""
+    if os.path.isfile(path):
+        return [(name, path)]
+    found = []
+    for root, dirs, files in os.walk(path):
+        dirs.sort()
+        for f in sorted(files):
+            full = os.path.join(root, f)
+            found.append(("/".join([name] + os.path.relpath(full, path).split(os.sep)), full))
+    return found
+
+
 def make(version, build=""):
-    """Copies them into a new folder (" (2)" ... when the name is taken). Returns the folder, None when nothing was
-    copied (nothing there, or every copy failed: logged)."""
+    """Packs them into one compressed zip (user 2026-11-14; " (2)" ... when the name is taken, by an older backup
+    folder too). Returns the zip, None when nothing was packed (nothing there, or every read failed: logged)."""
     base = os.path.join(folder(), label(version, build))
     target, n = base, 1
-    while os.path.exists(target):
+    while os.path.exists(target) or os.path.exists(target + ".zip"):
         n += 1
         target = f"{base} ({n})"
-    copied = 0
-    for name, path in _sources():
-        try:
-            if os.path.isdir(path):
-                if os.listdir(path):
-                    shutil.copytree(path, os.path.join(target, name))
-                    copied += 1
-            elif os.path.isfile(path):
-                os.makedirs(target, exist_ok=True)
-                shutil.copy2(path, os.path.join(target, name))
-                copied += 1
-        except OSError:
-            write_log(*sys.exc_info(), "(backing up the older version's settings)")
-    return target if copied else None
+    target += ".zip"
+    data, packed = io.BytesIO(), 0
+    with zipfile.ZipFile(data, "w", zipfile.ZIP_DEFLATED, strict_timestamps=False) as z:
+        for name, path in _sources():
+            for inside, full in (_files(name, path) if os.path.exists(path) else ()):
+                try:
+                    with open(full, "rb") as f:
+                        z.writestr(zipfile.ZipInfo.from_file(full, inside, strict_timestamps=False), f.read(),
+                                   zipfile.ZIP_DEFLATED)
+                    packed += 1
+                except OSError:
+                    write_log(*sys.exc_info(), "(backing up the older version's settings)")
+    if not packed:
+        return None
+    try:
+        os.makedirs(folder(), exist_ok=True)
+        safefile.write_bytes(target, data.getvalue())
+    except OSError:
+        write_log(*sys.exc_info(), "(backing up the older version's settings)")
+        return None
+    return target
 
 
 def shown_path(path):
-    """The backup folder as the user knows it: from the user folder on ("user/backups/1.7.2-5ec9217")."""
+    """The backup as the user knows it: from the user folder on ("user/backups/1.7.2-5ec9217.zip")."""
     user = os.path.dirname(os.path.dirname(path))
     try:
         return os.path.relpath(path, os.path.dirname(user))
@@ -100,7 +122,7 @@ class BackupNote(tk.Toplevel):
         on_top(self, app, "settings_backup")
 
     def open_folder(self):
-        system.open_path(self.path)
+        system.show_file(self.path)
 
     def close(self):
         then, self.then = self.then, None
