@@ -37,7 +37,7 @@ from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES
 from notes.paths import rows_up_to
 from files.own_tracks import FILE0, HAND, file_order, key_track, free_channel, full_plan, into_ids, new_id, with_port
 from notes.loaded import port_numbers
-from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, inside_out, turned_curve
+from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, funnel_strokes, inside_out, turned_curve
 from notes.fx import (flip_shape, flipped as fx_flipped, glue_after, tidy_glue, turn_shape, with_turn as fx_turned,
                       with_velocity)
 from notes.gateflip import (all_flipped, colours_back, offered as gate_offered,
@@ -1534,16 +1534,47 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         the most is asked about."""
         if sh["kind"] not in ("custom", "funnel") or sh.get("merge") or trial.get("hz"):
             return True
-        beats = [p[0] for p in trial["pts"]]
-        keys = [p[1] for p in trial["pts"]]
-        gate = min(sh.get("gate", 1), (sh.get("range") or {}).get("to", math.inf))
-        most = (int((max(beats) - min(beats)) * self.ppq / max(1, round(gate * self.ppq))) + 3) * (
-            int(max(keys) - min(keys)) + 2) * 2
+        most = self.notes_most(trial)
         if most <= big_ask.BIG:
             return True
         if most > 50 * big_ask.BIG:
             return self.ask_notes(most)
         return self.note_count(trial) <= self.note_count(sh) or self.confirm_big([trial])
+
+    def notes_most(self, sh):
+        """The most notes a spam custom shape / funnel could make (quick: its reach in time and keys over its gate).
+        A funnel's curves count too: they make notes past the wall (user 2026-11-14), so they can reach far past its
+        points (hunt: 80 M+ notes from one handle drag)."""
+        pts = [p for s in funnel_strokes(sh) for p in s] if sh["kind"] == "funnel" else sh["pts"]
+        beats, keys = [p[0] for p in pts], [p[1] for p in pts]
+        gate = min(sh.get("gate", 1), (sh.get("range") or {}).get("to", math.inf))
+        return (int((max(beats) - min(beats)) * self.ppq / max(1, round(gate * self.ppq))) + 3) * (
+            int(max(keys) - min(keys)) + 2) * 2
+
+    def too_many_to_drag(self, sh, held):
+        """A funnel handle / point dragged so far it may make more than big_ask's 1 M notes (more than when it was
+        pressed): True = only its lines follow, no notes are made until the let go asks (pianoroll.on_release).
+        held = {"most", "count"} at the press (count worked out once, when first needed)."""
+        if sh["kind"] != "funnel" or sh.get("hz") or sh["fill"] != "spam":  # (long notes: one a key stretch)
+            return False
+        most = self.notes_most(sh)
+        if most <= max(big_ask.BIG, held["most"]):
+            return False
+        if most > 50 * big_ask.BIG:
+            return True
+        if held["count"] is None:
+            held["count"] = self.note_count(held["before"]) or 0
+        return (self.note_count(sh) or 0) > max(big_ask.BIG, held["count"])
+
+    def lines_only(self):
+        """A drag step whose notes are too many to make while dragging (too_many_to_drag): the lines and point boxes
+        follow, the notes wait for the let go."""
+        self.sync_points()
+        if self._late_notes:
+            self.after_cancel(self._late_notes)
+            self._late_notes = None
+        self.notes_late = True
+        self.roll.request_redraw()
 
     def ppq_ok(self):
         try:

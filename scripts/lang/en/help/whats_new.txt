@@ -9,6 +9,8 @@ What's new:
 
 • Fixed: notes kept past the keys (Settings → Piano roll → Keep notes made there) were all drawn in one colour. They now show the shape's own colours, faded, and so do the faint copies of wrapped notes. Shapes reaching past the keys are also quicker to move and change. See [page:offrange|Notes past the keys].
 
+• Fixed: funnels with bent curves. A funnel whose curves reach far back no longer freezes the program; the gate Range now runs to where the line meets the wall, so a leaning wall or a funnel turned on its side keeps a smooth Range; the wall can't be dragged so flat that the curves fly far away; and dragging a curve past the wall asks first when it would make more than a million notes. See [page:funnel|Funnel].
+
 • Fixed: Kestrel (GPU) could freeze when you switched MIDI outs quickly, or when several things used the graphics card at once (Rendered ahead, the Hz bass preview, playback, changing soundfonts). Everything that uses the graphics card now takes turns, one at a time.
 
 • Changed: the settings backup made when a new version first starts is now one zip file (in the backups folder inside the user folder) instead of a copied folder. Open folder shows the zip. See [page:about|About].

@@ -32,6 +32,7 @@ from roll.roll_funnel import FLAT, FunnelEditing
 from roll.roll_gliss import GlissEditing
 from roll.roll_hz import HzStart
 from window import look
+from window.big_ask import BIG
 from window.hz_window import open_hz
 from window.load_extract import can_extract, delete_loaded, stop_extract
 from window.widgets import Tooltip
@@ -1296,6 +1297,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                     self.box_kept = (kept, set(app.sels))
                 app.push_undo(name=tr("pianoroll.drag_a_point"))
                 self.drag = ("handle", i)
+                sh = app.selected()  # (a funnel: how many notes it could make now, for the let go's question)
+                self.held_big = ({"before": copy.deepcopy(sh), "most": app.notes_most(sh), "count": None}
+                                 if sh and sh["kind"] == "funnel" else None)
                 if isinstance(i, tuple) and i[0] == "ripple":  # (a Ripples source's centre point: picked too)
                     app.pick_source(i[1])
                 return
@@ -1551,7 +1555,11 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             if self.unmoved(step):
                 return
             if self.stayed_inside(step):
-                self.app.shape_edited()
+                held = getattr(self, "held_big", None)
+                if held and self.app.too_many_to_drag(self.app.selected(), held):
+                    self.app.lines_only()  # (past 1 M notes: made only once the let go's question says yes)
+                else:
+                    self.app.shape_edited()
         elif kind == "move":
             if self.box_moving:  # (past the edge the view scrolls: box_scroll)
                 self.box_mouse = (e.x, e.y, e.state)
@@ -1754,6 +1762,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.grid_later = None
             if self.stayed_inside(step):  # (the snap would pass an edge: it stays where it stopped)
                 self.app.shape_edited()
+        if kind == "handle" and getattr(self, "held_big", None):
+            self.big_drag_asked()
         self.app.catch_up_notes()
         if kind == "sustop":
             self.stop_release(e)
@@ -1919,6 +1929,19 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.draw_select_box()  # (the box stays, see kept_box)
         if self.box_kept and getattr(self.app, "loaded", None) is not None:  # (the red outline round the loaded notes
             self.request_redraw()  # in it is read only once no drag is held: nothing else redrew, user 2026-10-26)
+
+    def big_drag_asked(self):
+        """A funnel's handle / point let go: past 1 M notes (more than before the drag) it's asked first, like a typed
+        point (App.point_ok; hunt 2026-11-14: one handle drag made 80 M+ notes); No = the funnel as it was."""
+        held, self.held_big = self.held_big, None
+        sh = self.app.selected()
+        if sh is None or sh["kind"] != "funnel" or self.app.notes_most(sh) <= max(BIG, held["most"]):
+            return
+        if not self.app.point_ok(held["before"], sh):
+            sh.clear()
+            sh.update(copy.deepcopy(held["before"]))
+            self.app.sync_points()
+            self.app.notes_late = True  # (made again below, catch_up_notes)
 
     def on_double(self, e):
         # Tk turns a quick second click into a double-click; only polylines use it, everything else gets a normal click
