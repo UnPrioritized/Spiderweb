@@ -14,7 +14,7 @@ from notes import loaded_map
 from notes.loaded import extract_groups
 from notes.engine import BIG_MARK, BIG_TEXT, with_big
 from notes.merge import merge_parts
-from notes.tempo import changed as tempo_edited, clean_tempo, tempo_text
+from notes.tempo import TempoSnap, changed as tempo_edited, snap_line, tempo_snap
 from window import look
 from window.widgets import ListTip, Tooltip, fit_screen, placed
 
@@ -190,7 +190,7 @@ class HistoryPanel:
         before = as_state(before, self.shapes)
         tempo_edited()
         if (self.undo_stack and self.undo_stack[-1][0] == before and not self.redo_stack
-                and self.step_tempo(self.undo_stack[-1]) == tempo_text(self.tempo)
+                and self.step_tempo(self.undo_stack[-1]) == tempo_snap(self.tempo)
                 and self.step_tracks(self.undo_stack[-1]) == json.dumps(self.own_tracks)
                 and self.step_deleted(self.undo_stack[-1]) == json.dumps(self.deleted)
                 and self.step_file_order(self.undo_stack[-1]) == json.dumps(self.file_order)
@@ -367,7 +367,7 @@ class HistoryPanel:
         pane = getattr(self, "tempo_pane", None)
         tempo_edited()  # (a step is saved as the line may change, before tempo_changed says so: read it again)
         return (sorted(self.sels), self.sel, boxes and list(boxes), self.hz_window and self.hz_window.sel_state(),
-                self.stroke, list(self.parts), self.part_main, self.ripple_pick, tempo_text(self.tempo),
+                self.stroke, list(self.parts), self.part_main, self.ripple_pick, tempo_snap(self.tempo),
                 pane.pick_state() if pane else "{}", json.dumps(self.own_tracks), json.dumps(self.deleted),
                 json.dumps(self.file_order), json.dumps(self.file_gone), json.dumps(self.file_props),
                 # (the track list's Select boxes: back with the notes they held, hunt 2026-10-26)
@@ -382,9 +382,9 @@ class HistoryPanel:
             self.loaded_map)
 
     def step_tempo(self, step):
-        """The tempo line (JSON) an undo step kept; the one now for a step made without it."""
+        """The tempo line (JSON, or a big line's TempoSnap) an undo step kept; the one now for a step made without it."""
         sel = step[2]
-        return sel[8] if len(sel) > 8 and isinstance(sel[8], str) else tempo_text(self.tempo)
+        return sel[8] if len(sel) > 8 and isinstance(sel[8], (str, TempoSnap)) else tempo_snap(self.tempo)
 
     def step_tracks(self, step):
         """The own tracks (JSON) an undo step kept; the ones now for a step made without them."""
@@ -575,8 +575,8 @@ class HistoryPanel:
             self.stroke, self.parts, self.part_main = picked[4], set(picked[5]), picked[6]
             if len(picked) > 7:  # (the Ripples source the undone change was made on, hunt)
                 self.ripple_pick = picked[7]
-        if len(picked) > 8 and isinstance(picked[8], str):
-            self.tempo = clean_tempo(json.loads(picked[8]))
+        if len(picked) > 8 and isinstance(picked[8], (str, TempoSnap)):
+            self.tempo = snap_line(picked[8])
             if len(picked) > 9 and isinstance(picked[9], str) and picked[9].startswith("{"):
                 self.tempo_pane.restore_pick(picked[9])  # (its Select box and what was picked, user)
             self.tempo_box.forget_typing()

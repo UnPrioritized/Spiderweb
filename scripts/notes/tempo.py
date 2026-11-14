@@ -136,13 +136,27 @@ def tempo_key(tempo):
     if tempo is None or tempo is not _text["tempo"]:
         return _mkey(tempo)
     if _text["kmade"] != _text["ver"]:
-        _text["key"], _text["kmade"] = _mkey(tempo), _text["ver"]
-    elif _CHECK and _mkey(tempo) != _text["key"]:
-        import sys
-        import traceback
-        sys.stderr.write("TEMPO STALE\n" + "".join(traceback.format_stack(limit=8)[:-1]))
-        _text["key"] = _mkey(tempo)
+        _text["key"], _text["kmade"] = _VKey(_text["ver"], _mkey(tempo) if _CHECK else None), _text["ver"]
+    elif _CHECK and _mkey(tempo) != _text["key"].check:
+        _stale("TEMPO STALE")
+        _text["key"] = _VKey(_text["ver"], _mkey(tempo))
+        _text["key"].ver = ("stale", id(_text["key"]))  # (never the same key as what was remembered before)
     return _text["key"]
+
+
+class _VKey:
+    """The watched line's cache key: its change number (2026-11-14: its bytes took ~30 ms per change at 190,000
+    points). check = its bytes in tests (SPIDERWEB_TEMPO_CHECK) to catch an edit that didn't say so."""
+    __slots__ = ("ver", "check")
+
+    def __init__(self, ver, check):
+        self.ver, self.check = ver, check
+
+    def __eq__(self, other):
+        return isinstance(other, _VKey) and other.ver == self.ver
+
+    def __hash__(self):
+        return hash(("tempo line", self.ver))
 
 
 _known_t = threading.local()  # (per thread: a background read never sees another thread's line)
@@ -178,7 +192,7 @@ def key_copy(key, tempo):
     """A copy of tempo as its key (tempo_key) reads back: what's remembered never changes with the line."""
     if isinstance(key, bytes):
         return marshal.loads(key)
-    return json.loads(key) if isinstance(key, str) else held_copy(tempo)
+    return json.loads(key) if isinstance(key, str) else held_copy(tempo)  # (the watched / held line: now)
 
 
 def tempo_text(tempo):
@@ -191,16 +205,141 @@ def tempo_text(tempo):
     if tempo is not _text["tempo"] or tempo is None:
         return json.dumps(tempo)
     if _text["made"] != _text["ver"]:
-        text = json.dumps(tempo)
+        snap = _snap_of(tempo)
+        text = snap.text() if snap is not None else json.dumps(tempo)
+        if _CHECK and snap is not None and text != json.dumps(tempo):
+            _stale("TEMPO PIECES WRONG")
+            text = json.dumps(tempo)
         if text != _text["text"]:  # (the same text = the same string kept: undo steps share it)
             _text["text"] = text
         _text["made"] = _text["ver"]
     elif _CHECK and json.dumps(tempo) != _text["text"]:
-        import sys
-        import traceback
-        sys.stderr.write("TEMPO STALE\n" + "".join(traceback.format_stack(limit=8)[:-1]))
+        _stale("TEMPO STALE")
         _text["text"] = json.dumps(tempo)
     return _text["text"]
+
+
+def _stale(what):
+    """SPIDERWEB_TEMPO_CHECK (tests): a remembered tempo result found wrong; =1 says it on stderr, a file path
+    adds it to that file."""
+    import sys
+    import traceback
+    text = what + "\n" + "".join(traceback.format_stack(limit=8)[:-2])
+    where = os.environ.get("SPIDERWEB_TEMPO_CHECK", "")
+    if where not in ("", "1"):
+        with open(where, "a", encoding="utf-8") as f:
+            f.write(text)
+    sys.stderr.write(text)
+
+
+# A BIG watched line's text in PIECES of PIECE points (2026-11-14, 190,000 short BPM changes: its 12.7 MB json took
+# ~200 ms for every undo step, save and "save first?" check, and every step kept a whole new copy): a piece whose
+# points are as they were keeps its text (one BPM changed = one piece written again); undo steps keep the pieces
+# (TempoSnap), shared with the steps before.
+PIECE = 4096
+_pieces = {"line": None, "ver": -1, "parts": [], "snap": None}
+
+
+class TempoSnap:
+    """An undo step's copy of a big tempo line: its json text as pieces (head = (key, its json or None for the
+    points), texts = the points' pieces, shared string objects). Equal to another copy / its text when the texts
+    are."""
+    __slots__ = ("head", "texts")
+
+    def __init__(self, head, texts):
+        self.head, self.texts = head, texts
+
+    def text(self):
+        """The line's json text, exactly json.dumps(line)."""
+        pts = "[" + ", ".join(self.texts) + "]"
+        return "{" + ", ".join(f"{json.dumps(k)}: {pts if v is None else v}" for k, v in self.head) + "}"
+
+    def line(self, known=None):
+        """(The line read back = json.loads(text()), each piece's points): a piece whose text is one of known's
+        {id(text): (its points as json reads them, text)} is THOSE points, not read again: only for clean_tempo,
+        which makes its own (never change them)."""
+        out, pieces = {}, []
+        for k, v in self.head:
+            out[k] = v if v is None else json.loads(v)
+        if "points" in out:
+            pts = []
+            for t in self.texts:
+                got = known.get(id(t)) if known else None
+                c = got[0] if got is not None and got[1] is t else json.loads("[" + t + "]")
+                pieces.append(c)
+                pts += c
+            out["points"] = pts
+        return out, pieces
+
+    def __eq__(self, other):
+        if isinstance(other, TempoSnap):
+            return self.head == other.head and self.texts == other.texts
+        if isinstance(other, str):
+            return self.text() == other
+        return NotImplemented
+
+    __hash__ = None
+
+
+def _snap_of(tempo):
+    """The watched line as a TempoSnap (made once per change, pieces as they were kept), None for a small line /
+    one these pieces can't hold (then plain json)."""
+    if _pieces["line"] is tempo and _pieces["ver"] == _text["ver"]:
+        return _pieces["snap"]
+    pts = tempo.get("points") if isinstance(tempo, dict) else None
+    if not isinstance(pts, list) or len(pts) < BIG_LINE or not all(type(k) is str for k in tempo):
+        return None
+    old = _pieces["parts"] if _pieces["line"] is tempo else []
+    parts = []
+    try:
+        for j, c in enumerate(range(0, len(pts), PIECE)):
+            sl = pts[c:c + PIECE]
+            if j < len(old) and old[j][0] == sl:
+                parts.append(old[j])
+            else:  # (its text + the points as json reads them back: to tell later whether it changed, and undo
+                text = json.dumps(sl)[1:-1]  # copies them instead of reading the text)
+                parts.append((json.loads("[" + text + "]"), text))
+    except (ValueError, TypeError):  # (a number json can't write)
+        return None
+    head = tuple((k, None if k == "points" else json.dumps(v)) for k, v in tempo.items())
+    snap = TempoSnap(head, tuple(t for _, t in parts))
+    was = _pieces["snap"]
+    if was is not None and _pieces["line"] is tempo and was == snap:
+        snap = was  # (the same line: the same copy, steps share it)
+    _pieces.update(line=tempo, ver=_text["ver"], parts=parts, snap=snap)
+    return snap
+
+
+def tempo_snap(tempo):
+    """What an undo step keeps of the tempo line: tempo_text, or for a big watched line its TempoSnap (pieces shared
+    with the steps before)."""
+    if tempo is not None and tempo is _text["tempo"] and tempo is not _held["tempo"]:
+        snap = _snap_of(tempo)
+        if snap is not None:
+            if _CHECK and snap.text() != json.dumps(tempo):
+                _stale("TEMPO PIECES WRONG")
+                return json.dumps(tempo)
+            return snap
+    return tempo_text(tempo)
+
+
+def snap_text(snap):
+    """An undo step's tempo copy (tempo_snap) as json text."""
+    return snap.text() if isinstance(snap, TempoSnap) else snap
+
+
+def snap_line(snap):
+    """An undo step's tempo copy (tempo_snap: text or TempoSnap) read back, cleaned: clean_tempo(json.loads(text)).
+    A TempoSnap's pieces the line now has are copied, not read; when cleaning changed nothing, the new line starts
+    with the copy's pieces (its next undo step writes only what changed)."""
+    if not isinstance(snap, TempoSnap):
+        return clean_tempo(json.loads(snap))
+    known = {id(t): (c, t) for c, t in _pieces["parts"]}
+    data, pieces = snap.line(known)
+    line = clean_tempo(data)  # (new points: the pieces stay as they were)
+    if line.get("points") == data.get("points"):
+        _pieces.update(line=line, ver=-1, parts=list(zip(pieces, snap.texts)), snap=snap)
+    return line
 
 
 def clamp_bpm(v):
@@ -256,43 +395,169 @@ def clean_tempo(data):
     return out
 
 
+def _clean_plain(raw, inner):
+    """_clean_points for a big list where EVERY point is an ordinary held 7-field point with a straight bend (what
+    190,000 short BPM changes are): the checks done on whole columns (the 7 columns taken apart once). Gives the
+    same list the point-by-point way does; None the moment anything is not ordinary (a curve, a text, a point out of
+    order / a hair from the next / on one beat three times, a number out of range...): then _clean_mixed."""
+    if set(map(type, raw)) != {list} or set(map(len, raw)) != {7}:
+        return None
+    cb, cv, ck, ct, cs, cp, cd = zip(*raw)
+    num = {int, float}
+    if not set(map(type, cb)) <= num or not set(map(type, cv)) <= num or set(ck) != {"hold"} or set(ct) != {""} \
+            or not set(cs) <= set(SCALES) or set(map(type, cp)) != {bool} or set(map(tuple, cd)) != {tuple(BEND)}:
+        return None
+    try:
+        b, v = np.array(cb, float), np.array(cv, float)
+    except (OverflowError, ValueError, TypeError):
+        return None
+    if not (np.isfinite(b).all() and np.isfinite(v).all()) or b.min() < 0 or b.max() > FAR or v.min() <= 0:
+        return None
+    d = np.diff(b)
+    if not bool(((d == 0) | (d > 2e-9)).all()) or (len(d) > 1 and bool(((d[1:] == 0) & (d[:-1] == 0)).any())):
+        return None  # (out of order, a pair a hair apart, or three on a beat: the careful way)
+    vv = np.clip(v, MIN_BPM, MAX_BPM).tolist()
+    keep = [False] * len(cp) if inner else list(cp)
+    # (the collector left on: switched off while making 190,000 lists, it paused ~0.2 s at some later moment)
+    pts = [[x, y, "hold", "", s, k, [0.5, 0.5]] for x, y, s, k in zip(b.tolist(), vv, cs, keep)]
+    if bool((d == 0).any()):  # (a jump's two points: drop_loose looks at them)
+        drop_loose(pts)
+    return pts
+
+
+_NUMS = (int, float)
+
+
+def _plain_row(p):
+    """An ordinary held 7-field point with a straight bend and plain numbers (_clean_mixed reads these in bulk)."""
+    return (type(p) is list and len(p) == 7 and type(p[0]) in _NUMS and type(p[1]) in _NUMS and p[2] == "hold"
+            and p[3] == "" and p[4] in SCALES and p[6] == BEND and type(p[6][0]) is float and type(p[6][1]) is float)
+
+
+def _clean_mixed(raw, inner):
+    """_clean_points for a big list with SOME unusual points (a few ramps, Keep timing parts, a text, points out of
+    order or on one beat): the ordinary held ones read in bulk, only the others point by point (_clean_one), then the
+    same rules as the point-by-point way (at most two a beat in the file's order, sorted keeping that order, a pair
+    put on exactly one beat, drop_loose): the same list. None = can't read the numbers in bulk (point by point)."""
+    n = len(raw)
+    flags = list(map(_plain_row, raw))
+    odd = [i for i, f in enumerate(flags) if not f]
+    if not odd:
+        rows = raw
+        idx = np.arange(n)
+    else:
+        idx = np.flatnonzero(np.fromiter(flags, bool, n))
+        rows = [raw[i] for i in idx.tolist()]
+    try:
+        b = np.fromiter((p[0] for p in rows), float, len(rows))
+        v = np.fromiter((p[1] for p in rows), float, len(rows))
+    except (OverflowError, ValueError, TypeError):
+        return None
+    ok = np.isfinite(b) & np.isfinite(v) & (b >= 0) & (b <= FAR) & (v > 0)
+    made = {}  # (an unusual point's file index -> its cleaned point)
+    for i in odd:
+        pt = _clean_one(raw[i], inner)
+        if pt is not None:
+            made[i] = pt
+    at = np.concatenate([idx[ok], np.array(sorted(made), np.int64)])  # (every kept point's place in the file)
+    beats = np.concatenate([b[ok], np.array([made[i][0] for i in sorted(made)], float)])
+    vals = np.concatenate([np.clip(v[ok], MIN_BPM, MAX_BPM), np.zeros(len(made))])  # (the plain ones' BPMs)
+    order = np.lexsort((at, beats))  # (by beat, then the file's order: what a stable sort of the file's list gives)
+    at, beats, vals = at[order], beats[order], vals[order]
+    near = np.flatnonzero(np.diff(beats) <= 2e-9)  # (only points this close can share round(beat, 9))
+    drop, snap = set(), {}
+    if len(near):
+        groups, cur = [], [int(near[0]), int(near[0]) + 1]
+        for k in near[1:].tolist():
+            if k <= cur[-1]:
+                cur.append(k + 1)
+            else:
+                groups.append(cur)
+                cur = [k, k + 1]
+        groups.append(cur)
+        for g in groups:
+            by = {}
+            for k in g:
+                by.setdefault(round(float(beats[k]), 9), []).append(k)
+            for ks in by.values():
+                ks.sort(key=lambda k: at[k])  # (the file's first two on a beat stay)
+                drop.update(ks[2:])
+            left = [k for k in g if k not in drop]
+            for k0, k1 in zip(left, left[1:]):  # (a pair on exactly one beat, not a hair apart)
+                if round(float(beats[k0]), 9) == round(float(beats[k1]), 9):
+                    snap[k1] = k0
+    keep_rows = [k for k in range(len(at)) if k not in drop] if drop else range(len(at))
+    bl, al, vl = beats.tolist(), at.tolist(), vals.tolist()
+    for k1, k0 in sorted(snap.items()):
+        bl[k1] = bl[k0]
+    pts = []
+    for k in keep_rows:
+        i = al[k]
+        pt = made.get(i)
+        if pt is None:
+            p = raw[i]
+            pt = [bl[k], vl[k], "hold", "", p[4], p[5] is True and not inner, [0.5, 0.5]]
+        else:
+            pt[0] = bl[k]
+        pts.append(pt)
+    if len(pts) > 1:
+        kb = np.fromiter((p[0] for p in pts), float, len(pts))
+        if bool((kb[1:] == kb[:-1]).any()):  # (a jump's two points: drop_loose looks at them)
+            drop_loose(pts)
+    return pts
+
+
+def _clean_one(p, inner):
+    """One point from a file / undo step cleaned, None when it's broken (left out: the rest kept)."""
+    if not isinstance(p, list):
+        return None
+    try:
+        b, v = float(p[0]), float(p[1])
+        kind = p[2] if len(p) > 2 and isinstance(p[2], str) else "hold"
+        bend = list(BEND) if kind != "s" else [0.5, 0.0]  # (an S-curve from before: much like it was)
+        kind, bend = OLD_CURVES.get(kind, (kind, bend))
+        kind = kind if kind in CURVES else "hold"
+        text = p[3] if len(p) > 3 and isinstance(p[3], str) else ""
+        scale = p[4] if len(p) > 4 and isinstance(p[4], str) and p[4] in SCALES else "lin"
+        keep = len(p) > 5 and p[5] is True
+        got = p[6] if len(p) > 6 and isinstance(p[6], list) and len(p[6]) == 2 else None
+        if got and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+                       for x in got):
+            bend = [min(1.0, max(0.0, float(x))) for x in got]
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if not (math.isfinite(b) and math.isfinite(v)) or not 0 <= b <= FAR or v <= 0:
+        return None
+    # (formulas up to 4000 letters: a part cut by a paste writes its formula again, longer each time)
+    pt = [b, clamp_bpm(v), kind, text[:4000], scale, keep and not inner, bend]
+    heard = None if inner or len(p) < 8 else clean_heard(p[7])
+    step = _clean_step(p[8]) if len(p) > 8 else None  # (its own Interval)
+    if heard or step is not None:
+        pt.append(heard or None)
+    if step is not None:
+        pt.append(step)
+    return pt
+
+
 def _clean_points(raw, inner=False):
     """A tempo line's points cleaned (clean_tempo); inner = a heard tempo line's (no Keep timing, no line of
-    their own)."""
+    their own). Big lists: in bulk (_clean_plain, _clean_mixed), the same list."""
+    if isinstance(raw, list) and len(raw) >= BIG_LINE:
+        got = _clean_plain(raw, inner)
+        if got is None:
+            got = _clean_mixed(raw, inner)
+        if got is not None:
+            return got
     pts = []
     seen = {}
     for p in raw if isinstance(raw, list) else []:
-        if not isinstance(p, list):  # (broken by hand: that point left out, the rest kept)
+        pt = _clean_one(p, inner)  # (broken by hand: that point left out, the rest kept)
+        if pt is None:
             continue
-        try:
-            b, v = float(p[0]), float(p[1])
-            kind = p[2] if len(p) > 2 and isinstance(p[2], str) else "hold"
-            bend = list(BEND) if kind != "s" else [0.5, 0.0]  # (an S-curve from before: much like it was)
-            kind, bend = OLD_CURVES.get(kind, (kind, bend))
-            kind = kind if kind in CURVES else "hold"
-            text = p[3] if len(p) > 3 and isinstance(p[3], str) else ""
-            scale = p[4] if len(p) > 4 and isinstance(p[4], str) and p[4] in SCALES else "lin"
-            keep = len(p) > 5 and p[5] is True
-            got = p[6] if len(p) > 6 and isinstance(p[6], list) and len(p[6]) == 2 else None
-            if got and all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
-                           for x in got):
-                bend = [min(1.0, max(0.0, float(x))) for x in got]
-        except (TypeError, ValueError, IndexError, OverflowError):
-            continue
-        if not (math.isfinite(b) and math.isfinite(v)) or not 0 <= b <= FAR or v <= 0:
-            continue
-        key = round(b, 9)
+        key = round(pt[0], 9)
         if seen.get(key, 0) >= 2:
             continue
         seen[key] = seen.get(key, 0) + 1
-        # (formulas up to 4000 letters: a part cut by a paste writes its formula again, longer each time)
-        pt = [b, clamp_bpm(v), kind, text[:4000], scale, keep and not inner, bend]
-        heard = None if inner or len(p) < 8 else clean_heard(p[7])
-        step = _clean_step(p[8]) if len(p) > 8 else None  # (its own Interval)
-        if heard or step is not None:
-            pt.append(heard or None)
-        if step is not None:
-            pt.append(step)
         pts.append(pt)
     pts.sort(key=lambda p: p[0])  # (stable: a pair keeps its order)
     for i in range(len(pts) - 1):  # (a pair on exactly one beat, not a hair apart)
@@ -338,6 +603,8 @@ def drop_loose(pts):
     """A jump's first point (where a glide arrives) taken out, in place, when no curved part arrives at it any more
     (held / deleted / dragged after a held part) or it is the same BPM as the second: it played nothing and
     couldn't be used (user 2026-10-22). True when one went."""
+    if len(pts) > 64:  # (only the pairs looked at: 190,000 points one by one took ~30 ms each change, and every
+        return _drop_loose_many(pts)  # point taken out of a big list moved all after it)
     gone = False
     i = 0
     while i + 1 < len(pts):
@@ -351,6 +618,36 @@ def drop_loose(pts):
                 continue
         i += 1
     return gone
+
+
+def _drop_loose_many(pts):
+    """drop_loose for a long list, the same points taken out: only the beats two points share are looked at (the
+    loop above keeps every other point and moves on), the list made again once."""
+    ce = col_entry(pts) if len(pts) >= BIG_LINE else None  # (a big line's beats: read once per change)
+    beats = ce[3] if ce is not None else np.fromiter((p[0] for p in pts), float, len(pts))
+    pairs = np.flatnonzero(beats[1:] == beats[:-1]).tolist()
+    if not pairs:
+        return False
+    gone = []
+    for i in pairs:  # (point i against point i + 1; what's before i = the nearest point before it still there)
+        p, q = pts[i], pts[i + 1]
+        k, g = i - 1, len(gone) - 1
+        while k >= 0 and g >= 0 and gone[g] == k:  # (the points taken out just before it: a run ending at i - 1)
+            k -= 1
+            g -= 1
+        before = pts[k] if k >= 0 else None
+        glides = before is not None and before[2] != "hold" and before[1] != p[1] and before[0] < p[0]
+        if not glides or p[1] == q[1]:
+            gone.append(i)
+    if not gone:
+        return False
+    if len(gone) > 16:
+        out = set(gone)
+        pts[:] = [p for k, p in enumerate(pts) if k not in out]
+    else:
+        for i in reversed(gone):
+            del pts[i]
+    return True
 
 
 def catch_set(c, k, v):
@@ -722,9 +1019,55 @@ def stretches(tempo, base):
     return out
 
 
+BIG_LINE = 2000  # (ds5: from this many points the shared column view below is used)
+_COLS = []  # (ds5) [[points list, version, n, beats, BPMs, log2 BPMs or None, plain]] the last few lists looked at
+_ig0, _ig1, _ig2, _ig5 = (__import__("operator").itemgetter(k) for k in (0, 1, 2, 5))
+
+
+def col_entry(pts):
+    """(ds5) ONE shared read of a big points list (~12 ms for 192,000 points, made once per tempo change = per
+    watch / changed() version): its beats + BPMs as arrays, and `plain` = every point an ordinary held 7-field point
+    (hold, no Keep timing, no heard line / own Interval) so the quick lanes below may skip per-point checks. None for
+    a small list."""
+    n = len(pts)
+    if n < BIG_LINE:
+        return None
+    ver = _text["ver"]
+    for e in _COLS:
+        if e[0] is pts and e[1] == ver and e[2] == n:
+            if _CHECK and not (np.array_equal(e[3], np.fromiter(map(_ig0, pts), float, n))
+                               and np.array_equal(e[4], np.fromiter(map(_ig1, pts), float, n))
+                               and e[10] == [i for i, p in enumerate(pts) if len(p) > 5 and p[5] is True]):
+                _stale("TEMPO COLUMNS STALE")  # (a line changed in place without changed(): made again)
+                _COLS.remove(e)
+                break
+            return e
+    beats = np.fromiter(map(_ig0, pts), float, n)
+    vs = np.fromiter(map(_ig1, pts), float, n)
+    lens = set(map(len, pts))
+    if min(lens) < 7:  # (not a cleaned line: the careful ways)
+        return None
+    kinds = set(map(_ig2, pts))
+    hold = np.ones(n, bool) if kinds == {"hold"} else np.fromiter((k == "hold" for k in map(_ig2, pts)), bool, n)
+    nokeep = max(lens) == 7 and set(map(_ig5, pts)) <= {False}  # (no Keep timing, no heard line / own Interval)
+    plain = nokeep and bool(hold.all())
+    cand = np.zeros(n, bool)  # (point i's part is a curve: not held, next BPM differs, goes on in beats)
+    cand[:-1] = ~hold[:-1] & (vs[1:] != vs[:-1]) & (beats[1:] > beats[:-1])
+    keeps = [] if nokeep else [i for i, p in enumerate(pts) if p[5] is True]  # (keep_points' answer)
+    e = [pts, ver, n, beats, vs, None, plain, hold, nokeep, cand, keeps]
+    _COLS.insert(0, e)
+    del _COLS[3:]
+    return e
+
+
 def point_arrays(pts):
     """(beats, BPMs, log2 BPMs) of the points as arrays: drawn_bpm's, made once for many reads (2026-10-29: a Fill's
     2,000 catch-ups made them again for every curved part, 4,000 points x 4,000 parts)."""
+    e = col_entry(pts)
+    if e is not None:
+        if e[5] is None:
+            e[5] = np.log2(e[4])
+        return e[3], e[4], e[5]
     vs = np.array([p[1] for p in pts])
     return np.array([p[0] for p in pts]), vs, np.log2(vs)
 
@@ -741,7 +1084,12 @@ def drawn_bpm(tempo, base, beats, arrays=None):
     idx = np.searchsorted(pb, beats, "right") - 1  # the point at or before each beat (-1: before the first)
     has = idx >= 0
     out[has] = vs[idx[has]]
-    for i in np.unique(idx[has & (idx < len(pts) - 1)]).tolist():  # (only the parts asked about: a song with
+    ce = col_entry(pts)
+    asked = idx[has & (idx < len(pts) - 1)]
+    if ce is not None:  # (only the curved parts among them: the loop below `continue`s on all the others)
+        asked = asked[ce[9][asked]]
+    asked = np.unique(asked)
+    for i in asked.tolist():  # (only the parts asked about: a song with
         kind = pts[i][2]  # thousands of points read part by part was slow, hunt 2026-10-22)
         if kind == "hold" or pts[i][1] == pts[i + 1][1] or pb[i + 1] <= pb[i]:
             continue
@@ -847,30 +1195,51 @@ def typed_bpms(tempo):
     """{us: the f32 BPM typed}: each point's BPM by the microseconds held_us gives it, so a Domino copy / .dms
     writes the BPM as typed (252, not another f32 that also gives 238,095 us; user 2026-11-01)."""
     out = {}
-    for p in tempo.get("points") or ():
+    pts = tempo.get("points") or ()
+    ce = col_entry(pts) if len(pts) >= BIG_LINE else None
+    if ce is not None:  # (ds5: once per DISTINCT BPM, in the order each first shows: the same answer; 7 of 192,000)
+        vs, first = np.unique(ce[4], return_index=True)
+        vals = vs[np.argsort(first, kind="stable")].tolist()
+    else:
+        vals = [p[1] for p in pts]
+    for v in vals:
         try:
-            out.setdefault(held_us(p[1]), float(np.float32(p[1])))
+            out.setdefault(held_us(v), float(np.float32(v)))
         except (TypeError, ValueError, ZeroDivisionError, OverflowError):
             pass
     return out
+
+
+def _first_ticks_np(pb, ppq):
+    """_first_ticks' all-at-once steps as an int64 array (None when they can't be used: the one-by-one way)."""
+    a = np.asarray(pb, float)
+    if a.ndim == 1 and np.isfinite(a).all() and (np.abs(a) * ppq).max() < 2.0 ** 52:
+        c = np.maximum(0, np.ceil(a * ppq)).astype(np.int64)
+        on = np.ones(len(c), bool)
+        for _ in range(4):
+            down = on & (c > 0) & ((c - 1) / ppq >= a)
+            up = on & ~down & (c / ppq < a)
+            c[down] -= 1
+            c[up] += 1
+            on = down | up
+            if not on.any():
+                break
+        return c
+    return None
+
+
+class Segs(list):
+    """(ds5) _segments' pieces [(a, b, us)] of a big all-held line, with the same pieces as arrays (.arr = (starts,
+    us)) so _runs / _seg_events needn't read 190,000 tuples back."""
+    arr = None
 
 
 def _first_ticks(pb, ppq):
     """The first tick of each point's part: the smallest tick t with t / ppq >= the point's beat (as drawn_bpm
     reads it)."""
     if len(pb) > 64:  # (all at once, the same steps: a loaded MIDI's 35,000 points took 15 ms every drag step)
-        a = np.asarray(pb, float)
-        if a.ndim == 1 and np.isfinite(a).all() and (np.abs(a) * ppq).max() < 2.0 ** 52:
-            c = np.maximum(0, np.ceil(a * ppq)).astype(np.int64)
-            on = np.ones(len(c), bool)
-            for _ in range(4):
-                down = on & (c > 0) & ((c - 1) / ppq >= a)
-                up = on & ~down & (c / ppq < a)
-                c[down] -= 1
-                c[up] += 1
-                on = down | up
-                if not on.any():
-                    break
+        c = _first_ticks_np(pb, ppq)
+        if c is not None:
             return c.tolist()
     out = []
     for b in pb:
@@ -898,41 +1267,75 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
     # only the points whose parts can reach ticks t0..t1 (+ one each side; a tick's margin for rounding): a catch-up
     # per jump read the whole line each time, thousands of jumps took minutes (PLAN #12 B)
     if ordered is None:
-        ordered = all(p[0] <= q[0] for p, q in zip(pts, pts[1:]))
+        whole = col_entry(pts) if len(pts) >= BIG_LINE else None  # (a big line: its beats read once per change)
+        ordered = bool((whole[3][1:] >= whole[3][:-1]).all()) if whole is not None else all(
+            p[0] <= q[0] for p, q in zip(pts, pts[1:]))
     p_lo, p_hi = 0, len(pts)  # (out of order, e.g. half way through a change: every point, as before)
     if ordered:
         p_lo = max(0, bisect.bisect_right(pts, (t0 - 1) / ppq, key=lambda p: p[0]) - 1)
         p_hi = min(len(pts), bisect.bisect_left(pts, (t1 + 1) / ppq, key=lambda p: p[0]) + 1)
-    near = {"points": pts[p_lo:p_hi]}  # (drawn_bpm reads only these: the beats asked are all inside their parts)
-    first = _first_ticks([p[0] for p in near["points"]], ppq)
-    # edges[k - k0] for parts k = p_lo .. p_hi (k = 0: before the first point; k = i + 1: point i's part)
-    edges = ([0] if p_lo == 0 else []) + first + ([max(t1, first[-1] + 1) if first else t1] if p_hi == len(pts) else [])
+    # (ds5: the whole big line = its shared column read (col_entry), not a copy + point by point reads)
+    ce = col_entry(pts) if p_lo == 0 and p_hi == len(pts) else None
+    near = {"points": pts if ce is not None else pts[p_lo:p_hi]}  # (drawn_bpm reads only these: the beats asked are all inside their parts)
+    fnp = _first_ticks_np(ce[3], ppq) if ce is not None else None
     k0 = 0 if p_lo == 0 else p_lo + 1
-    # (every held part's BPM read at once: one read per part made a loaded MIDI with 35,000 tempo changes hang)
     arrays = point_arrays(near["points"]) if near["points"] else None
-    held_bpm = drawn_bpm(near, base, np.maximum(edges[:-1], t0) / ppq, arrays)
-    # (every part's ends + a held part's microseconds at once, 2026-11-14: 190,000 short BPM changes one by one
-    # took ~0.3 s a read; the same numbers as held_us one at a time)
-    e_arr = np.asarray(edges, np.int64)
-    a_arr, b_arr = np.maximum(e_arr[:-1], t0), np.minimum(e_arr[1:], t1)
-    ii = np.arange(len(edges) - 1) + k0 - 1  # (the point each part starts at; -1 = before the first)
-    nxt = np.minimum(ii + 1, len(pts) - 1) - p_lo  # (the next point, as near's index)
-    cur = np.maximum(ii, 0) - p_lo
-    near_pts = near["points"]
-    if near_pts:
-        vs = arrays[1]
-        holds = np.fromiter((p[2] == "hold" for p in near_pts), bool, len(near_pts))
-        same = vs[np.clip(cur, 0, len(near_pts) - 1)] == vs[np.clip(nxt, 0, len(near_pts) - 1)]
-        held_arr = (ii < 0) | (ii == len(pts) - 1) | holds[np.clip(cur, 0, len(near_pts) - 1)] | same
+    if fnp is not None:  # (ds5: the whole big line: every step on arrays; the tick list only if a part isn't held)
+        n_p = len(pts)
+        e_arr = np.concatenate([[0], fnp, [max(t1, int(fnp[-1]) + 1)]]).astype(np.int64)
+        edges = None
+        n_e = len(e_arr)
+        held_bpm = drawn_bpm(near, base, np.maximum(e_arr[:-1], t0) / ppq, arrays)
+        a_arr, b_arr = np.maximum(e_arr[:-1], t0), np.minimum(e_arr[1:], t1)
+        held_arr = np.ones(n_p + 1, bool)  # (part 0: before the first point; part j: point j - 1's)
+        held_arr[1:n_p] = ce[7][:-1] | (arrays[1][:-1] == arrays[1][1:])
     else:
-        held_arr = np.ones(len(ii), bool)
+        first = _first_ticks([p[0] for p in near["points"]], ppq)
+        # edges[k - k0] for parts k = p_lo .. p_hi (k = 0: before the first point; k = i + 1: point i's part)
+        edges = ([0] if p_lo == 0 else []) + first + ([max(t1, first[-1] + 1) if first else t1] if p_hi == len(pts) else [])
+        n_e = len(edges)
+        # (every held part's BPM read at once: one read per part made a loaded MIDI with 35,000 tempo changes hang)
+        held_bpm = drawn_bpm(near, base, np.maximum(edges[:-1], t0) / ppq, arrays)
+        # (every part's ends + a held part's microseconds at once, 2026-11-14: 190,000 short BPM changes one by one
+        # took ~0.3 s a read; the same numbers as held_us one at a time)
+        e_arr = np.asarray(edges, np.int64)
+        a_arr, b_arr = np.maximum(e_arr[:-1], t0), np.minimum(e_arr[1:], t1)
+        ii = np.arange(len(edges) - 1) + k0 - 1  # (the point each part starts at; -1 = before the first)
+        nxt = np.minimum(ii + 1, len(pts) - 1) - p_lo  # (the next point, as near's index)
+        cur = np.maximum(ii, 0) - p_lo
+        near_pts = near["points"]
+        if near_pts:
+            vs = arrays[1]
+            holds = np.fromiter((p[2] == "hold" for p in near_pts), bool, len(near_pts))
+            same = vs[np.clip(cur, 0, len(near_pts) - 1)] == vs[np.clip(nxt, 0, len(near_pts) - 1)]
+            held_arr = (ii < 0) | (ii == len(pts) - 1) | holds[np.clip(cur, 0, len(near_pts) - 1)] | same
+        else:
+            held_arr = np.ones(len(ii), bool)
     held_u = _held_us_many(held_bpm, base, base_u)
     if bool(held_arr[a_arr < b_arr].all()):  # (all held: no per-part steps to work out)
         on = a_arr < b_arr
-        return list(zip(a_arr[on].tolist(), b_arr[on].tolist(), held_u[on].tolist()))
+        got = Segs(zip(a_arr[on].tolist(), b_arr[on].tolist(), held_u[on].tolist()))
+        got.arr = (a_arr[on], held_u[on])  # (ds5: and the same as arrays: _runs / _seg_events read these)
+        return got
+    held_arr_np, held_u_np = held_arr, held_u
     held_u = held_u.tolist()
     every_all = tempo.get("every", EVERY)
-    for j in range(len(edges) - 1):
+    sparse = None
+    if n_e >= BIG_LINE:  # (ds5: only the parts that are NOT held are visited; the held ones between in bulk)
+        on = a_arr < b_arr
+        sparse = np.flatnonzero(on & ~held_arr_np).tolist()
+    if edges is None:
+        edges = e_arr.tolist()
+    todo, prev = (sparse + [None]) if sparse is not None else range(len(edges) - 1), 0
+    for jn in todo:
+        if sparse is not None:
+            stop = len(edges) - 1 if jn is None else jn
+            sl = on[prev:stop]
+            out.extend(zip(a_arr[prev:stop][sl].tolist(), b_arr[prev:stop][sl].tolist(), held_u_np[prev:stop][sl].tolist()))
+            if jn is None:
+                break
+            prev = jn + 1
+        j = jn
         k = k0 + j
         a, b = max(edges[j], t0), min(edges[j + 1], t1)
         if b <= a:
@@ -1029,6 +1432,10 @@ def _put_many(segs, puts):
     def sane(spans):
         return all(b > a for a, b in spans) and all(b0 <= a1 for (_, b0), (a1, _) in zip(spans, spans[1:]))
     if not puts:  # (nothing to put: the pieces as they are; a sane list is in order already, as sorting gave)
+        if isinstance(segs, Segs):  # (ds5: a copy that keeps its arrays)
+            got = Segs(segs)
+            got.arr = segs.arr
+            return got
         return list(segs)
     if not sane([(ra, rb) for ra, rb, _ in puts]) or not sane([(a, b) for a, b, _ in segs]):
         for ra, rb, news in puts:
@@ -1150,7 +1557,10 @@ def keeps(p):
 
 def keep_points(pts):
     """The indexes of the points keeps() is True for, in order (one quick pass: a loaded MIDI's 35,000 points
-    asked keeps() one by one several times every redraw)."""
+    asked keeps() one by one several times every redraw). A big line: once per change (col_entry)."""
+    ce = col_entry(pts) if len(pts) >= BIG_LINE else None
+    if ce is not None:
+        return list(ce[10])
     return [i for i, p in enumerate(pts) if len(p) > 5 and p[5] is True]
 
 
@@ -1219,6 +1629,35 @@ def layout(tempo, base, ppq):
     key = (tempo_key(tempo), base, ppq)
     if key in _layouts:
         return _layouts[key]
+    ce = col_entry(tempo["points"]) if len(tempo["points"]) >= BIG_LINE and not tempo["catch"] else None
+    if ce is not None and ce[8]:  # (ds5: a big line with no catch-ups, no Keep timing: nothing to work out)
+        orig, copy_of = tempo, []
+        start_u = base_us(base)
+
+        if isinstance(key[0], _VKey):  # (the watched line: no text to read it back from later)
+            if ce[6]:  # (all held: its beats + BPMs say it all, as they were now)
+                pb, vs, every = ce[3], ce[4], tempo.get("every", EVERY)
+                copy_of.append(lambda: {"points": [[b, v, "hold", "", "lin", False, [0.5, 0.5]] for b, v in
+                                                   zip(pb.tolist(), vs.tolist())], "catch": [], "every": every})
+            else:
+                c = held_copy(tempo)
+                copy_of.append(lambda: c)
+
+        def real(a, b):
+            if not copy_of or callable(copy_of[0]):  # (its own copy as the line was, made only if asked)
+                c = copy_of.pop()() if copy_of else key_copy(key[0], orig)
+                copy_of.append((c, all(p[0] <= q[0] for p, q in zip(c["points"], c["points"][1:]))))
+            c, ordered = copy_of[0]
+            return _segments(c, base, start_u, ppq, a, b, ordered)
+
+        def keep_segs(n, lo, hi):
+            raise IndexError(n)
+        real.__qualname__, keep_segs.__qualname__ = "layout.<locals>.real", "layout.<locals>.keep_segs"
+        if len(_layouts) > 8:
+            _layouts.clear()
+        _layouts[key] = out = {"start_u": start_u, "keeps": [], "worked": [], "real": real,
+                               "keep_segs": keep_segs, "own_line": []}
+        return out
     # (its own copy: what's remembered never changes with the line; the held line copied straight: no text)
     tempo = key_copy(key[0], tempo)
     ordered = all(p[0] <= q[0] for p, q in zip(tempo["points"], tempo["points"][1:]))  # (once: _segments' many reads)
@@ -1483,9 +1922,15 @@ def step_edges(tempo, worked, ppq):
     got = _edges.get(key)
     every = tempo.get("every", EVERY)
     if got is None:
-        first = _first_ticks([p[0] for p in pts], ppq)
+        ce = col_entry(pts) if len(pts) >= BIG_LINE else None
+        if ce is not None:  # (a big line: only its curved parts looked at; none = no ticks worked out)
+            look = np.flatnonzero(ce[9]).tolist()
+            first = _first_ticks(ce[3].tolist(), ppq) if look else []
+        else:
+            first = _first_ticks([p[0] for p in pts], ppq)
+            look = range(len(pts) - 1)
         got = []
-        for i in range(len(pts) - 1):
+        for i in look:
             if pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1] and first[i + 1] > first[i]:
                 e, off = step_of(pts[i], every)  # (its own Interval, point[8])
                 got.append((first[i], first[i + 1], pts[i][0], pts[i + 1][0], to_jump(pts, i), e, first[i] + off))
@@ -1754,6 +2199,51 @@ def ruler_marks(tempo, base, ppq, bar=4):
     return out
 
 
+_cols_marks = {}
+
+
+def ruler_cols(tempo, base, ppq, bar=4):
+    """(ds5) ruler_marks of a big PLAIN line (every point an ordinary held point, no catch-ups, no stairs) as arrays
+    {"beat", "before" (NaN = None: at beat 0), "at"} of the marks, one per point where the next isn't on its beat; the
+    marks themselves = (beat, "point", (before, at, None), None). None when the line is not like that (ruler_marks
+    then). No per-mark tuples: the ruler's layout hops over them (roll_draw.shown_from_cols)."""
+    pts = tempo["points"]
+    ce = col_entry(pts) if tempo.get("catch") == [] else None
+    if ce is None or not ce[6]:
+        return None
+    key = (tempo_key(tempo), base, ppq, bar)
+    if key in _cols_marks:
+        return _cols_marks[key]
+    pb, vals = ce[3], ce[4]
+    n = len(pb)
+    befores = drawn_bpm(tempo, base, pb - 1e-9 * np.maximum(1.0, pb), (pb, vals, None))
+    shown = np.ones(n, bool)
+    shown[:-1] = pb[1:] != pb[:-1]
+    idx = np.flatnonzero(shown)
+    bef, at = befores[idx], vals[idx]
+    first = pb[idx] > 0
+    out = None
+    with np.errstate(invalid="ignore"):
+        small = first & ~(np.abs(at - bef) > STAIR_STEP * bef)
+    if int(np.count_nonzero(small)) < STAIR_MIN:  # (stairs need STAIR_MIN small steps: none possible)
+        stairs = []
+    else:
+        stairs = _stair_core(idx, first, np.where(first, bef, np.nan), at, np.ones(len(idx), bool), np.ones(n, bool),
+                             pb, [], bar)
+    if not stairs:
+        out = {"beat": pb[idx], "before": np.where(first, bef, np.nan), "at": at}
+    if len(_cols_marks) > 4:
+        _cols_marks.clear()
+    _cols_marks[key] = out
+    return out
+
+
+def cols_as_marks(c):
+    """(ds5) ruler_cols as ruler_marks' list (for checks)."""
+    b, a = c["before"].tolist(), c["at"].tolist()
+    return [(x, "point", (None if y != y else y, z, None), None) for x, y, z in zip(c["beat"].tolist(), b, a)]
+
+
 def heard_marks(tempo, base, ppq, bar=4):
     """ruler_marks for each Keep timing run's own heard tempo line (user 2026-10-24: the ruler marks its points too,
     in purple, same rules): only the points inside the run, before its first point = the tempo heard before the run;
@@ -1801,13 +2291,19 @@ def _stair_runs(idx, before, at, then, hold, pb, lines, bar):
     mark). A run from k: held steps (a held point after a held part, not past STAIR_STEP of the BPM), one way (the
     first change sets it), each within a bar of the one before with no catch-up line between (lines sorted);
     steps with no change at its end left off; STAIR_MIN+ changes = stairs."""
-    n = len(idx)
-    if n < STAIR_MIN:
+    if len(idx) < STAIR_MIN:
         return []
     has = np.array([b is not None for b in before], bool)
     bef = np.array([b if b is not None else np.nan for b in before], float)
-    at = np.asarray(at, float)
     no_then = np.array([t is None for t in then], bool)
+    return _stair_core(idx, has, bef, np.asarray(at, float), no_then, hold, pb, lines, bar)
+
+
+def _stair_core(idx, has, bef, at, no_then, hold, pb, lines, bar):
+    """_stair_runs with its marks as arrays (has = a BPM before, bef = it, no_then = no purple heard BPM)."""
+    n = len(idx)
+    if n < STAIR_MIN:
+        return []
     prev_hold = (idx > 0) & hold[np.maximum(idx - 1, 0)]
     with np.errstate(invalid="ignore"):
         ent = has & hold[idx] & no_then & prev_hold & ~(np.abs(at - bef) > STAIR_STEP * bef)

@@ -39,7 +39,7 @@ from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
 from notes.gliss import clean_gliss, for_new
-from notes.tempo import clamp_bpm, clean_tempo, empty as empty_tempo, has_tempo
+from notes.tempo import clamp_bpm, clean_tempo, empty as empty_tempo, has_tempo, tempo_text
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
 from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts
 from notes.text import TEXT_DEFAULTS, clean_text, rejoin_old, tag_texts
@@ -301,6 +301,8 @@ def project_json(data):
             lines.append(f'"shapes": [\n  {body}\n ]' if v else '"shapes": []')
             if wholes:
                 lines.append('"wholes": [\n  ' + ",\n  ".join(short_shape(w) for w in wholes) + "\n ]")
+        elif k == "tempo":  # (its top level holds no floats; a big line's text is kept in pieces: tempo_text)
+            lines.append(f"{json.dumps(k)}: {tempo_text(v)}")
         else:
             if isinstance(v, dict):
                 v = {a: short_num(b) for a, b in v.items()}  # (12 digits like shapes: a long default gate stays exact)
@@ -1213,13 +1215,15 @@ class ProjectFiles:
 
     def saved_key(self):
         """What Open project compares with the last save / open: the shapes and the tempo line."""
-        return json.dumps([self.shapes, self.tempo if self.tempo != empty_tempo() else None]
-                          + ([self.own_tracks] if self.own_tracks else []) + ([self.deleted] if self.deleted else [])
-                          + ([{"start_track": True}] if self.start_track else [])
-                          + ([{"file_order": self.file_order}] if self.file_order else [])
-                          + ([{"file_gone": self.file_gone}] if self.file_gone else [])
-                          + ([{"file_props": {str(n): v for n, v in self.file_props.items()}}] if self.file_props else [])
-                          + ([{"loaded_map": self.loaded_map}] if self.loaded_map else []))
+        rest = (([self.own_tracks] if self.own_tracks else []) + ([self.deleted] if self.deleted else [])
+                + ([{"start_track": True}] if self.start_track else [])
+                + ([{"file_order": self.file_order}] if self.file_order else [])
+                + ([{"file_gone": self.file_gone}] if self.file_gone else [])
+                + ([{"file_props": {str(n): v for n, v in self.file_props.items()}}] if self.file_props else [])
+                + ([{"loaded_map": self.loaded_map}] if self.loaded_map else []))
+        # (= json.dumps of the whole list; the tempo line's text kept in pieces: tempo_text)
+        return "[" + ", ".join([json.dumps(self.shapes), tempo_text(self.tempo) if self.tempo != empty_tempo()
+                                else "null"] + [json.dumps(x) for x in rest]) + "]"
 
     def may_replace(self, name):
         """Before Open project replaces the shapes (Undo can't bring them back): if they (or the tempo line, the own

@@ -27,7 +27,7 @@ from notes.paths import KEYS
 from notes.sliced import clip_strokes, moved_by, moved_mark, on_side, piece_knives
 from notes.sustain import is_sustained, sustain_on
 from notes.meter import bar_lines, beat_lines, key_name, sig_text, sigs_of
-from notes.tempo import bpm_text, heard_marks, kept_bpms, ruler_marks, short_bpm, tempo_key
+from notes.tempo import bpm_text, heard_marks, kept_bpms, ruler_cols, ruler_marks, short_bpm, tempo_key
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
                               PlayFollow, SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_colours,
                               note_name, slot_colours, velocity_shades)
@@ -610,6 +610,60 @@ def tempo_tip(t):
 
 def _first_of(m):
     return m[0]
+
+
+class TipRange:
+    """(ds5) the tip lines of the marks lo..hi-1 of a big plain line (ruler_cols), made only when read: len() and
+    [:10] are what the ruler asks; a list of the same tuples tempo_layout makes for each mark."""
+
+    def __init__(self, cols, lo, hi):
+        self.cols, self.lo, self.hi = cols, lo, hi
+
+    def __len__(self):
+        return self.hi - self.lo
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            a, b, st = i.indices(self.hi - self.lo)
+            return [self[k] for k in range(a, b, st)]
+        k = self.lo + (i if i >= 0 else i + self.hi - self.lo)
+        return ("point", False, self.cols["bm_l"][k], self.cols["at_l"][k], None)
+
+    def __iter__(self):
+        return (self[k] for k in range(len(self)))
+
+
+def shown_from_cols(cols, sx, s, measure):
+    """(ds5) tempo_shown for a big PLAIN line (ruler_cols, no Keep timing / catch-ups / stairs): the same entries
+    [x, text, tips, colour, right, ux, tail] the one-mark-at-a-time loop makes, but a mark landing on the text before
+    is not visited: the ones inside its room are found at once (searchsorted) and join its tips as a range. So the
+    work follows what is SHOWN, not the 190,000 marks."""
+    x = cols["beat"] * sx
+    if "moved" not in cols:  # (once per line: what each mark's text shows)
+        before, at = cols["before"], cols["at"]
+        with np.errstate(invalid="ignore"):
+            cols["moved"] = ~np.isnan(before) & (np.abs(before - at) > 1e-6 * at)
+        cols["moved_l"] = cols["moved"].tolist()
+        cols["bm_l"] = [v if m else None for v, m in zip(before.tolist(), cols["moved_l"])]
+        cols["at_l"] = at.tolist()
+    moved_l, x_l = cols["moved_l"], x.tolist()
+    rt, n = look.RULER_TEMPO, len(x_l)
+    shown, end, i = [], -math.inf, 0
+    while i < n:
+        xi, lo = x_l[i], i
+        if shown and xi < end:
+            if shown[-1][1]:  # (on the text before: joins its tip; every mark inside its room at once)
+                j = max(int(np.searchsorted(x, end, "left")), i + 1)
+                shown[-1][2].hi = j
+                i = j
+                continue
+            lo = shown.pop()[2].lo  # (on a mark with no text: this one, saying more, takes its place)
+        text = mark_text(("P", cols["bm_l"][i], cols["at_l"][i], None, None))[0] if moved_l[i] else ""
+        right = xi + 3 * s + measure(text) if text else xi
+        shown.append([xi, text, TipRange(cols, lo, i + 1), rt, right, None, None])
+        end = right + 4 * s if text else xi + 2 * s
+        i += 1
+    return shown
 
 
 def _written(m):
@@ -2597,6 +2651,12 @@ class RollDrawing:
         if getattr(self, "_tempo_laid", (None,))[0] == key:
             return self._tempo_laid[1]
         s = self.scale
+        pane = getattr(self.app, "tempo_pane", None)
+        if pane is not None:  # (ds5: a big plain line = marks as arrays, the layout hops over the crowded ones)
+            cols = ruler_cols(self.app.tempo, pane.base(), self.app.ppq, self.app.beats)
+            if cols is not None:
+                self._tempo_laid = (key, got) if (got := shown_from_cols(cols, self.sx, s, measure)) else (key, [])
+                return self._tempo_laid[1]
         later = lambda a, b: b if a is None else a if b is None else max(a, b)  # noqa: E731
         shown, end = [], -math.inf
         for x, text, tip, colour, ux, tail in self.tempo_layout(lazy=True):

@@ -143,6 +143,11 @@ class _Pairs:
 
 def _seg_events(segs):
     """tempo._runs for file_plan's pieces: (a, b, us), us = a number, one per tick, or (run starts, values)."""
+    arr = getattr(segs, "arr", None)  # (ds5: tempo.Segs, all held: its arrays)
+    if arr is not None and len(segs) > 64:
+        t, v = arr
+        keep = np.concatenate([[True], v[1:] != v[:-1]])
+        return list(zip(t[keep].tolist(), v[keep].tolist()))
     ticks, vals = [], []
     for a, b, u in segs:
         if isinstance(u, tuple):
@@ -458,7 +463,9 @@ def limit_spots(tempo, base, ppq, beats, ticks, heard=None, loose=None):
         return out
     ticks = np.asarray(ticks, np.int64).ravel()
     loose = np.zeros(0, np.int64) if loose is None else np.asarray(loose, np.int64).ravel()
-    upto = max([int(t.max()) for t in (ticks, loose) if len(t)] + [beat_tick(p[0], ppq) for p in tempo["points"]])
+    # (ds5: beat_tick is steady up with the beat: the last tick is the latest beat's; one read, not 190,000)
+    upto = max([int(t.max()) for t in (ticks, loose) if len(t)]
+               + ([beat_tick(max(p[0] for p in tempo["points"]), ppq)] if tempo["points"] else []))
     bars = bar_ticks(tempo, ppq, upto)
     _, _, _, keeps, gaps, out["dense"], out["gave"], _ = keep_gaps(tempo, base, ppq, beats, ticks, bars, loose,
                                                                    heard)
@@ -532,7 +539,9 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     out["typed"] = typed_bpms(tempo)  # (Domino's items write these BPMs as typed: domino_clip.dms_bpm)
     ticks = np.asarray(ticks, np.int64).ravel()
     loose = np.asarray(loose, np.int64).ravel()
-    upto = max([int(t.max()) for t in (ticks, loose) if len(t)] + [beat_tick(p[0], ppq) for p in tempo["points"]])
+    # (ds5: beat_tick is steady up with the beat: the last tick is the latest beat's; one read, not 190,000)
+    upto = max([int(t.max()) for t in (ticks, loose) if len(t)]
+               + ([beat_tick(max(p[0] for p in tempo["points"]), ppq)] if tempo["points"] else []))
     bars = bar_ticks(tempo, ppq, upto)
     lay, segs, out["bad"], keeps, gaps, out["dense"], out["gave"], times = keep_gaps(tempo, base, ppq, beats, ticks,
                                                                                     bars, loose, heard)
@@ -639,7 +648,10 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         bp_f += f.tolist()
         offset = int(f[-1]) - e
         at = e
-    file_segs += [(x + offset, y + offset, v) for x, y, v in _cut(segs, at, end)]
+    if not keeps and not file_segs and offset == 0:
+        file_segs = segs  # (ds5: no Keep timing: _cut(segs, 0, end) is segs as they are; kept with its arrays)
+    else:
+        file_segs += [(x + offset, y + offset, v) for x, y, v in _cut(segs, at, end)]
     events = _seg_events(file_segs)
     if events[0][0] != 0:
         events.insert(0, (0, start_u))
