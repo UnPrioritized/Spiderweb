@@ -8,7 +8,9 @@ curls; none = 0), "loops": how many times the loop repeats, "each": on a joined 
 the piano roll looked then, like arcs), "mirror": the other side (flipping the shape), "scale": sideways size after
 turning the shape (like tumours)}, and maybe "name" (a saved pattern's) and "loop" = the loop edited by hand as a
 curve {"pts": anchors + handles in (along 0 -> 1, sideways in keys), "sharp": corners} (bezier.py): it's used instead
-of the formula, which stays so the loop can go back to it.
+of the formula, which stays so the loop can go back to it. Maybe "graphs": {"loops" or a number's name: [[u, f],
+...]} (u 0 -> 1 along the line, f = multiplier, like tumours' graphs): "loops" = how crowded the loops are there
+(loop_warp; the count stays).
 Both a pattern and a shape may have "sym" = symmetric halves picked by the user: "mirror" (the second half is the
 first half mirrored, like an arch) or "turn" (turned half-way round, like an S); only the formula's first half counts.
 
@@ -62,13 +64,16 @@ def keep_sym(new, old):
 
 def new_pattern(preset, k, old=None):
     """A pattern from a preset. k: beats per key on screen. old: the pattern it replaces (its loops, how it runs
-    over pieces and its symmetric halves stay)."""
+    over pieces, its symmetric halves and its graphs that still fit stay)."""
     _, _, text, values = next(p for p in PATTERN_PRESETS if p[0] == preset)
     old = old or {}
     out = {"preset": preset, "formula": text, "vars": dict(values), "loops": old.get("loops", LOOPS_DEFAULT),
            "each": old.get("each", False), "k": k, "mirror": False, "scale": 1.0}
     if preset in PRESET_ALONG:
         out["along"] = PRESET_ALONG[preset]
+    graphs = clean_pattern_graphs(old.get("graphs"), values)  # (the Loops graph, and numbers it still has)
+    if graphs:
+        out["graphs"] = graphs
     return keep_sym(out, old)
 
 
@@ -128,7 +133,20 @@ def clean_pattern(p):
         out["name"] = str(p["name"])
     if loop:
         out["loop"] = loop
+    graphs = clean_pattern_graphs(p.get("graphs"), out["vars"])
+    if graphs:
+        out["graphs"] = graphs
     return keep_sym(out, p)
+
+
+def clean_pattern_graphs(graphs, values):
+    """A pattern's graphs from a file ({"loops" or a number's name: [[u, f], ...]}, see the top), only those it can
+    use; None if none are left."""
+    from notes.tumour import clean_graph
+    if not isinstance(graphs, dict):
+        return None
+    out = {key: g for key in ("loops", *values) if (g := clean_graph(graphs.get(key)))}
+    return out or None
 
 
 def pattern_name(p):
@@ -570,13 +588,73 @@ def bake_shape(sh):
         sh["tumour"] = tm
 
 
+WARP_STEPS = 8192  # the Loops graph's table along the line (plus the graph's own points)
+
+
+def loop_warp(p):
+    """The Loops graph (p["graphs"]["loops"]: how crowded the loops are along the line, 0 = none there) as a table
+    (u along the line 0 -> 1, share of the loops before u 0 -> 1), or None: no graph, or 0 everywhere (ignored)."""
+    g = (p.get("graphs") or {}).get("loops")
+    if not g:
+        return None
+    gu, gf = np.array([q[0] for q in g], float), np.array([q[1] for q in g], float)
+    u = np.unique(np.concatenate([np.linspace(0.0, 1.0, WARP_STEPS + 1), gu]))
+    d = np.maximum(np.interp(u, gu, gf), 0.0)  # (below 0 = none)
+    share = np.concatenate([[0.0], np.cumsum((d[1:] + d[:-1]) / 2 * np.diff(u))])
+    if share[-1] <= 1e-12:
+        return None
+    return u, share / share[-1]
+
+
+def warp_share(warp, u):
+    """The share of the loops before u along the line."""
+    return u if warp is None else float(np.interp(u, warp[0], warp[1]))
+
+
+def warp_place(warp, q):
+    """Where along the line (0 -> 1) the loops reach share q: where none are (0 %), a share lands at the far end of
+    that stretch (a loop starts after it) or just before it (the last one ends there). Past 0 / 1 (an along formula
+    running off the ends): straight on."""
+    us, sh = warp
+    q = np.asarray(q, float)
+    inner = np.clip(q, 0.0, 1.0 - 1e-12)
+    i = np.clip(np.searchsorted(sh, inner, side="right"), 1, len(sh) - 1)
+    d = sh[i] - sh[i - 1]
+    f = np.where(d > 0, (inner - sh[i - 1]) / np.where(d > 0, d, 1.0), 1.0)
+    out = us[i - 1] + f * (us[i] - us[i - 1])
+    out = np.where(q >= 1.0, out + (q - 1.0), out)
+    return np.where(q < 0.0, out + q, out)
+
+
+def _plain_stretches(s_run, v_run, ln, size):
+    """With a Loops graph: the line runs plain from the piece's start / to its end where no loops are (0 % there),
+    and the path's own points go in (a long plain or spread-out stretch still follows the path's bends)."""
+    if s_run[0] > 0:
+        s_run, v_run = [0.0] + s_run, [v_run[0]] + v_run
+    if s_run[-1] < size:
+        s_run, v_run = s_run + [size], v_run + [v_run[-1]]
+    s, v = np.array(s_run), np.array(v_run)
+    if len(s) < 2 or np.any(np.diff(s) < 0):  # (an along formula running back: left as it is)
+        return s, v
+    extra = ln[(ln > s[0]) & (ln < s[-1])]
+    extra = extra[~np.isin(extra, s)]
+    if not len(extra):
+        return s, v
+    s_all = np.concatenate([s, extra])
+    v_all = np.concatenate([v, np.interp(extra, s, v)])
+    order = np.argsort(s_all, kind="stable")
+    return s_all[order], v_all[order]
+
+
 def pattern_paths(paths, p):
     """The pattern laid along each path ((beat, pitch) point lists: a curve's pieces), as (beat, pitch) lists.
-    Unchanged if the formula can't be worked out."""
+    Unchanged if the formula can't be worked out. A Loops graph moves the loops along the line (their count stays):
+    over each piece with Each piece, else over the whole line."""
     try:
         u, v = loop_points(p)
     except ValueError:
         return paths
+    warp = loop_warp(p)
     k = p["k"]
     screens = [np.asarray(path, float).reshape(-1, 2) / [k, 1.0] for path in paths]
     lengths = [np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(a, axis=0).T))]) if len(a) > 1 else np.zeros(1)
@@ -589,7 +667,7 @@ def pattern_paths(paths, p):
         starts = np.concatenate([[0.0], np.cumsum([ln[-1] for ln in lengths])])
         spans = [(starts[j], total, p["loops"]) for j in range(len(lengths))]
     # MAX_POINTS shared by every piece: the loops they all touch (each piece had MAX_POINTS of its own)
-    touched = sum(math.ceil((o + ln[-1]) / t * n) - math.floor(o / t * n)
+    touched = sum(math.ceil(warp_share(warp, (o + ln[-1]) / t) * n) - math.floor(warp_share(warp, o / t) * n)
                   for ln, (o, t, n) in zip(lengths, spans) if t > 1e-12)
     out = []
     for a, ln, (offset, total, loops) in zip(screens, lengths, spans):
@@ -598,8 +676,8 @@ def pattern_paths(paths, p):
             out.append([tuple(q) for q in (a * [k, 1.0]).tolist()])
             continue
         # the loops that reach this piece, with enough points per loop to follow the path's own bends too
-        first = math.floor(offset / total * loops)
-        last = math.ceil((offset + size) / total * loops)
+        first = math.floor(warp_share(warp, offset / total) * loops)
+        last = math.ceil(warp_share(warp, (offset + size) / total) * loops)
         need = len(a) / max(1e-9, loops * size / total)  # the path's own points per loop
         per = max(LOOP_SAMPLES, math.ceil(need / LOOP_SAMPLES) * LOOP_SAMPLES)
         per = min(per, max(8, MAX_POINTS // max(1, touched)))
@@ -613,7 +691,8 @@ def pattern_paths(paths, p):
         side = np.tile(vv[:-1], count)
         along = np.append(along, first + count - 1 + uu[-1])
         side = np.append(side, vv[-1])
-        s = along / loops * total - offset  # distance along this piece
+        q = along / loops
+        s = (q if warp is None else warp_place(warp, q)) * total - offset  # distance along this piece
         inside = np.nonzero((s >= 0) & (s <= size))[0]
         if not len(inside):
             out.append([tuple(q) for q in (a * [k, 1.0]).tolist()])
@@ -628,6 +707,8 @@ def pattern_paths(paths, p):
             f = (size - s[i1]) / (s[i1 + 1] - s[i1])
             s_run.append(size)
             v_run.append(side[i1] + (side[i1 + 1] - side[i1]) * f)
+        if warp is not None:
+            s_run, v_run = _plain_stretches(s_run, v_run, ln, size)
         got = _lay(a, ln, np.array(s_run), np.array(v_run)) * [k, 1.0]
         out.append([tuple(q) for q in got.tolist()])
     return out
