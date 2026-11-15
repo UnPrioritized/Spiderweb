@@ -1,7 +1,8 @@
-"""A tumour setting's graph (the "…" next to its box in the tumour window): along the whole line, the box's number is
-multiplied by the graph (100 % = as typed). Drag points, click to add one, right-click one for its menu (type its
-exact value, delete it); presets and a formula; the shown height is a preset or typed. Ctrl+Z / Ctrl+Y step through
-the changes made in the window. Stored as tm["graphs"][setting] (tumour.py)."""
+"""A number's graph (the "…" next to its box): along the whole line, the box's number is multiplied by the graph
+(100 % = as typed). Drag points, click to add one, right-click one for its menu (type its exact value, delete it);
+presets and a formula; the shown height is a preset or typed. Ctrl+Z / Ctrl+Y step through the changes made in the
+window. Where the graph lives (which shapes, how it's stored) is up to its GraphSource: tumours keep theirs as
+tm["graphs"][setting] (tumour_window.TumourGraphs)."""
 
 import json
 import math
@@ -13,8 +14,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import formula, fmt
 from files.system import work_area
-from notes.joined import shown_tumour
-from notes.tumour import GRAPH_LIMIT, TUMOUR_DEFAULTS
+from notes.tumour import GRAPH_LIMIT
 from window import look
 from window.panel_custom import GAP_COLOR
 from window.widgets import (REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, chart_edges, fit_screen, placed, read_number,
@@ -43,10 +43,54 @@ def block_undo(win):
         win.bind(k, lambda e: "break")
 
 
+class GraphSource:
+    """What a GraphWindow edits: the shapes it changes and where their graphs live. Tumours: TumourGraphs."""
+
+    def __init__(self, owner):
+        self.owner, self.app = owner, owner.app  # (the window that opened it: the graph opens beside it)
+
+    def targets(self):
+        """The shapes the graph is on (empty = greyed: nothing fitting is selected)."""
+        return []
+
+    def graph(self, key):
+        """The first target's graph for key (None = flat)."""
+        return None
+
+    def store(self, key, pts):
+        """Put pts on every target."""
+
+    def box_number(self, key):
+        """The box's number as the box shows it (what 100 % is)."""
+        return 1.0
+
+    def band(self):
+        """(start, end) of the part of the line the setting works on (outside it greyed), or None."""
+        return None
+
+    def band_label(self):
+        return ""
+
+    def empty_text(self, name):
+        """Shown when nothing fitting is selected."""
+        return ""
+
+    def snapshot(self, tgts, key):
+        """The targets' graphs for key as they are now (Cancel puts them back)."""
+        return None
+
+    def restore(self, tgts, saved, key):
+        """Cancel: the graphs from snapshot back on those targets still there."""
+
+    def closed(self, gw):
+        """The graph window closed."""
+
+
 class GraphWindow(tk.Toplevel):
-    def __init__(self, tw, key, label, unit):
+    def __init__(self, src, key, label, unit):
+        tw = src.owner
         super().__init__(tw)
-        self.tw, self.app, self.key, self.label, self.unit = tw, tw.app, key, label, unit
+        self.src, self.app, self.key, self.label, self.unit = src, src.app, key, label, unit
         self.title(tr("graph_window.graph", label=label))
         self.transient(tw)
         self.resizable(False, False)
@@ -124,7 +168,7 @@ class GraphWindow(tk.Toplevel):
         self._storing = False
         self.hist = LocalUndo(self, lambda: json.dumps(self.pts), self.put_state)
         self.sync(fit_view=True)
-        # where it was last time, else beside the tumour window (on its left when there's no room on its right)
+        # where it was last time, else beside the window that opened it (on its left when there's no room on its right)
         self.update_idletasks()
         geo = placed(self, self.app.graph_pos)
         if not geo:
@@ -139,19 +183,16 @@ class GraphWindow(tk.Toplevel):
 
     # ------------------------------------------------------------ the shapes' graph
 
-    def tm(self):
-        return dict(TUMOUR_DEFAULTS, **(self.app.shown_tumours() or {}))
-
     def sync(self, fit_view=False):
         """Show the first selected line's graph (not while a point is being dragged)."""
-        tgts = self.app.tumour_targets()
+        tgts = self.src.targets()
         old = self.session["tgts"] if self.session else None
         new = old is None or len(old) != len(tgts) or any(a is not b for a, b in zip(old, tgts))
         if new:
             self.begin()  # (other shapes selected: what was done to the last ones is kept, like OK)
         if self.drag:
             return
-        g = (self.tm().get("graphs") or {}).get(self.key)
+        g = self.src.graph(self.key)
         self.pts = [list(p) for p in (g or FLAT)]
         # other shapes, or the graph changed from outside (the main window's undo): its steps here start again
         if new or not self._storing and self.hist.get() != self.hist.states[self.hist.at]:
@@ -165,7 +206,7 @@ class GraphWindow(tk.Toplevel):
         self.job = None
         self._storing = True
         try:
-            self.tw.set_graph(self.key, self.pts)
+            self.src.store(self.key, self.pts)
         finally:
             self._storing = False
 
@@ -174,7 +215,7 @@ class GraphWindow(tk.Toplevel):
             self.job = self.after_idle(self.store)
 
     def set_points(self, pts):
-        if not self.app.tumour_targets():
+        if not self.src.targets():
             return
         self.pts = [list(p) for p in pts]
         if not self.fits(self.view_range()):
@@ -189,7 +230,7 @@ class GraphWindow(tk.Toplevel):
             self.after_cancel(self.job)
             self.job = None
         self.drag = None
-        if not self.app.tumour_targets():
+        if not self.src.targets():
             return
         self.pts = json.loads(state)
         if not self.fits(self.view_range()):
@@ -220,11 +261,8 @@ class GraphWindow(tk.Toplevel):
 
     def begin(self):
         """Start again from the selected shapes' graphs as they are now (Cancel goes back to this)."""
-        app = self.app
-        tgts = app.tumour_targets()
-        self.session = {"tgts": tgts,
-                        "graphs": [json.loads(json.dumps(((shown_tumour(t) or {}).get("graphs") or {}).get(self.key)))
-                                   for t in tgts]}
+        tgts = self.src.targets()
+        self.session = {"tgts": tgts, "saved": self.src.snapshot(tgts, self.key)}
 
     def ok(self):
         """Keep the graph."""
@@ -238,26 +276,13 @@ class GraphWindow(tk.Toplevel):
         if self.job:
             self.after_cancel(self.job)
             self.job = None
-        # (still part of the tumour window's change: its Accept / X decides whether it's kept)
         app, ses = self.app, self.session
         if ses and any(t is s for t in ses["tgts"] for s in app.shapes):
-            for t, g in zip(ses["tgts"], ses["graphs"]):
-                tm = t.get("tumour") if any(t is s for s in app.shapes) else None
-                if not tm:
-                    continue
-                graphs = dict(tm.get("graphs") or {})
-                graphs.pop(self.key, None)
-                if g:
-                    graphs[self.key] = g
-                if graphs:
-                    tm["graphs"] = graphs
-                else:
-                    tm.pop("graphs", None)
-            self.tw.changed(("graph", self.key))
+            self.src.restore(ses["tgts"], ses["saved"], self.key)
         self.close()
 
     def close(self):
-        self.tw.graph_window = None
+        self.src.closed(self)
         self.destroy()
 
     def remember(self, e):
@@ -336,8 +361,7 @@ class GraphWindow(tk.Toplevel):
 
     def box_number(self):
         """The box's number as the box shows it (what 100 % is)."""
-        tm = self.tm()
-        return tm[self.key] * (self.app.ppq if self.key in ("length", "dist") else 100 if self.key == "slant" else 1)
+        return self.src.box_number(self.key)
 
     def value_text(self, f):
         """What f (a multiplier) makes of the box's number, as the box shows it."""
@@ -354,9 +378,8 @@ class GraphWindow(tk.Toplevel):
         lo, hi = self.view_range()
         x0, x1 = self.u2x(0), self.u2x(1)
         y_top, y_bot = self.f2y(hi / 100), self.f2y(lo / 100)
-        tm = self.tm()
-        # outside the tumour range: no bumps there, so greyed out
-        r0, r1 = sorted((tm["start"], tm["end"]))
+        # outside the part the setting works on (tumours: their range): greyed out
+        r0, r1 = sorted(self.src.band() or (0.0, 1.0))
         for a, b in ((0.0, r0), (r1, 1.0)):
             if b - a > 1e-9:
                 cv.create_rectangle(self.u2x(a), y_top, self.u2x(b), y_bot, fill=look.CHART_BAND, outline="")
@@ -375,9 +398,8 @@ class GraphWindow(tk.Toplevel):
         cv.create_text(x1, y_bot + 4 * s, text=tr("graph_window.line_end"), anchor="ne", fill=look.LABEL,
                        font=look.font(7))
         if r0 > 1e-9 or r1 < 1 - 1e-9:
-            cv.create_text((self.u2x(r0) + self.u2x(r1)) / 2, y_bot + 4 * s, text=tr("graph_window.tumour_range"),
-                           anchor="n",
-                           fill=look.HINT, font=look.font(7))
+            cv.create_text((self.u2x(r0) + self.u2x(r1)) / 2, y_bot + 4 * s, text=self.src.band_label(),
+                           anchor="n", fill=look.HINT, font=look.font(7))
         lw = max(1, round(1.5 * s))
         cv.create_line(*[c for u, f in self.pts for c in (self.u2x(u), self.f2y(f))], fill=look.CHART_LINE, width=lw)
         r = 4 * s
@@ -393,8 +415,8 @@ class GraphWindow(tk.Toplevel):
         name = self.label.lower()
         self.info.config(text=tr("graph_window.along_the_line_100_the_box", label=self.label,
                                  split=self.value_text(1).split('= ')[1])
-                         if self.app.tumour_targets() else tr("graph_window.select_a_line_with_tumours_to", name=name))
-        zero = bool(self.app.tumour_targets()) and abs(self.box_number()) < 1e-12
+                         if self.src.targets() else self.src.empty_text(name))
+        zero = bool(self.src.targets()) and abs(self.box_number()) < 1e-12
         if zero != bool(self.zero_note.winfo_manager()):
             if zero:
                 self.zero_note.pack(anchor="w", after=self.info)
@@ -413,7 +435,7 @@ class GraphWindow(tk.Toplevel):
         return None if best is None else best[1]
 
     def press(self, e):
-        if not self.app.tumour_targets():
+        if not self.src.targets():
             return
         i = self.point_at(e.x, e.y)
         if i is None:  # a new point here
@@ -459,7 +481,7 @@ class GraphWindow(tk.Toplevel):
     def point_menu(self, e):
         """Right-click a point: type its exact value, or delete it (not when only the two ends are left)."""
         i = self.point_at(e.x, e.y)
-        if i is None or not self.app.tumour_targets():
+        if i is None or not self.src.targets():
             return
         m = tk.Menu(self, tearoff=0)
         m.add_command(label=tr("graph_window.value"), command=lambda: PointDialog(self, i))
@@ -469,7 +491,7 @@ class GraphWindow(tk.Toplevel):
 
     def delete_point(self, i):
         """An end's neighbour becomes the new end (it moves to the line's start / end)."""
-        if len(self.pts) <= 2 or not self.app.tumour_targets():
+        if len(self.pts) <= 2 or not self.src.targets():
             return
         del self.pts[i]
         self.pts[0][0], self.pts[-1][0] = 0.0, 1.0
@@ -479,7 +501,7 @@ class GraphWindow(tk.Toplevel):
 
     def set_point(self, i, u, f):
         """Point i typed in (PointDialog)."""
-        if [u, f] == self.pts[i] or not self.app.tumour_targets():
+        if [u, f] == self.pts[i] or not self.src.targets():
             return
         self.pts[i] = [u, f]
         if not self.fits(self.view_range()):

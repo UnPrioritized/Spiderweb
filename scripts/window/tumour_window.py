@@ -12,7 +12,7 @@ from files.mathexpr import calc, fmt
 from notes.joined import shown_tumour, unify_tumours
 from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
 from window import look
-from window.graph_window import GraphWindow
+from window.graph_window import GraphSource, GraphWindow
 from window.panel_custom import GAP_COLOR
 from window.widgets import LocalUndo, Scrub, Tooltip, bad, fit_screen, good, grid_shown, placed, unchanged, unit_text
 
@@ -44,6 +44,58 @@ TIPS = {
 }
 NOTHING = tr("tumour_window.select_a_line_polyline_freehand_stroke")
 TUMOUR_KEYS = ("tumour", "tumours", "splits")  # what this window changes on a shape (joined.py: "tumours", "splits")
+
+
+class TumourGraphs(GraphSource):
+    """The graph window on the selected lines' tumours: tm["graphs"][setting] (tumour.py)."""
+
+    def tm(self):
+        return dict(TUMOUR_DEFAULTS, **(self.app.shown_tumours() or {}))
+
+    def targets(self):
+        return self.app.tumour_targets()
+
+    def graph(self, key):
+        return (self.tm().get("graphs") or {}).get(key)
+
+    def store(self, key, pts):
+        self.owner.set_graph(key, pts)
+
+    def box_number(self, key):
+        return self.tm()[key] * (self.app.ppq if key in ("length", "dist") else 100 if key == "slant" else 1)
+
+    def band(self):
+        tm = self.tm()
+        return tm["start"], tm["end"]
+
+    def band_label(self):
+        return tr("graph_window.tumour_range")
+
+    def empty_text(self, name):
+        return tr("graph_window.select_a_line_with_tumours_to", name=name)
+
+    def snapshot(self, tgts, key):
+        return [json.loads(json.dumps(((shown_tumour(t) or {}).get("graphs") or {}).get(key))) for t in tgts]
+
+    def restore(self, tgts, saved, key):
+        # (still part of the tumour window's change: its Accept / X decides whether it's kept)
+        shapes = self.app.shapes
+        for t, g in zip(tgts, saved):
+            tm = t.get("tumour") if any(t is s for s in shapes) else None
+            if not tm:
+                continue
+            graphs = dict(tm.get("graphs") or {})
+            graphs.pop(key, None)
+            if g:
+                graphs[key] = g
+            if graphs:
+                tm["graphs"] = graphs
+            else:
+                tm.pop("graphs", None)
+        self.owner.changed(("graph", key))
+
+    def closed(self, gw):
+        self.owner.graph_window = None
 
 
 class TumourWindow(tk.Toplevel):
@@ -403,7 +455,7 @@ class TumourWindow(tk.Toplevel):
         if self.graph_window:
             self.graph_window.lift()
         else:
-            self.graph_window = GraphWindow(self, key, label, unit)
+            self.graph_window = GraphWindow(TumourGraphs(self), key, label, unit)
         self.graph_window.focus_set()
 
     def set_graph(self, key, pts):
