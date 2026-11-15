@@ -1,20 +1,28 @@
 Drag a box on the piano roll, or click two corners. Ctrl makes it perfect as it looks on screen (a circle, a square, an equal-sided triangle or star).
 
-The panel sets how many Points the polygon has (3 = triangle, 4 = square, 5 = pentagon…) and its Kind:
+The panel sets how many Points the polygon has (3 = triangle, 4 = square, 5 = pentagon…; 2 = a flat line until a pattern on its sides pulls its two sides apart) and its Kind:
 
 Polygon: a flat side at the bottom.
 
-Star: outer and inner points take turns. Inner size is how far out the inner points are, in % of the outer ones (100 = a polygon with twice the points).
+Star: outer and inner points take turns. Inner size is how far out the inner points are, in % of the outer ones (100 = a polygon with twice the points). Inner turn turns the inner points round the middle while the outer points stay, for a swirled star (degrees; minus = the other way).
 
 Crossing star: joins every Skip-th point with straight lines that cross, like a pentagram (5 points, skip 2). When the two share a divisor, it's several loops (6 points, skip 2 = two triangles).
 
 Change them any time with the polygon selected; the panel's numbers are also used for the next one you draw.
 [clip:polygon]
 
+Twist bends every side into an S, all the same way, so the shape swirls like a pinwheel (0 = straight sides, 100 = each side leaves its corner at a right angle; minus = the other way).
+
+Uneven makes the sides different lengths: the corners slide along the circle, so they stay the same distance from the middle (0 = all sides equal). Random: every corner slides by its own random amount; New random rolls new ones (each selected polygon gets its own). Typed lengths: the Lengths boxes are side lengths that repeat round the shape: 1 and 2 = short and long sides taking turns, 1, 1, 3 = two short then one long, 1, 2, 3, 4 = growing. + adds a box, − takes the last one away. At 100 % each side takes exactly its share of the way round; less blends it with equal sides.
+
 The sides can have a shape: right-click the polygon → [page:formulas#Shape of the line|Formula] → Shape of the line (Quarter circle, S-curve, your own…). Every side becomes that shape, from its corner to the next one, so a square can become a flower of arches. A closed shape (like Circle) sits on each side as wide as the side, and the sides stay straight.
 
 The sides can also have a pattern: right-click the polygon → Formula → Pattern along the line (a wave, zigzag, spikes, your own…). Every side gets the same pattern. Each piece = every side gets all the loops; Across all = the loops run on round the whole outline.
 
-The pattern's height is in hundredths of the polygon's height, so it grows with the shape. [page:symmetric|Symmetric halves] work on it too. "Turn into plain curve" makes the result a plain curve you can reshape with its handles (the polygon settings go).
+The pattern's height is in hundredths of the polygon's height, so it grows with the shape. [page:symmetric|Symmetric halves] and [page:formulas#Flatten|Flatten] work on it too.
+
+A second pattern: right-click → Formula → Second pattern (once the sides have a pattern). Mix says how the two go together: On top = the second one rides along the first (small spikes on big bumps); Taking turns = the 1st, 3rd, 5th… sides get the first pattern, the 2nd, 4th… the second. The side panel shows its numbers and Mix under the first pattern's. Removing the first pattern moves the second one up.
+
+"Turn into plain curve" makes the result a plain curve you can reshape with its handles (the polygon settings go).
 
 They're custom shapes, so their inside can be filled (see [page:fill|Inside fill]) and they resize, turn and skew like any custom shape (see [page:custom_edit|Custom shapes: resize, turn, skew]). With [page:live|Live shape] on they're drawn into the live shape instead.

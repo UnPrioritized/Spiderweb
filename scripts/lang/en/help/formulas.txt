@@ -21,6 +21,8 @@ Height = how far it swings to each side, in keys:
 
 Curls: the line runs back over itself in little loops; "curl" over 1 makes loops, under 1 a wave.
 
+Flatten (in the side panel, under Symmetric halves) presses the tops of the bumps flat, like a balloon pressed on a wall: they keep their width and only get lower (50 = flat at half their height, 100 = no bumps left). It works with every pattern and stays when you pick another one. Softness says where the flat top starts: 0 = a hard cut with sharp corners, higher = rounder edges.
+
 ## Graphs along the line
 
 Every number of a pattern, Loops too, has a "…" button after its box, in the side panel, in Custom… and in [page:path|Copy along a path]. It opens a graph like the [page:tumours|tumour] graphs: from the start of the line (left) to its end (right), where 100 % = the number in the box. Drag the points, pick Rise, Fall, Hill or Valley, or type a formula; Flat (off) takes the graph off. A blue "× graph" next to a box means that number follows a graph.
