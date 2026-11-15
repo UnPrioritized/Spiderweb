@@ -35,6 +35,7 @@ def clear():
     """Forget every remembered outline / solution."""
     _outlines.clear()
     _solved.clear()
+    _modes.clear()
 
 
 def sine_modes(m):
@@ -258,6 +259,7 @@ def outline_of(base, ppq, view):
         if len(_outlines) > 3:
             _outlines.clear()
             _solved.clear()
+            _modes.clear()  # (row patterns of every height seen: up to ~45 MB on tall shapes)
         got = _outlines[key] = Outline(base, ppq, view)
     return got, key
 
@@ -678,7 +680,7 @@ class Mixed:
         return fn
 
 
-def blend_steps(sizes, ppq, base, centre, view, merged_rows, mix=1.0, seg=None, deepest=None):
+def _blend_steps(sizes, ppq, base, centre, view, merged_rows, mix=1.0, seg=None, deepest=None):
     """Each step's (start, end, key) stretches, the inside itself first: step i = every spot whose value is at
     least 1 - sizes[i] (sizes[0] = the inside). merged_rows joins touching stretches (nested's). With mix < 1 the
     value is mixed with the depth (seg = the outline's segments in the view, deepest = Even band's deepest)."""
@@ -747,7 +749,7 @@ def blend_steps(sizes, ppq, base, centre, view, merged_rows, mix=1.0, seg=None, 
     return steps
 
 
-def values(base, ppq, centre, view, beats, keys, mix=1.0, seg=None, deepest=None):
+def _values(base, ppq, centre, view, beats, keys, mix=1.0, seg=None, deepest=None):
     """The value at (beats, key) spots, read on each key row's middle line (checks / tests)."""
     s = solved(np.asarray(base, np.int64).reshape(-1, 3), ppq, centre, view)
     keys = np.asarray(keys)
@@ -756,3 +758,36 @@ def values(base, ppq, centre, view, beats, keys, mix=1.0, seg=None, deepest=None
     if mix < 1:
         return Mixed(s, mix, seg, deepest).value(ri, xs, seg_dist(seg, xs, view[1] * keys))
     return value_of_heat(s, heat_at(s.o, s, ri, xs) / s.hot)
+
+
+def _moved(base, ppq, centre, view, seg):
+    """The inside measured from its own first tick and lowest key (hunt 2026-11-16: moving a shape redid the whole
+    solve at every step; a moved copy is now the same problem): (base, centre, seg) that way + the shift."""
+    s0, k0 = int(base[:, 0].min()), int(base[:, 2].min())
+    rel = base - np.array([s0, s0, k0], np.int64)
+    centre = (centre[0] - s0 / ppq, centre[1] - k0)
+    if seg is not None:
+        dx, dy = s0 / ppq + view[0] * k0, view[1] * k0
+        seg = seg - np.array([dx, dy, dx, dy])
+    return rel, centre, seg, s0, k0
+
+
+def blend_steps(sizes, ppq, base, centre, view, merged_rows, mix=1.0, seg=None, deepest=None):
+    """Each step's (start, end, key) stretches, the inside itself first: step i = every spot whose value is at
+    least 1 - sizes[i] (sizes[0] = the inside). merged_rows joins touching stretches (nested's). With mix < 1 the
+    value is mixed with the depth (seg = the outline's segments in the view, deepest = Even band's deepest)."""
+    base = np.asarray(base, np.int64).reshape(-1, 3)
+    if not len(base):
+        return [base]
+    rel, centre, seg, s0, k0 = _moved(base, ppq, centre, view, seg)
+    shift = np.array([s0, s0, k0], np.int64)
+    return [st + shift if len(st) else st
+            for st in _blend_steps(sizes, ppq, rel, centre, view, merged_rows, mix, seg, deepest)]
+
+
+def values(base, ppq, centre, view, beats, keys, mix=1.0, seg=None, deepest=None):
+    """The value at (beats, key) spots, read on each key row's middle line (checks / tests)."""
+    base = np.asarray(base, np.int64).reshape(-1, 3)
+    rel, centre, seg, s0, k0 = _moved(base, ppq, centre, view, seg)
+    return _values(rel, ppq, centre, view, np.asarray(beats, float) - s0 / ppq, np.asarray(keys) - k0, mix, seg,
+                   deepest)
