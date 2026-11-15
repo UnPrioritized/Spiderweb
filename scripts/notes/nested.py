@@ -40,7 +40,7 @@ MOST_STEPS = 60
 MORPH_POINTS = 200  # points spread round every piece of an outline while morphing (at least)
 MOST_POINTS = 2000  # (more than that: spread evenly, corners may round off a little)
 RECOLOUR = ("colours", "skip")  # (settings that only change the steps' colours, not their shapes)
-MOST_COLOURS = 15
+MOST_COLOURS = 16  # (16 with "Use channel 10": the panel allows areas.most_colours)
 _spans = {}  # nested_spans, remembered
 
 

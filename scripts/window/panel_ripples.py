@@ -61,7 +61,7 @@ class RipplesPanel:
                 apply = (lambda left=False, key=key: self.on_ripples_box(key, left))
                 e.bind("<Return>", lambda ev, apply=apply: apply())
                 leave_box(self, e, var, apply)
-                Scrub(self, [(e, var, apply)], steps, lo, hi, label=lb)
+                Scrub(self, [(e, var, apply)], steps, lo, self.colours_most if key == "colours" else hi, label=lb)
                 for w in (lb, e):
                     Tooltip(w, tr("panel_custom." + text + "_tip"))
                 self.ripples_boxes[key] = (e, var)
@@ -298,6 +298,7 @@ class RipplesPanel:
         if self._loading or left and unchanged(e):
             return
         _, _, _, lo, hi, _, _, to_setting = next(b for line in BOXES for b in line if b[0] == key)
+        hi = self.colours_most() if key == "colours" else hi  # (panel_nested: 16 with "Use channel 10")
         try:
             x = calc(var.get())
             if not lo <= x <= hi:

@@ -20,7 +20,7 @@ import numpy as np
 
 from files.lang import size as lang_size, tr, trn
 from notes.areas import ALL_COLOURS, most_colours
-from notes.custom import (ROUND, CUSTOM_DEFAULTS, capped_colours, custom_note_count, has_pattern, set_key_top,
+from notes.custom import (ROUND, CENTRE_KEYS, CUSTOM_DEFAULTS, capped_colours, custom_note_count, has_pattern, set_key_top,
                           tracks_apart)
 from window import big_ask, look, notes_wait
 from window.help import Tips, open_help
@@ -3050,7 +3050,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def on_use_ch10(self):
         """The "Use channel 10" tick. Turned off: Colours / Add between turns over 16 channels go down to 15 at
-        once, as an undo step (user: not kept for when it's ticked again). Drawn colours (drawer areas, a stroke's
+        once (Nested / Tiles / Ripples Colours too), as an undo step (user: not kept for when it's ticked again). Drawn colours (drawer areas, a stroke's
         colour) stay: the drawer and panel say so in orange. Ctrl+Z on that step ticks it again (_restore)."""
         if not self.use_ch10.get():
             most = most_colours(False)
@@ -3061,6 +3061,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.over_15(self.shapes)
             if (self.defaults.get("cycle") or {}).get("n", 0) > most:
                 self.defaults["cycle"] = dict(self.defaults["cycle"], n=most)
+            self.over_15([self.custom_defaults])  # (new shapes' Nested / Tiles / Ripples Colours)
         self.on_channel_mode()
 
     def on_channel_mode(self):
@@ -3366,6 +3367,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 b = (t.get("between") or {}).get("set")
                 if b and b.get("colours", 0) > most:
                     over.append((b, "colours"))
+                # (Nested / Tiles / Ripples fills' Colours, the shelved ones too)
+                for c in [t.get(k) for k in CENTRE_KEYS] + list((t.get("patterns_kept") or {}).values()):
+                    if isinstance(c, dict) and c.get("colours", 0) > most:
+                        over.append((c, "colours"))
             if over:
                 found.append(sh)
             if clamp:

@@ -34,7 +34,7 @@ INSIDES = ("rings", "empty", "plain")
 RIPPLES_DEFAULTS = {"steps": 60, "grow": 5.0, "auto": True, "edge": True, "turn": 0.0, "spacing": 0, "colours": 4,
                     "skip": False, "inside": "rings", "trim": True}
 MOST_STEPS = 120
-MOST_COLOURS = 15
+MOST_COLOURS = 16  # (16 with "Use channel 10": the panel allows areas.most_colours)
 MOST_GROW = 50.0  # (5000 %)
 RAYS = 720  # directions a source's reach is measured in (Auto)
 GRID = 64  # frame spots checked across (Auto), plus its corners

@@ -10,7 +10,7 @@ from tkinter import messagebox, ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import shelve_patterns, unshelve
-from notes.tiles import BY, FLIPS, LAYOUTS, MOST_BEATS, MOST_COLOURS, MOST_KEYS, TILES_DEFAULTS, too_many
+from notes.tiles import BY, FLIPS, LAYOUTS, MOST_BEATS, MOST_KEYS, TILES_DEFAULTS, too_many
 from window import look
 from window.drawer import library_lists
 from window.panel_nested import DROP_WIDTH, NOTES_CHOICES, drop_row
@@ -81,7 +81,7 @@ class TilesPanel:
                 apply = (lambda left=False: self.on_tiles_box("colours", left))
                 e.bind("<Return>", lambda ev: apply())
                 leave_box(self, e, var, apply)
-                Scrub(self, [(e, var, apply)], (1, 1, 1), 1, MOST_COLOURS, label=lb)
+                Scrub(self, [(e, var, apply)], (1, 1, 1), 1, self.colours_most, label=lb)
                 for w in (lb, e):
                     Tooltip(w, tr("panel_custom.tiles_colours_tip"))
                 self.tiles_boxes["colours"] = (e, var)
@@ -193,7 +193,7 @@ class TilesPanel:
         if self._loading or left and unchanged(e):
             return
         spec = next((b for line in BOXES for b in line if b[0] == key), None)
-        lo, hi, ticks = (spec[3], spec[4], spec[6]) if spec else (1, MOST_COLOURS, False)
+        lo, hi, ticks = (spec[3], spec[4], spec[6]) if spec else (1, self.colours_most(), False)
         try:
             x = math.floor(calc(var.get()) + 0.5)
             if not lo <= x <= hi or ticks and x > MOST_BEATS * self.ppq:  # (no more than a saved shape keeps)

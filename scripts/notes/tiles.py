@@ -28,7 +28,7 @@ CIRCLE = [{"kind": "ellipse", "box": [0.0, 0.0, 1.0, 1.0]}]
 TILES_DEFAULTS = {"of": {"name": "Circle", "strokes": CIRCLE}, "keys": 12, "length": 1.0, "gap_keys": 2,
                   "gap": 0.25, "layout": "grid", "flip": "none", "by": "diag", "colours": 4, "whole": False}
 MOST_KEYS = 128
-MOST_COLOURS = 15
+MOST_COLOURS = 16  # (16 with "Use channel 10": the panel allows areas.most_colours)
 MOST_BEATS = 10 ** 4  # (the longest tile length / gap kept)
 MOST_TILES = 1000000  # (past this many tiles, or MOST_NOTES of their notes, the fill is left empty: the panel says so)
 MOST_NOTES = 8000000

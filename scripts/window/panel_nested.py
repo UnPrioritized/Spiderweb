@@ -7,6 +7,7 @@ from tkinter import messagebox, ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
+from notes.areas import most_colours
 from notes.custom import shelve_patterns, unshelve
 from notes.nested import MOST_COLOURS, MOST_STEPS, NESTED_DEFAULTS
 from window import look
@@ -104,7 +105,7 @@ class NestedPanel:
                 apply = (lambda left=False, key=key: self.on_nested_box(key, left))
                 e.bind("<Return>", lambda ev, apply=apply: apply())
                 leave_box(self, e, var, apply)
-                Scrub(self, [(e, var, apply)], steps, lo, hi, label=lb)
+                Scrub(self, [(e, var, apply)], steps, lo, self.colours_most if key == "colours" else hi, label=lb)
                 for w in (lb, e):
                     Tooltip(w, tr("panel_custom." + text + "_tip"))
                 self.nested_boxes[key] = (e, var)
@@ -235,6 +236,10 @@ class NestedPanel:
         self.sync_custom()
         self.sync_colours()
 
+    def colours_most(self):
+        """The most colours a Nested / Ripples / Tiles fill's Colours box takes: 16 with "Use channel 10"."""
+        return most_colours(self.all16())
+
     def on_nested_box(self, key, left=False):
         """A Nested number box entered (left: only left, so nothing happens unless its number was changed)."""
         e, var = self.nested_boxes[key]
@@ -242,6 +247,7 @@ class NestedPanel:
             return
         spec = next(b for line in BOXES for b in line if b[0] == key)
         _, _, _, lo, hi, _, _, to_setting = spec
+        hi = self.colours_most() if key == "colours" else hi
         try:
             x = calc(var.get())
             if not lo <= x <= hi:
