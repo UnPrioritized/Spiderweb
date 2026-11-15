@@ -9,13 +9,13 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import calc, fmt
-from notes.pattern import FORMULA_KINDS, MAX_LOOPS, formula_shape, loop_points, most_loops
+from notes.pattern import FORMULA_KINDS, MAX_LOOPS, SOFT_DEFAULT, formula_shape, loop_points, most_loops
 from notes.polygon import update_polygon
 from window import look
 from window.formula_host import SYM_CHOICES, layer_name, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
 from window.pattern_graphs import PanelGraphs, graphed, open_graph
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, read_number, unchanged
 
 LAYERS = ("shape", "pattern")  # (a curve's shape first: the pattern runs along it)
 LOOP_STEPS = (1, 10, 0.1)    # quick changes (widgets.Scrub): step, Shift step, Ctrl step
@@ -51,6 +51,21 @@ class PatternPanel:
             cb.bind("<<ComboboxSelected>>", lambda e, l=layer: self.on_formula_sym(l, e.widget.current()))
             for w in (lb, cb):
                 Tooltip(w, tr("pattern_dialog.sym_tip"))
+            if layer == "pattern":  # Flatten % + Softness %: any bump pressed flat like a balloon on a wall
+                flat_row = ttk.Frame(row)
+                flat_row.pack(fill="x", pady=(2, 0))
+                self.flat_vars, self.flat_entries = {}, {}
+                for key in ("flatten", "soft"):
+                    lb = ttk.Label(flat_row, text=tr("panel_pattern." + key))
+                    lb.pack(side="left", padx=(0 if key == "flatten" else 10, 0))
+                    var = self.flat_vars[key] = tk.StringVar()
+                    e = self.flat_entries[key] = ttk.Entry(flat_row, textvariable=var, width=5)
+                    e.pack(side="left", padx=(4, 0))
+                    e.bind("<Return>", lambda ev, k=key: self.on_flat_entry(k))
+                    leave_box(self, e, var, lambda left, k=key: self.on_flat_entry(k, left))
+                    Scrub(self, [(e, var, lambda k=key: self.on_flat_entry(k))], (5, 25, 1), 0, 100, label=lb)
+                    for w in (lb, e):
+                        Tooltip(w, tr("panel_pattern." + key + "_tip"))
             # (only while the Loops box is at the most, user)
             most = ttk.Label(row, text=tr("panel_pattern.loops_most", most=fmt(MAX_LOOPS)), foreground=GAP_COLOR,
                              font=look.font(8), wraplength=int(300 * self.scale), justify="left")
@@ -125,6 +140,10 @@ class PatternPanel:
                 var.set(fmt(p["loops"] if name == "loops" else p["vars"][name]))
                 e.config(style="TEntry")
             ui["sym"].set(sym_label(p.get("sym")))
+            if layer == "pattern":
+                for key, var in self.flat_vars.items():
+                    var.set(fmt(p.get(key, SOFT_DEFAULT if key == "soft" else 0.0)))
+                    self.flat_entries[key].config(style="TEntry")
             self._loading = False
             for name, (b, mark) in ui.get("graph_marks", {}).items():
                 pack_shown(mark, name in graphed(p), side="left", padx=(3, 0), after=b)
@@ -249,6 +268,28 @@ class PatternPanel:
                 sh[layer]["vars"][name] = value
         self.formulas_edited()
         self.show_loops_most()
+
+    def on_flat_entry(self, key, left=False):
+        """Flatten % / Softness % (Enter, stepped, or left: widgets.leave_box): on every selected pattern."""
+        e = self.flat_entries[key]
+        if self._loading or left and unchanged(e):
+            return
+        value = read_number(self.flat_vars[key].get(), 0, 100)
+        if value is None:
+            bad(e)
+            return
+        good(e)
+        now = SOFT_DEFAULT if key == "soft" else 0.0
+        tgts = [sh for sh in self.with_layer("pattern") if sh["pattern"].get(key, now) != value]
+        if not tgts:
+            return
+        self.begin_edit(("pattern", tuple(sorted(self.sels)), key))
+        for sh in tgts:
+            if key == "flatten" and not value:
+                sh["pattern"].pop("flatten", None)
+            else:
+                sh["pattern"][key] = value
+        self.formulas_edited()
 
     def show_loops_most(self):
         """The note under the Loops box: only while it's at the most (user)."""

@@ -56,10 +56,36 @@ SYMS = ("mirror", "turn")  # a formula's symmetric halves (see the top)
 
 
 def keep_sym(new, old):
-    """new with old's symmetric halves (picking another preset keeps them)."""
-    if (old or {}).get("sym") in SYMS:
+    """new with old's symmetric halves and Flatten / Softness (picking another preset keeps them; from a file:
+    made valid)."""
+    old = old or {}
+    if old.get("sym") in SYMS:
         new["sym"] = old["sym"]
+    for key in ("flatten", "soft"):
+        try:
+            v = float(old.get(key, 0.0))
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(v) and (v > 0 or key == "soft" and key in old):
+            new[key] = max(0.0, min(100.0, v))
     return new
+
+
+SOFT_DEFAULT = 50.0  # % Softness shown before one is typed
+
+
+def flattened(side, peak, flatten, soft):
+    """Bump values (side: keys, + or -) pressed flat like a balloon on a wall: the wall at (100 - flatten) % of the
+    loop's peak, both ways; soft % rounds where the flat top starts (0 = a hard cut with corners, 100 = as round as
+    the room allows: the curve reaches the wall right at the peak)."""
+    cap = (1 - flatten / 100) * peak
+    x = np.abs(side)
+    w = soft / 100 * min(cap, peak - cap)
+    if w <= 1e-12:
+        out = np.minimum(x, cap)
+    else:  # (a smooth knee from cap - w to cap + w)
+        out = np.where(x <= cap - w, x, np.where(x >= cap + w, cap, x - (x - (cap - w)) ** 2 / (4 * w)))
+    return np.sign(side) * out
 
 
 def new_pattern(preset, k, old=None):
@@ -757,6 +783,7 @@ def pattern_paths(paths, p):
     except ValueError:
         return paths
     warp = loop_warp(p)
+    peak = float(np.max(np.abs(v))) if len(v) else 0.0
     graphs = number_graphs(p)
     height = graphs.pop("height") if smooth_height(p, graphs) else None  # (the rest: one value per loop)
     k = p["k"]
@@ -818,6 +845,8 @@ def pattern_paths(paths, p):
         s = (q if warp is None else warp_place(warp, q)) * total - offset  # distance along this piece
         if height is not None:  # (smoothly, where each point is along the line)
             side = side * np.interp((s + offset) / total, *height)
+        if p.get("flatten"):  # (the wall stays where the plain loop's peak puts it: taller graphed loops press more)
+            side = flattened(side, peak, p["flatten"], p.get("soft", SOFT_DEFAULT))
         inside = np.nonzero((s >= 0) & (s <= size))[0]
         if not len(inside):
             out.append([tuple(q) for q in (a * [k, 1.0]).tolist()])
