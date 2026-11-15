@@ -45,7 +45,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   nearest        picture._dist2(...).argmin(1) (Image to notes): each colour's nearest palette colour
   spread_line    picture._spread: the error spreading, one slanted line at a time (its OKLab left to NumPy)
   area_spots     faces.Faces.area_at: the area each spot is in (custom shapes' Fill / Spam, area colours)
-  smooth_sor     nested.smooth_values' loop (Nested fill, Blend)
+  blend_heat     notes/blend_rows.heat_at: Nested Blend's heat at spots (finding each ring edge)
   band_rows      shrink.near_rows (Even band, Outline gate): each outline edge's band on each line, joined line by line
   field_dist     shrink.field's distances to the outline on a grid (Nested's centre, Blend, the Outline gate preview)
   gap_ticks      tempo_file.keep_gaps' work on one Keep timing part (export, Conductor pane checks)
@@ -3141,18 +3141,6 @@ def limit_live(st, x, frames, loud, slot):
 
 
 @njit(nogil=True)
-def smooth_sor(flat, red, black, wide, om, times):
-    """nested.smooth_values' loop: red-black over-relaxation on a grid with a zero border (flat), red / black = the
-    cells each half changes, the same sums in the same order."""
-    for _ in range(times):
-        for part in (red, black):
-            for i in part:
-                g = (flat[i - 1] + flat[i + 1] + flat[i - wide] + flat[i + wide]) / 4
-                here = flat[i]
-                flat[i] = here + om * (g - here)
-
-
-@njit(nogil=True)
 def _band_at(ax, ay, bx, by, length, y, r):
     """shrink.near_rows' sums for one edge on the line at y: its round-ended band's stretch (lo, hi), lo >= hi =
     none. The same sums in the same order."""
@@ -3263,6 +3251,33 @@ def field_dist(ax, ay, bx, by, xs, ys, reach, block, dist):
                         if d2 < best:
                             best = d2
                     dist[j, i] = min(math.sqrt(best), 2.0 * reach)
+
+@njit(nogil=True)
+def blend_heat(nodes, dl, mu, wsc, wec, mode_at, run_m, run_p, width, j, r, xs, j0, q, cx, out):
+    """notes/blend_rows.heat_at: Nested Blend's heat at spots. Spot i lies in piece j[i] (between nodes j and j + 1)
+    on row r[i], in a run of run_m modes (place run_p, first mode mode_at); its heat = the sum over the run's modes
+    of q_k (WS w_s + WE w_e), plus the point source's part in piece j0. mu, wsc, wec, mode_at, run_m, run_p: pieces x
+    width, row by row. The same sums in the same order."""
+    for i in range(len(xs)):
+        jj, rr = j[i], r[i]
+        at = jj * width + rr
+        m, p, first = run_m[at], run_p[at], mode_at[at]
+        t, d = xs[i] - nodes[jj], dl[jj]
+        u, src = 0.0, 0.0
+        for k in range(m):
+            qk = math.sqrt(2.0 / m) * math.sin(math.pi * ((p + 0.5) * (k + 1)) / m)
+            if k == m - 1:
+                qk *= math.sqrt(0.5)
+            c = jj * width + first + k
+            mk = mu[c]
+            em = -math.expm1(-2.0 * mk * d)
+            ws = (math.exp(-mk * t) - math.exp(-mk * (2.0 * d - t))) / em
+            we = (math.exp(-mk * (d - t)) - math.exp(-mk * (d + t))) / em
+            u += qk * (wsc[c] * ws + wec[c] * we)
+            if jj == j0:
+                src += qk * (q[first + k] * math.exp(-mk * abs(xs[i] - cx)) / (2.0 * mk))
+        out[i] = u + src
+    return 0
 
 
 @njit(nogil=True)
@@ -4084,7 +4099,9 @@ def warm():
               np.ones(1), f1, f1, np.ones(1), np.full(1, 9, np.int64), np.ones(1), np.ones(1), np.ones(1), 0.01)
     hz_order(np.arange(300, dtype=np.int64))
     area_spots(f1, f1, np.zeros(2), i2, i2, i2, 0, i1, f1, f1, f1, f1, f1, f1, f1, f)
-    smooth_sor(np.zeros(9), np.array([4], np.int64), np.zeros(0, np.int64), 3, 1.9, 1)
+    z1 = np.zeros(1, np.int64)
+    blend_heat(np.zeros(2), np.ones(1), np.ones(1), np.zeros(1), np.zeros(1), z1, z1 + 1, z1, 1, z1, z1,
+               np.zeros(1), 0, np.zeros(1), 0.0, np.zeros(1))
     band_rows(f1, f1, f1 + 1, f1 + 1, f1 + 1, np.full(1, 0.5), i1 * 0, i1, 1.0, i1.copy(), f1.copy(), f1.copy())
     field_dist(f1, f1, f1 + 1, f1 + 1, f1, f1, 1.0, 24, np.zeros((1, 1)))
     t3 = np.array([0, 1, 3], np.int64)

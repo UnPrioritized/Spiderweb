@@ -83,13 +83,14 @@ py_loops! {
     area_spots(x: &[f64], y: &[f64], levels: &[f64], start: &[i64], off: &[i64], lab: &[i64], outside: i64,
                edge: &[i64], ex: &[f64], ey: &[f64], es: &[f64], x0: &[f64], y0: &[f64], x1: &[f64], y1: &[f64],
                eps: f64, out: &mut [i64]) => crate::misc::area_spots;
-    smooth_sor(flat: &mut [f64], red: &[i64], black: &[i64], wide: i64, om: f64, times: i64)
-               => crate::misc::smooth_sor;
     // ---- Inside fills' distances to the outline (fills.rs)
     band_rows(ax: &[f64], ay: &[f64], bx: &[f64], by: &[f64], length: &[f64], ys: &[f64], first: &[i64], n: &[i64],
               r: f64, row_out: &mut [i64], lo_out: &mut [f64], hi_out: &mut [f64]) => crate::fills::band_rows;
     field_dist(ax: &[f64], ay: &[f64], bx: &[f64], by: &[f64], xs: &[f64], ys: &[f64], reach: f64, block: i64,
                dist: NdMut<f64, 2>) => crate::fills::field_dist;
+    blend_heat(nodes: &[f64], dl: &[f64], mu: &[f64], wsc: &[f64], wec: &[f64], mode_at: &[i64], run_m: &[i64],
+               run_p: &[i64], width: i64, j: &[i64], r: &[i64], xs: &[f64], j0: i64, q: &[f64], cx: f64,
+               out: &mut [f64]) => crate::fills::blend_heat;
     dc_block(x: NdMut<f32, 2>, c: &[f64], z: NdMut<f64, 2>) => crate::misc::dc_block;
     // ---- Hz bass (hz.rs)
     wave_fill(starts: &[i64], a: i64, b: i64, sq0: &[i64], wo: &[f64], out: &mut [f64]) => crate::hz::wave_fill;

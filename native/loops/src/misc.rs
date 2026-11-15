@@ -1,5 +1,5 @@
 //! MIDI bytes, Image to notes, custom shapes' areas, Nested fill: fastloops' midi_events, midi_track, nearest,
-//! spread_line, area_spots, smooth_sor. The same sums in the same order as those.
+//! spread_line, area_spots. The same sums in the same order as those.
 use std::cell::RefCell;
 
 use crate::maths::{fdiv, pmax, pmin};
@@ -306,23 +306,6 @@ pub fn dc_block(x: NdMut<f32, 2>, c: &[f64], z: NdMut<f64, 2>) -> i64 {
             z[ch * 2] = b1 * s - a1 * y + z[ch * 2 + 1];
             z[ch * 2 + 1] = b2 * s - a2 * y;
             x[i * 2 + ch] = y as f32;
-        }
-    }
-    0
-}
-
-/// fastloops.smooth_sor (flat changed in place) -> 0.
-#[inline(always)]
-pub fn smooth_sor(flat: &mut [f64], red: &[i64], black: &[i64], wide: i64, om: f64, times: i64) -> i64 {
-    let w = wide as usize;
-    for _ in 0..times {
-        for part in [red, black] {
-            for &i in part {
-                let i = i as usize;
-                let g = (flat[i - 1] + flat[i + 1] + flat[i - w] + flat[i + w]) / 4.0;
-                let here = flat[i];
-                flat[i] = here + om * (g - here);
-            }
         }
     }
     0

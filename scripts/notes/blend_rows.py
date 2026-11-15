@@ -19,6 +19,8 @@ import math
 
 import numpy as np
 
+from files.speed import compiled
+
 STEP = 1 / 16  # spacing along a row (in row heights) of the samples the evening-out sums over
 LEVELS = 400
 MOST_ROWS = 256  # (taller shapes: neighbouring keys worked out together as one strip, user 2026-11-16: the solve's
@@ -151,9 +153,9 @@ class Outline:
         self.seg = [Piece(np.flatnonzero(alive[:, j]), dl[j], self.h) if alive[:, j].any() else None
                     for j in range(pieces)]
         # where each (piece, row) sits among its piece's modes: first mode of its run, run length, place in run
-        self.mode_at = np.full((pieces, n), -1, np.int32)
-        self.run_m = np.ones((pieces, n), np.int32)
-        self.run_p = np.zeros((pieces, n), np.int32)
+        self.mode_at = np.full((pieces, n), -1, np.int64)
+        self.run_m = np.ones((pieces, n), np.int64)
+        self.run_p = np.zeros((pieces, n), np.int64)
         for j, p in enumerate(self.seg):
             if p is None:
                 continue
@@ -171,6 +173,8 @@ class Outline:
         self.pb = [empty] * (pieces + 1)  # i - 1's among piece i - 1's: Lo_i = -Ks(piece i - 1)[pa, pm])
         self.pm = [empty] * (pieces + 1)
         self.Sinv = [np.zeros((0, 0))] * (pieces + 1)
+        self._basis, self.depths, self._spots = {}, {}, None  # (remembered: basis(), Mixed's distances at the
+        # samples, spots())
         prev = np.zeros((0, 0))
         kept = {}  # (a piece's dense Kc / Ks, built once: it is the right piece of one node, the left of the next)
 
@@ -197,6 +201,40 @@ class Outline:
                 lo = -ks_l[np.ix_(pa, pm)]
                 dm = dm - (lo @ prev) @ lo.T
             self.Sinv[i] = prev = spd_inverse(dm)
+
+    def basis(self, j):
+        """Piece j's sample spots (t from its start, STEP strip heights apart, ends included) and each mode's share
+        of its two ends' values there (the same for every centre point: remembered)."""
+        got = self._basis.get(j)
+        if got is None:
+            dl = self.dl[j]
+            ns = max(1, int(math.ceil(dl / (STEP * self.h))))
+            t = np.linspace(0, dl, ns + 1)[None, :]
+            mu = self.seg[j].mu[:, None]
+            em = -np.expm1(-2 * mu * dl)
+            ws = (np.exp(-mu * t) - np.exp(-mu * (2 * dl - t))) / em
+            we = (np.exp(-mu * (dl - t)) - np.exp(-mu * (dl + t))) / em
+            got = self._basis[j] = (t, ws, we, dl / ns)
+        return got
+
+    def spots(self):
+        """Every sample spot (x, y, its share of its row: ends halved), all pieces' rows one after another in
+        samples()' order (remembered)."""
+        if self._spots is None:
+            xs_l, ys_l, ws_l = [], [], []
+            for j, p in enumerate(self.seg):
+                if p is None:
+                    continue
+                t, _, _, dx = self.basis(j)
+                xs = self.nodes[j] + t[0]
+                wt = np.full(len(xs), dx)
+                wt[0] *= 0.5
+                wt[-1] *= 0.5
+                xs_l.append(np.tile(xs, p.n))
+                ys_l.append(np.repeat(self.h * (p.rows + self.off), len(xs)))
+                ws_l.append(np.tile(wt, p.n))
+            self._spots = np.concatenate(xs_l), np.concatenate(ys_l), np.concatenate(ws_l)
+        return self._spots
 
     def lo(self, i, v):
         """Lo_i v (v on node i - 1's unknowns -> node i's)."""
@@ -310,6 +348,14 @@ def heat_at(o, s, ri, xs):
     ok = (xs >= o.nodes[0]) & (xs <= o.nodes[-1]) & (ri >= 0) & (ri < o.N)
     ok[ok] &= o.alive[ri[ok], j[ok]]
     idx = np.flatnonzero(ok)
+    fast = compiled("blend_heat")
+    if fast is not None and len(idx):  # (the same, as a compiled loop: files/fastloops.py)
+        got = np.empty(len(idx))
+        fast.blend_heat(o.nodes, o.dl, o.MU.ravel(), s.WS.ravel(), s.WE.ravel(), o.mode_at.ravel(), o.run_m.ravel(),
+                        o.run_p.ravel(), o.N, j[idx].astype(np.int64), ri[idx].astype(np.int64),
+                        np.ascontiguousarray(xs[idx], float), int(s.j0), s.q, float(s.cx), got)
+        out[idx] = got
+        return out
     for lo in range(0, len(idx), 4000):
         ii = idx[lo:lo + 4000]
         jj, rr, x = j[ii], ri[ii], xs[ii]
@@ -360,18 +406,13 @@ def samples(o, s):
         sg = o.seg[j]
         if sg is None:
             continue
-        dl = o.dl[j]
-        ns = max(1, int(math.ceil(dl / (STEP * o.h))))
-        t = np.linspace(0, dl, ns + 1)[None, :]
-        mu = sg.mu[:, None]
-        em = -np.expm1(-2 * mu * dl)
-        ws = (np.exp(-mu * t) - np.exp(-mu * (2 * dl - t))) / em
-        we = (np.exp(-mu * (dl - t)) - np.exp(-mu * (dl + t))) / em
+        t, ws, we, dx = o.basis(j)
         m = sg.n
         wh = s.WS[j, :m, None] * ws + s.WE[j, :m, None] * we
         if j == s.j0:
+            mu = sg.mu[:, None]
             wh = wh + (s.q[:m, None] * np.exp(-mu * np.abs(o.nodes[j] + t - s.cx)) / (2 * mu))
-        out.append((j, o.nodes[j] + t[0], sg.rows, sg.from_modes(wh), dl / ns))
+        out.append((j, o.nodes[j] + t[0], sg.rows, sg.from_modes(wh), dx))
     return out
 
 
@@ -392,16 +433,9 @@ def solved(base, ppq, centre, view):
     longer = max(o.nodes[-1] - o.nodes[0], h * o.N)
     s.hot = circle_mean(o, s, max(longer / 60, 1.5 * h))  # (the hot disc's heat: value 1 from there in)
     s.sm = samples(o, s)
-    us, ws, rs = [], [], []
-    for j, xs, rows, g, dx in s.sm:
-        wt = np.full(len(xs), dx)
-        wt[0] *= 0.5
-        wt[-1] *= 0.5
-        y = h * (rows + o.off)
-        us.append((g / s.hot).ravel())
-        ws.append(np.tile(wt, len(rows)))
-        rs.append(np.hypot(xs[None, :] - cx, (y - cy)[:, None]).ravel())
-    u, wgt, r = np.concatenate(us), np.concatenate(ws), np.concatenate(rs)
+    u = np.concatenate([(g / s.hot).ravel() for j, xs, rows, g, dx in s.sm])
+    sx, sy, wgt = o.spots()
+    r = np.hypot(sx - cx, sy - cy)
     free = u < 1
     pos = u[free] * LEVELS - 0.5  # (each sample shared between the three nearest levels: a smooth histogram)
     d = pos - np.round(pos)
@@ -443,10 +477,11 @@ def heat_for(s, v):
 
 def roots(fn, x0, x1, ppq):
     """Where fn(which, x) (bracket numbers, spots) crosses 0 inside each bracket [x0, x1] (opposite signs at its
-    ends): regula falsi (Illinois) on the exact value, every 8th step a halving, until the spot moves < 1e-4 tick."""
+    ends): regula falsi (Illinois) on the exact value, every 8th step a halving, until the spot moves < 1e-7 tick
+    (that tight: a last-digit difference between the compiled loop and NumPy can't move a note's tick)."""
     every = np.arange(len(x0))
     f0, f1 = fn(every, x0), fn(every, x1)
-    tol = 1e-4 / ppq
+    tol = 1e-7 / ppq
     x0, x1 = x0.copy(), x1.copy()
     xm = (x0 + x1) / 2
     act = np.arange(len(x0))
@@ -503,11 +538,14 @@ class Mixed:
         """The value at every sample (like s.sm's heat)."""
         from notes.shrink import distances
         o, s = self.s.o, self.s
-        out = []
-        for j, xs, rows, g, _ in s.sm:
-            d = distances(self.seg, xs, o.h * (rows + o.off), 1.5 * self.deepest + o.h)
-            out.append((1 - self.mix) * d / self.deepest + self.mix * value_of_heat(s, g / s.hot))
-        return out
+        key = (self.seg.tobytes(), self.deepest)
+        depth = o.depths.get(key)  # (the distances don't move with the centre point: remembered per outline)
+        if depth is None:
+            o.depths.clear()
+            depth = o.depths[key] = [distances(self.seg, xs, o.h * (rows + o.off), 1.5 * self.deepest + o.h)
+                                     for j, xs, rows, g, _ in s.sm]
+        return [(1 - self.mix) * d / self.deepest + self.mix * value_of_heat(s, g / s.hot)
+                for d, (j, xs, rows, g, _) in zip(depth, s.sm)]
 
     def crossing(self, row, x0, x1, line):
         """fn for roots: the value minus its line, in each bracket (row index, [x0, x1]); only the segments that
@@ -565,18 +603,18 @@ def blend_steps(sizes, ppq, base, centre, view, merged_rows, mix=1.0, seg=None, 
         want = np.array([heat_for(s, t) for t in lines]) * s.hot
         sampled = [g for _, _, _, g, _ in s.sm]
     rows_l, x0_l, x1_l, which_l, up_l = [], [], [], [], []
-    for (j, xs, rows, _, _), g in zip(s.sm, sampled):  # (brackets: neighbouring samples on both sides of a line)
-        for ti, gt in enumerate(want):
-            if lines[ti] <= 0:
-                continue
-            on = g >= gt
-            rr, ii = np.nonzero(on[:, 1:] != on[:, :-1])
-            if len(rr):
-                rows_l.append(rows[rr])
-                x0_l.append(xs[ii])
-                x1_l.append(xs[ii + 1])
-                which_l.append(np.full(len(rr), ti))
-                up_l.append(on[rr, ii + 1])
+    real = np.array([ti for ti, t in enumerate(lines) if t > 0], np.int64)
+    for (j, xs, rows, _, _), g in zip(s.sm, sampled):  # (brackets: neighbouring samples on both sides of a line,
+        if not len(real):  # every line at once)
+            break
+        on = g[None] >= want[real][:, None, None]
+        wi, rr, ii = np.nonzero(on[:, :, 1:] != on[:, :, :-1])
+        if len(rr):
+            rows_l.append(rows[rr])
+            x0_l.append(xs[ii])
+            x1_l.append(xs[ii + 1])
+            which_l.append(real[wi])
+            up_l.append(on[wi, rr, ii + 1])
     steps = [base]
     if not rows_l:
         return steps + [base if t <= 0 else np.zeros((0, 3), np.int64) for t in lines]

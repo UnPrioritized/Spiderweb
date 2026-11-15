@@ -1,5 +1,6 @@
 //! Inside fills' distances to the outline (notes/shrink.py: Even band, Outline gate, Nested's field): fastloops'
-//! band_rows, field_dist. The same sums in the same order as those.
+//! band_rows, field_dist; Nested Blend's heat (notes/blend_rows.py): blend_heat. The same sums in the same order as
+//! those.
 use crate::maths::{pmax, pmin};
 use rayon::prelude::*;
 
@@ -312,5 +313,91 @@ impl Grid<'_> {
                 d[i] = pmin(best.sqrt(), 2.0 * reach);
             }
         }
+    }
+}
+
+/// fastloops.blend_heat: Nested Blend's heat at spots (notes/blend_rows.py heat_at). Piece j (between nodes j and
+/// j + 1, length dl[j]) of spot i holds row r[i] in a run of run_m modes (place run_p, first mode mode_at); its
+/// value = sum over the run's modes of q_k (WS w_s + WE w_e) (+ the point source's part in piece j0). mu, wsc, wec,
+/// mode_at, run_m, run_p: pieces x width, row by row. -> 0, FAILED = odd sizes.
+#[allow(clippy::too_many_arguments)]
+pub fn blend_heat(nodes: &[f64], dl: &[f64], mu: &[f64], wsc: &[f64], wec: &[f64], mode_at: &[i64], run_m: &[i64],
+                  run_p: &[i64], width: i64, j: &[i64], r: &[i64], xs: &[f64], j0: i64, q: &[f64], cx: f64,
+                  out: &mut [f64]) -> i64 {
+    let (n, e) = (xs.len(), dl.len());
+    if width < 1 || j.len() != n || r.len() != n || out.len() != n || nodes.len() != e + 1 {
+        return FAILED;
+    }
+    let w = width as usize;
+    let cells = e * w;
+    if mu.len() != cells || wsc.len() != cells || wec.len() != cells || mode_at.len() != cells
+        || run_m.len() != cells || run_p.len() != cells || q.len() != w {
+        return FAILED;
+    }
+    for i in 0..n {
+        if j[i] < 0 || j[i] as usize >= e || r[i] < 0 || r[i] as usize >= w {
+            return FAILED;
+        }
+        let at = j[i] as usize * w + r[i] as usize;
+        let (m, first) = (run_m[at], mode_at[at]);
+        if m < 1 || first < 0 || (first + m) as usize > w {
+            return FAILED;
+        }
+    }
+    let h = Heat { nodes, dl, mu, wsc, wec, mode_at, run_m, run_p, w, j0, q, cx };
+    match crate::pool_for(true, n, 4) {
+        None => {
+            for i in 0..n {
+                out[i] = h.at(j[i] as usize, r[i] as usize, xs[i]);
+            }
+        }
+        Some(pool) => pool.install(|| {
+            out.par_iter_mut().enumerate().for_each(|(i, o)| *o = h.at(j[i] as usize, r[i] as usize, xs[i]));
+        }),
+    }
+    0
+}
+
+/// blend_heat's inputs.
+struct Heat<'a> {
+    nodes: &'a [f64],
+    dl: &'a [f64],
+    mu: &'a [f64],
+    wsc: &'a [f64],
+    wec: &'a [f64],
+    mode_at: &'a [i64],
+    run_m: &'a [i64],
+    run_p: &'a [i64],
+    w: usize,
+    j0: i64,
+    q: &'a [f64],
+    cx: f64,
+}
+
+impl Heat<'_> {
+    /// The heat at x on row r of piece j (the twin's sums, one mode after another).
+    fn at(&self, j: usize, r: usize, x: f64) -> f64 {
+        let at = j * self.w + r;
+        let (m, p, first) = (self.run_m[at], self.run_p[at] as f64, self.mode_at[at] as usize);
+        let mf = m as f64;
+        let (t, d) = (x - self.nodes[j], self.dl[j]);
+        let (mut u, mut src) = (0.0, 0.0);
+        let own = j as i64 == self.j0;
+        for k in 0..m as usize {
+            let mut qk = (2.0 / mf).sqrt() * (std::f64::consts::PI * ((p + 0.5) * (k + 1) as f64) / mf).sin();
+            if k as i64 == m - 1 {
+                qk *= 0.5f64.sqrt();
+            }
+            let c = j * self.w + first + k;
+            let mu = self.mu[c];
+            let em = -(-2.0 * mu * d).exp_m1();
+            let ws = ((-mu * t).exp() - (-mu * (2.0 * d - t)).exp()) / em;
+            let we = ((-mu * (d - t)).exp() - (-mu * (d + t)).exp()) / em;
+            u += qk * (self.wsc[c] * ws + self.wec[c] * we);
+            if own {
+                src += qk * (self.q[first + k] * (-mu * (x - self.cx).abs()).exp() / (2.0 * mu));
+            }
+        }
+        u + src
     }
 }

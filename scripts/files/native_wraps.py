@@ -21,8 +21,8 @@ NEEDS = {
     "warp_newton": ("warp_newton",), "warp_soft": ("warp_soft",), "warp_exact": ("warp_exact",),
     "warp_soft2": ("warp_soft2",),
     "midi_events": ("midi_events", "take_bytes"), "midi_track": ("midi_track", "take_bytes"), "nearest": ("nearest",),
-    "spread_line": ("spread_line",), "area_spots": ("area_spots",), "smooth_sor": ("smooth_sor",),
-    "band_rows": ("band_rows",), "field_dist": ("field_dist",),
+    "spread_line": ("spread_line",), "area_spots": ("area_spots",),
+    "band_rows": ("band_rows",), "field_dist": ("field_dist",), "blend_heat": ("blend_heat",),
     "dc_block": ("dc_block",),
     "wave_fill": ("wave_fill",), "bez_solve": ("bez_solve",), "note_ends": ("note_ends",), "hz_expand": ("hz_expand",), "hz_late": ("hz_late",),
     "hz_order": ("hz_order",), "hz_finish": ("hz_finish", "hz_finish_i"),
@@ -322,12 +322,6 @@ class Wraps:
             return self.base.area_spots(*args[:-1])
         return out
 
-    def smooth_sor(self, flat, red, black, wide, om, times):
-        args = (flat, red, black, wide, om, times)
-        got = self.x.smooth_sor(*args)
-        if got < 0 and self._again("smooth_sor", got, args) < 0:
-            self.base.smooth_sor(*args)
-
     def band_rows(self, ax, ay, bx, by, length, ys, first, n, r, row_out, lo_out, hi_out):
         args = (ax, ay, bx, by, length, ys, first, n, r, row_out, lo_out, hi_out)
         m = self.x.band_rows(*args)
@@ -340,6 +334,11 @@ class Wraps:
         got = self.x.field_dist(*args)
         if got < 0 and self._again("field_dist", got, args) < 0:
             self.base.field_dist(*args)
+
+    def blend_heat(self, *args):
+        got = self.x.blend_heat(*args)
+        if got < 0 and self._again("blend_heat", got, args) < 0:
+            self.base.blend_heat(*args)
 
     def dc_block(self, x, c, z):
         got = self.x.dc_block(x, c, z)
