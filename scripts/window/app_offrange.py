@@ -104,8 +104,15 @@ def lined_up(rows, used10, notes, use10, real):
     d = pairs[:, 1] - pairs[:, 0]
     ds, dc = np.unique(np.repeat(d, counts), return_counts=True)
     shift = int(ds[dc.argmax()])
+    # (a slot the shift takes under 0 moves up by whole channel sets: same colour, slot % channels; tester
+    # 2026-11-15: more colours past the keys than on them, laid first, went to -1 and all fell on one slot)
+    per = 16 if use10 or used10 else 15
+
+    def moved(k):
+        k += shift
+        return k if k >= 0 else k + -(k // per) * per
     kinds, back = np.unique(out, return_inverse=True)  # (a few alone slots: one look-up each, not per note)
-    return np.array([best[k][0] if k in best else k + shift if k >= 0 else -1 for k in kinds.tolist()],
+    return np.array([best[k][0] if k in best else moved(k) if k >= 0 else -1 for k in kinds.tolist()],
                     np.int64)[back.ravel()]
 
 
