@@ -626,6 +626,53 @@ def warp_place(warp, q):
     return np.where(q < 0.0, out + q, out)
 
 
+def number_graphs(p):
+    """The pattern's numbers that follow a graph: {name: (u, f) arrays} (none on a loop edited by hand: it has no
+    numbers)."""
+    if p.get("loop"):
+        return {}
+    gs = p.get("graphs") or {}
+    return {n: (np.array([q[0] for q in gs[n]], float), np.array([q[1] for q in gs[n]], float))
+            for n in p["vars"] if gs.get(n)}
+
+
+@functools.lru_cache(maxsize=256)
+def _height_scales(text, values, sym, along):
+    """Does height only scale the loop sideways (height * ..., like every preset)? Then its graph changes it
+    smoothly along the line; else (a formula of your own) once per loop, like the other numbers."""
+    vals = dict(values)
+    try:
+        u1, v1 = _loop(text, tuple(sorted(dict(vals, height=1.0).items())), sym, along)
+        u2, v2 = _loop(text, tuple(sorted(dict(vals, height=2.0).items())), sym, along)
+    except ValueError:
+        return False
+    return bool(np.allclose(u1, u2, rtol=0, atol=1e-9) and np.allclose(v2, 2 * v1, rtol=1e-9, atol=1e-9))
+
+
+def smooth_height(p, graphs):
+    """The Height graph changes the side sizes smoothly (see _height_scales)."""
+    return "height" in graphs and _height_scales(p["formula"], tuple(sorted(p["vars"].items())),
+                                                 p.get("sym") if p.get("sym") in SYMS else None, p.get("along", ""))
+
+
+def loops_with_values(p, x, values):
+    """Many loops at once, each with its own numbers: x (loops, samples) along each loop 0 -> 1, values {name:
+    number or (loops, 1) array}. (along, side) arrays like loop_points' (symmetric halves, mirrored / scaled).
+    ValueError if the formula can't be worked out."""
+    sym = p.get("sym") if p.get("sym") in SYMS else None
+    second = x > 0.5
+    xh = np.where(second, 1.0 - x, x) if sym else x  # (symmetric: the first half makes the second)
+    v = formula(p["formula"], named=True).arrays(xh, values)
+    if sym == "turn":
+        mid = formula(p["formula"], named=True).arrays(np.full((x.shape[0], 1), 0.5), values)
+        v = np.where(second, 2 * mid - v, v)
+    u = x
+    if p.get("along", "").strip():
+        a = formula(p["along"], named=True).arrays(xh, values)
+        u = x + (np.where(second, -a, a) if sym else a)
+    return u, v * (-p["scale"] if p["mirror"] else p["scale"])
+
+
 def _plain_stretches(s_run, v_run, ln, size):
     """With a Loops graph: the line runs plain from the piece's start / to its end where no loops are (0 % there),
     and the path's own points go in (a long plain or spread-out stretch still follows the path's bends)."""
@@ -655,6 +702,8 @@ def pattern_paths(paths, p):
     except ValueError:
         return paths
     warp = loop_warp(p)
+    graphs = number_graphs(p)
+    height = graphs.pop("height") if smooth_height(p, graphs) else None  # (the rest: one value per loop)
     k = p["k"]
     screens = [np.asarray(path, float).reshape(-1, 2) / [k, 1.0] for path in paths]
     lengths = [np.concatenate([[0.0], np.cumsum(np.hypot(*np.diff(a, axis=0).T))]) if len(a) > 1 else np.zeros(1)
@@ -686,13 +735,31 @@ def pattern_paths(paths, p):
         count = last - first
         if count * per > MAX_POINTS + per:  # (a piece can touch one loop more than its share)
             count = MAX_POINTS // per + 1
-        loop_no = np.repeat(np.arange(first, first + count), per)
-        along = np.tile(uu[:-1], count) + loop_no
-        side = np.tile(vv[:-1], count)
-        along = np.append(along, first + count - 1 + uu[-1])
-        side = np.append(side, vv[-1])
+        if graphs:  # each loop with its numbers where its middle is
+            nos = np.arange(first, first + count, dtype=float)
+            mids = (nos + 0.5) / loops
+            at = mids if warp is None else warp_place(warp, mids)
+            values = dict(p["vars"])
+            for name, (gu, gf) in graphs.items():
+                values[name] = (p["vars"][name] * np.interp(at, gu, gf))[:, None]
+            try:
+                uu2, vv2 = loops_with_values(p, np.broadcast_to(t, (count, per + 1)), values)
+            except ValueError:
+                return paths
+            along = (uu2[:, :-1] + nos[:, None]).ravel()
+            side = vv2[:, :-1].ravel()
+            along = np.append(along, nos[-1] + uu2[-1, -1])
+            side = np.append(side, vv2[-1, -1])
+        else:
+            loop_no = np.repeat(np.arange(first, first + count), per)
+            along = np.tile(uu[:-1], count) + loop_no
+            side = np.tile(vv[:-1], count)
+            along = np.append(along, first + count - 1 + uu[-1])
+            side = np.append(side, vv[-1])
         q = along / loops
         s = (q if warp is None else warp_place(warp, q)) * total - offset  # distance along this piece
+        if height is not None:  # (smoothly, where each point is along the line)
+            side = side * np.interp((s + offset) / total, *height)
         inside = np.nonzero((s >= 0) & (s <= size))[0]
         if not len(inside):
             out.append([tuple(q) for q in (a * [k, 1.0]).tolist()])

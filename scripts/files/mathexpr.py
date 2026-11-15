@@ -1,6 +1,7 @@
 """Lets number boxes accept simple math like 960*4 or (60+4)*16, and reads curve formulas like x^2."""
 
 import ast
+import functools
 import math
 import operator
 
@@ -125,7 +126,59 @@ def formula(text, named=False, var="x"):
             raise ValueError(tr("mathexpr.not_a_real_number"))
         return float(v)
     fn.names = names
+    fn.arrays = lambda x, values=None: _arrays(tree, var, x, values or {})
     return fn
+
+
+def _np_power(left, right):
+    """_power for arrays."""
+    import numpy as np
+    if np.any(np.abs(right) > 64):
+        raise ValueError(tr("mathexpr.exponent_too_large"))
+    return np.power(np.asarray(left, float), right)
+
+
+def _np_funcs():
+    import numpy as np
+
+    def many(f):
+        return lambda *a: functools.reduce(f, a)
+    return {"sin": np.sin, "cos": np.cos, "tan": np.tan, "asin": np.arcsin, "acos": np.arccos, "atan": np.arctan,
+            "sinh": np.sinh, "cosh": np.cosh, "tanh": np.tanh, "sqrt": np.sqrt, "exp": np.exp, "log": np.log,
+            "ln": np.log, "log10": np.log10, "log2": np.log2, "abs": np.abs, "min": many(np.minimum),
+            "max": many(np.maximum), "floor": np.floor, "ceil": np.ceil,
+            "round": lambda a, n=0: np.round(a, int(n)), "pow": _np_power}
+
+
+def _arrays(tree, var, x, values):
+    """A formula worked out for many x at once (NumPy arrays; values may be arrays too, broadcast against x): what
+    fn gives one by one, as an array. ValueError where it can't be worked out (math's errors give NaN / inf here)."""
+    import numpy as np
+    funcs = _np_funcs()
+
+    def ev(node):
+        if isinstance(node, ast.Constant):
+            return node.value
+        if isinstance(node, ast.Name):
+            return x if node.id == var else FORMULA_NAMES[node.id] if node.id in FORMULA_NAMES else values[node.id]
+        if isinstance(node, ast.BinOp):
+            left, right = ev(node.left), ev(node.right)
+            if isinstance(node.op, ast.Pow):
+                return _np_power(left, right)
+            return _OPS[type(node.op)](np.asarray(left, float), right)
+        if isinstance(node, ast.UnaryOp):
+            v = ev(node.operand)
+            return -v if isinstance(node.op, ast.USub) else v
+        return funcs[node.func.id](*(ev(a) for a in node.args))
+
+    with np.errstate(all="ignore"):
+        try:
+            v = np.broadcast_to(np.asarray(ev(tree.body), float), np.shape(x))
+        except (TypeError, KeyError, ZeroDivisionError, OverflowError):
+            raise ValueError(tr("mathexpr.not_a_real_number"))
+    if not np.all(np.isfinite(v)):
+        raise ValueError(tr("mathexpr.not_a_real_number"))
+    return v
 
 
 def calc_int(text, lo=None, hi=None):
