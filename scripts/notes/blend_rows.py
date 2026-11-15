@@ -313,8 +313,10 @@ def solve(o, cx, cy, w):
     first = min(f) if f else pieces
     y = [np.zeros(len(u)) for u in o.U]
     for i in range(first, pieces):
-        if len(o.U[i]):
-            y[i] = f.get(i, 0.0) - (o.lo(i, o.Sinv[i - 1] @ y[i - 1]) if i > first and len(y[i - 1]) else 0.0)
+        if len(o.U[i]):  # (always an array: after a gap no row reaches across, node i - 1 has nothing to carry)
+            y[i] = f[i] if i in f else np.zeros(len(o.U[i]))
+            if i > first and len(y[i - 1]):
+                y[i] = y[i] - o.lo(i, o.Sinv[i - 1] @ y[i - 1])
     sol = [np.zeros(len(u)) for u in o.U]
     for i in range(pieces - 1, 0, -1):
         if not len(o.U[i]):
