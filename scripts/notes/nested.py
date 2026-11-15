@@ -27,7 +27,6 @@ import math
 
 import numpy as np
 
-from files import speed
 from notes.custom import (carried_fill, clean_of_at, cut_out, drawn_view, edge_loops, find_spans, fill_plan,
                           frame_spans, frame_to_bp, frame_to_uv, has_nested, has_tiles, in_turns, inside_rows, merged_rows, poly_edges, rows_spans)
 from notes.paths import pitch_of, top_key
@@ -224,98 +223,23 @@ def deepest_field(sh, view):
     return got, max(float(got[3].max()), 1e-9)
 
 
-def smooth_values(f, step, cx, cy, x0, y0):
-    """Blend's smooth value on the field's grid: 0 on the outline (and outside), 1 on a small disc round the centre
-    point (cx, cy in the view; the nearest inside spot when it's outside), like heat spreading from it (solved by
-    red-black over-relaxation); then evened out so its steps are about equally thick (each level's average
-    distance to the outline, rising)."""
-    inside = f > 0
-    h, w = f.shape
-    if not inside.any():
-        return np.zeros(f.shape)
-    jc, ic = (cy - y0) / step, (cx - x0) / step
-    jj, ii = np.mgrid[0:h, 0:w]
-    d2 = (jj - jc) ** 2 + (ii - ic) ** 2
-    if not inside[min(h - 1, max(0, int(round(jc)))), min(w - 1, max(0, int(round(ic))))]:
-        k = np.argmin(np.where(inside, d2, np.inf))
-        jc, ic = divmod(k, w)
-        d2 = (jj - jc) ** 2 + (ii - ic) ** 2
-    hot = inside & (d2 <= max(1.0, max(h, w) / 60) ** 2)
-    free = inside & ~hot
-    # (worked in place on a copy with a zero border, only on the cells each half changes: the same sums as the whole
-    # grid at once, much quicker while the centre point is dragged)
-    pad = np.zeros((h + 2, w + 2))
-    pad[1:-1, 1:-1] = np.where(hot, 1.0, 0.0)
-    flat, wide = pad.reshape(-1), w + 2
-    red = free & ((jj + ii) % 2 == 0)
-    black = free & ~red
-    om = 1.9
-    cells = [np.flatnonzero(np.pad(part, 1)) for part in (red, black)]
-    fast = speed.loops()
-    if fast:  # (the same, as a compiled loop: files/fastloops.py)
-        fast.smooth_sor(flat, *cells, wide, om, 4 * max(h, w))
-    else:
-        for _ in range(4 * max(h, w)):
-            for at in cells:
-                g = (flat[at - 1] + flat[at + 1] + flat[at - wide] + flat[at + wide]) / 4
-                here = flat[at]
-                flat[at] = here + om * (g - here)
-    u = pad[1:-1, 1:-1].copy()
-    # evened out by each level's average distance from the centre point (falling as the level rises): 1 - that
-    # over the outline's. (By the distance to the outline instead, every spot deeper in than the centre point got
-    # the top value: one big middle step when the point was moved off the middle.)
-    bins = 400
-    at = np.minimum(bins - 1, (u * bins).astype(np.int64))
-    away = np.sqrt(d2)
-    sums = np.bincount(at[free], away[free], bins)
-    counts = np.bincount(at[free], minlength=bins)
-    level = np.where(counts > 0, sums / np.maximum(counts, 1), np.inf)
-    level = np.minimum.accumulate(level)
-    level[~np.isfinite(level)] = 0.0
-    edge = level[0] if level[0] > 0 else max(float(level.max()), 1e-9)
-    out = np.where(inside, 1 - np.minimum(level[at], edge) / edge, 0.0)
-    out[hot] = 1.0
-    return out
-
-
 def blend_steps(sh, ppq, base, centre, view):
-    """Blend toward the centre point: each spot's smooth value (smooth_values) mixed with its Even band depth by
-    "mix" (0 = Even band, 1 = all smooth); step i = every spot at least (1 - its size) in. Read along each key row's
-    middle line at a fine step and cut exactly to the shape (the steps' edges are as fine as the grid, not exact).
-    At mix 1: worked out exactly on the key rows instead (notes/blend_rows.py)."""
-    if sh["nested"].get("mix", 1.0) >= 1:
-        from notes import blend_rows
-        return blend_rows.blend_steps([sz for sz, _ in step_sizes(sh["nested"])], ppq, base, centre, view,
-                                      merged_rows)
-    (x0, y0, step, f, _), deepest = deepest_field(sh, view)
-    a, c = view
-    t = smooth_values(f, step, centre[0] + a * centre[1], c * centre[1], x0, y0)
+    """Blend toward the centre point: each spot's smooth value (heat from the centre point, evened out) mixed with
+    its Even band depth by "mix" (0 = Even band, 1 = all smooth); step i = every spot at least (1 - its size) in.
+    Worked out exactly on the key rows (notes/blend_rows.py): every edge is where the value crosses its line."""
+    from notes import blend_rows
+    sizes = [sz for sz, _ in step_sizes(sh["nested"])]
     mix = sh["nested"].get("mix", 1.0)
-    t = (1 - mix) * np.maximum(f, 0) / deepest + mix * t
-    # every stretch of the inside cut into cells about a third of a grid square long, each read at its middle
-    s, e, k = base[:, 0], base[:, 1], base[:, 2]
-    cell = max(1.0, step / 3 * ppq)
-    n = np.maximum(1, np.ceil((e - s) / cell).astype(np.int64))
-    which = np.repeat(np.arange(len(base)), n)
-    j = np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
-    width = (e - s) / n
-    c0 = s[which] + j * width[which]
-    mid = (c0 + width[which] / 2) / ppq
-    p = k[which].astype(float)
-    gx, gy = (mid + a * p - x0) / step, (c * p - y0) / step
-    h, w = t.shape
-    ix, iy = np.clip(np.floor(gx).astype(np.int64), 0, w - 2), np.clip(np.floor(gy).astype(np.int64), 0, h - 2)
-    fx, fy = np.clip(gx - ix, 0, 1), np.clip(gy - iy, 0, 1)
-    val = ((t[iy, ix] * (1 - fx) + t[iy, ix + 1] * fx) * (1 - fy)
-           + (t[iy + 1, ix] * (1 - fx) + t[iy + 1, ix + 1] * fx) * fy)
-    starts = np.floor(c0 + 0.5).astype(np.int64)
-    ends = np.floor(c0 + width[which] + 0.5).astype(np.int64)
-    steps = [base]
-    for size, _ in step_sizes(sh["nested"])[1:]:
-        on = val >= 1 - size
-        steps.append(merged_rows(np.column_stack([starts[on], ends[on], k[which][on]])) if on.any()
-                     else np.zeros((0, 3), np.int64))
-    return steps
+    if mix >= 1:
+        return blend_rows.blend_steps(sizes, ppq, base, centre, view, merged_rows)
+    return blend_rows.blend_steps(sizes, ppq, base, centre, view, merged_rows, mix, *blend_depth(sh, view))
+
+
+def blend_depth(sh, view):
+    """Blend's depth scale: the outline's segments in the view and Even band's deepest distance."""
+    from notes.shrink import segments, warp
+    loops, _ = edge_loops(sh)
+    return warp(segments(loops), view), deepest_field(sh, view)[1]
 
 
 def scaled_steps(sh, ppq, base, centre, view):

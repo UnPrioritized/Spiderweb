@@ -9,7 +9,7 @@ the same rows are alive, and each run of neighbouring rows has closed-form sine 
 nodes (value and slope carried on) by one block-tridiagonal solve, kept per outline. The centre point is a point
 source on its row(s); the hot disc's level is the heat's mean on a small circle round it.
 
-Evened out like the grid version was (nested.smooth_values): 400 heat levels, each level's average distance from
+Evened out like the old grid version (before 2026-11-16): 400 heat levels, each level's average distance from
 the centre point (made falling), value = 1 - level / outermost level's; the averages are sums over the exact heat
 along the rows (STEP row heights apart), each sample shared between the three nearest levels.
 
@@ -337,11 +337,11 @@ def heat_for(s, v):
     return float(s.u_at[i - 1] + f * (s.u_at[i] - s.u_at[i - 1]))
 
 
-def roots(o, s, row, x0, x1, target, ppq):
-    """Where the heat on each row reaches its target inside [x0, x1] (opposite sides there): regula falsi
-    (Illinois) on the exact heat, every 8th step a halving, until the spot moves < 1e-4 tick."""
-    f0 = heat_at(o, s, row, x0) - target
-    f1 = heat_at(o, s, row, x1) - target
+def roots(fn, x0, x1, ppq):
+    """Where fn(which, x) (bracket numbers, spots) crosses 0 inside each bracket [x0, x1] (opposite signs at its
+    ends): regula falsi (Illinois) on the exact value, every 8th step a halving, until the spot moves < 1e-4 tick."""
+    every = np.arange(len(x0))
+    f0, f1 = fn(every, x0), fn(every, x1)
     tol = 1e-4 / ppq
     x0, x1 = x0.copy(), x1.copy()
     xm = (x0 + x1) / 2
@@ -354,7 +354,7 @@ def roots(o, s, row, x0, x1, target, ppq):
         x = np.clip((a0 * g1 - a1 * g0) / den, np.minimum(a0, a1), np.maximum(a0, a1))
         if it % 8 == 7:
             x = (a0 + a1) / 2
-        fx = heat_at(o, s, row[act], x) - target[act]
+        fx = fn(act, x)
         left = np.sign(fx) == np.sign(g0)  # (the spot lies right of x: x replaces x0)
         sd = side[act]
         n0, n1 = np.where(left, x, a0), np.where(left, a1, x)
@@ -371,9 +371,81 @@ def roots(o, s, row, x0, x1, target, ppq):
     return xm
 
 
-def blend_steps(sizes, ppq, base, centre, view, merged_rows):
+def seg_dist(seg, px, py):
+    """Each spot's distance to the nearest of the segments (exact, a chunk of spots at a time)."""
+    out = np.empty(len(px))
+    ax, ay, bx, by = (seg[:, i][None, :] for i in range(4))
+    dx, dy = bx - ax, by - ay
+    ll = np.maximum(dx * dx + dy * dy, 1e-18)
+    for lo in range(0, len(px), 256):
+        x, y = px[lo:lo + 256, None], py[lo:lo + 256, None]
+        t = np.clip(((x - ax) * dx + (y - ay) * dy) / ll, 0, 1)
+        out[lo:lo + 256] = np.sqrt(((x - ax - t * dx) ** 2 + (y - ay - t * dy) ** 2).min(axis=1))
+    return out
+
+
+class Mixed:
+    """The mix slider's part: value = (1 - mix) x depth / deepest + mix x the evened-out heat, depth = the exact
+    distance to the outline (the segments, in the view) like Even band's."""
+
+    def __init__(self, s, mix, seg, deepest):
+        self.s, self.mix, self.seg, self.deepest = s, mix, seg, deepest
+
+    def value(self, ri, xs, depth):
+        heat = heat_at(self.s.o, self.s, ri, xs) / self.s.hot
+        return (1 - self.mix) * depth / self.deepest + self.mix * value_of_heat(self.s, heat)
+
+    def sampled(self):
+        """The value at every sample (like s.sm's heat)."""
+        from notes.shrink import distances
+        o, s = self.s.o, self.s
+        out = []
+        for j, xs, rows, g, _ in s.sm:
+            d = distances(self.seg, xs, o.h * (rows + o.k0), 1.5 * self.deepest + o.h)
+            out.append((1 - self.mix) * d / self.deepest + self.mix * value_of_heat(s, g / s.hot))
+        return out
+
+    def crossing(self, row, x0, x1, line):
+        """fn for roots: the value minus its line, in each bracket (row index, [x0, x1]); only the segments that
+        can be nearest somewhere in a bracket are measured (within its middle's distance + its length)."""
+        o = self.s.o
+        y = o.h * (row + o.k0)
+        mx = (x0 + x1) / 2
+        seg = self.seg
+        ax, ay, bx, by = (seg[:, i][None, :] for i in range(4))
+        dx, dy = bx - ax, by - ay
+        ll = np.maximum(dx * dx + dy * dy, 1e-18)
+        pb, ps = [], []
+        for lo in range(0, len(mx), 256):
+            x, yy = mx[lo:lo + 256, None], y[lo:lo + 256, None]
+            t = np.clip(((x - ax) * dx + (yy - ay) * dy) / ll, 0, 1)
+            d = np.sqrt((x - ax - t * dx) ** 2 + (yy - ay - t * dy) ** 2)
+            near = d <= d.min(axis=1, keepdims=True) + (x1 - x0)[lo:lo + 256, None] + 1e-12
+            b, k = np.nonzero(near)
+            pb.append(b + lo)
+            ps.append(k)
+        pair_b, pair_s = np.concatenate(pb), np.concatenate(ps)  # (bracket, segment) pairs, by bracket
+
+        def fn(which, x):
+            pick = np.zeros(len(mx), np.int64) - 1
+            pick[which] = np.arange(len(which))
+            on = pick[pair_b] >= 0
+            b, k = pick[pair_b[on]], pair_s[on]
+            px, py = x[b], y[which][b]
+            s4 = seg[k]
+            ex, ey = s4[:, 2] - s4[:, 0], s4[:, 3] - s4[:, 1]
+            t = np.clip(((px - s4[:, 0]) * ex + (py - s4[:, 1]) * ey) / np.maximum(ex * ex + ey * ey, 1e-18), 0, 1)
+            d = np.sqrt((px - s4[:, 0] - t * ex) ** 2 + (py - s4[:, 1] - t * ey) ** 2)
+            depth = np.full(len(which), np.inf)
+            np.minimum.at(depth, b, d)
+            return self.value(row[which], x, depth) - line[which]
+        return fn
+
+
+def blend_steps(sizes, ppq, base, centre, view, merged_rows, mix=1.0, seg=None, deepest=None):
     """Each step's (start, end, key) stretches, the inside itself first: step i = every spot whose value is at
-    least 1 - sizes[i] (sizes[0] = the inside). merged_rows joins touching stretches (nested's)."""
+    least 1 - sizes[i] (sizes[0] = the inside). merged_rows joins touching stretches (nested's). With mix < 1 the
+    value is mixed with the depth (seg = the outline's segments in the view, deepest = Even band's deepest)."""
     base = np.asarray(base, np.int64).reshape(-1, 3)
     if not len(base):
         return [base]
@@ -381,9 +453,15 @@ def blend_steps(sizes, ppq, base, centre, view, merged_rows):
     o = s.o
     a = view[0]
     lines = [1 - sz for sz in sizes[1:]]
-    want = np.array([heat_for(s, t) for t in lines]) * s.hot
+    mixed = Mixed(s, mix, seg, deepest) if mix < 1 else None
+    if mixed:  # (brackets on the mixed value itself)
+        want = np.array(lines)
+        sampled = mixed.sampled()
+    else:  # (the value rises with the heat: brackets and spots on the heat's own level, as exact and cheaper)
+        want = np.array([heat_for(s, t) for t in lines]) * s.hot
+        sampled = [g for _, _, _, g, _ in s.sm]
     rows_l, x0_l, x1_l, which_l, up_l = [], [], [], [], []
-    for j, xs, rows, g, _ in s.sm:  # (brackets: neighbouring samples on different sides of a step's line)
+    for (j, xs, rows, _, _), g in zip(s.sm, sampled):  # (brackets: neighbouring samples on both sides of a line)
         for ti, gt in enumerate(want):
             if lines[ti] <= 0:
                 continue
@@ -400,7 +478,13 @@ def blend_steps(sizes, ppq, base, centre, view, merged_rows):
         return steps + [base if t <= 0 else np.zeros((0, 3), np.int64) for t in lines]
     row, x0, x1 = np.concatenate(rows_l), np.concatenate(x0_l), np.concatenate(x1_l)
     which, up = np.concatenate(which_l), np.concatenate(up_l)
-    xr = roots(o, s, row, x0, x1, want[which], ppq)
+    target = want[which]
+    if mixed:
+        fn = mixed.crossing(row, x0, x1, target)
+    else:
+        def fn(idx, x):
+            return heat_at(o, s, row[idx], x) - target[idx]
+    xr = roots(fn, x0, x1, ppq)
     order = np.lexsort((xr, row, which))
     row, xr, which, up = row[order], xr[order], which[order], up[order]
     for ti, t in enumerate(lines):
@@ -419,9 +503,12 @@ def blend_steps(sizes, ppq, base, centre, view, merged_rows):
     return steps
 
 
-def values(base, ppq, centre, view, beats, keys):
-    """The evened-out value at (beats, key) spots, read on each key row's middle line (checks / tests)."""
+def values(base, ppq, centre, view, beats, keys, mix=1.0, seg=None, deepest=None):
+    """The value at (beats, key) spots, read on each key row's middle line (checks / tests)."""
     s = solved(np.asarray(base, np.int64).reshape(-1, 3), ppq, centre, view)
     keys = np.asarray(keys)
     xs = np.asarray(beats, float) + view[0] * keys
-    return value_of_heat(s, heat_at(s.o, s, np.round(keys).astype(np.int64) - s.o.k0, xs) / s.hot)
+    ri = np.round(keys).astype(np.int64) - s.o.k0
+    if mix < 1:
+        return Mixed(s, mix, seg, deepest).value(ri, xs, seg_dist(seg, xs, view[1] * keys))
+    return value_of_heat(s, heat_at(s.o, s, ri, xs) / s.hot)

@@ -278,12 +278,18 @@ def field(polys, walled, reach, view=None):
     step = max(x_hi - x_lo, y_hi - y_lo) / GRID or 1.0
     xs = np.arange(x_lo - step, x_hi + 2 * step, step)
     ys = np.arange(y_lo - step, y_hi + 2 * step, step)
+    return _field_end(key, seg, xs, ys, step, distances(seg, xs, ys, reach), walled, view)
+
+
+def distances(seg, xs, ys, reach):
+    """Each grid spot's distance to the nearest of the segments (rows = ys, columns = xs, both rising), exact up to
+    `reach` (further ones count as 2 x reach): each block of the grid looks only at the segments near it."""
     dist = np.full((len(ys), len(xs)), 2.0 * reach)
     fast = compiled("field_dist")
     if fast is not None:  # (the same, as a compiled loop: files/fastloops.py)
-        fast.field_dist(*(np.ascontiguousarray(seg[:, i], float) for i in range(4)), xs, ys, float(reach), BLOCK,
-                        dist)
-        return _field_end(key, seg, xs, ys, step, dist, walled, view)
+        fast.field_dist(*(np.ascontiguousarray(seg[:, i], float) for i in range(4)), np.ascontiguousarray(xs, float),
+                        np.ascontiguousarray(ys, float), float(reach), BLOCK, dist)
+        return dist
     s_xlo, s_xhi = np.minimum(seg[:, 0], seg[:, 2]), np.maximum(seg[:, 0], seg[:, 2])
     s_ylo, s_yhi = np.minimum(seg[:, 1], seg[:, 3]), np.maximum(seg[:, 1], seg[:, 3])
     for j0 in range(0, len(ys), BLOCK):
@@ -302,7 +308,7 @@ def field(polys, walled, reach, view=None):
             t = np.clip(((px - ax) * dx + (py - ay) * dy) / np.maximum(dx * dx + dy * dy, 1e-18), 0, 1)
             d = np.sqrt(((px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2).min(axis=1)).reshape(len(y), len(x))
             dist[j0:j0 + BLOCK, i0:i0 + BLOCK] = np.minimum(d, 2.0 * reach)
-    return _field_end(key, seg, xs, ys, step, dist, walled, view)
+    return dist
 
 
 def _field_end(key, seg, xs, ys, step, dist, walled, view):
