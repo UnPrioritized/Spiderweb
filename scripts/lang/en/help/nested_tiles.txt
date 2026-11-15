@@ -17,7 +17,7 @@ Scaling (toward the centre point): each copy is a true smaller copy of the shape
 
 Even band (follows the outline): every step is equally thick all the way round and follows each bend, like the Outline gate. This suits long, curved or thin shapes. It has no centre point. Sharp points can come out on the inner steps of an oval: that's how an even band works on a shape that is flat along its sides and tight at its ends.
 
-Blend (toward the centre point): the steps follow the outline near the edge and round off smoothly into the centre point, without sharp points. Round toward the centre goes from 0 % (the same as Even band) to 100 % (fully rounded into the point).
+Blend (toward the centre point): the steps follow the outline near the edge and round off smoothly into the centre point, without sharp points. Round toward the centre goes from 0 % (the same as Even band) to 100 % (fully rounded into the point). Blend works its steps out exactly on each key row, so every step's edge falls on the exact tick. On very tall shapes (more than 256 keys, possible with notes kept past the keys), a few neighbouring keys are worked out together, so the steps there are a little coarser from key to key.
 
 All three are measured in the proportions the shape was first drawn in, so a circle's steps stay round however its box was stretched.
 
@@ -34,6 +34,8 @@ Morph into it (shown once another shape is picked in Copies of): the steps chang
 Copy angle (Scaling only): turns the copies by this much, round the centre point, before anything else. With Morph into it, the steps change into the turned shape without spinning. Turn adds its own turn on top.
 
 Colours: how many channels the steps take turns over. Every other one empty leaves every other step without notes, so the copies show as separate rings.
+
+Shortest piece: pieces of a step shorter than this many ticks on a key take the colour of the pieces beside them (both sides' colour when they match, else the longer side's; at the shape's edge, the one beside it). Use it to clean up thin slivers where steps bunch up against the outline. 0 keeps every piece.
 
 ## Tiles
 
