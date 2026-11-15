@@ -99,6 +99,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.press_key = 0.0     # ... and key (a Shift move goes by how far the mouse really went: user 2026-11-06,
         #                          zoomed far in the shape jumped off the mouse by the press's snapping)
         self.grid_later = None   # a resize whose notes were too slow to snap while dragging: (make, beat) for let go
+        self.grid_slow = False   # (and from then on, for the rest of the drag)
         self.inside_fit = None   # a fitted box being dragged: the frame in it (custom.frame_in_box; frame_for_box)
         self.limit = None        # how far the shapes being edited may reach (limits)
         self._pan = None
@@ -530,14 +531,17 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         def edge(at):
             nonlocal right
             sh["pts"] = make(at)
-            notes = app.notes_of(sh)
+            # (Nested steps lie inside the plain fill: the same first start / last end without them, and far
+            # quicker: a patterned polygon's Even band took ~1 s a try, up to 5 tries a step, user's file)
+            notes = app.notes_of({k: v for k, v in sh.items() if k != "nested"} if sh.get("nested") else sh)
             if not len(notes):
                 return None
             first, last = float(notes[:, 0].min()) / app.ppq, float(notes[:, 1].max()) / app.ppq
             if right is None:
                 right = at >= (first + last) / 2
             return last if right else first
-        if late and app.notes_late:  # (the notes wait for the mouse to rest: making them here would crawl)
+        # (the notes wait for the mouse to rest, or were slow once this drag: making them here would crawl)
+        if late and (app.notes_late or self.grid_slow):
             self.grid_later = (make, x)
             return
         started = time.perf_counter()
@@ -545,6 +549,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if got is None:
             return
         if late and time.perf_counter() - started > 0.03:  # (up to 5 more of these per move would crawl)
+            self.grid_slow = True  # (every later step too: a nested fill took 0.8 s a step, user's file)
             self.grid_later = (make, x)
             return
         self.grid_later = None
@@ -1194,6 +1199,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.grabbed = self.cycle = self.cycled = self.area_pick = None
         self.box_in = self.box_ruler = self.box_resume = self.time_only = self.box_drop = self.box_vel = False
         self.room = self.limit = self.grid_later = None
+        self.grid_slow = False  # (notes_onto_grid: too slow to snap while this drag lasts)
         return kept
 
     def band_press(self, e, kept):

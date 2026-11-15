@@ -3072,6 +3072,7 @@
  "roll_menu.box_selected": "{n} shapes selected",
  "app.joined": "{curve} (joined)",
  "panel_custom.n_notes": "{n:,} notes.",
+ "panel_custom.counting": "Counting notes…",
  "panel_custom.n_notes_one": "1 note.",
  "panel_custom.not_in_library": "This shape isn't in the shape library any more (renamed or deleted). Its drawing is kept in this project.",
  "engine.handle": "handle",

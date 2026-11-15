@@ -478,8 +478,12 @@ class CustomPanel:
             # (a merged shape: its own notes, not its two shapes' as they were: some rows may be "Merge leftovers")
             counted = ([self.shapes[i] for i in sorted(self.sels) if self.shapes[i]["kind"] == "custom"]
                        if any(self.merge_part(t, parts) for t in tgts) else tgts)
-            total = sum(self.note_count(t) for t in counted)
-            info = trn("panel_custom.n_notes", total, n=total)
+            if self._bg_notes:  # (being made in the background: counted when they're in, not made twice at once
+                info = tr("panel_custom.counting")  # here: a Nested fill held the window 1.4 s, user's file)
+                self.count_owed = True  # (shapes_changed syncs again once they're in)
+            else:
+                total = sum(self.note_count(t) for t in counted)
+                info = trn("panel_custom.n_notes", total, n=total)
             if gaps and fill in ("fill", "spam"):
                 info += (tr("panel_custom.one_gap_in_the_outline_filled") if gaps == 1 else
                          tr("panel_custom.gaps_in_the_outline_filled_as", gaps=gaps))

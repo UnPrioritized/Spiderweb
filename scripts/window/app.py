@@ -229,6 +229,7 @@ SPLIT_TIP = (
 class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, ColoursPanel, RecolourPanel, SnapPanel, MaskPanel, PolygonPanel, FreehandPanel, GlissPanel, LassoPanel, FunnelPanel, TumourPanel, PatternPanel, TextPanel, JoinSplit, JoinMerge, JoinLines, BetweenGroups,
           Playback, KestrelSetup, Pictures, AppClip, AppTransform, AppOffrange, AppKeys, HistoryPanel, ScrollingSide, tk.Tk):
     _bg_notes = False  # the notes are being made in the background after an edit (shapes_changed, notes_wait.py)
+    count_owed = False  # the side panel's note count waits for them (panel_custom.sync_custom)
     _recolour_owed = False  # the panel's Recolour row waits for those notes (panel_recolour.sync_recolour)
     _bg_serial = None  # (the event that started it: its other bindings don't wait for it)
     _bg_carry = None  # (the selected shapes whose old notes go along meanwhile: roll_draw.carry_from)
@@ -2282,9 +2283,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.strips_window:  # (its strips each in a colour of its own while it shows them)
             self.drawn = strip_colours(self.drawn, self.strips_window.shown_owners())
         self._mask_time = time.perf_counter() - started
-        if wanted != self.colours_wanted:
-            self.colours_wanted = wanted
-            self.after_idle(self.sync_custom)  # (the panel's warning)
+        if wanted != self.colours_wanted or self.count_owed:
+            self.colours_wanted, self.count_owed = wanted, False
+            self.after_idle(self.sync_custom)  # (the panel's warning; its note count when it waited for these)
         self.play_changed()
         if self.hz_window:
             self.hz_window.show_cc()  # (its CC lines on other shapes' channels: the notes just made)

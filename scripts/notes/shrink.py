@@ -195,6 +195,23 @@ def inner_rows(polys, walled, keys, r, ppq, view=None):
     return np.asarray(out, np.int64).reshape(-1, 3)
 
 
+def _could_be_nearest(seg, x0, x1, y0, y1):
+    """The edges that can be the nearest one to some spot in the box x0..x1, y0..y1: an edge whose box is further
+    from the whole box than the nearest edge is from the box's middle plus half its diagonal can't be (so the
+    distances come out exactly the same, edges far away left out: a patterned polygon's thousands of little edges
+    made every block look at all of them, 1.6 s a change)."""
+    if len(seg) < 64:
+        return seg
+    ax, ay, bx, by = seg[:, 0], seg[:, 1], seg[:, 2], seg[:, 3]
+    cx, cy = (x0 + x1) / 2, (y0 + y1) / 2
+    dx, dy = bx - ax, by - ay
+    t = np.clip(((cx - ax) * dx + (cy - ay) * dy) / np.maximum(dx * dx + dy * dy, 1e-18), 0, 1)
+    most = np.sqrt(((cx - ax - t * dx) ** 2 + (cy - ay - t * dy) ** 2).min()) + math.hypot(x1 - x0, y1 - y0) / 2
+    gx = np.maximum(0.0, np.maximum(np.minimum(ax, bx) - x1, x0 - np.maximum(ax, bx)))
+    gy = np.maximum(0.0, np.maximum(np.minimum(ay, by) - y1, y0 - np.maximum(ay, by)))
+    return seg[np.hypot(gx, gy) <= most * (1 + 1e-9) + 1e-12]
+
+
 def field(polys, walled, reach, view=None):
     """The distance to the outline on a grid over the shape (in the view, see inner_rows), minus outside: (x0, y0,
     step, values[row, column], view). Only distances up to `reach` are exact (further ones count as 2 x reach), so
@@ -224,6 +241,7 @@ def field(polys, walled, reach, view=None):
             near = seg[rows & (s_xhi >= x[0] - reach) & (s_xlo <= x[-1] + reach)]
             if not len(near):
                 continue
+            near = _could_be_nearest(near, x[0], x[-1], y[0], y[-1])
             gx, gy = np.meshgrid(x, y)
             px, py = gx.ravel()[:, None], gy.ravel()[:, None]
             ax, ay, bx, by = (near[:, i][None, :] for i in range(4))
