@@ -11,8 +11,8 @@ Ways ("way"):
 - "band" (Even band): the inside shrunk inward step by step, every step equally thick all round, like the outline
   gate's even band (shrink.inner_rows, exact, in the drawn view). No centre point and no turn.
 - "blend" (Blend toward the centre point): steps that follow the outline near it and round off into the centre
-  point (a smooth heat-like value on shrink.field's grid, mixed with the Even band by "mix" 0..1). Its steps' edges
-  are as fine as that grid; the shape's own edge stays exact. No turn.
+  point (heat spreading from it, worked out exactly on the key rows: notes/blend_rows.py; mixed with the Even band
+  by "mix" 0..1). Every step's edge is exact to the tick. No turn.
 
 sh["nested"] = {"way", "steps" (copies, the shape itself counts), "last" (the last copy's size, 0..1), "spacing"
 (-100..100: + = the copies closer together toward the last one), "turn" (degrees per step), "colours" (how many
@@ -20,7 +20,8 @@ channels the steps take turns over), "skip" (True = every other step left empty)
 only once moved; missing = the middle of the filled part), "mix" (Blend: 0 = Even band .. 1 = all rounded), "of"
 (Scaling: {"name", "strokes"} = the copies are this library shape, filling the shape's box; missing = itself),
 "angle" (Scaling: degrees the copies' drawing is turned first, round the centre point; Turn adds on top), "morph"
-(Scaling with "of": True = the steps change from the shape into that drawing bit by bit, morph_plan)}."""
+(Scaling with "of": True = the steps change from the shape into that drawing bit by bit, morph_plan), "shortest"
+(ticks, 0 = off: a shorter piece on a key takes its neighbours' step, shortest_pieces)}."""
 
 import json
 import math
@@ -34,8 +35,9 @@ from notes.shrink import field, inner_rows, proportion
 
 WAYS = ("scale", "band", "blend")
 NESTED_DEFAULTS = {"way": "scale", "steps": 8, "last": 0.0, "spacing": 0, "turn": 0.0, "colours": 4, "skip": False,
-                   "mix": 1.0, "angle": 0.0, "morph": False}
+                   "mix": 1.0, "angle": 0.0, "morph": False, "shortest": 0}
 MOST_STEPS = 60
+MOST_SHORTEST = 10 ** 9  # (ticks)
 MORPH_POINTS = 200  # points spread round every piece of an outline while morphing (at least)
 MOST_POINTS = 2000  # (more than that: spread evenly, corners may round off a little)
 RECOLOUR = ("colours", "skip")  # (settings that only change the steps' colours, not their shapes)
@@ -61,6 +63,8 @@ def clean_nested(c):
         out["colours"] = max(1, min(MOST_COLOURS, int(c.get("colours", out["colours"]))))
         mix = float(c.get("mix", out["mix"]))
         out["mix"] = max(0.0, min(1.0, mix)) if math.isfinite(mix) else 1.0
+        shortest = float(c.get("shortest", 0))
+        out["shortest"] = max(0, min(MOST_SHORTEST, int(shortest))) if math.isfinite(shortest) else 0
     except (TypeError, ValueError):
         return None
     if not math.isfinite(out["last"]):
@@ -193,10 +197,75 @@ def nested_steps(sh, ppq):
     if view[1] <= 0:
         return [base]
     if cfg["way"] == "band":
-        return band_steps(sh, ppq, base, view)
-    if cfg["way"] == "blend":
-        return blend_steps(sh, ppq, base, centre, view)
-    return scaled_steps(sh, ppq, base, centre, view)
+        steps = band_steps(sh, ppq, base, view)
+    elif cfg["way"] == "blend":
+        steps = blend_steps(sh, ppq, base, centre, view)
+    else:
+        steps = scaled_steps(sh, ppq, base, centre, view)
+    return shortest_pieces(steps, cfg.get("shortest", 0))
+
+
+def shortest_pieces(steps, least):
+    """The steps with every piece shorter than `least` ticks merged into its neighbours (user 2026-11-16, the
+    "Shortest piece" box): a piece = a run of one key where the same step is on top (the later step covers the ones
+    before, as painted); the shortest first, it takes its neighbours' step when both match, else the longer
+    neighbour's (one neighbour: that one's; none: kept). Step 0 (the inside) stays as it is; the others are rebuilt
+    as "every piece of this step or a later one"."""
+    if least <= 0 or len(steps) < 2 or not len(steps[0]):
+        return steps
+    by_key = []  # each step's stretches by key
+    for st in steps:
+        st = np.asarray(st, np.int64).reshape(-1, 3)
+        st = st[np.lexsort((st[:, 0], st[:, 2]))]
+        keys, first = np.unique(st[:, 2], return_index=True)
+        ends = np.r_[first[1:], len(st)]
+        by_key.append({int(k): st[a:b] for k, a, b in zip(keys.tolist(), first.tolist(), ends.tolist())})
+    out = [[] for _ in steps]
+    for key, inside in by_key[0].items():
+        for s0, e0, _ in inside.tolist():  # (each stretch of the inside on its own: across a gap is no neighbour)
+            cuts = [s0, e0]
+            for d in range(1, len(steps)):
+                got = by_key[d].get(key)
+                if got is not None:
+                    on = got[(got[:, 1] > s0) & (got[:, 0] < e0)]
+                    cuts.extend(np.clip(on[:, :2], s0, e0).ravel().tolist())
+            cuts = np.unique(cuts)
+            mid = (cuts[:-1] + cuts[1:]) / 2
+            depth = np.zeros(len(mid), np.int64)
+            for d in range(1, len(steps)):
+                got = by_key[d].get(key)
+                if got is not None and len(got):
+                    i = np.searchsorted(got[:, 0], mid, "right") - 1
+                    on = (i >= 0) & (mid < got[np.maximum(i, 0), 1])
+                    depth[on] = d
+            change = np.r_[True, depth[1:] != depth[:-1]]
+            pieces = [[int(a), int(b), int(d)] for a, b, d in
+                      zip(cuts[:-1][change].tolist(), np.r_[cuts[1:][np.r_[change[1:], True]]].tolist(),
+                          depth[change].tolist())]
+            while len(pieces) > 1:
+                short = [i for i, p in enumerate(pieces) if p[1] - p[0] < least]
+                if not short:
+                    break
+                i = min(short, key=lambda j: (pieces[j][1] - pieces[j][0], j))
+                left = pieces[i - 1] if i > 0 else None
+                right = pieces[i + 1] if i + 1 < len(pieces) else None
+                if left and right and left[2] != right[2]:
+                    take = left if left[1] - left[0] >= right[1] - right[0] else right
+                else:
+                    take = left or right
+                pieces[i][2] = take[2]
+                merged = []  # (neighbours now on the same step join)
+                for p in pieces:
+                    if merged and merged[-1][2] == p[2]:
+                        merged[-1][1] = p[1]
+                    else:
+                        merged.append(p)
+                pieces = merged
+            for a, b, d in pieces:
+                for i in range(1, d + 1):
+                    out[i].append((a, b, key))
+    return [steps[0]] + [merged_rows(np.array(rows, np.int64).reshape(-1, 3)) if rows else np.zeros((0, 3), np.int64)
+                         for rows in out[1:]]
 
 
 def band_steps(sh, ppq, base, view):

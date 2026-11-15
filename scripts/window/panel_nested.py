@@ -1,5 +1,6 @@
 """The side panel's rows for Inside fill "Nested" (notes/nested.py): Notes Fill / Spam, Shrink by, Copies of, Morph
-into it, Copy angle, Steps, Last size, Spacing, Turn, Colours and Every other one empty. Mixed into App."""
+into it, Copy angle, Steps, Last size, Spacing, Turn, Colours, Shortest piece and Every other one empty. Mixed into
+App."""
 
 import copy
 import tkinter as tk
@@ -9,7 +10,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.areas import most_colours
 from notes.custom import shelve_patterns, unshelve
-from notes.nested import MOST_COLOURS, MOST_STEPS, NESTED_DEFAULTS
+from notes.nested import MOST_COLOURS, MOST_SHORTEST, MOST_STEPS, NESTED_DEFAULTS
 from window import look
 from window.drawer import library_lists
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, name_list, set_names, unchanged
@@ -26,6 +27,8 @@ BOXES = [
      ("colours", "nested_colours", "", 1, MOST_COLOURS, (1, 1, 1), int, int)],
     [("turn", "nested_turn", "nested_turn_unit", -180, 180, (1, 10, 0.1), float, float)],  # (Scaling only)
     [("mix", "nested_mix", "%", 0, 100, (1, 10, 0.1), lambda v: round(v * 100, 6), lambda x: x / 100)],  # (Blend)
+    [("shortest", "nested_shortest", "nested_shortest_unit", 0, MOST_SHORTEST, (1, 10, 1), int,
+      lambda x: int(round(x)))],
 ]
 WAY_CHOICES = [("scale", tr("panel_custom.nested_way_scale")), ("band", tr("panel_custom.nested_way_band")),
                ("blend", tr("panel_custom.nested_way_blend"))]
