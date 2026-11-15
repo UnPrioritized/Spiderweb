@@ -242,7 +242,10 @@ def kept_rows(shapes, rendered, make, keys, ppq, multi, rounds, use10=False, alo
             else:
                 real = make(dict(other, _rounds=True) if rounds and has_colours(other) else other)[1]
                 u = np.unique(np.asarray(real, np.int64)) if real is not None else np.zeros(1, np.int64)
-                most = int(np.bincount(mine[:, 4] - mine[:, 4].min()).argmax() + mine[:, 4].min())
+                # (the most used slot, ties = the lowest; counted by the slots there are: a repeat's slot is billions
+                # past the others, and counting every number between asked for 33 GB at once, 2026-11-15)
+                vals, counts = np.unique(mine[:, 4], return_counts=True)
+                most = int(vals[counts.argmax()])
                 slot = repeat_slots(t, u, np.asarray(got, np.int64), most) if rounds and len(u) == len(got) else None
                 if slot is not None:
                     guessed = ~np.isin(t & (ROUND - 1), u & (ROUND - 1))  # (a colour never on the keys)
