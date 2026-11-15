@@ -378,8 +378,10 @@ class FormulaDialog(tk.Toplevel):
         item.update({key: self.pat[key] for key in self.texts if key in self.pat})
         if self.pat.get("loop"):
             item["loop"] = copy.deepcopy(self.pat["loop"])
-        if self.layer == "pattern" and self.pat.get("graphs"):  # (user: the saved list keeps the graphs)
-            item["graphs"] = copy.deepcopy(self.pat["graphs"])
+        if self.layer == "pattern":  # (user: the saved list keeps the graphs)
+            self.drop_unused_graphs()
+            if self.pat.get("graphs"):
+                item["graphs"] = copy.deepcopy(self.pat["graphs"])
         keep_sym(item, self.pat)
         if not self.save_file(name, item):
             return
@@ -489,6 +491,7 @@ class FormulaDialog(tk.Toplevel):
         self._loading = False
         for name, (b, mark) in self.graph_marks.items():
             pack_shown(mark, name in graphed(self.pat), side="left", padx=(3, 0), after=b)
+        self.lay_cells()
         if self.graph_window:
             self.graph_window.sync()
         self.ok = True
@@ -515,11 +518,11 @@ class FormulaDialog(tk.Toplevel):
     def build_boxes(self, names):
         for w in self.numbers.winfo_children():
             w.destroy()
-        self.boxes, self.graph_marks = {}, {}
+        self.boxes, self.graph_marks, self.cells, self.cell_lines, self.cells_laid = {}, {}, [], [], None
         self._names = names
         for name in names:
             cell = ttk.Frame(self.numbers)
-            cell.pack(side="left", padx=(0, 10))
+            self.cells.append(cell)
             lb = ttk.Label(cell, text=tr("panel_pattern.loops") if name == "loops" else name)
             lb.pack(side="left")
             var = tk.StringVar()
@@ -541,6 +544,40 @@ class FormulaDialog(tk.Toplevel):
             for w in (lb, e):
                 Tooltip(w, tip)
             self.boxes[name] = (var, e)
+
+    def lay_cells(self):
+        """The number boxes side by side, on as many lines as the preview's width holds (like words: many numbers,
+        each with "…" and "× graph", made the window wider than the screen)."""
+        cells = getattr(self, "cells", [])
+        if not cells:
+            return
+        self.numbers.update_idletasks()
+        room = self.canvas.winfo_reqwidth()
+        lines, used = [], None
+        for i, c in enumerate(cells):
+            w = c.winfo_reqwidth() + 10
+            if used is None or used + w > room:
+                lines.append([i])
+                used = w
+            else:
+                lines[-1].append(i)
+                used += w
+        laid = [tuple(line) for line in lines]
+        if laid == self.cells_laid:
+            return
+        self.cells_laid = laid
+        for c in cells:
+            c.pack_forget()
+        for f in self.cell_lines:
+            f.destroy()
+        self.cell_lines = []
+        for line in lines:
+            f = ttk.Frame(self.numbers)
+            f.pack(anchor="w")
+            self.cell_lines.append(f)
+            for i in line:
+                cells[i].pack(in_=f, side="left", padx=(0, 10))
+                cells[i].lift(f)  # (the line frame is made later: it would cover the cell)
 
     def on_number(self, name):
         if self._loading or name not in self.boxes:
@@ -612,10 +649,22 @@ class FormulaDialog(tk.Toplevel):
         if not self.ok and not self.pat.get("loop"):
             return
         self.drop_graph()
+        self.drop_unused_graphs()
         self.show_on_roll()
         self.destroy()
         step = "panel_pattern.shape_step" if self.layer == "shape" else "panel_pattern.pattern_step"
         self.host.commit(self.snap, tr(step, name=self.name_of(self.pat)))
+
+    def drop_unused_graphs(self):
+        """Graphs of numbers a typed formula no longer has go (kept while typing: a name half typed comes back
+        with its graph); the Loops graph stays."""
+        if self.layer != "pattern":
+            return
+        gs = clean_pattern_graphs(self.pat.get("graphs"), {} if self.pat.get("loop") else self.pat["vars"])
+        if gs:
+            self.pat["graphs"] = gs
+        else:
+            self.pat.pop("graphs", None)
 
     def cancel(self):
         self.drop_graph()

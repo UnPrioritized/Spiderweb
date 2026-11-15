@@ -29,9 +29,10 @@ from window import big_ask, look
 from window.formula_host import FormulaHost
 from window.join_split import without10
 from window.pattern_dialog import load_patterns, saved_pattern
+from window.pattern_graphs import graphed
 from window.speed_graph import SpeedGraph, start_curve
 from window.tool_window import ToolWindow
-from window.widgets import (Scrub, Tooltip, bad, good, grid_shown, name_index, name_list, read_number, set_names,
+from window.widgets import (Scrub, Tooltip, bad, good, grid_shown, pack_shown, name_index, name_list, read_number, set_names,
                             unit_word)
 
 LENGTHS = [s for s, _ in SNAP_LIST if s != "off"]  # "one copy every" choices (the snap list's note lengths)
@@ -697,6 +698,17 @@ class PathWindow(ToolWindow):
         if self.cfg.get("pts"):
             FormulaDialog(PathHost(self), "pattern")
 
+    def open_pattern_graph(self, name):
+        """The "…" under a formula number: its graph along the path (pattern_graphs.py)."""
+        from window.pattern_graphs import PathGraphs, open_graph
+        b = self.graph_marks.get(name, (None,))[0]
+        open_graph(self, PathGraphs(self, b), name)
+
+    def drop_pattern_graph(self):
+        gw, self.pattern_graph = getattr(self, "pattern_graph", None), None
+        if gw:
+            gw.ok()
+
     def put_formula_number(self, name, done=True):
         """A formula number box (Loops first): typed, stepped or dragged."""
         p = self.cfg.get("pattern")
@@ -739,7 +751,20 @@ class PathWindow(ToolWindow):
                 for w in (lb, e):
                     Tooltip(w, tip)
                 self.pat_boxes[name] = (var, e)
+            self.graph_marks = {}
+            for c, name in enumerate(names):  # its graph along the path ("× graph" in blue while it has one)
+                var, e = self.pat_boxes[name]
+                cell = ttk.Frame(self.formula_numbers)
+                cell.grid(row=1, column=2 * c + 1, sticky="w")
+                b = ttk.Button(cell, text="…", width=2, command=lambda n=name: self.open_pattern_graph(n))
+                b.pack(side="left")
+                Tooltip(b, tr("pattern_graph.loops_button_tip" if name == "loops" else "pattern_graph.button_tip"))
+                self.graph_marks[name] = (b, ttk.Label(cell, text=tr("panel_pattern.x_graph"), foreground=look.VALUE))
             grid_shown(self.formula_numbers, bool(names))
+        for name, (b, mark) in getattr(self, "graph_marks", {}).items():
+            pack_shown(mark, name in graphed(p), side="left", padx=(3, 0), after=b)
+        if getattr(self, "pattern_graph", None):
+            self.pattern_graph.sync()
         for name, (var, e) in self.pat_boxes.items():
             text = fmt(round(p["loops"] if name == "loops" else p["vars"][name], 6))
             if var.get() != text:
@@ -960,6 +985,7 @@ class PathWindow(ToolWindow):
             self.after_cancel(self.graph_job)
             self.graph_job = None
         self.drop_graph()
+        self.drop_pattern_graph()
         super().close()
         self.app.roll.request_redraw()
 

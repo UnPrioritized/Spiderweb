@@ -232,6 +232,8 @@ class GraphWindow(tk.Toplevel):
         # other shapes, or the graph changed from outside (the main window's undo): its steps here start again
         if new or not self._storing and self.hist.get() != self.hist.states[self.hist.at]:
             self.hist.reset()
+            if not new:  # (changed elsewhere, e.g. Custom…'s Apply: Cancel goes back to it, not past it)
+                self.begin()
         if fit_view or new and not self.fits(self.view_range()):
             self.fit_view()
         self.draw()
@@ -420,7 +422,8 @@ class GraphWindow(tk.Toplevel):
         if own is not None:
             return own
         v = fmt(round(self.box_number() * f, 2))
-        return tr("graph_window.text", f=fmt(round(f * 100, 1)), v=v, unit=unit_text(v, self.unit))
+        # (strip: a number without a unit word ("4", not "4 ."))
+        return tr("graph_window.text", f=fmt(round(f * 100, 1)), v=v, unit=unit_text(v, self.unit)).strip()
 
     def f_snap(self):
         """Dragging moves points in steps of this (5 %, finer when the view is small)."""
@@ -535,6 +538,9 @@ class GraphWindow(tk.Toplevel):
 
     def release(self, e):
         self.drag = None
+        if self.job:  # (the last move not on the shapes yet: it belongs to this drag's step)
+            self.after_cancel(self.job)
+            self.store()
         self.draw()
         self.mark()
 

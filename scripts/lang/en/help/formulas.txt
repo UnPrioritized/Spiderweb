@@ -23,7 +23,7 @@ Curls: the line runs back over itself in little loops; "curl" over 1 makes loops
 
 ## Graphs along the line
 
-Every number of a pattern, Loops too, has a "…" button after its box, in the side panel and in Custom…. It opens a graph like the [page:tumours|tumour] graphs: from the start of the line (left) to its end (right), where 100 % = the number in the box. Drag the points, pick Rise, Fall, Hill or Valley, or type a formula; Flat (off) takes the graph off. A blue "× graph" next to a box means that number follows a graph.
+Every number of a pattern, Loops too, has a "…" button after its box, in the side panel, in Custom… and in [page:path|Copy along a path]. It opens a graph like the [page:tumours|tumour] graphs: from the start of the line (left) to its end (right), where 100 % = the number in the box. Drag the points, pick Rise, Fall, Hill or Valley, or type a formula; Flat (off) takes the graph off. A blue "× graph" next to a box means that number follows a graph.
 [clip:formulas-graphs]
 
 The Loops graph says how crowded the loops are: they bunch up where it's high and spread out where it's low, and the number of loops stays the same. At 0 % there are no loops, only the plain line. With Each piece the graph runs over every piece on its own; with Across all, once over the whole line.

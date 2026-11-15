@@ -126,15 +126,18 @@ def formula(text, named=False, var="x"):
             raise ValueError(tr("mathexpr.not_a_real_number"))
         return float(v)
     fn.names = names
-    fn.arrays = lambda x, values=None: _arrays(tree, var, x, values or {})
+    fn.arrays = lambda x, values=None, keep_bad=False: _arrays(tree, var, x, values or {}, keep_bad)
     return fn
 
 
-def _np_power(left, right):
-    """_power for arrays."""
+def _np_power(left, right, keep_bad=False):
+    """_power for arrays (keep_bad: NaN where the power is too big, instead of ValueError)."""
     import numpy as np
-    if np.any(np.abs(right) > 64):
-        raise ValueError(tr("mathexpr.exponent_too_large"))
+    big = np.abs(right) > 64
+    if np.any(big):
+        if not keep_bad:
+            raise ValueError(tr("mathexpr.exponent_too_large"))
+        return np.where(big, np.nan, np.power(np.asarray(left, float), np.where(big, 1.0, right)))
     return np.power(np.asarray(left, float), right)
 
 
@@ -150,11 +153,14 @@ def _np_funcs():
             "round": lambda a, n=0: np.round(a, int(n)), "pow": _np_power}
 
 
-def _arrays(tree, var, x, values):
+def _arrays(tree, var, x, values, keep_bad=False):
     """A formula worked out for many x at once (NumPy arrays; values may be arrays too, broadcast against x): what
-    fn gives one by one, as an array. ValueError where it can't be worked out (math's errors give NaN / inf here)."""
+    fn gives one by one, as an array. ValueError where it can't be worked out (math's errors give NaN / inf here);
+    keep_bad: NaN there instead (the caller leaves those places out)."""
     import numpy as np
     funcs = _np_funcs()
+    if keep_bad:
+        funcs["pow"] = lambda a, b: _np_power(a, b, True)
 
     def ev(node):
         if isinstance(node, ast.Constant):
@@ -164,7 +170,7 @@ def _arrays(tree, var, x, values):
         if isinstance(node, ast.BinOp):
             left, right = ev(node.left), ev(node.right)
             if isinstance(node.op, ast.Pow):
-                return _np_power(left, right)
+                return _np_power(left, right, keep_bad)
             return _OPS[type(node.op)](np.asarray(left, float), right)
         if isinstance(node, ast.UnaryOp):
             v = ev(node.operand)
@@ -177,6 +183,8 @@ def _arrays(tree, var, x, values):
         except (TypeError, KeyError, ZeroDivisionError, OverflowError):
             raise ValueError(tr("mathexpr.not_a_real_number"))
     if not np.all(np.isfinite(v)):
+        if keep_bad:
+            return np.where(np.isfinite(v), v, np.nan)
         raise ValueError(tr("mathexpr.not_a_real_number"))
     return v
 

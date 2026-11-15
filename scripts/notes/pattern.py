@@ -655,22 +655,54 @@ def smooth_height(p, graphs):
                                                  p.get("sym") if p.get("sym") in SYMS else None, p.get("along", ""))
 
 
-def loops_with_values(p, x, values):
+def loops_with_values(p, x, values, keep_bad=False):
     """Many loops at once, each with its own numbers: x (loops, samples) along each loop 0 -> 1, values {name:
     number or (loops, 1) array}. (along, side) arrays like loop_points' (symmetric halves, mirrored / scaled).
-    ValueError if the formula can't be worked out."""
+    ValueError if the formula can't be worked out (keep_bad: NaN at those places instead)."""
     sym = p.get("sym") if p.get("sym") in SYMS else None
     second = x > 0.5
     xh = np.where(second, 1.0 - x, x) if sym else x  # (symmetric: the first half makes the second)
-    v = formula(p["formula"], named=True).arrays(xh, values)
+    v = formula(p["formula"], named=True).arrays(xh, values, keep_bad)
     if sym == "turn":
-        mid = formula(p["formula"], named=True).arrays(np.full((x.shape[0], 1), 0.5), values)
+        mid = formula(p["formula"], named=True).arrays(np.full((x.shape[0], 1), 0.5), values, keep_bad)
         v = np.where(second, 2 * mid - v, v)
     u = x
     if p.get("along", "").strip():
-        a = formula(p["along"], named=True).arrays(xh, values)
+        a = formula(p["along"], named=True).arrays(xh, values, keep_bad)
         u = x + (np.where(second, -a, a) if sym else a)
     return u, v * (-p["scale"] if p["mirror"] else p["scale"])
+
+
+def bad_loops(p, x, values):
+    """loops_with_values where loops the formula can't work out with their numbers (a graph took one somewhere it
+    can't go) are a plain stretch of line: (along, side, how many were left plain)."""
+    uu, vv = loops_with_values(p, x, values, keep_bad=True)
+    bad = ~(np.isfinite(uu).all(axis=1) & np.isfinite(vv).all(axis=1))
+    if bad.any():
+        uu, vv = np.array(uu, float), np.array(vv, float)
+        uu[bad], vv[bad] = x[bad], 0.0
+    return uu, vv, int(bad.sum())
+
+
+def graph_trouble(p, key, pts):
+    """Would the number key following graph pts (or the pattern's own graphs, pts None) leave loops plain somewhere
+    (the formula can't be worked out with the number there)? Checked at 401 places along the line."""
+    gs = dict(p.get("graphs") or {})
+    if pts is not None:
+        gs[key] = pts
+    p = dict(p, graphs=gs)
+    graphs = number_graphs(p)
+    if not graphs:
+        return False
+    at = np.linspace(0.0, 1.0, 401)
+    values = dict(p["vars"])
+    for name, (gu, gf) in graphs.items():
+        values[name] = (p["vars"][name] * np.interp(at, gu, gf))[:, None]
+    x = np.broadcast_to(np.linspace(0.0, 1.0, LOOP_SAMPLES + 1), (len(at), LOOP_SAMPLES + 1))
+    try:
+        return bad_loops(p, x, values)[2] > 0
+    except ValueError:
+        return False  # (no good with any numbers: the box says so)
 
 
 def _plain_stretches(s_run, v_run, ln, size):
@@ -681,8 +713,10 @@ def _plain_stretches(s_run, v_run, ln, size):
     if s_run[-1] < size:
         s_run, v_run = s_run + [size], v_run + [v_run[-1]]
     s, v = np.array(s_run), np.array(v_run)
-    if len(s) < 2 or np.any(np.diff(s) < 0):  # (an along formula running back: left as it is)
+    if len(s) < 2:
         return s, v
+    if np.any(np.diff(s) < 0):  # (an along formula running back, Curls: only where nothing else runs over it)
+        return _clear_stretches(s, v, ln)
     extra = ln[(ln > s[0]) & (ln < s[-1])]
     extra = extra[~np.isin(extra, s)]
     if not len(extra):
@@ -691,6 +725,27 @@ def _plain_stretches(s_run, v_run, ln, size):
     v_all = np.concatenate([v, np.interp(extra, s, v)])
     order = np.argsort(s_all, kind="stable")
     return s_all[order], v_all[order]
+
+
+def _clear_stretches(s, v, ln):
+    """_plain_stretches when the line runs back over itself somewhere: the path's own points go in only between two
+    neighbours that nothing else reaches between (everything before is behind, everything after ahead: a plain
+    stretch where the loops are 0 %), so the line's order stays."""
+    d = np.diff(s)
+    behind = np.maximum.accumulate(s)[:-1] <= s[:-1]
+    ahead = np.minimum.accumulate(s[::-1])[::-1][1:] >= s[1:]
+    clear = np.nonzero((d > 0) & behind & ahead)[0]
+    lo, hi = np.searchsorted(ln, s[clear], "right"), np.searchsorted(ln, s[clear + 1], "left")
+    at, add_s, add_v = [], [], []
+    for i, a, b in zip(clear[hi > lo], lo[hi > lo], hi[hi > lo]):  # (at most one a path point)
+        extra = ln[a:b]
+        at.append(np.full(len(extra), i + 1))
+        add_s.append(extra)
+        add_v.append(v[i] + (v[i + 1] - v[i]) * (extra - s[i]) / d[i])
+    if not at:
+        return s, v
+    at = np.concatenate(at)
+    return np.insert(s, at, np.concatenate(add_s)), np.insert(v, at, np.concatenate(add_v))
 
 
 def pattern_paths(paths, p):
@@ -735,6 +790,9 @@ def pattern_paths(paths, p):
         count = last - first
         if count * per > MAX_POINTS + per:  # (a piece can touch one loop more than its share)
             count = MAX_POINTS // per + 1
+        if count <= 0:  # (no loops on this piece at all: a Loops graph at 0 % all over it)
+            out.append([tuple(q) for q in (a * [k, 1.0]).tolist()])
+            continue
         if graphs:  # each loop with its numbers where its middle is
             nos = np.arange(first, first + count, dtype=float)
             mids = (nos + 0.5) / loops
@@ -743,7 +801,7 @@ def pattern_paths(paths, p):
             for name, (gu, gf) in graphs.items():
                 values[name] = (p["vars"][name] * np.interp(at, gu, gf))[:, None]
             try:
-                uu2, vv2 = loops_with_values(p, np.broadcast_to(t, (count, per + 1)), values)
+                uu2, vv2, _ = bad_loops(p, np.broadcast_to(t, (count, per + 1)), values)
             except ValueError:
                 return paths
             along = (uu2[:, :-1] + nos[:, None]).ravel()

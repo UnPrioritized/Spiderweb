@@ -8,6 +8,7 @@ import copy
 
 from files.lang import tr
 from files.mathexpr import fmt
+from notes.pattern import graph_trouble
 from notes.tumour import clean_graph
 from window.graph_window import GraphSource, GraphWindow
 
@@ -51,8 +52,11 @@ class PatternGraphs(GraphSource):
         return tr("pattern_graph.zero", label=label)
 
     def note(self, key, pts):
-        if key == "loops" and all(f <= 1e-12 for _, f in pts):
-            return tr("pattern_graph.all_zero")
+        if key == "loops":
+            return tr("pattern_graph.all_zero") if all(f <= 1e-12 for _, f in pts) else None
+        p = self.pattern()
+        if p and graph_trouble(p, key, pts):
+            return tr("pattern_graph.some_plain", label=graph_label(key))
         return None
 
     def box_number(self, key):
@@ -163,6 +167,53 @@ class DialogGraphs(PatternGraphs):
 
     def closed(self, gw):
         self.dialog.graph_window = None
+
+
+class PathGraphs(PatternGraphs):
+    """The Copy along a path window's formula (its page's cfg "pattern"): changes show at once, each finished one a
+    step of the window's own undo (Accept makes it the piano roll's)."""
+    attr = "pattern_graph"
+
+    def __init__(self, win, anchor):
+        super().__init__(win, anchor)
+        self.win = win
+        self.step = 0
+
+    def targets(self):
+        return [self.win.cfg] if self.win.cfg.get("pattern") else []
+
+    def pattern(self):
+        return self.win.cfg.get("pattern")
+
+    def graph(self, key):
+        return ((self.pattern() or {}).get("graphs") or {}).get(key)
+
+    def store(self, key, pts):
+        p = self.pattern()
+        if not p:
+            return
+        p = copy.deepcopy(p)
+        set_graph(p, key, pts)
+        self.win.cfg["pattern"] = p
+        self.win.show()
+        self.win.preview(False)
+        self.win.undo.mark(("pattern_graph", key, self.step))
+
+    def done(self, key):
+        self.win.preview(True)
+        self.win.undo.mark(("pattern_graph", key, self.step), end=True)
+        self.step += 1
+
+    def snapshot(self, tgts, key):
+        return copy.deepcopy(self.graph(key))
+
+    def restore(self, tgts, saved, key):
+        if self.pattern() and self.graph(key) != saved:
+            self.store(key, saved or [[0.0, 1.0], [1.0, 1.0]])
+            self.done(key)
+
+    def closed(self, gw):
+        self.win.pattern_graph = None
 
 
 def open_graph(holder, src, key):

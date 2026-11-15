@@ -101,6 +101,8 @@ class PatternPanel:
         self._rows["pattern"] = bool(self.patterned())
         self.layout_rows()
         if not self._rows["pattern"]:
+            if self.pattern_graph:  # (nothing with a pattern selected: its window says so)
+                self.pattern_graph.sync()
             return
         for layer in LAYERS:
             ui = self.formula_ui[layer]

@@ -339,6 +339,7 @@
  "pattern_graph.loops_info": "Loops along the line: how crowded they are at each spot.",
  "pattern_graph.loops_value": "{f} % crowded",
  "pattern_graph.all_zero": "The graph is 0 % everywhere, so there would be no loops at all: it's ignored.",
+ "pattern_graph.some_plain": "At some spots {label} can't be used: those loops are left plain.",
  "pattern_graph.zero": "{label} is 0, so this graph changes nothing. Type a number in its box first.",
  "pattern_graph.select": "Select a line with a pattern to give its {name} a graph.",
  "panel_pattern.number_tip": "\"{name}\" in the pattern's formula. Sizes to the side are in keys.",

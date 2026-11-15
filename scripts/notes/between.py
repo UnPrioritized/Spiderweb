@@ -589,17 +589,30 @@ def _pattern(a, b, f, rev):
 
 def _mix_graphs(ga, gb, f):
     """Two patterns' graphs (pattern.py) f of the way from ga to gb, point for point at every place either has a
-    point (a number without a graph = flat 100 %); None when none are left."""
+    point (a number without a graph = flat 100 %); a sudden jump (two points at one place) stays a jump, the
+    values just before and just after it blended apart. None when none are left."""
     from notes.tumour import clean_graph
+
+    def sides(g, u):
+        """g's value just before and just after u."""
+        at = [v for w, v in g if abs(w - u) < 1e-9]
+        if at:
+            return at[0], at[-1]
+        x = float(np.interp(u, [w for w, _ in g], [v for _, v in g]))
+        return x, x
     ga, gb = ga or {}, gb or {}
     out = {}
     for key in sorted(set(ga) | set(gb)):
         a = ga.get(key) or [[0.0, 1.0], [1.0, 1.0]]
         b = gb.get(key) or [[0.0, 1.0], [1.0, 1.0]]
-        us = sorted({round(float(u), 9) for u, _ in a + b})
-        va = np.interp(us, [u for u, _ in a], [v for _, v in a])
-        vb = np.interp(us, [u for u, _ in b], [v for _, v in b])
-        g = clean_graph([[u, float(x + (y - x) * f)] for u, x, y in zip(us, va, vb)])
+        pts = []
+        for u in sorted({round(float(u), 9) for u, _ in a + b}):
+            (a0, a1), (b0, b1) = sides(a, u), sides(b, u)
+            before, after = a0 + (b0 - a0) * f, a1 + (b1 - a1) * f
+            pts.append([u, float(before)])
+            if abs(after - before) > 1e-12:
+                pts.append([u, float(after)])
+        g = clean_graph(pts)
         if g:
             out[key] = [list(q) for q in g]
     return out or None
