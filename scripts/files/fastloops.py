@@ -46,6 +46,8 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   spread_line    picture._spread: the error spreading, one slanted line at a time (its OKLab left to NumPy)
   area_spots     faces.Faces.area_at: the area each spot is in (custom shapes' Fill / Spam, area colours)
   smooth_sor     nested.smooth_values' loop (Nested fill, Blend)
+  band_rows      shrink.near_rows (Even band, Outline gate): each outline edge's band on each line, joined line by line
+  field_dist     shrink.field's distances to the outline on a grid (Nested's centre, Blend, the Outline gate preview)
   gap_ticks      tempo_file.keep_gaps' work on one Keep timing part (export, Conductor pane checks)
   gap_plan       tempo_file.file_plan's gaps of one Keep timing part as file tempo runs (with tempo._fit_blocks,
                  _fit_exact, _flat_pair (+ its full search), _near_pair, _nearest1, next_safe as *_n)
@@ -3151,6 +3153,119 @@ def smooth_sor(flat, red, black, wide, om, times):
 
 
 @njit(nogil=True)
+def _band_at(ax, ay, bx, by, length, y, r):
+    """shrink.near_rows' sums for one edge on the line at y: its round-ended band's stretch (lo, hi), lo >= hi =
+    none. The same sums in the same order."""
+    lo, hi = np.inf, -np.inf
+    for px, py in ((ax, ay), (bx, by)):  # the round ends
+        d = r * r - (y - py) * (y - py)
+        if d > 0:
+            w = math.sqrt(d)
+            if px - w < lo:
+                lo = px - w
+            if px + w > hi:
+                hi = px + w
+    dx, dy = bx - ax, by - ay
+    if abs(dy) < 1e-12:  # (flat)
+        b_lo, b_hi = min(ax, bx), max(ax, bx)
+        ok = abs(y - ay) < r
+    else:
+        c = ax + dx * (y - ay) / dy
+        w = r * length / abs(dy)
+        b_lo, b_hi = c - w, c + w
+        ok = True
+    if abs(dx) < 1e-12:  # (upright)
+        t = (y - ay) * dy / (length * length if length > 0 else 1.0)
+        ok = ok and t >= 0 and t <= 1
+    else:
+        x0 = ax - (y - ay) * dy / dx
+        x1 = x0 + length * length / dx
+        b_lo = max(b_lo, min(x0, x1))
+        b_hi = min(b_hi, max(x0, x1))
+    if ok and b_hi > b_lo and length > 0:
+        if b_lo < lo:
+            lo = b_lo
+        if b_hi > hi:
+            hi = b_hi
+    return lo, hi
+
+
+@njit(nogil=True)
+def band_rows(ax, ay, bx, by, length, ys, first, n, r, row_out, lo_out, hi_out):
+    """shrink.near_rows after its line ranges (edge e reaches lines first[e] .. first[e] + n[e] - 1; length =
+    np.hypot of its sides): every edge's band across every line it reaches, a line's stretches sorted and joined
+    (touching ones too) -> how many, line by line in row_out / lo_out / hi_out (room: n.sum())."""
+    nl = len(ys)
+    count = np.zeros(nl + 1, np.int64)
+    for e in range(len(ax)):
+        for row in range(first[e], first[e] + n[e]):
+            count[row + 1] += 1
+    for i in range(nl):
+        count[i + 1] += count[i]
+    at = count[:nl].copy()
+    blo, bhi = np.empty(count[nl]), np.empty(count[nl])
+    for e in range(len(ax)):
+        for row in range(first[e], first[e] + n[e]):
+            lo, hi = _band_at(ax[e], ay[e], bx[e], by[e], length[e], ys[row], r)
+            if hi > lo:
+                blo[at[row]], bhi[at[row]] = lo, hi
+                at[row] += 1
+    m = 0
+    for row in range(nl):
+        s, t = count[row], at[row]
+        if t == s:
+            continue
+        order = np.argsort(blo[s:t])
+        reach = -np.inf
+        for j in order:
+            a, b = blo[s + j], bhi[s + j]
+            if a > reach:
+                row_out[m], lo_out[m], hi_out[m] = row, a, b
+                m += 1
+                reach = b
+            elif b > reach:
+                hi_out[m - 1] = b
+                reach = b
+    return m
+
+
+@njit(nogil=True)
+def field_dist(ax, ay, bx, by, xs, ys, reach, block, dist):
+    """shrink.field's distances: on the grid xs x ys, a block of block x block spots at a time, the distance to the
+    nearest of the edges whose box comes within reach of the block's (none: dist kept), at most 2 x reach. The same
+    sums in the same order."""
+    ne = len(ax)
+    near = np.empty(ne, np.int64)
+    for j0 in range(0, len(ys), block):
+        j1 = min(j0 + block, len(ys))
+        for i0 in range(0, len(xs), block):
+            i1 = min(i0 + block, len(xs))
+            k = 0
+            for e in range(ne):
+                if (max(ay[e], by[e]) >= ys[j0] - reach and min(ay[e], by[e]) <= ys[j1 - 1] + reach
+                        and max(ax[e], bx[e]) >= xs[i0] - reach and min(ax[e], bx[e]) <= xs[i1 - 1] + reach):
+                    near[k] = e
+                    k += 1
+            if k == 0:
+                continue
+            for j in range(j0, j1):
+                py = ys[j]
+                for i in range(i0, i1):
+                    px = xs[i]
+                    best = np.inf
+                    for q in range(k):
+                        e = near[q]
+                        dx, dy = bx[e] - ax[e], by[e] - ay[e]
+                        t = ((px - ax[e]) * dx + (py - ay[e]) * dy) / max(dx * dx + dy * dy, 1e-18)
+                        t = min(max(t, 0.0), 1.0)
+                        u, v = px - ax[e] - t * dx, py - ay[e] - t * dy
+                        d2 = u * u + v * v
+                        if d2 < best:
+                            best = d2
+                    dist[j, i] = min(math.sqrt(best), 2.0 * reach)
+
+
+@njit(nogil=True)
 def _domino_safe1(x):
     """tempo.domino_safe of one value (the same float32 rounding)."""
     bpm = np.float64(np.float32(6e7 / max(x, 1)))
@@ -3970,6 +4085,8 @@ def warm():
     hz_order(np.arange(300, dtype=np.int64))
     area_spots(f1, f1, np.zeros(2), i2, i2, i2, 0, i1, f1, f1, f1, f1, f1, f1, f1, f)
     smooth_sor(np.zeros(9), np.array([4], np.int64), np.zeros(0, np.int64), 3, 1.9, 1)
+    band_rows(f1, f1, f1 + 1, f1 + 1, f1 + 1, np.full(1, 0.5), i1 * 0, i1, 1.0, i1.copy(), f1.copy(), f1.copy())
+    field_dist(f1, f1, f1 + 1, f1 + 1, f1, f1, 1.0, 24, np.zeros((1, 1)))
     t3 = np.array([0, 1, 3], np.int64)
     gap_ticks(0, 3, t3, t3[:0], np.full(3, 500000, np.int64), t3[:0], 500000, 0xFFFFFF)
     gap_ticks(0, 3, t3, t3, np.full(3, 500000, np.int64), np.arange(4, dtype=np.int64) * 500000, 0, 0xFFFFFF)

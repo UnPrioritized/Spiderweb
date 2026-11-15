@@ -15,6 +15,8 @@ import math
 
 import numpy as np
 
+from files.speed import compiled
+
 SAMPLES = 8  # lines across each key row: a row counts where the shrunk inside touches it anywhere (like the inside)
 GRID = 160  # the preview's grid: this many cells across the shape's longer side
 BLOCK = 24  # the grid is worked out in blocks this many points across
@@ -58,6 +60,32 @@ def crossings(seg, y):
     return np.sort(s[:, 0] + (s[:, 2] - s[:, 0]) * (y - s[:, 1]) / (s[:, 3] - s[:, 1]))
 
 
+def crossings_all(seg, ys):
+    """crossings(seg, y) for each y in ys, all at once: the same numbers (each edge only meets the lines between
+    its ends: one line at a time looked at every edge, most of an Even band's time once its loops were compiled)."""
+    ys = np.asarray(ys, float)
+    out = [np.zeros(0) for _ in range(len(ys))]
+    if not len(seg) or not len(ys):
+        return out
+    order = np.argsort(ys, kind="stable")
+    sy = ys[order]
+    lo, hi = np.minimum(seg[:, 1], seg[:, 3]), np.maximum(seg[:, 1], seg[:, 3])  # (crossed: lo <= y < hi)
+    first = np.searchsorted(sy, lo, "left")
+    n = np.maximum(np.searchsorted(sy, hi, "left") - first, 0)
+    if not n.sum():
+        return out
+    e = np.repeat(np.arange(len(seg)), n)
+    line = order[np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)]
+    s, y = seg[e], ys[line]
+    x = s[:, 0] + (s[:, 2] - s[:, 0]) * (y - s[:, 1]) / (s[:, 3] - s[:, 1])
+    o = np.lexsort((x, line))
+    line, x = line[o], x[o]
+    cuts = np.r_[0, np.flatnonzero(line[1:] != line[:-1]) + 1, len(line)]
+    for a, b in zip(cuts[:-1].tolist(), cuts[1:].tolist()):
+        out[int(line[a])] = x[a:b]
+    return out
+
+
 def walled_pieces(x, y, walled, view):
     """Which pieces between the crossings x (on the line at height y, in the view) are filled (walled =
     custom.fill_test, in beats / keys)."""
@@ -69,10 +97,10 @@ def walled_pieces(x, y, walled, view):
     return walled(spots - view[0] * p, np.full(spots.shape, p))
 
 
-def inside_at(seg, y, walled=None, view=(0.0, 1.0)):
+def inside_at(seg, y, walled=None, view=(0.0, 1.0), x=None):
     """Where the line at height y (seg and y in the view) is inside: even-odd, or with walled (custom.fill_test)
-    every piece it fills. [(a, b)] sorted, merged."""
-    x = crossings(seg, y)
+    every piece it fills. [(a, b)] sorted, merged. x: its crossings when already known (crossings_all)."""
+    x = crossings(seg, y) if x is None else x
     if walled is None:
         return merge(list(zip(x[0::2].tolist(), x[1::2].tolist())))
     on = walled_pieces(x, y, walled, view)
@@ -102,6 +130,14 @@ def near_rows(seg, ys, r):
     first = np.searchsorted(ys, s_lo, "right")  # (lines strictly inside lo .. hi)
     n = np.maximum(np.searchsorted(ys, s_hi, "left") - first, 0)
     e = np.repeat(np.arange(len(seg)), n)
+    fast = compiled("band_rows")
+    if fast is not None and n.sum():  # (the same, as a compiled loop: files/fastloops.py)
+        total = int(n.sum())
+        ax, ay, bx, by = (np.ascontiguousarray(seg[:, i], float) for i in range(4))
+        rows, los, his = np.empty(total, np.int64), np.empty(total), np.empty(total)
+        m = fast.band_rows(ax, ay, bx, by, np.hypot(bx - ax, by - ay), np.ascontiguousarray(ys),
+                           first.astype(np.int64), n.astype(np.int64), float(r), rows, los, his)
+        return _by_line(out, rows[:m], los[:m], his[:m])
     row = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
     if not len(e):
         return out
@@ -147,6 +183,16 @@ def near_rows(seg, ys, r):
     return out
 
 
+def _by_line(out, row, lo, hi):
+    """Joined stretches in line order (row, lo, hi) put into out, a list per line."""
+    if not len(row):
+        return out
+    cuts = np.r_[0, np.flatnonzero(row[1:] != row[:-1]) + 1, len(row)]
+    for s, e in zip(cuts[:-1].tolist(), cuts[1:].tolist()):
+        out[int(row[s])] = np.column_stack([lo[s:e], hi[s:e]]).tolist()
+    return out
+
+
 def minus(spans, cuts):
     """spans with the cuts taken out. Both sorted + merged (inside_at, near_rows), so each span only looks at the
     cuts from the first one still reaching it up to the first past its end (every span with every cut grew with
@@ -180,13 +226,15 @@ def inner_rows(polys, walled, keys, r, ppq, view=None):
     keys = list(keys)
     ys = [(q - 0.5 + (j + 0.5) / SAMPLES) * vc for q in keys for j in range(SAMPLES)]
     near = near_rows(seg, ys, r)
+    cross = crossings_all(seg, ys)
     out = []
     for n, q in enumerate(keys):
         got = []
         for j in range(SAMPLES):
             y = ys[n * SAMPLES + j]
             shift = va * y / vc  # (the view's line back in beats)
-            got += [(s - shift, e - shift) for s, e in minus(inside_at(seg, y, walled, view), near[n * SAMPLES + j])]
+            got += [(s - shift, e - shift)
+                    for s, e in minus(inside_at(seg, y, walled, view, cross[n * SAMPLES + j]), near[n * SAMPLES + j])]
         for a, b in merge(got):
             s = math.floor(a * ppq + 0.5)
             e = math.floor(b * ppq + 0.5)
@@ -231,6 +279,11 @@ def field(polys, walled, reach, view=None):
     xs = np.arange(x_lo - step, x_hi + 2 * step, step)
     ys = np.arange(y_lo - step, y_hi + 2 * step, step)
     dist = np.full((len(ys), len(xs)), 2.0 * reach)
+    fast = compiled("field_dist")
+    if fast is not None:  # (the same, as a compiled loop: files/fastloops.py)
+        fast.field_dist(*(np.ascontiguousarray(seg[:, i], float) for i in range(4)), xs, ys, float(reach), BLOCK,
+                        dist)
+        return _field_end(key, seg, xs, ys, step, dist, walled, view)
     s_xlo, s_xhi = np.minimum(seg[:, 0], seg[:, 2]), np.maximum(seg[:, 0], seg[:, 2])
     s_ylo, s_yhi = np.minimum(seg[:, 1], seg[:, 3]), np.maximum(seg[:, 1], seg[:, 3])
     for j0 in range(0, len(ys), BLOCK):
@@ -249,9 +302,14 @@ def field(polys, walled, reach, view=None):
             t = np.clip(((px - ax) * dx + (py - ay) * dy) / np.maximum(dx * dx + dy * dy, 1e-18), 0, 1)
             d = np.sqrt(((px - ax - t * dx) ** 2 + (py - ay - t * dy) ** 2).min(axis=1)).reshape(len(y), len(x))
             dist[j0:j0 + BLOCK, i0:i0 + BLOCK] = np.minimum(d, 2.0 * reach)
+    return _field_end(key, seg, xs, ys, step, dist, walled, view)
+
+
+def _field_end(key, seg, xs, ys, step, dist, walled, view):
+    """field's inside / outside signs on the distances, remembered under key."""
     inside = np.zeros(dist.shape, bool)
-    for j, y in enumerate(ys):  # a grid row at a time: the edges it crosses, then how many lie left of each spot
-        xc = crossings(seg, y)
+    for j, (y, xc) in enumerate(zip(ys, crossings_all(seg, ys))):  # a grid row at a time: the edges it crosses,
+        # then how many lie left of each spot
         if not len(xc):
             continue
         at = np.searchsorted(xc, xs)
