@@ -4,6 +4,8 @@
 
 Kept notes are drawn see-through in the same colours the shape gives its notes inside the keys, so a shape's colours carry on across the edge (Colours, repeated colours getting new channels, Recolour and Multi channel included). Opacity (1 to 100 %) sets how strongly. A shape made wholly out there, with no notes on the keys at all, shows the colours it would have on the keys too.
 
+Moving a shape across the edge can swap some of its colours: the pattern stays the same, but colour A may become colour B. That's normal, not a mistake. Channels are handed out by which of the shape's notes are on the keys, so when that changes, the order changes too. The whole shape swaps together, the notes on the keys as well, so its colours still carry on across the edge.
+
 Exact colours (slower), under Keep notes made there: the colours are worked out with the whole project, as if the keyboard were taller, so two shapes overlapping out there show the colours they'd get once both are moved onto the keys. It's done in the background after each change, so the colours may change a moment later. Off, they're worked out shape by shape: quicker, and nearly always the same. The status line counts them apart, in red after the note count: "237,360 notes (+1,447 off-range)". Rest the mouse on the red part to see what happens to them.
 
 ## Working with them
