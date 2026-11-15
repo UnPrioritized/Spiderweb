@@ -15,11 +15,15 @@ the top, and the drawing fills its box (0..1 both ways, like every custom shape)
 pattern's "to the side" (to the left of the way it goes) points outward."""
 
 import math
+import random
 
 from notes.pattern import clean_pattern, clean_shape_formula
 
 STYLES = ("polygon", "star", "cross")
-POLYGON_DEFAULTS = {"points": 5, "style": "polygon", "inner": 50.0, "skip": 2, "twist": 0.0, "turn": 0.0}
+UNEVEN_HOWS = ("random", "turns")
+POLYGON_DEFAULTS = {"points": 5, "style": "polygon", "inner": 50.0, "skip": 2, "twist": 0.0, "turn": 0.0,
+                    "uneven": 0.0, "uneven_how": "random", "seed": 1}
+MOST_SEED = 999999
 MAX_POINTS = 200
 MIN_POINTS = 2  # (2 = a flat line, two sides on top of each other: a pattern on them pulls them apart)
 MOST_TWIST = 100.0  # % (100 = each side leaves its corner at a right angle)
@@ -41,7 +45,10 @@ def clean_polygon(d):
                "style": d.get("style") if d.get("style") in STYLES else "polygon",
                "inner": max(0.0, min(1000.0, float(d.get("inner", POLYGON_DEFAULTS["inner"])))),
                "skip": max(1, int(d.get("skip", POLYGON_DEFAULTS["skip"]))),
-               "twist": _signed(d, "twist", MOST_TWIST), "turn": _signed(d, "turn", MOST_TURN)}
+               "twist": _signed(d, "twist", MOST_TWIST), "turn": _signed(d, "turn", MOST_TURN),
+               "uneven": max(0.0, _signed(d, "uneven", 100.0)),
+               "uneven_how": d.get("uneven_how") if d.get("uneven_how") in UNEVEN_HOWS else "random",
+               "seed": max(1, min(MOST_SEED, int(d.get("seed", 1))))}
     except (TypeError, ValueError, OverflowError):
         return None
     pat, form = clean_pattern(d.get("pattern")), clean_shape_formula(d.get("shape"))
@@ -52,29 +59,46 @@ def clean_polygon(d):
     return out
 
 
+def uneven_shifts(d, count):
+    """How far each of count points round the circle slides along it (in steps between points; 0 = even), for
+    "uneven" %: Random (by "seed": the same number = the same shape) or In turns (every other side longer). Never
+    past a neighbour: at most 0.45 of a step each way."""
+    u = d.get("uneven", 0.0) / 100
+    if not u:
+        return [0.0] * count
+    if d.get("uneven_how") == "turns":
+        return [(0.225 if i % 2 else -0.225) * u for i in range(count)]
+    rng = random.Random(d.get("seed", 1))
+    return [rng.uniform(-0.45, 0.45) * u for _ in range(count)]
+
+
 def polygon_loops(d):
     """The outline(s) as closed point lists, round (a circle through the corners has radius 1, centre 0, 0; y up),
     clockwise."""
     n = d["points"]
     if d["style"] == "star":
         r, turn = d["inner"] / 100, math.radians(d.get("turn", 0.0))
+        shift = uneven_shifts(d, 2 * n)
         pts = []
         for i in range(n):
             for j, rad in ((0, 1.0), (0.5, r)):
-                a = math.pi / 2 - 2 * math.pi * (i + j) / n - (turn if j else 0.0)  # (+ = inner points clockwise)
+                a = (math.pi / 2 - 2 * math.pi * (i + j + shift[2 * i + (j > 0)] / 2) / n
+                     - (turn if j else 0.0))  # (+ turn = inner points clockwise)
                 pts.append((rad * math.cos(a), rad * math.sin(a)))
         return [pts + [pts[0]]]
+    shift = uneven_shifts(d, n)
     if d["style"] == "cross":
         k = d["skip"] % n or 1
-        corners = [(math.cos(math.pi / 2 - 2 * math.pi * i / n), math.sin(math.pi / 2 - 2 * math.pi * i / n))
-                   for i in range(n)]
+        corners = [(math.cos(math.pi / 2 - 2 * math.pi * (i + shift[i]) / n),
+                    math.sin(math.pi / 2 - 2 * math.pi * (i + shift[i]) / n)) for i in range(n)]
         loops = []
         for first in range(math.gcd(n, k)):
             loop = [corners[(first + j * k) % n] for j in range(n // math.gcd(n, k))]
             loops.append(loop + [loop[0]])
         return loops
     start = -math.pi / 2 - math.pi / n  # (the bottom side flat)
-    pts = [(math.cos(start - 2 * math.pi * i / n), math.sin(start - 2 * math.pi * i / n)) for i in range(n)]
+    pts = [(math.cos(start - 2 * math.pi * (i + shift[i]) / n), math.sin(start - 2 * math.pi * (i + shift[i]) / n))
+           for i in range(n)]
     return [pts + [pts[0]]]
 
 

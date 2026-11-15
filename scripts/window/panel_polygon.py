@@ -3,20 +3,23 @@ star's inner size and a crossing star's skip. They change the selected polygons,
 gets. The shape of the sides and the pattern along them are formulas (right-click ▸ Formula: formula_host.py's
 PolygonHost; their numbers show in the formula part of the panel)."""
 
+import random
 import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import fmt
-from notes.polygon import MAX_POINTS, MIN_POINTS, MOST_TURN, MOST_TWIST, STYLES, update_polygon
+from notes.polygon import (MAX_POINTS, MIN_POINTS, MOST_SEED, MOST_TURN, MOST_TWIST, STYLES, UNEVEN_HOWS,
+                           update_polygon)
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, read_number, unchanged
 
 STYLE_NAMES = [tr("panel_polygon.style_" + s) for s in STYLES]
+HOW_NAMES = [tr("panel_polygon.uneven_" + s) for s in UNEVEN_HOWS]
 # name: (lowest, highest, steps (step, Shift step, Ctrl step), whole numbers only)
 NUMBERS = {"points": (MIN_POINTS, MAX_POINTS, (1, 5, 1), True), "inner": (0, 1000, (5, 25, 1), False),
            "skip": (1, MAX_POINTS - 1, (1, 5, 1), True), "twist": (-MOST_TWIST, MOST_TWIST, (5, 25, 1), False),
-           "turn": (-MOST_TURN, MOST_TURN, (5, 15, 1), False)}
+           "turn": (-MOST_TURN, MOST_TURN, (5, 15, 1), False), "uneven": (0, 100, (5, 25, 1), False)}
 SHOWN_FOR = {"star": ("inner", "turn"), "cross": ("skip",)}  # (only the boxes the kind uses show, user)
 
 
@@ -31,7 +34,10 @@ class PolygonPanel:
         row2 = self.polygon_row2 = ttk.Frame(box)  # (only for a star / crossing star)
         row1.pack(fill="x")
         row_t.pack(fill="x", pady=(2, 0))
-        for row, name in ((row1, "points"), (row_t, "twist"), (row2, "inner"), (row2, "turn"), (row2, "skip")):
+        row_u = ttk.Frame(box)
+        row_u.pack(fill="x", pady=(2, 0))
+        for row, name in ((row1, "points"), (row_t, "twist"), (row_u, "uneven"), (row2, "inner"), (row2, "turn"),
+                          (row2, "skip")):
             cell = self.polygon_cells[name] = ttk.Frame(row)
             if row is not row2:
                 cell.pack(side="left", padx=(0, 10))
@@ -54,6 +60,16 @@ class PolygonPanel:
                 cb.pack(side="left", padx=(4, 0))
                 cb.bind("<<ComboboxSelected>>", lambda ev: (self.on_polygon_style(), self.roll.focus_set()))
                 Tooltip(cb, tr("panel_polygon.kind_tip"))
+            if name == "uneven":  # how: Random (+ New random) / In turns
+                self.polygon_how = tk.StringVar()
+                cb = self.polygon_how_box = ttk.Combobox(row_u, textvariable=self.polygon_how, values=HOW_NAMES,
+                                                         state="readonly", width=max(map(len, HOW_NAMES)))
+                cb.pack(side="left")
+                cb.bind("<<ComboboxSelected>>", lambda ev: (self.on_polygon_how(), self.roll.focus_set()))
+                Tooltip(cb, tr("panel_polygon.uneven_how_tip"))
+                b = self.polygon_reroll = ttk.Button(row_u, text=tr("panel_polygon.new_random"),
+                                                     command=self.on_polygon_reroll)
+                Tooltip(b, tr("panel_polygon.new_random_tip"))
         # 2 points and nothing on the sides: just a flat line (a pattern on the sides changes its shape)
         self.polygon_flat = ttk.Label(box, text=tr("panel_polygon.flat"), foreground=look.WARN, font=look.font(8),
                                       wraplength=int(260 * self.scale), justify="left")
@@ -84,7 +100,9 @@ class PolygonPanel:
             var.set(fmt(d[name]))
             self.polygon_entries[name].config(style="TEntry")
         self.polygon_style.set(STYLE_NAMES[STYLES.index(d["style"])])
+        self.polygon_how.set(HOW_NAMES[UNEVEN_HOWS.index(d["uneven_how"])])
         self._loading = False
+        pack_shown(self.polygon_reroll, d["uneven_how"] == "random", side="left", padx=(6, 0))
         want = SHOWN_FOR.get(d["style"], ())
         for name in ("inner", "turn", "skip"):
             self.polygon_entries[name].config(state="normal" if name in want else "disabled")
@@ -129,4 +147,24 @@ class PolygonPanel:
             return
         picked = self.polygon_style_box.current()  # (the place: two choices translated alike stay apart)
         self.set_polygon("style", STYLES[picked if picked >= 0 else STYLE_NAMES.index(self.polygon_style.get())])
+
+    def on_polygon_how(self):
+        if self._loading:
+            return
+        picked = self.polygon_how_box.current()
+        self.set_polygon("uneven_how", UNEVEN_HOWS[picked if picked >= 0 else HOW_NAMES.index(self.polygon_how.get())])
+
+    def on_polygon_reroll(self):
+        """New random: each selected polygon (and the next one drawn) gets its own new uneven corners, one step."""
+        shapes = self.polygon_shapes()
+        if shapes:
+            self.push_undo(name=tr("history.polygon"))
+            for sh in shapes:
+                sh["polygon"]["seed"] = random.randint(1, MOST_SEED)
+                update_polygon(sh)
+        self.polygon_defaults["seed"] = random.randint(1, MOST_SEED)
+        if shapes:
+            self.shapes_changed()
+        self.sync_polygon()
+        self.schedule_autosave()
 
