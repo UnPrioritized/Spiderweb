@@ -500,21 +500,25 @@ def moved_formulas(holder, fn):
 
 BAKE_TOLERANCE = 0.05  # how closely "Turn into plain curve" follows the pattern, in keys (as the piano roll looked)
 BAKE_SHARE = 0.001  # the same for a drawer stroke / funnel curve, as a share of its size
+# a polygon's sides: closer (dense tall stairs / spikes lost whole keys at BAKE_SHARE; measured with
+# dev/scratch/bake_count.py + bake_tight.py: 40 tall spikes a side = at most ~1,400 anchors, under 1 s)
+POLYGON_BAKE_SHARE = 0.0001
 
 
 BAKE_SYM = ("mirror", "turn")  # symmetric halves a baked curve gets when it has them (bezier.fit_symmetric)
 
 
-def baked_path(holder, pts, modes=BAKE_SYM, formed=None):
+def baked_path(holder, pts, modes=BAKE_SYM, formed=None, share=BAKE_SHARE):
     """A drawer stroke's / funnel curve's formulas made into ordinary anchors and handles: (pts, sharp, sym).
-    pts: its curve's points; or formed: the path it makes with them (a line / polyline / arc stroke)."""
+    pts: its curve's points; or formed: the path it makes with them (a line / polyline / arc stroke). share: how
+    closely it follows, as a share of its size."""
     from notes.bezier import fit_symmetric, sample
     path = formed if formed is not None else formed_path(sample([tuple(q) for q in pts], 240), holder)
     k = (holder.get("pattern") or holder["shape"])["k"]
     a = np.asarray(path, float) / [k, 1.0]
     size = max(1e-9, float(np.hypot(*(a.max(axis=0) - a.min(axis=0)))))
     corners = []
-    got, sym = fit_symmetric([tuple(q) for q in a.tolist()], BAKE_SHARE * size, corners, modes)
+    got, sym = fit_symmetric([tuple(q) for q in a.tolist()], share * size, corners, modes)
     return [[x * k, y] for x, y in got], corners, sym
 
 

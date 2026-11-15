@@ -333,11 +333,11 @@ def plain_stroke(st):
     return {key: v for key, v in st.items() if key not in ("shape", "pattern", "rev")}
 
 
-def baked_stroke(st, modes):
+def baked_stroke(st, modes, share=None):
     """Turn into plain curve: the stroke as it looks with its formulas, as a curve stroke without them (a line /
     polyline / arc becomes a curve; its role, colour and shape it came from stay). modes: the symmetric halves
-    it may get."""
-    pts, sharp, sym = baked_path(st, None, modes, stroke_points(st))
+    it may get; share: how closely it follows (pattern.baked_path; None = as usual)."""
+    pts, sharp, sym = baked_path(st, None, modes, stroke_points(st), **({"share": share} if share else {}))
     out = {key: v for key, v in st.items()
            if key not in ("kind", "pts", "shape", "pattern", "sym", "rev", "k", "sides", "sharp")}
     out.update(kind="curve", pts=pts)

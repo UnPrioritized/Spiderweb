@@ -545,8 +545,7 @@ class PolygonHost(AppHost):
     it's put on."""
     pattern_help = "pattern_dialog.help_polygon"
     number_tip = "panel_pattern.number_tip_polygon"
-    plain_label = "roll_menu.turn_into_plain_lines"
-    asks_big = False  # (bake changes the polygon's shape, not the holder; plain lines aren't slow to show)
+    asks_big = False  # (bake changes the polygon's shape, not the holder; the baked curve has few anchors)
 
     def targets(self):
         return [sh["polygon"] for sh in self.app.polygon_shapes()]
@@ -583,10 +582,13 @@ class PolygonHost(AppHost):
         return (sides[0] if pat.get("each") else sum(sides)) / pat.get("loops", 1.0) / scale
 
     def bake(self, holder):
-        """Turn into plain lines: the polygon's outline as it is now (pattern and all) becomes plain polylines; it's
-        no longer a polygon (its settings go)."""
-        from notes.custom import stroke_points
+        """Turn into plain curve: the polygon's outline as it is now (pattern and all) becomes a plain curve with as
+        few anchors as follow it closely (like the piano roll's curves; every drawn point kept was thousands, slow
+        and useless to edit); a side without formulas stays a plain polyline. No longer a polygon (settings go)."""
+        from notes.custom import baked_stroke
+        from notes.pattern import POLYGON_BAKE_SHARE
         sh = self.shape_of(holder)
         if sh:
-            sh["strokes"] = [{"kind": "poly", "pts": [list(p) for p in stroke_points(st)]} for st in sh["strokes"]]
+            sh["strokes"] = [baked_stroke(st, (), POLYGON_BAKE_SHARE) if has_formula(st)
+                             else {"kind": "poly", "pts": [list(p) for p in st["pts"]]} for st in sh["strokes"]]
             del sh["polygon"]
