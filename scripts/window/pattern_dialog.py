@@ -149,7 +149,8 @@ class FormulaDialog(tk.Toplevel):
     def __init__(self, host, layer="pattern"):
         parent = host.parent
         super().__init__(parent)
-        self.layer = layer
+        self.layer = layer  # (the holder's key: "shape", "pattern", or a polygon's "pattern2")
+        self.kind = "shape" if layer == "shape" else "pattern"
         shape = layer == "shape"
         self.title(tr("pattern_dialog.shape_title") if shape else tr("pattern_dialog.title"))
         self.transient(parent)
@@ -333,7 +334,7 @@ class FormulaDialog(tk.Toplevel):
                     self.listbox.see(i)
 
     def fill_list(self):
-        self.saved = load_patterns(self.layer)
+        self.saved = load_patterns(self.kind)
         self.items = [("preset", pid, name) for pid, name, _, _ in self.presets()]
         self.items += [("saved", item, item["name"]) for item in self.saved]
         self.listbox.delete(0, "end")
@@ -378,7 +379,7 @@ class FormulaDialog(tk.Toplevel):
         item.update({key: self.pat[key] for key in self.texts if key in self.pat})
         if self.pat.get("loop"):
             item["loop"] = copy.deepcopy(self.pat["loop"])
-        if self.layer == "pattern":  # (user: the saved list keeps the graphs)
+        if self.kind == "pattern":  # (user: the saved list keeps the graphs)
             self.drop_unused_graphs()
             if self.pat.get("graphs"):
                 item["graphs"] = copy.deepcopy(self.pat["graphs"])
@@ -407,7 +408,7 @@ class FormulaDialog(tk.Toplevel):
     def save_file(self, name, item):
         """save_pattern, saying what went wrong. True when saved."""
         try:
-            kept = save_pattern(name, item, self.layer)
+            kept = save_pattern(name, item, self.kind)
         except OSError as e:
             messagebox.showerror(tr("pattern_dialog.spiderweb"), tr("pattern_dialog.couldn_t_save", e=e), parent=self)
             return False
@@ -479,7 +480,7 @@ class FormulaDialog(tk.Toplevel):
 
     def refresh(self):
         """Number boxes, the preview and the piano roll after a change."""
-        names = (["loops"] if self.layer == "pattern" else []) + ([] if self.pat.get("loop") else
+        names = (["loops"] if self.kind == "pattern" else []) + ([] if self.pat.get("loop") else
                                                                   list(self.pat["vars"]))
         if names != self._names:
             self.build_boxes(names)
@@ -508,7 +509,7 @@ class FormulaDialog(tk.Toplevel):
             else:
                 self.set_info(tr("pattern_dialog.whole_shape") if self.layer == "shape" else
                               tr("pattern_dialog.one_loop"), look.INFO)
-            if self.layer == "pattern" and self.pat["loops"] >= self.most_loops():  # (only then, user)
+            if self.kind == "pattern" and self.pat["loops"] >= self.most_loops():  # (only then, user)
                 self.set_info(tr("panel_pattern.loops_most", most=fmt(self.most_loops())), GAP_COLOR,
                               back=bool(self.pat.get("loop")))
         self.view = self.view[:3] + (self.loop_len(),) if self.own_view and self.view else None
@@ -533,7 +534,7 @@ class FormulaDialog(tk.Toplevel):
             loops = name == "loops"
             Scrub(self.host.app, [(e, var, lambda n=name: self.on_number(n))], (1, 10, 0.1) if loops else (0.5, 5, 0.1),
                   0.01 if loops else None, None, label=lb)
-            if self.layer == "pattern":  # its graph along the line ("× graph" in blue while it has one)
+            if self.kind == "pattern":  # its graph along the line ("× graph" in blue while it has one)
                 b = ttk.Button(cell, text="…", width=2, command=lambda n=name: self.open_graph(n))
                 b.pack(side="left", padx=(2, 0))
                 Tooltip(b, tr("pattern_graph.loops_button_tip" if loops else "pattern_graph.button_tip"))
@@ -625,7 +626,7 @@ class FormulaDialog(tk.Toplevel):
             own = h.get(self.layer) or dict(self.host.fresh(h, self.layer), mirror=False)
             new = copy.deepcopy(self.pat)
             new.update(k=own["k"], mirror=own["mirror"])
-            if self.layer == "pattern":
+            if self.kind == "pattern":
                 new["scale"] = own.get("scale", 1.0)
             h[self.layer] = new
             self.host.placed(h, self.layer, before)
@@ -652,13 +653,14 @@ class FormulaDialog(tk.Toplevel):
         self.drop_unused_graphs()
         self.show_on_roll()
         self.destroy()
-        step = "panel_pattern.shape_step" if self.layer == "shape" else "panel_pattern.pattern_step"
+        step = ("panel_pattern.shape_step" if self.layer == "shape" else "panel_pattern.pattern2_step"
+                if self.layer == "pattern2" else "panel_pattern.pattern_step")
         self.host.commit(self.snap, tr(step, name=self.name_of(self.pat)))
 
     def drop_unused_graphs(self):
         """Graphs of numbers a typed formula no longer has go (kept while typing: a name half typed comes back
         with its graph); the Loops graph stays."""
-        if self.layer != "pattern":
+        if self.kind != "pattern":
             return
         gs = clean_pattern_graphs(self.pat.get("graphs"), {} if self.pat.get("loop") else self.pat["vars"])
         if gs:
@@ -679,7 +681,7 @@ class FormulaDialog(tk.Toplevel):
         if self.layer == "shape":
             return 1.0
         h = self.targets[0]
-        own = h.get("pattern") or self.host.fresh(h, "pattern")
+        own = h.get(self.layer) or self.host.fresh(h, self.layer)
         got = self.host.loop_length(h, dict(self.pat, loops=LOOPS_DEFAULT, k=own["k"], scale=own.get("scale", 1.0)))
         return got if got > 1e-6 else 8.0
 
@@ -719,7 +721,7 @@ class FormulaDialog(tk.Toplevel):
         line = sample([tuple(p) for p in loop["pts"]], 32)
         us = [a for a, _ in loop["pts"]] + [a for a, _ in line] + [0.0, 1.0]
         vs = [b for _, b in loop["pts"]] + [b for _, b in line]
-        if self.layer == "pattern":  # (the middle line in the middle)
+        if self.kind == "pattern":  # (the middle line in the middle)
             tall = max([abs(b) for b in vs] + [0.5])
             lo_v, hi_v = -tall, tall
         else:
@@ -751,7 +753,7 @@ class FormulaDialog(tk.Toplevel):
         pts = loop["pts"]
         line = [self.to_xy(p) for p in sample([tuple(p) for p in pts], 32)]
         font = look.font(8)
-        if self.layer == "pattern":
+        if self.kind == "pattern":
             c.create_line(0, ym, self.w, ym, fill=look.PAT_ORIGIN, dash=(6, 4))  # the curve itself (the origin path)
             width = length * s
             for shift in (-1, 1):  # the loops before and after it, faint
@@ -853,7 +855,7 @@ class FormulaDialog(tk.Toplevel):
             lo, hi = sorted([self.from_xy(0, 0)[axis], self.from_xy(self.w, self.h)[axis]])
             for k in range(math.ceil(lo / step), math.floor(hi / step) + 1):
                 v = k * step
-                strong = abs(v) < step / 2 or (axis == 0 and self.layer == "pattern" and abs(v - 1) < step / 2)
+                strong = abs(v) < step / 2 or (axis == 0 and self.kind == "pattern" and abs(v - 1) < step / 2)
                 color = look.PAT_GRID_STRONG if strong else look.PAT_GRID
                 if axis == 0:
                     x = self.to_xy((v, 0))[0]
@@ -898,7 +900,7 @@ class FormulaDialog(tk.Toplevel):
             keep_symmetric(c, self.drag, self.to_xy, axis=axis)
         self.set_info(tr("pattern_dialog.shape_edited_by_hand") if self.layer == "shape" else
                       tr("pattern_dialog.edited_by_hand"), look.GOOD, back=True)
-        want = ["loops"] if self.layer == "pattern" else []
+        want = ["loops"] if self.kind == "pattern" else []
         if self._names != want:
             self.build_boxes(want)
             if want:

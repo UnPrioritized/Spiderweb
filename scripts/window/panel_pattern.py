@@ -12,12 +12,13 @@ from files.mathexpr import calc, fmt
 from notes.pattern import FORMULA_KINDS, MAX_LOOPS, SOFT_DEFAULT, formula_shape, loop_points, most_loops
 from notes.polygon import update_polygon
 from window import look
-from window.formula_host import SYM_CHOICES, layer_name, set_loop_sym, sym_label
+from window.formula_host import MIX_CHOICES, SYM_CHOICES, PolygonHost, layer_name, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
 from window.pattern_graphs import PanelGraphs, graphed, open_graph
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, read_number, unchanged
 
-LAYERS = ("shape", "pattern")  # (a curve's shape first: the pattern runs along it)
+LAYERS = ("shape", "pattern", "pattern2")  # (a curve's shape first: the pattern runs along it; pattern2: a
+# polygon's second pattern)
 LOOP_STEPS = (1, 10, 0.1)    # quick changes (widgets.Scrub): step, Shift step, Ctrl step
 NUMBER_STEPS = (0.5, 5, 0.1)
 
@@ -33,8 +34,7 @@ class PatternPanel:
             row = ttk.Frame(box)
             top = ttk.Frame(row)
             top.pack(fill="x")
-            ttk.Label(top, text=tr("panel_pattern.shape") if layer == "shape" else
-                      tr("panel_pattern.pattern")).pack(side="left")
+            ttk.Label(top, text=tr("panel_pattern." + layer)).pack(side="left")
             label = ttk.Label(top, text="", foreground=look.HINT)
             label.pack(side="left", padx=(5, 0))
             numbers = ttk.Frame(row)  # a box per name in the formula (a pattern: Loops first); rebuilt when they change
@@ -51,6 +51,17 @@ class PatternPanel:
             cb.bind("<<ComboboxSelected>>", lambda e, l=layer: self.on_formula_sym(l, e.widget.current()))
             for w in (lb, cb):
                 Tooltip(w, tr("pattern_dialog.sym_tip"))
+            if layer == "pattern2":  # how it mixes with the first: On top / Taking turns
+                lb = ttk.Label(sym_row, text=tr("formula_host.mix"))
+                lb.pack(side="left", padx=(10, 0))
+                self.mix_var = tk.StringVar()
+                mixes = [tr(key) for _, key in MIX_CHOICES]
+                cb = self.mix_box = ttk.Combobox(sym_row, textvariable=self.mix_var, values=mixes, state="readonly",
+                                                 width=max(len(n) for n in mixes))
+                cb.pack(side="left", padx=(5, 0))
+                cb.bind("<<ComboboxSelected>>", lambda e: self.on_mix(e.widget.current()))
+                for w in (lb, cb):
+                    Tooltip(w, tr("formula_host.mix_tip"))
             if layer == "pattern":  # Flatten % + Softness %: any bump pressed flat like a balloon on a wall
                 flat_row = ttk.Frame(row)
                 flat_row.pack(fill="x", pady=(2, 0))
@@ -127,7 +138,7 @@ class PatternPanel:
                 continue
             ui["row"].pack(fill="x", pady=(0, 4))
             p = tgts[0][layer]
-            names = (["loops"] if layer == "pattern" else []) + ([] if p.get("loop") else list(p["vars"]))
+            names = (["loops"] if layer != "shape" else []) + ([] if p.get("loop") else list(p["vars"]))
             polygon = "points" in tgts[0]  # (a polygon's sizes are hundredths of its height, not keys)
             if (names, polygon) != ui["names"]:
                 self._build_formula_boxes(layer, names, polygon)
@@ -140,6 +151,8 @@ class PatternPanel:
                 var.set(fmt(p["loops"] if name == "loops" else p["vars"][name]))
                 e.config(style="TEntry")
             ui["sym"].set(sym_label(p.get("sym")))
+            if layer == "pattern2":
+                self.mix_var.set(tr(dict(MIX_CHOICES)[tgts[0].get("mix", "top")]))
             if layer == "pattern":
                 for key, var in self.flat_vars.items():
                     var.set(fmt(p.get(key, SOFT_DEFAULT if key == "soft" else 0.0)))
@@ -268,6 +281,11 @@ class PatternPanel:
                 sh[layer]["vars"][name] = value
         self.formulas_edited()
         self.show_loops_most()
+
+    def on_mix(self, picked):
+        if self._loading or picked < 0:
+            return
+        PolygonHost(self).set_mix(MIX_CHOICES[picked][0])
 
     def on_flat_entry(self, key, left=False):
         """Flatten % / Softness % (Enter, stepped, or left: widgets.leave_box): on every selected pattern."""

@@ -20,7 +20,7 @@ from notes.gaterange import (RangeKeys, RangeRows, clean_range, halved, range_gr
 from notes.bezier import sample
 from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, formed_path, formed_paths, has_formula,
                            moved_formulas)
-from notes.polygon import clean_corners, side_paths
+from notes.polygon import MIXES, clean_corners, formed_sides
 from notes.smooth import clean_level, smooth_path
 from notes.paths import (top_key, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
@@ -292,6 +292,12 @@ def clean_formulas(st, out):
         out["pattern"] = pat
     if form:
         out["shape"] = form
+    if out.get("sides"):  # (a polygon's second pattern: polygon.py)
+        pat2 = clean_pattern(st.get("pattern2"))
+        if pat2:
+            out["pattern" if not pat else "pattern2"] = pat2
+            if pat and st.get("mix") in MIXES:
+                out["mix"] = st["mix"]
     return out
 
 
@@ -323,7 +329,7 @@ def stroke_points(st):
         return smooth_path(st["pts"], st["smooth"], st.get("k", 1.0))
     if st.get("sides") and has_formula(st):  # a polygon's sides, each with the shape / pattern (polygon.py)
         out = []
-        for side in formed_paths(side_paths(st["pts"], st.get("corners")), st):
+        for side in formed_sides(st):
             out += side[1:] if out else side
         return out
     if not st.get("free") and has_formula(st):  # a line / polyline: along all of it, round its corners
@@ -333,7 +339,7 @@ def stroke_points(st):
 
 def plain_stroke(st):
     """The stroke without its formulas (the dashed origin path under them)."""
-    return {key: v for key, v in st.items() if key not in ("shape", "pattern", "rev")}
+    return {key: v for key, v in st.items() if key not in ("shape", "pattern", "pattern2", "mix", "rev")}
 
 
 def baked_stroke(st, modes, share=None):
@@ -342,7 +348,8 @@ def baked_stroke(st, modes, share=None):
     it may get; share: how closely it follows (pattern.baked_path; None = as usual)."""
     pts, sharp, sym = baked_path(st, None, modes, stroke_points(st), **({"share": share} if share else {}))
     out = {key: v for key, v in st.items()
-           if key not in ("kind", "pts", "shape", "pattern", "sym", "rev", "k", "sides", "sharp")}
+           if key not in ("kind", "pts", "shape", "pattern", "pattern2", "mix", "corners", "sym", "rev", "k", "sides",
+                          "sharp")}
     out.update(kind="curve", pts=pts)
     if sharp:
         out["sharp"] = sharp

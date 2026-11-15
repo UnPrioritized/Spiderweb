@@ -28,7 +28,11 @@ def layer_name(layer, p):
 
 
 def step_name(layer, name):
-    return tr("panel_pattern.shape_step" if layer == "shape" else "panel_pattern.pattern_step", name=name)
+    return tr("panel_pattern.shape_step" if layer == "shape" else "panel_pattern.pattern2_step"
+              if layer == "pattern2" else "panel_pattern.pattern_step", name=name)
+
+
+MIX_CHOICES = (("top", "formula_host.mix_top"), ("turns", "formula_host.mix_turns"))  # a polygon's second pattern
 
 
 SYM_CHOICES = (("", "widgets.off"), ("mirror", "formula_host.mirrored"),
@@ -134,7 +138,7 @@ class FormulaHost:
         got = self.fresh(holder, layer)
         if layer == "shape":
             return saved_shape(saved, got["k"]) if saved else new_shape(preset, got["k"], holder.get("shape"))
-        old = holder.get("pattern")
+        old = holder.get(layer)
         new = saved_pattern(saved, got["k"], old) if saved else new_pattern(preset, got["k"], old)
         new["scale"] = got.get("scale", 1.0)
         return new
@@ -150,17 +154,37 @@ class FormulaHost:
             name = SHAPE_NAMES[preset] if layer == "shape" else pattern_name({"preset": preset})
         else:
             name = None
+        if layer == "pattern2":  # (only on top of a first pattern)
+            tgts = [h for h in tgts if h.get("pattern")]
+            if not tgts:
+                return
         self.begin(step_name(layer, name) if name else tr("panel_pattern.remove_" + layer))
         for h in tgts:
             if preset is None and not saved:
                 h.pop(layer, None)
+                if layer == "pattern" and h.get("pattern2"):  # (the second moves up)
+                    h["pattern"] = h.pop("pattern2")
+                if not h.get("pattern2"):
+                    h.pop("mix", None)
                 if not has_formula(h):
                     h.pop("rev", None)
             else:
                 before = copy.deepcopy(h)
                 h[layer] = self.new_formula(h, layer, preset, saved)
+                if layer == "pattern2":
+                    h.setdefault("mix", "top")
                 self.placed(h, layer, before)
         self.spread()
+        self.changed()
+
+    def set_mix(self, mix):
+        """A polygon's second pattern: "top" (on top of the first) or "turns" (sides take turns)."""
+        tgts = [h for h in self.targets() if h.get("pattern2") and h.get("mix") != mix]
+        if not tgts:
+            return
+        self.begin(tr("formula_host.mix_step", name=tr(dict(MIX_CHOICES)[mix])))
+        for h in tgts:
+            h["mix"] = mix
         self.changed()
 
     def set_sym(self, layer, mode):
@@ -190,7 +214,7 @@ class FormulaHost:
             return
         self.begin(tr("panel_pattern.remove_formula"))
         for h in tgts:
-            for key in ("shape", "pattern", "rev"):
+            for key in ("shape", "pattern", "pattern2", "mix", "rev"):
                 h.pop(key, None)
         self.spread()
         self.changed()
@@ -247,10 +271,11 @@ def formula_menu(m, host, picks):
     from window.pattern_dialog import load_patterns
     h = host.current() or {}
     sub = tk.Menu(m, tearoff=0)
+    pattern_list = [(pid, name) for pid, name, _, _ in PATTERN_PRESETS]
     for layer, label, presets in (
             ("shape", tr("roll_menu.shape_of_the_line"), [(sid, name) for sid, name, _, _, _ in SHAPE_PRESETS]),
-            ("pattern", tr("roll_menu.pattern_along_the_line"),
-             [(pid, name) for pid, name, _, _ in PATTERN_PRESETS])):
+            ("pattern", tr("roll_menu.pattern_along_the_line"), pattern_list),
+            ("pattern2", tr("roll_menu.second_pattern"), pattern_list)):
         if layer not in host.layers:
             continue
         pat = h.get(layer) or {}
@@ -269,7 +294,7 @@ def formula_menu(m, host, picks):
         for pid, name in presets:
             menu.add_radiobutton(label=name, value=pid, variable=pick,
                                  command=lambda l=layer, p=pid: host.set_formula(l, p))
-        saved = load_patterns(layer)
+        saved = load_patterns("shape" if layer == "shape" else "pattern")
         if saved:
             menu.add_separator()
         for item in reversed(saved):  # (newest first, user 2026-10-14)
@@ -277,7 +302,14 @@ def formula_menu(m, host, picks):
                                  command=lambda l=layer, it=item: host.set_formula(l, None, it))
         menu.add_separator()
         sym_menu(menu, host, layer, picks)
-        sub.add_cascade(label=label, menu=menu)
+        if layer == "pattern2":  # how it mixes with the first; only once there's a first pattern
+            mix = picks["mix"] = tk.StringVar(m, value=h.get("mix", "top"))
+            mm = tk.Menu(menu, tearoff=0)
+            for value, key in MIX_CHOICES:
+                mm.add_radiobutton(label=tr(key), value=value, variable=mix, command=lambda v=value: host.set_mix(v))
+            menu.add_cascade(label=tr("formula_host.mix"), menu=mm, state="normal" if pat else "disabled")
+        sub.add_cascade(label=label, menu=menu,
+                        state="normal" if layer != "pattern2" or h.get("pattern") else "disabled")
     sub.add_separator()
     on = "normal" if host.with_formula() else "disabled"
     sub.add_command(label=tr("roll_menu.remove_formula"), command=host.remove, state=on)
@@ -546,6 +578,7 @@ class PolygonHost(AppHost):
     pattern_help = "pattern_dialog.help_polygon"
     number_tip = "panel_pattern.number_tip_polygon"
     asks_big = False  # (bake changes the polygon's shape, not the holder; the baked curve has few anchors)
+    layers = ("shape", "pattern", "pattern2")  # (a second pattern: on top of the first, or sides taking turns)
 
     def targets(self):
         return [sh["polygon"] for sh in self.app.polygon_shapes()]
@@ -560,8 +593,8 @@ class PolygonHost(AppHost):
         return {"k": uv_k(sh["pts"], k) if sh else 1.0, "scale": DRAWER_SCALE}
 
     def placed(self, holder, layer, before):
-        if layer == "pattern" and not before.get("pattern"):  # (every side gets all the loops, to start with)
-            holder["pattern"]["each"] = True
+        if layer in ("pattern", "pattern2") and not before.get(layer):  # (every side gets all the loops, to start)
+            holder[layer]["each"] = True
 
     def changed(self, final=True):
         from notes.polygon import update_polygon

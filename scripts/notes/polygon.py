@@ -17,10 +17,11 @@ pattern's "to the side" (to the left of the way it goes) points outward."""
 import math
 import random
 
-from notes.pattern import clean_pattern, clean_shape_formula
+from notes.pattern import clean_pattern, clean_shape_formula, formed_paths, pattern_paths, shape_paths
 
 STYLES = ("polygon", "star", "cross")
 UNEVEN_HOWS = ("random", "turns")
+MIXES = ("top", "turns")  # a second pattern: on top of the first (riding on it) / sides taking turns
 POLYGON_DEFAULTS = {"points": 5, "style": "polygon", "inner": 50.0, "skip": 2, "twist": 0.0, "turn": 0.0,
                     "uneven": 0.0, "uneven_how": "random", "seed": 1}
 MOST_SEED = 999999
@@ -52,8 +53,14 @@ def clean_polygon(d):
     except (TypeError, ValueError, OverflowError):
         return None
     pat, form = clean_pattern(d.get("pattern")), clean_shape_formula(d.get("shape"))
+    pat2 = clean_pattern(d.get("pattern2"))
+    if pat2 and not pat:  # (a second pattern needs a first: it moves up)
+        pat, pat2 = pat2, None
     if pat:
         out["pattern"] = pat
+    if pat2:
+        out["pattern2"] = pat2
+        out["mix"] = d.get("mix") if d.get("mix") in MIXES else "top"
     if form:
         out["shape"] = form
     return out
@@ -163,9 +170,11 @@ def polygon_strokes(d):
         st["pts"][-1] = list(st["pts"][0])
         if corners:
             st["corners"] = corners
-        for layer in ("shape", "pattern"):
+        for layer in ("shape", "pattern", "pattern2"):
             if d.get(layer):
                 st[layer] = d[layer]
+        if st.get("pattern2"):
+            st["mix"] = d.get("mix", "top")
         out.append(st)
     return out
 
@@ -185,6 +194,25 @@ def side_paths(pts, corners=None):
     if corners and clean_corners(corners, len(pts)):  # (points edited since in a live shape: every point a corner)
         return [[tuple(p) for p in pts[a:b + 1]] for a, b in zip(corners, corners[1:])]
     return [[tuple(a), tuple(b)] for a, b in zip(pts, pts[1:])]
+
+
+def formed_sides(st):
+    """A polygon stroke's sides with its shape and pattern(s) on them. A second pattern ("pattern2"): "top" = laid
+    along the first one's outline (small spikes riding on big bumps), "turns" = sides take turns (1st, 3rd ...
+    get the first pattern, 2nd, 4th ... the second)."""
+    sides = side_paths(st["pts"], st.get("corners"))
+    p2 = st.get("pattern2") if st.get("pattern") else None
+    if not p2:
+        return formed_paths(sides, st)
+    if st.get("mix") == "turns":
+        out = [None] * len(sides)
+        out[0::2] = formed_paths(sides[0::2], st)
+        if len(sides) > 1:
+            out[1::2] = formed_paths(sides[1::2], dict(st, pattern=p2))
+        return out
+    if st.get("shape"):
+        sides = shape_paths(sides, st["shape"])
+    return pattern_paths(pattern_paths(sides, st["pattern"], arrays=True), p2)
 
 
 def clean_corners(corners, n):

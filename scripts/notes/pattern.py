@@ -526,7 +526,7 @@ def moved_formulas(holder, fn):
         return
     o = np.asarray(fn(0.0, 0.0), float)
     a = np.column_stack([np.asarray(fn(1.0, 0.0), float) - o, np.asarray(fn(0.0, 1.0), float) - o])
-    for layer in ("shape", "pattern"):
+    for layer in ("shape", "pattern", "pattern2"):  # (pattern2: a polygon stroke's second pattern)
         p = holder.get(layer)
         if not p:
             continue
@@ -537,7 +537,7 @@ def moved_formulas(holder, fn):
         k = r1 / r2
         det = float(np.linalg.det(np.diag([1 / k, 1.0]) @ b))  # ... and on to where it's round there
         new = dict(p, k=k, mirror=p["mirror"] != (det < 0))
-        if layer == "pattern":
+        if layer != "shape":
             new["scale"] = p["scale"] * math.sqrt(abs(det))
         holder[layer] = new
 
@@ -774,10 +774,11 @@ def _clear_stretches(s, v, ln):
     return np.insert(s, at, np.concatenate(add_s)), np.insert(v, at, np.concatenate(add_v))
 
 
-def pattern_paths(paths, p):
+def pattern_paths(paths, p, arrays=False):
     """The pattern laid along each path ((beat, pitch) point lists: a curve's pieces), as (beat, pitch) lists.
     Unchanged if the formula can't be worked out. A Loops graph moves the loops along the line (their count stays):
-    over each piece with Each piece, else over the whole line."""
+    over each piece with Each piece, else over the whole line. arrays: each piece as an (n, 2) array instead (a
+    second pattern laid on top next: no lists of tuples in between)."""
     try:
         u, v = loop_points(p)
     except ValueError:
@@ -804,7 +805,7 @@ def pattern_paths(paths, p):
     for a, ln, (offset, total, loops) in zip(screens, lengths, spans):
         size = ln[-1]
         if len(a) < 2 or size <= 1e-12 or total <= 1e-12:
-            out.append([tuple(q) for q in (a * [k, 1.0]).tolist()])
+            out.append(a * [k, 1.0] if arrays else [tuple(q) for q in (a * [k, 1.0]).tolist()])
             continue
         # the loops that reach this piece, with enough points per loop to follow the path's own bends too
         first = math.floor(warp_share(warp, offset / total) * loops)
@@ -818,7 +819,7 @@ def pattern_paths(paths, p):
         if count * per > MAX_POINTS + per:  # (a piece can touch one loop more than its share)
             count = MAX_POINTS // per + 1
         if count <= 0:  # (no loops on this piece at all: a Loops graph at 0 % all over it)
-            out.append([tuple(q) for q in (a * [k, 1.0]).tolist()])
+            out.append(a * [k, 1.0] if arrays else [tuple(q) for q in (a * [k, 1.0]).tolist()])
             continue
         if graphs:  # each loop with its numbers where its middle is
             nos = np.arange(first, first + count, dtype=float)
@@ -849,20 +850,20 @@ def pattern_paths(paths, p):
             side = flattened(side, peak, p["flatten"], p.get("soft", SOFT_DEFAULT))
         inside = np.nonzero((s >= 0) & (s <= size))[0]
         if not len(inside):
-            out.append([tuple(q) for q in (a * [k, 1.0]).tolist()])
+            out.append(a * [k, 1.0] if arrays else [tuple(q) for q in (a * [k, 1.0]).tolist()])
             continue
         i0, i1 = inside[0], inside[-1]
-        s_run, v_run = list(s[i0:i1 + 1]), list(side[i0:i1 + 1])
+        s_run, v_run = s[i0:i1 + 1], side[i0:i1 + 1]
         if i0 > 0 and s[i0] > 0:  # exactly from the piece's start ...
             f = (0 - s[i0 - 1]) / (s[i0] - s[i0 - 1])
-            s_run.insert(0, 0.0)
-            v_run.insert(0, side[i0 - 1] + (side[i0] - side[i0 - 1]) * f)
+            s_run = np.concatenate(([0.0], s_run))
+            v_run = np.concatenate(([side[i0 - 1] + (side[i0] - side[i0 - 1]) * f], v_run))
         if i1 + 1 < len(s) and s[i1] < size:  # ... to its end
             f = (size - s[i1]) / (s[i1 + 1] - s[i1])
-            s_run.append(size)
-            v_run.append(side[i1] + (side[i1 + 1] - side[i1]) * f)
+            s_run = np.append(s_run, size)
+            v_run = np.append(v_run, side[i1] + (side[i1 + 1] - side[i1]) * f)
         if warp is not None:
-            s_run, v_run = _plain_stretches(s_run, v_run, ln, size)
-        got = _lay(a, ln, np.array(s_run), np.array(v_run)) * [k, 1.0]
-        out.append([tuple(q) for q in got.tolist()])
+            s_run, v_run = _plain_stretches(list(s_run), list(v_run), ln, size)
+        got = _lay(a, ln, np.asarray(s_run, float), np.asarray(v_run, float)) * [k, 1.0]
+        out.append(got if arrays else [tuple(q) for q in got.tolist()])
     return out
