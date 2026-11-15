@@ -46,8 +46,74 @@ def sine_modes(m):
     return got
 
 
+def spd_inverse(s):
+    """The inverse of a symmetric positive definite matrix by its Cholesky factor (the plain inverse is several
+    times slower here: the maths library's threads don't pay off at these sizes)."""
+    try:
+        li = tri_inverse(np.linalg.cholesky(s))
+    except np.linalg.LinAlgError:
+        return np.linalg.inv(s)
+    return li.T @ li
+
+
+def tri_inverse(low):
+    """The inverse of a lower triangular matrix, halves at a time (matrix products do most of the work)."""
+    n = len(low)
+    if n <= 48:
+        return np.linalg.inv(low)
+    k = n // 2
+    a, c = tri_inverse(low[:k, :k]), tri_inverse(low[k:, k:])
+    out = np.zeros((n, n))
+    out[:k, :k], out[k:, k:] = a, c
+    out[k:, :k] = -(c @ low[k:, :k]) @ a
+    return out
+
+
+class Piece:
+    """One piece between two nodes: its alive rows, their runs of neighbours (rows in different runs don't meet
+    inside a piece: each run has its own sine modes) and each mode's decay (mu) and end-to-end weights."""
+
+    def __init__(self, rows, dl, h):
+        self.rows, self.n = rows, len(rows)
+        cut = np.flatnonzero(np.diff(rows) > 1) + 1
+        starts = np.concatenate([[0], cut])
+        ends = np.concatenate([cut, [len(rows)]])
+        self.runs = list(zip(starts.tolist(), ends.tolist()))
+        self.mu = np.concatenate([sine_modes(b - a)[1] for a, b in self.runs]) / h
+        z = self.mu * dl
+        em = -np.expm1(-2 * z)
+        self.wc = self.mu * (2 - em) / em  # (slope at one end from the value there / at the other end, per mode)
+        self.ws = self.mu * 2 * np.exp(-z) / em
+
+    def to_modes(self, v):
+        out = np.empty(self.n)
+        for a, b in self.runs:
+            out[a:b] = sine_modes(b - a)[0].T @ v[a:b]
+        return out
+
+    def from_modes(self, c):
+        """Mode weights (n, or n x columns) back to rows."""
+        out = np.empty(c.shape)
+        for a, b in self.runs:
+            out[a:b] = sine_modes(b - a)[0] @ c[a:b]
+        return out
+
+    def dense(self, w):
+        """The n x n matrix Q diag(w) Q^T (block by runs)."""
+        out = np.zeros((self.n, self.n))
+        for a, b in self.runs:
+            q = sine_modes(b - a)[0]
+            out[a:b, a:b] = (q * w[a:b]) @ q.T
+        return out
+
+    def apply(self, w, v):
+        """Q diag(w) Q^T v."""
+        return self.from_modes(self.to_modes(v) * w)
+
+
 class Outline:
-    """The inside's rows as nodes and pieces, with the joined solve's elimination done once (block LU)."""
+    """The inside's rows as nodes and pieces, with the joined solve's elimination done once (block LU: only each
+    node's inverted Schur complement is kept)."""
 
     def __init__(self, base, ppq, view):
         a, h = view
@@ -67,48 +133,69 @@ class Outline:
         np.add.at(d, (row, i1), -1)
         alive = self.alive = np.cumsum(d, axis=1)[:, :pieces] > 0
         dl = self.dl = np.diff(nodes)
-        self.Qf = np.zeros((pieces, n, n))  # (each piece's modes by row, for reading the heat anywhere)
-        self.MU = np.zeros((pieces, n))
-        seg = self.seg = []
-        for j in range(pieces):
-            rows = np.flatnonzero(alive[:, j])
-            if not len(rows):
-                seg.append(None)
+        self.seg = [Piece(np.flatnonzero(alive[:, j]), dl[j], h) if alive[:, j].any() else None
+                    for j in range(pieces)]
+        # where each (piece, row) sits among its piece's modes: first mode of its run, run length, place in run
+        self.mode_at = np.full((pieces, n), -1, np.int32)
+        self.run_m = np.ones((pieces, n), np.int32)
+        self.run_p = np.zeros((pieces, n), np.int32)
+        for j, p in enumerate(self.seg):
+            if p is None:
                 continue
-            m = len(rows)
-            qc = np.zeros((m, m))
-            mu = np.zeros(m)
-            off = 0
-            for run in np.split(rows, np.flatnonzero(np.diff(rows) > 1) + 1):
-                q, decay = sine_modes(len(run))
-                qc[off:off + len(run), off:off + len(run)] = q
-                mu[off:off + len(run)] = decay / h
-                off += len(run)
-            z = mu * dl[j]
-            em = -np.expm1(-2 * z)
-            wc = mu * (2 - em) / em  # (slope at one end from the value there / at the other end, per mode)
-            ws = mu * 2 * np.exp(-z) / em
-            self.Qf[j][np.ix_(rows, np.arange(m))] = qc
-            self.MU[j, :m] = mu
-            seg.append(dict(rows=rows, Q=qc, mu=mu, n=m, Kc=(qc * wc) @ qc.T, Ks=(qc * ws) @ qc.T))
+            for ra, rb in p.runs:
+                r = p.rows[ra:rb]
+                self.mode_at[j, r], self.run_m[j, r], self.run_p[j, r] = ra, rb - ra, np.arange(rb - ra)
+        self.MU = np.zeros((pieces, n))
+        for j, p in enumerate(self.seg):
+            if p is not None:
+                self.MU[j, :p.n] = p.mu
         # unknowns at each node: the rows alive on both sides of it (elsewhere a row's end is 0)
         empty = np.zeros(0, np.int64)
         self.U = [empty] + [np.flatnonzero(alive[:, i - 1] & alive[:, i]) for i in range(1, pieces)] + [empty]
-        self.Lo, self.W, self.Sinv = [None] * (pieces + 1), [None] * (pieces + 1), [None] * (pieces + 1)
+        self.pa = [empty] * (pieces + 1)  # (node i's unknowns among piece i - 1's rows / piece i's rows, and node
+        self.pb = [empty] * (pieces + 1)  # i - 1's among piece i - 1's: Lo_i = -Ks(piece i - 1)[pa, pm])
+        self.pm = [empty] * (pieces + 1)
+        self.Sinv = [np.zeros((0, 0))] * (pieces + 1)
         prev = np.zeros((0, 0))
+        kept = {}  # (a piece's dense Kc / Ks, built once: it is the right piece of one node, the left of the next)
+
+        def dense(j):
+            got = kept.get(j)
+            if got is None:
+                kept.clear()
+                p = self.seg[j]
+                got = kept[j] = (p.dense(p.wc), p.dense(p.ws))
+            return got
+
         for i in range(1, pieces):
             u, um = self.U[i], self.U[i - 1]
             if not len(u):
-                self.Lo[i], self.W[i], self.Sinv[i] = np.zeros((0, len(um))), np.zeros((0, len(um))), np.zeros((0, 0))
                 prev = self.Sinv[i]
                 continue
-            left, right = seg[i - 1], seg[i]
-            pa, pb = np.searchsorted(left["rows"], u), np.searchsorted(right["rows"], u)
-            dm = left["Kc"][np.ix_(pa, pa)] + right["Kc"][np.ix_(pb, pb)]
-            lo = -left["Ks"][np.ix_(pa, np.searchsorted(left["rows"], um))] if len(um) else np.zeros((len(u), 0))
-            w = lo @ prev
-            self.Lo[i], self.W[i], self.Sinv[i] = lo, w, np.linalg.inv(dm - w @ lo.T)
-            prev = self.Sinv[i]
+            left, right = self.seg[i - 1], self.seg[i]
+            pa, pb, pm = (np.searchsorted(left.rows, u), np.searchsorted(right.rows, u),
+                          np.searchsorted(left.rows, um))
+            self.pa[i], self.pb[i], self.pm[i] = pa, pb, pm
+            kc_l, ks_l = dense(i - 1)
+            dm = kc_l[np.ix_(pa, pa)] + dense(i)[0][np.ix_(pb, pb)]
+            if len(um):
+                lo = -ks_l[np.ix_(pa, pm)]
+                dm = dm - (lo @ prev) @ lo.T
+            self.Sinv[i] = prev = spd_inverse(dm)
+
+    def lo(self, i, v):
+        """Lo_i v (v on node i - 1's unknowns -> node i's)."""
+        p = self.seg[i - 1]
+        z = np.zeros(p.n)
+        z[self.pm[i]] = v
+        return -p.apply(p.ws, z)[self.pa[i]]
+
+    def lo_t(self, i, v):
+        """Lo_i^T v (v on node i's unknowns -> node i - 1's)."""
+        p = self.seg[i - 1]
+        z = np.zeros(p.n)
+        z[self.pa[i]] = v
+        return -p.apply(p.ws, z)[self.pm[i]]
 
 
 def outline_of(base, ppq, view):
@@ -154,37 +241,34 @@ def solve(o, cx, cy, w):
     pieces, n = o.E, o.N
     j0 = s.j0 = int(np.clip(np.searchsorted(o.nodes, cx, "right") - 1, 0, pieces - 1))
     sg = o.seg[j0]
-    src = np.zeros(sg["n"])
+    src = np.zeros(sg.n)
     for r, ww in w.items():
-        src[np.searchsorted(sg["rows"], r)] = ww
-    q = sg["Q"].T @ src
-    mu = sg["mu"]
+        src[np.searchsorted(sg.rows, r)] = ww
+    q = sg.to_modes(src)
+    mu = sg.mu
     xs, xe = o.nodes[j0], o.nodes[j0 + 1]
     es, ee = np.exp(-mu * (cx - xs)), np.exp(-mu * (xe - cx))
-    qm = sg["Q"]
-    ups, upe = qm @ (q * es / (2 * mu)), qm @ (q * ee / (2 * mu))  # (the source alone, at the piece's ends)
-    dps, dpe = qm @ (q * es / 2), -(qm @ (q * ee / 2))
+    ups, upe = sg.from_modes(q * es / (2 * mu)), sg.from_modes(q * ee / (2 * mu))  # (the source alone, at the ends)
+    dps, dpe = sg.from_modes(q * es / 2), -sg.from_modes(q * ee / 2)
     s.q = np.zeros(n)
-    s.q[:sg["n"]] = q
+    s.q[:sg.n] = q
     f = {}
     if 1 <= j0 <= pieces - 1 and len(o.U[j0]):
-        p = np.searchsorted(sg["rows"], o.U[j0])
-        f[j0] = (dps + sg["Kc"] @ ups - sg["Ks"] @ upe)[p]
+        f[j0] = (dps + sg.apply(sg.wc, ups) - sg.apply(sg.ws, upe))[np.searchsorted(sg.rows, o.U[j0])]
     if 1 <= j0 + 1 <= pieces - 1 and len(o.U[j0 + 1]):
-        p = np.searchsorted(sg["rows"], o.U[j0 + 1])
-        f[j0 + 1] = (-dpe - sg["Ks"] @ ups + sg["Kc"] @ upe)[p]
+        f[j0 + 1] = (-dpe - sg.apply(sg.ws, ups) + sg.apply(sg.wc, upe))[np.searchsorted(sg.rows, o.U[j0 + 1])]
     first = min(f) if f else pieces
     y = [np.zeros(len(u)) for u in o.U]
     for i in range(first, pieces):
         if len(o.U[i]):
-            y[i] = f.get(i, 0.0) - (o.W[i] @ y[i - 1] if i > first and len(y[i - 1]) else 0.0)
+            y[i] = f.get(i, 0.0) - (o.lo(i, o.Sinv[i - 1] @ y[i - 1]) if i > first and len(y[i - 1]) else 0.0)
     sol = [np.zeros(len(u)) for u in o.U]
     for i in range(pieces - 1, 0, -1):
         if not len(o.U[i]):
             continue
         rhs = y[i]
         if i + 1 <= pieces - 1 and len(o.U[i + 1]):
-            rhs = rhs - o.Lo[i + 1].T @ sol[i + 1]
+            rhs = rhs - o.lo_t(i + 1, sol[i + 1])
         sol[i] = o.Sinv[i] @ rhs
     at_node = np.zeros((pieces + 1, n))
     for i in range(1, pieces):
@@ -194,11 +278,11 @@ def solve(o, cx, cy, w):
         sg = o.seg[j]
         if sg is None:
             continue
-        us, ue = at_node[j, sg["rows"]], at_node[j + 1, sg["rows"]]
+        us, ue = at_node[j, sg.rows], at_node[j + 1, sg.rows]
         if j == j0:
             us, ue = us - ups, ue - upe
-        s.WS[j, :sg["n"]] = sg["Q"].T @ us
-        s.WE[j, :sg["n"]] = sg["Q"].T @ ue
+        s.WS[j, :sg.n] = sg.to_modes(us)
+        s.WE[j, :sg.n] = sg.to_modes(ue)
     return s
 
 
@@ -214,18 +298,22 @@ def heat_at(o, s, ri, xs):
     for lo in range(0, len(idx), 4000):
         ii = idx[lo:lo + 4000]
         jj, rr, x = j[ii], ri[ii], xs[ii]
+        m, p, first = o.run_m[jj, rr][:, None], o.run_p[jj, rr][:, None], o.mode_at[jj, rr][:, None]
+        k = np.arange(int(m.max()))[None, :]
+        use = k < m
+        q = np.sqrt(2.0 / m) * np.sin(np.pi * ((p + 0.5) * (k + 1)) / m)  # (the run's sine modes, sine_modes')
+        q = np.where(k == m - 1, q * np.sqrt(0.5), q) * use
+        col = np.where(use, first + k, 0)
+        mu = np.where(use, o.MU[jj[:, None], col], 1.0)
         t = (x - o.nodes[jj])[:, None]
         dl = o.dl[jj][:, None]
-        q = o.Qf[jj, rr]
-        mu = o.MU[jj]
-        mu = np.where(mu > 0, mu, 1.0)
         em = -np.expm1(-2 * mu * dl)
         ws = (np.exp(-mu * t) - np.exp(-mu * (2 * dl - t))) / em
         we = (np.exp(-mu * (dl - t)) - np.exp(-mu * (dl + t))) / em
-        u = (q * (s.WS[jj] * ws + s.WE[jj] * we)).sum(1)
-        m = jj == s.j0
-        if m.any():
-            u[m] += (q[m] * (s.q * np.exp(-mu[m] * np.abs(x[m] - s.cx)[:, None]) / (2 * mu[m]))).sum(1)
+        u = (q * (s.WS[jj[:, None], col] * ws + s.WE[jj[:, None], col] * we)).sum(1)
+        at = jj == s.j0
+        if at.any():
+            u[at] += (q[at] * (s.q[col[at]] * np.exp(-mu[at] * np.abs(x[at] - s.cx)[:, None]) / (2 * mu[at]))).sum(1)
         out[ii] = u
     return out
 
@@ -259,15 +347,15 @@ def samples(o, s):
         dl = o.dl[j]
         ns = max(1, int(math.ceil(dl / (STEP * o.h))))
         t = np.linspace(0, dl, ns + 1)[None, :]
-        mu = sg["mu"][:, None]
+        mu = sg.mu[:, None]
         em = -np.expm1(-2 * mu * dl)
         ws = (np.exp(-mu * t) - np.exp(-mu * (2 * dl - t))) / em
         we = (np.exp(-mu * (dl - t)) - np.exp(-mu * (dl + t))) / em
-        m = sg["n"]
+        m = sg.n
         wh = s.WS[j, :m, None] * ws + s.WE[j, :m, None] * we
         if j == s.j0:
             wh = wh + (s.q[:m, None] * np.exp(-mu * np.abs(o.nodes[j] + t - s.cx)) / (2 * mu))
-        out.append((j, o.nodes[j] + t[0], sg["rows"], sg["Q"] @ wh, dl / ns))
+        out.append((j, o.nodes[j] + t[0], sg.rows, sg.from_modes(wh), dl / ns))
     return out
 
 
