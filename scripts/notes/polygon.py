@@ -19,9 +19,17 @@ import math
 from notes.pattern import clean_pattern, clean_shape_formula
 
 STYLES = ("polygon", "star", "cross")
-POLYGON_DEFAULTS = {"points": 5, "style": "polygon", "inner": 50.0, "skip": 2}
+POLYGON_DEFAULTS = {"points": 5, "style": "polygon", "inner": 50.0, "skip": 2, "twist": 0.0, "turn": 0.0}
 MAX_POINTS = 200
 MIN_POINTS = 2  # (2 = a flat line, two sides on top of each other: a pattern on them pulls them apart)
+MOST_TWIST = 100.0  # % (100 = each side leaves its corner at a right angle)
+MOST_TURN = 180.0  # degrees a star's inner points turn
+SIDE_STEPS = 32  # points along a twisted side
+
+
+def _signed(d, key, most):
+    v = float(d.get(key, 0.0))
+    return max(-most, min(most, v)) if math.isfinite(v) else 0.0
 
 
 def clean_polygon(d):
@@ -32,8 +40,9 @@ def clean_polygon(d):
         out = {"points": max(MIN_POINTS, min(MAX_POINTS, int(d.get("points", POLYGON_DEFAULTS["points"])))),
                "style": d.get("style") if d.get("style") in STYLES else "polygon",
                "inner": max(0.0, min(1000.0, float(d.get("inner", POLYGON_DEFAULTS["inner"])))),
-               "skip": max(1, int(d.get("skip", POLYGON_DEFAULTS["skip"])))}
-    except (TypeError, ValueError):
+               "skip": max(1, int(d.get("skip", POLYGON_DEFAULTS["skip"]))),
+               "twist": _signed(d, "twist", MOST_TWIST), "turn": _signed(d, "turn", MOST_TURN)}
+    except (TypeError, ValueError, OverflowError):
         return None
     pat, form = clean_pattern(d.get("pattern")), clean_shape_formula(d.get("shape"))
     if pat:
@@ -48,11 +57,11 @@ def polygon_loops(d):
     clockwise."""
     n = d["points"]
     if d["style"] == "star":
-        r = d["inner"] / 100
+        r, turn = d["inner"] / 100, math.radians(d.get("turn", 0.0))
         pts = []
         for i in range(n):
             for j, rad in ((0, 1.0), (0.5, r)):
-                a = math.pi / 2 - 2 * math.pi * (i + j) / n
+                a = math.pi / 2 - 2 * math.pi * (i + j) / n - (turn if j else 0.0)  # (+ = inner points clockwise)
                 pts.append((rad * math.cos(a), rad * math.sin(a)))
         return [pts + [pts[0]]]
     if d["style"] == "cross":
@@ -69,9 +78,43 @@ def polygon_loops(d):
     return [pts + [pts[0]]]
 
 
+def twisted_side(a, b, twist):
+    """One side from corner a to corner b bent into an S (twist -1..1): it leaves a turned by twist x 90 degrees
+    and comes into b turned the same way, so every side swirls alike (a pinwheel). Points from a to b."""
+    (ax, ay), (bx, by) = a, b
+    dx, dy = bx - ax, by - ay
+    t = twist * math.pi / 2
+    c, s = math.cos(t), math.sin(t)
+    hx, hy = (dx * c - dy * s) / 3, (dx * s + dy * c) / 3  # (both handles: the side's way turned, a third long)
+    p1, p2 = (ax + hx, ay + hy), (bx - hx, by - hy)
+    out = []
+    for k in range(SIDE_STEPS + 1):
+        u = k / SIDE_STEPS
+        w0, w1, w2, w3 = (1 - u) ** 3, 3 * u * (1 - u) ** 2, 3 * u * u * (1 - u), u ** 3
+        out.append((w0 * ax + w1 * p1[0] + w2 * p2[0] + w3 * bx, w0 * ay + w1 * p1[1] + w2 * p2[1] + w3 * by))
+    out[0], out[-1] = a, b
+    return out
+
+
+def drawn_loops(d):
+    """polygon_loops with the twist on: each loop's points + where its corners are in them (or None: every point
+    is a corner)."""
+    loops, twist = polygon_loops(d), d.get("twist", 0.0) / 100
+    if not twist:
+        return [(loop, None) for loop in loops]
+    out = []
+    for loop in loops:
+        pts, corners = [loop[0]], [0]
+        for a, b in zip(loop, loop[1:]):
+            pts += twisted_side(a, b, twist)[1:]
+            corners.append(len(pts) - 1)
+        out.append((pts, corners))
+    return out
+
+
 def polygon_aspect(d):
     """Width / height of the drawing as it looks round (for drawing it with Ctrl)."""
-    pts = [p for loop in polygon_loops(d) for p in loop]
+    pts = [p for loop, _ in drawn_loops(d) for p in loop]
     xs, ys = [x for x, _ in pts], [y for _, y in pts]
     w, h = max(xs) - min(xs), max(ys) - min(ys)
     return w / h if w > 1e-9 and h > 1e-9 else 1.0
@@ -79,9 +122,10 @@ def polygon_aspect(d):
 
 def polygon_strokes(d):
     """The custom shape strokes for polygon settings d: the loops stretched to fill the 0..1 box, each a closed
-    polyline with "sides" and d's shape / pattern (custom.stroke_points lays them along each side)."""
-    loops = polygon_loops(d)
-    pts = [p for loop in loops for p in loop]
+    polyline with "sides" and d's shape / pattern (custom.stroke_points lays them along each side). Twisted: each
+    side is many points, "corners" = where the corners are among them."""
+    loops = drawn_loops(d)
+    pts = [p for loop, _ in loops for p in loop]
     xs, ys = [x for x, _ in pts], [y for _, y in pts]
     x0, y0 = min(xs), min(ys)
     w, h = max(xs) - x0, max(ys) - y0
@@ -90,9 +134,11 @@ def polygon_strokes(d):
         return round((v - lo) / size, 9) if size > 1e-9 else 0.5
 
     out = []
-    for loop in loops:
+    for loop, corners in loops:
         st = {"kind": "poly", "pts": [[spot(x, x0, w), spot(y, y0, h)] for x, y in loop], "sides": True}
         st["pts"][-1] = list(st["pts"][0])
+        if corners:
+            st["corners"] = corners
         for layer in ("shape", "pattern"):
             if d.get(layer):
                 st[layer] = d[layer]
@@ -109,6 +155,18 @@ def update_polygon(sh):
             fit_upright(sh)
 
 
-def side_paths(pts):
-    """A polygon stroke's sides, each [start, end]."""
+def side_paths(pts, corners=None):
+    """A polygon stroke's sides, each [start, end] (or, twisted: corners = where the corners are among pts, each
+    side all its points from one corner to the next)."""
+    if corners and clean_corners(corners, len(pts)):  # (points edited since in a live shape: every point a corner)
+        return [[tuple(p) for p in pts[a:b + 1]] for a, b in zip(corners, corners[1:])]
     return [[tuple(a), tuple(b)] for a, b in zip(pts, pts[1:])]
+
+
+def clean_corners(corners, n):
+    """A twisted polygon stroke's corner places from a file, or None (not valid for n points)."""
+    if not isinstance(corners, list) or len(corners) < 2 or corners[0] != 0 or corners[-1] != n - 1:
+        return None
+    if not all(isinstance(c, int) and not isinstance(c, bool) for c in corners):
+        return None
+    return list(corners) if all(a < b for a, b in zip(corners, corners[1:])) else None

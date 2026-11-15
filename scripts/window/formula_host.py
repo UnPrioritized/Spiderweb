@@ -576,7 +576,8 @@ class PolygonHost(AppHost):
         k, scale = pat.get("k", 1.0), pat.get("scale", 1.0)
         sides = [sum(math.hypot((b[0] - a[0]) / k, b[1] - a[1]) for a, b in zip(side, side[1:]))
                  for st in polygon_strokes(dict(holder, pattern=None)) for side in
-                 (shape_paths(side_paths(st["pts"]), st["shape"]) if st.get("shape") else side_paths(st["pts"]))]
+                 (shape_paths(side_paths(st["pts"], st.get("corners")), st["shape"]) if st.get("shape")
+                  else side_paths(st["pts"], st.get("corners")))]
         if not sides or scale <= 0:
             return 0.0
         return (sides[0] if pat.get("each") else sum(sides)) / pat.get("loops", 1.0) / scale

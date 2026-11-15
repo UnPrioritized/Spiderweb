@@ -20,7 +20,7 @@ from notes.gaterange import (RangeKeys, RangeRows, clean_range, halved, range_gr
 from notes.bezier import sample
 from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, formed_path, formed_paths, has_formula,
                            moved_formulas)
-from notes.polygon import side_paths
+from notes.polygon import clean_corners, side_paths
 from notes.smooth import clean_level, smooth_path
 from notes.paths import (top_key, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
@@ -225,6 +225,9 @@ def clean_strokes(strokes):
                     else:  # a line / polyline, or a polygon's (polygon.py: the shape / pattern on each side)
                         if st.get("sides"):
                             out[-1]["sides"] = True
+                            corners = clean_corners(st.get("corners"), len(pts))  # (a twisted polygon's)
+                            if corners:
+                                out[-1]["corners"] = corners
                         clean_formulas(st, out[-1])
             if isinstance(st.get("src"), int) and out:  # which shape it came from (convert.py)
                 out[-1]["src"] = st["src"]
@@ -320,7 +323,7 @@ def stroke_points(st):
         return smooth_path(st["pts"], st["smooth"], st.get("k", 1.0))
     if st.get("sides") and has_formula(st):  # a polygon's sides, each with the shape / pattern (polygon.py)
         out = []
-        for side in formed_paths(side_paths(st["pts"]), st):
+        for side in formed_paths(side_paths(st["pts"], st.get("corners")), st):
             out += side[1:] if out else side
         return out
     if not st.get("free") and has_formula(st):  # a line / polyline: along all of it, round its corners

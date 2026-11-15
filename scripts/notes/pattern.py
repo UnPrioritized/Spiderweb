@@ -163,7 +163,7 @@ def loop_pieces(holder):
     joined curve's pieces, else 1."""
     if "points" in holder and "style" in holder:
         from notes.polygon import polygon_strokes, side_paths
-        return sum(len(side_paths(st["pts"])) for st in polygon_strokes(dict(holder, pattern=None, shape=None)))
+        return sum(len(side_paths(st["pts"], st.get("corners"))) for st in polygon_strokes(dict(holder, pattern=None, shape=None)))
     return len(holder.get("gaps") or ()) + 1
 
 

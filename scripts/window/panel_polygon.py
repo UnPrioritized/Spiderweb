@@ -8,14 +8,16 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import fmt
-from notes.polygon import MAX_POINTS, MIN_POINTS, STYLES, update_polygon
+from notes.polygon import MAX_POINTS, MIN_POINTS, MOST_TURN, MOST_TWIST, STYLES, update_polygon
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, read_number, unchanged
 
 STYLE_NAMES = [tr("panel_polygon.style_" + s) for s in STYLES]
 # name: (lowest, highest, steps (step, Shift step, Ctrl step), whole numbers only)
 NUMBERS = {"points": (MIN_POINTS, MAX_POINTS, (1, 5, 1), True), "inner": (0, 1000, (5, 25, 1), False),
-           "skip": (1, MAX_POINTS - 1, (1, 5, 1), True)}
+           "skip": (1, MAX_POINTS - 1, (1, 5, 1), True), "twist": (-MOST_TWIST, MOST_TWIST, (5, 25, 1), False),
+           "turn": (-MOST_TURN, MOST_TURN, (5, 15, 1), False)}
+SHOWN_FOR = {"star": ("inner", "turn"), "cross": ("skip",)}  # (only the boxes the kind uses show, user)
 
 
 class PolygonPanel:
@@ -25,11 +27,13 @@ class PolygonPanel:
         box = self.polygon_box = ttk.Frame(self.custom_box)  # (packed at the top of the custom part when shown)
         self.polygon_vars, self.polygon_entries, self.polygon_cells = {}, {}, {}
         row1 = ttk.Frame(box)
+        row_t = ttk.Frame(box)
         row2 = self.polygon_row2 = ttk.Frame(box)  # (only for a star / crossing star)
         row1.pack(fill="x")
-        for row, name in ((row1, "points"), (row2, "inner"), (row2, "skip")):
+        row_t.pack(fill="x", pady=(2, 0))
+        for row, name in ((row1, "points"), (row_t, "twist"), (row2, "inner"), (row2, "turn"), (row2, "skip")):
             cell = self.polygon_cells[name] = ttk.Frame(row)
-            if row is row1:
+            if row is not row2:
                 cell.pack(side="left", padx=(0, 10))
             lb = ttk.Label(cell, text=tr("panel_polygon." + name))
             lb.pack(side="left")
@@ -81,11 +85,10 @@ class PolygonPanel:
             self.polygon_entries[name].config(style="TEntry")
         self.polygon_style.set(STYLE_NAMES[STYLES.index(d["style"])])
         self._loading = False
-        self.polygon_entries["inner"].config(state="normal" if d["style"] == "star" else "disabled")
-        self.polygon_entries["skip"].config(state="normal" if d["style"] == "cross" else "disabled")
-        want = {"star": "inner", "cross": "skip"}.get(d["style"])  # (only the box the kind uses shows, user)
-        for name in ("inner", "skip"):
-            pack_shown(self.polygon_cells[name], name == want, side="left", padx=(0, 10))
+        want = SHOWN_FOR.get(d["style"], ())
+        for name in ("inner", "turn", "skip"):
+            self.polygon_entries[name].config(state="normal" if name in want else "disabled")
+            pack_shown(self.polygon_cells[name], name in want, side="left", padx=(0, 10))
         pack_shown(self.polygon_row2, want, fill="x", pady=(2, 0))
         flat = d["points"] == 2 and d["style"] != "star" and not (d.get("shape") or d.get("pattern"))
         pack_shown(self.polygon_flat, flat, fill="x", pady=(2, 0))
