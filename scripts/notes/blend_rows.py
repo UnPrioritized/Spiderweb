@@ -633,19 +633,34 @@ class Mixed:
         y = o.h * (row + o.off)
         mx = (x0 + x1) / 2
         seg = self.seg
-        ax, ay, bx, by = (seg[:, i][None, :] for i in range(4))
-        dx, dy = bx - ax, by - ay
-        ll = np.maximum(dx * dx + dy * dy, 1e-18)
+        from notes.shrink import _could_be_nearest
+        numbered = np.column_stack([seg, np.arange(len(seg))])  # (the filter keeps the rows: their numbers too)
+        # brackets in small squares (hunt 2026-11-16: every bracket measured against all of a patterned
+        # outline's thousands of edges took 0.4 s): each square only looks at the edges that can be nearest in it
+        size = max(float(np.ptp(mx)), float(np.ptp(y)), 1e-9) / 12
+        cell = np.floor((mx - mx.min()) / size).astype(np.int64) * 100000 + np.floor((y - y.min()) / size).astype(
+            np.int64)
+        order = np.argsort(cell, kind="stable")
+        cuts = np.flatnonzero(np.diff(cell[order])) + 1
         pb, ps = [], []
-        for lo in range(0, len(mx), 256):
-            x, yy = mx[lo:lo + 256, None], y[lo:lo + 256, None]
-            t = np.clip(((x - ax) * dx + (yy - ay) * dy) / ll, 0, 1)
-            d = np.sqrt((x - ax - t * dx) ** 2 + (yy - ay - t * dy) ** 2)
-            near = d <= d.min(axis=1, keepdims=True) + (x1 - x0)[lo:lo + 256, None] + 1e-12
-            b, k = np.nonzero(near)
-            pb.append(b + lo)
-            ps.append(k)
-        pair_b, pair_s = np.concatenate(pb), np.concatenate(ps)  # (bracket, segment) pairs, by bracket
+        for group in np.split(order, cuts):
+            for lo in range(0, len(group), 256):
+                idx = group[lo:lo + 256]
+                near_seg = _could_be_nearest(numbered, float(x0[idx].min()), float(x1[idx].max()),
+                                             float(y[idx].min()), float(y[idx].max()))
+                ax, ay, bx, by = (near_seg[:, i][None, :] for i in range(4))
+                dx, dy = bx - ax, by - ay
+                ll = np.maximum(dx * dx + dy * dy, 1e-18)
+                x, yy = mx[idx, None], y[idx, None]
+                t = np.clip(((x - ax) * dx + (yy - ay) * dy) / ll, 0, 1)
+                d = np.sqrt((x - ax - t * dx) ** 2 + (yy - ay - t * dy) ** 2)
+                near = d <= d.min(axis=1, keepdims=True) + (x1 - x0)[idx, None] + 1e-12
+                b, k = np.nonzero(near)
+                pb.append(idx[b])
+                ps.append(near_seg[k, 4].astype(np.int64))
+        pair_b, pair_s = np.concatenate(pb), np.concatenate(ps)  # (bracket, segment) pairs
+        by_bracket = np.argsort(pair_b, kind="stable")
+        pair_b, pair_s = pair_b[by_bracket], pair_s[by_bracket]
 
         def fn(which, x):
             pick = np.zeros(len(mx), np.int64) - 1
