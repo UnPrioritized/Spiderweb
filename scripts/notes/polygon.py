@@ -2,7 +2,8 @@
 are made from them (polygon_strokes), so the point count, the kind and a pattern on the sides can be changed any
 time after it's placed.
 
-sh["polygon"] = {"points": how many corners (3 = triangle) or star points, "style": "polygon" / "star" (outer and
+sh["polygon"] = {"points": how many corners (3 = triangle; 2 = a flat line until a pattern pulls its two sides
+apart) or star points, "style": "polygon" / "star" (outer and
 inner points take turns: "inner" = how far out the inner points are, in % of the outer ones) / "cross" (a star drawn
 by joining every "skip"-th corner, crossing itself: 5 skip 2 = a pentagram; when the two share a divisor it's
 several loops, 6 skip 2 = two triangles), maybe "shape" (pattern.py: every side becomes it, from its corner to the
@@ -20,6 +21,7 @@ from notes.pattern import clean_pattern, clean_shape_formula
 STYLES = ("polygon", "star", "cross")
 POLYGON_DEFAULTS = {"points": 5, "style": "polygon", "inner": 50.0, "skip": 2}
 MAX_POINTS = 200
+MIN_POINTS = 2  # (2 = a flat line, two sides on top of each other: a pattern on them pulls them apart)
 
 
 def clean_polygon(d):
@@ -27,7 +29,7 @@ def clean_polygon(d):
     if not isinstance(d, dict):
         return None
     try:
-        out = {"points": max(3, min(MAX_POINTS, int(d.get("points", POLYGON_DEFAULTS["points"])))),
+        out = {"points": max(MIN_POINTS, min(MAX_POINTS, int(d.get("points", POLYGON_DEFAULTS["points"])))),
                "style": d.get("style") if d.get("style") in STYLES else "polygon",
                "inner": max(0.0, min(1000.0, float(d.get("inner", POLYGON_DEFAULTS["inner"])))),
                "skip": max(1, int(d.get("skip", POLYGON_DEFAULTS["skip"])))}
@@ -82,11 +84,14 @@ def polygon_strokes(d):
     pts = [p for loop in loops for p in loop]
     xs, ys = [x for x, _ in pts], [y for _, y in pts]
     x0, y0 = min(xs), min(ys)
-    w, h = max(max(xs) - x0, 1e-9), max(max(ys) - y0, 1e-9)
+    w, h = max(xs) - x0, max(ys) - y0
+
+    def spot(v, lo, size):  # (a flat drawing, 2 points, sits in the middle of its box: a pattern bulges both ways)
+        return round((v - lo) / size, 9) if size > 1e-9 else 0.5
+
     out = []
     for loop in loops:
-        st = {"kind": "poly", "pts": [[round((x - x0) / w, 9), round((y - y0) / h, 9)] for x, y in loop],
-              "sides": True}
+        st = {"kind": "poly", "pts": [[spot(x, x0, w), spot(y, y0, h)] for x, y in loop], "sides": True}
         st["pts"][-1] = list(st["pts"][0])
         for layer in ("shape", "pattern"):
             if d.get(layer):

@@ -8,12 +8,13 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.mathexpr import fmt
-from notes.polygon import MAX_POINTS, STYLES, update_polygon
+from notes.polygon import MAX_POINTS, MIN_POINTS, STYLES, update_polygon
+from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, read_number, unchanged
 
 STYLE_NAMES = [tr("panel_polygon.style_" + s) for s in STYLES]
 # name: (lowest, highest, steps (step, Shift step, Ctrl step), whole numbers only)
-NUMBERS = {"points": (3, MAX_POINTS, (1, 5, 1), True), "inner": (0, 1000, (5, 25, 1), False),
+NUMBERS = {"points": (MIN_POINTS, MAX_POINTS, (1, 5, 1), True), "inner": (0, 1000, (5, 25, 1), False),
            "skip": (1, MAX_POINTS - 1, (1, 5, 1), True)}
 
 
@@ -49,6 +50,9 @@ class PolygonPanel:
                 cb.pack(side="left", padx=(4, 0))
                 cb.bind("<<ComboboxSelected>>", lambda ev: (self.on_polygon_style(), self.roll.focus_set()))
                 Tooltip(cb, tr("panel_polygon.kind_tip"))
+        # 2 points and nothing on the sides: just a flat line (a pattern on the sides changes its shape)
+        self.polygon_flat = ttk.Label(box, text=tr("panel_polygon.flat"), foreground=look.WARN, font=look.font(8),
+                                      wraplength=int(260 * self.scale), justify="left")
 
     def polygon_shapes(self):
         """The selected polygons (custom shapes made by the Polygon tool)."""
@@ -83,6 +87,8 @@ class PolygonPanel:
         for name in ("inner", "skip"):
             pack_shown(self.polygon_cells[name], name == want, side="left", padx=(0, 10))
         pack_shown(self.polygon_row2, want, fill="x", pady=(2, 0))
+        flat = d["points"] == 2 and d["style"] != "star" and not (d.get("shape") or d.get("pattern"))
+        pack_shown(self.polygon_flat, flat, fill="x", pady=(2, 0))
 
     def set_polygon(self, key, value, edit_key=None):
         """A polygon setting changed: on the selected polygons (their strokes made again) and for new ones.
