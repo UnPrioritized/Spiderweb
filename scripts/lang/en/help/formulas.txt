@@ -1,16 +1,38 @@
-Right-click a curve, line, polyline or arc → Formula. [page:live|Live shape] strokes, [page:drawer|drawer] strokes, polygon sides and highlighted [page:funnel_curves|funnel curves] have it too. It has two parts, and a curve can have both at once.
+Right-click a curve, line, polyline or arc → Formula. [page:live|Live shape] strokes, [page:drawer|drawer] strokes, polygon sides and highlighted [page:funnel_curves|funnel curves] have it too. It has two parts, and a curve can have both at once: the Shape of the line bends the whole line, and the Pattern along the line repeats along it.
+[clip:formulas-in-action]
 
 Below, "curve" means all of these. On a polyline the pattern runs along all of it, round its corners.
 
-Shape of the line: the line takes a shape. One that ends where it starts (Circle, Flower, Heart, Figure 8) is as wide as from the curve's start (A) to its end (B) and sits on that line; the others (Spiral, Slow start, Fast start, S-curve, Reverse S, Quarter circle, Exponential, Logarithmic) start at A and end at B. They look round at the zoom you have when you pick them.
+## Shape of the line
+
+The line takes a shape. One that ends where it starts (Circle, Flower, Heart, Figure 8) is as wide as from the curve's start (A) to its end (B) and sits on that line; the others (Spiral, Slow start, Fast start, S-curve, Reverse S, Quarter circle, Exponential, Logarithmic) start at A and end at B. They look round at the zoom you have when you pick them.
 [clip:formulas-shapes]
 
-Pattern along the line: a pattern repeats along the line (along its shape, if it has one): Wave, Zigzag, Bounce, Square wave, Sawtooth, Teeth, Spikes, Half circles, Stair steps, Swell, Fading wave, Curls. Loops = how many times (4.5 works too). Its height is in keys. Curls: the line runs back over itself in little loops; "curl" over 1 makes loops, under 1 a wave.
+## Pattern along the line
+
+A pattern repeats along the line (along its shape, if it has one). These are the notes each one makes:
 [clip:formulas-patterns]
+
+Loops = how many times it repeats (4.5 works too):
+[clip:formulas-loops]
+
+Height = how far it swings to each side, in keys:
+[clip:formulas-height]
+
+Curls: the line runs back over itself in little loops; "curl" over 1 makes loops, under 1 a wave.
+
+## Changing it
+
+The curve you drew stays as a dashed line with its [page:curves_pen|anchors and handles]: bend it and the shape and pattern follow.
+[clip:formulas-follow]
+
+The side panel shows the selected curve's numbers (like turns, petals, height and Loops). On a joined curve, Across all runs the loops on from piece to piece and Each piece gives every piece all of them. Separate curves each get their own pattern: join them first to run one pattern across them.
 
 [page:symmetric|Symmetric halves] (in the Formula menu under each list, in the Custom… window and in the side panel): only the first half of the formula counts, and the second half is made from it: Mirrored (arch), or Turned (S): turned half way round. A shape that ends where it starts stays closed. It works on your own formulas and saved ones too, and Save keeps it.
 
-The curve you drew stays as a dashed line with its [page:curves_pen|anchors and handles]: bend it and the shape and pattern follow. The side panel shows the selected curve's numbers (like turns, petals, height and Loops). On a joined curve, Across all runs the loops on from piece to piece and Each piece gives every piece all of them. Separate curves each get their own pattern: join them first to run one pattern across them.
+Remove formula takes them off (the curve you drew is left). Turn into plain curve makes what you see into ordinary anchors and handles (a line, polyline, arc or polygon becomes a curve); if its two halves match, it gets Symmetric halves.
+
+## Custom… and your own formulas
 
 Custom… (at the top of each list) shows every shape or pattern with its formula and a box for each of its numbers. The preview shows one loop of a pattern, or the whole shape: drag its points to change it by hand, and every loop on the curve follows (Back to formula forgets it). Ctrl+Z / Ctrl+Y undo and redo your changes inside the window (Cancel still puts everything back).
 
@@ -22,7 +44,7 @@ Your own formula: tick Edit formula. A pattern is y of x for one loop (x goes fr
 
 Works: numbers, + - * / ^ % ( ), pi, e, sin cos tan asin acos atan sinh cosh tanh sqrt exp ln log log10 log2 abs min max floor ceil round pow. log is the same as ln (the natural log); use log10 for base 10.
 
-Remove formula takes them off (the curve you drew is left). Turn into plain curve makes what you see into ordinary anchors and handles (a line, polyline or arc becomes a curve); if its two halves match, it gets Symmetric halves.
+## Other places
 
 A stroke of a live shape (or of any placed drawing): right-click the stroke on the piano roll. Its sizes are in keys as the piano roll looks when you pick it, and grow and shrink with the shape after that. The fill follows what you see, and new strokes snap onto the ends you see.
 
