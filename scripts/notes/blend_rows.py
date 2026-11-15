@@ -173,8 +173,8 @@ class Outline:
         self.pb = [empty] * (pieces + 1)  # i - 1's among piece i - 1's: Lo_i = -Ks(piece i - 1)[pa, pm])
         self.pm = [empty] * (pieces + 1)
         self.Sinv = [np.zeros((0, 0))] * (pieces + 1)
-        self._basis, self.depths, self._spots = {}, {}, None  # (remembered: basis(), Mixed's distances at the
-        # samples, spots())
+        self._basis, self.depths, self._spots, self._roomy = {}, {}, None, None  # (remembered: basis(), Mixed's
+        # distances at the samples, spots(), roomy_spots())
         prev = np.zeros((0, 0))
         kept = {}  # (a piece's dense Kc / Ks, built once: it is the right piece of one node, the left of the next)
 
@@ -276,6 +276,11 @@ def place(o, centre, view):
         if w:
             total = sum(w.values())
             return cx, cy, {k: v / total for k, v in w.items()}
+    roomy = roomy_spots(o)  # (hunt 2026-11-16: the nearest spot could be a one-key tip, too tight for the hot disc:
+    if len(roomy):  # the rings collapsed there; the nearest spot with room for it instead)
+        i = int(np.argmin((roomy[:, 0] - cx) ** 2 + (roomy[:, 1] - cy) ** 2))
+        x, y = float(roomy[i, 0]), float(roomy[i, 1])
+        return x, y, {int(round(y / o.h - o.off)): 1.0}
     yk = o.h * (o.row + o.off)
     m = np.minimum(0.5 * o.h, (o.x1 - o.x0) / 2)
     px = np.clip(cx, o.x0 + m, o.x1 - m)
@@ -397,7 +402,75 @@ def circle_mean(o, s, rho):
         (xs[ok] > o.nodes[0]) & (xs[ok] < o.nodes[-1]))
     if live.any() and g[live].mean() > 0:
         return float(g[live].mean())
-    return float(max(g.max(), 1e-12))
+
+    # (a disc smaller than the gap to the next middle line: read on the source's own rows, rho either side)
+    rows = np.array(sorted(s.w), np.int64)
+    side = heat_at(o, s, np.concatenate([rows, rows]), np.concatenate([np.full(len(rows), s.cx - rho),
+                                                                       np.full(len(rows), s.cx + rho)]))
+    side = side[side > 0]
+    return float(side.mean()) if len(side) else float(max(heat_at(o, s, rows, np.full(len(rows), s.cx)).max(),
+                                                          1e-300))
+
+
+def hot_radius(o):
+    """The hot disc's usual radius: 1/60 of the longer side, at least 1.5 strips, at most 1/12 of the longer side
+    (a shape a few keys tall: one strip is tall)."""
+    longer = max(o.nodes[-1] - o.nodes[0], o.h * o.N)
+    return min(max(longer / 60, 1.5 * o.h), longer / 12)
+
+
+def roomy_spots(o):
+    """Spots along every strip's middle line (a quarter of hot_radius apart) where the whole hot disc fits twice
+    over: (x, y) of those with at least 2 x hot_radius of room (its own strip's ends, the first dead strip above /
+    below there). The same for every centre point: remembered."""
+    if o._roomy is None:
+        need = 2 * hot_radius(o)
+        step = hot_radius(o) / 4
+        xs_l, rs_l, own_l = [], [], []
+        for x0, x1, r in zip(o.x0.tolist(), o.x1.tolist(), o.row.tolist()):
+            n = min(400, int((x1 - x0) // step))
+            if n >= 1:
+                x = x0 + (np.arange(n) + 0.5) * (x1 - x0) / n
+                xs_l.append(x)
+                rs_l.append(np.full(n, r))
+                own_l.append(np.minimum(x - x0, x1 - x))  # (room along its own strip)
+        if not xs_l:
+            o._roomy = np.zeros((0, 2))
+            return o._roomy
+        xs, rs, own = np.concatenate(xs_l), np.concatenate(rs_l), np.concatenate(own_l)
+        j = np.clip(np.searchsorted(o.nodes, xs, "right") - 1, 0, o.E - 1)
+        up, down = np.zeros((o.N, o.E)), np.zeros((o.N, o.E))  # (live strips above / below in a run, per piece)
+        for r in range(o.N - 2, -1, -1):
+            up[r] = np.where(o.alive[r + 1], up[r + 1] + 1, 0)
+        for r in range(1, o.N):
+            down[r] = np.where(o.alive[r - 1], down[r - 1] + 1, 0)
+        room = np.minimum(own, o.h * (np.minimum(up[rs, j], down[rs, j]) + 0.5))
+        keep = room >= need
+        o._roomy = np.column_stack([xs[keep], o.h * (rs[keep] + o.off)])
+    return o._roomy
+
+
+def wall_distance(o, cx, cy):
+    """How far (cx, cy) is from the nearest wall of the inside: a strip's end (its corner on its middle line), or
+    the edge half a strip beyond the last strip alive at cx above / below."""
+    ends = np.concatenate([o.x0, o.x1])
+    ys = np.tile(o.h * (o.row + o.off), 2)
+    near = float(np.hypot(ends - cx, ys - cy).min())
+    alive = np.zeros(o.N, bool)
+    alive[o.row[(o.x0 <= cx) & (cx <= o.x1)]] = True
+    r = (cy / o.h) - o.off
+    lo, hi = int(math.floor(r)), int(math.ceil(r))
+    if 0 <= lo < o.N and alive[lo] and 0 <= hi < o.N and alive[hi]:
+        up = hi
+        while up + 1 < o.N and alive[up + 1]:
+            up += 1
+        down = lo
+        while down - 1 >= 0 and alive[down - 1]:
+            down -= 1
+        near = min(near, o.h * (up + 0.5 + o.off) - cy, cy - o.h * (down - 0.5 + o.off))
+    else:  # (between a live and a dead strip: the wall is right here)
+        near = min(near, o.h / 2)
+    return max(near, 1e-12)
 
 
 def samples(o, s):
@@ -433,7 +506,11 @@ def solved(base, ppq, centre, view):
     s.o = o
     h = o.h
     longer = max(o.nodes[-1] - o.nodes[0], h * o.N)
-    s.hot = circle_mean(o, s, max(longer / 60, 1.5 * h))  # (the hot disc's heat: value 1 from there in)
+    # (the hot disc's heat: value 1 from there in; never reaching more than halfway to the nearest wall, hunt
+    # 2026-11-16: in a thin shape or a narrow tip the usual disc took in the cold parts by the walls and its level
+    # came out so low that most of the shape counted as the middle; in a shape only a few keys tall one row is
+    # tall, so the disc is held to a twelfth of the longer side too)
+    s.hot = circle_mean(o, s, min(hot_radius(o), wall_distance(o, cx, cy) / 2))
     s.sm = samples(o, s)
     u = np.concatenate([(g / s.hot).ravel() for j, xs, rows, g, dx in s.sm])
     sx, sy, wgt = o.spots()
