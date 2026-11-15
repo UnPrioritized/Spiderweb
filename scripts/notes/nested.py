@@ -281,7 +281,12 @@ def smooth_values(f, step, cx, cy, x0, y0):
 def blend_steps(sh, ppq, base, centre, view):
     """Blend toward the centre point: each spot's smooth value (smooth_values) mixed with its Even band depth by
     "mix" (0 = Even band, 1 = all smooth); step i = every spot at least (1 - its size) in. Read along each key row's
-    middle line at a fine step and cut exactly to the shape (the steps' edges are as fine as the grid, not exact)."""
+    middle line at a fine step and cut exactly to the shape (the steps' edges are as fine as the grid, not exact).
+    At mix 1: worked out exactly on the key rows instead (notes/blend_rows.py)."""
+    if sh["nested"].get("mix", 1.0) >= 1:
+        from notes import blend_rows
+        return blend_rows.blend_steps([sz for sz, _ in step_sizes(sh["nested"])], ppq, base, centre, view,
+                                      merged_rows)
     (x0, y0, step, f, _), deepest = deepest_field(sh, view)
     a, c = view
     t = smooth_values(f, step, centre[0] + a * centre[1], c * centre[1], x0, y0)
