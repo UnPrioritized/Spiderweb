@@ -132,7 +132,8 @@ class PolygonPanel:
             self.polygon_entries[name].config(state="normal" if name in want else "disabled")
             pack_shown(self.polygon_cells[name], name in want, side="left", padx=(0, 10))
         pack_shown(self.polygon_row2, want, fill="x", pady=(2, 0))
-        flat = d["points"] == 2 and d["style"] != "star" and not (d.get("shape") or d.get("pattern"))
+        flat = (d["points"] == 2 and d["style"] != "star" and not (d.get("shape") or d.get("pattern"))
+                and not d.get("twist") and not d.get("uneven"))
         pack_shown(self.polygon_flat, flat, fill="x", pady=(2, 0))
 
     def set_polygon(self, key, value, edit_key=None):

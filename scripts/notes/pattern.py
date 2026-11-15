@@ -187,17 +187,16 @@ def pattern_name(p):
 def loop_pieces(holder):
     """How many pieces a pattern on holder runs along: a polygon's sides (holder = its settings, polygon.py), a
     joined curve's pieces, else 1."""
-    if "points" in holder and "style" in holder:
-        from notes.polygon import polygon_strokes, side_paths
-        return sum(len(side_paths(st["pts"], st.get("corners"))) for st in polygon_strokes(dict(holder, pattern=None, shape=None)))
-    return len(holder.get("gaps") or ()) + 1
+    if "points" in holder and "style" in holder:  # (straight from the settings: a star's sides are twice its
+        return holder["points"] * (2 if holder["style"] == "star" else 1)  # points; a crossing star's loops
+    return len(holder.get("gaps") or ()) + 1                               # together have one side a point)
 
 
-def most_loops(holder, each=None):
-    """The most Loops a pattern on holder can have: MAX_LOOPS in all, so with Each piece shared by the pieces (each
-    piece gets all the loops: 50,000 on 200 sides made 80 million points)."""
+def most_loops(holder, each=None, layer="pattern"):
+    """The most Loops a pattern (layer: a polygon's second one too) on holder can have: MAX_LOOPS in all, so with
+    Each piece shared by the pieces (each piece gets all the loops: 50,000 on 200 sides made 80 million points)."""
     if each is None:
-        each = (holder.get("pattern") or {}).get("each", False)
+        each = (holder.get(layer) or {}).get("each", False)
     return MAX_LOOPS if not each else max(1, MAX_LOOPS // loop_pieces(holder))
 
 

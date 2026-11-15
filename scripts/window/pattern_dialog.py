@@ -22,7 +22,7 @@ from files.about import USER
 from files.safefile import write_text
 from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
                           held_axis, keep_symmetric, nearest, pen_handles, sample)
-from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, clean_loop,
+from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, SOFT_DEFAULT, clean_loop,
                            clean_pattern_graphs, formula_loop,
                            formula_shape, keep_sym, most_loops, new_pattern, new_shape, pattern_name, pattern_names,
                            shape_name, shape_names)
@@ -31,7 +31,8 @@ from window import look
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
 from window.pattern_graphs import DialogGraphs, graphed, open_graph
-from window.widgets import ListTip, LocalUndo, Scrub, Tooltip, bad, good, pack_shown, remember_place, wheel_unit
+from window.widgets import (ListTip, LocalUndo, Scrub, Tooltip, bad, good, pack_shown, read_number, remember_place,
+                            wheel_unit)
 
 PATTERNS_FILE = os.path.join(USER, "patterns.json")
 OLD_CURVES_FILE = os.path.join(USER, "curves.json")  # the funnel's saved curve formulas (before shapes of curves)
@@ -157,6 +158,8 @@ class FormulaDialog(tk.Toplevel):
         self.resizable(False, False)
         self.host, self.app = host, host.app
         self.targets = host.targets()
+        if layer == "pattern2":  # (a second pattern only on top of a first, like the Formula menu)
+            self.targets = [h for h in self.targets if h.get("pattern")]
         self.snap = host.snapshot()
         self.before = [copy.deepcopy(h) for h in self.targets]
         self.k = host.fresh(self.targets[0], layer)["k"]
@@ -235,6 +238,19 @@ class FormulaDialog(tk.Toplevel):
         cb.bind("<<ComboboxSelected>>", lambda e: self.on_sym(e.widget.current()))
         for w in (lb, cb):
             Tooltip(w, tr("pattern_dialog.sym_tip"))
+        self.flat_vars = {}  # a pattern's Flatten % + Softness % (the preview shows the loop before pressing)
+        for key in (() if shape else ("flatten", "soft")):
+            lb = ttk.Label(row, text=tr("panel_pattern." + key))
+            lb.pack(side="left", padx=(12 if key == "flatten" else 8, 0))
+            var = self.flat_vars[key] = tk.StringVar()
+            e = ttk.Entry(row, textvariable=var, width=5)
+            e.pack(side="left", padx=(4, 0))
+            e.bind("<Return>", lambda ev, k=key: (self.on_flat(k), "break")[1])
+            e.bind("<FocusOut>", lambda ev, k=key: self.on_flat(k))
+            Scrub(self.host.app, [(e, var, lambda k=key: self.on_flat(k))], (5, 25, 1), 0, 100, label=lb)
+            for w in (lb, e):
+                Tooltip(w, tr("panel_pattern." + key + "_tip") + "\n" + tr("pattern_dialog.flat_preview_tip"))
+            self.flat_vars[key] = (var, e)
         r += 1
         self.numbers = ttk.Frame(right)  # (a pattern: Loops, then) a box per name in the formulas
         self.numbers.grid(row=r + 1, column=0, columnspan=2, sticky="w", pady=(0, 6))
@@ -478,6 +494,26 @@ class FormulaDialog(tk.Toplevel):
         self.refresh()
         self.mark()
 
+    def on_flat(self, key):
+        """Flatten % / Softness % typed or stepped (0 Flatten = none)."""
+        if self._loading:
+            return
+        var, e = self.flat_vars[key]
+        value = read_number(var.get(), 0, 100)
+        if value is None:
+            bad(e)
+            return
+        good(e)
+        if self.pat.get(key, SOFT_DEFAULT if key == "soft" else 0.0) == value:
+            return
+        if key == "flatten" and not value:
+            self.pat.pop("flatten", None)
+        else:
+            self.pat[key] = value
+        self.pat.pop("name", None)  # (not the saved one any more)
+        self.refresh()
+        self.mark(("flat", key))
+
     def refresh(self):
         """Number boxes, the preview and the piano roll after a change."""
         names = (["loops"] if self.kind == "pattern" else []) + ([] if self.pat.get("loop") else
@@ -489,6 +525,9 @@ class FormulaDialog(tk.Toplevel):
             var.set(fmt(self.pat["loops"] if name == "loops" else self.pat["vars"][name]))
             e.config(style="TEntry")
         self.sym.set(sym_label(self.pat.get("sym")))
+        for key, (var, e) in self.flat_vars.items():
+            var.set(fmt(self.pat.get(key, SOFT_DEFAULT if key == "soft" else 0.0)))
+            e.config(style="TEntry")
         self._loading = False
         for name, (b, mark) in self.graph_marks.items():
             pack_shown(mark, name in graphed(self.pat), side="left", padx=(3, 0), after=b)
@@ -682,7 +721,8 @@ class FormulaDialog(tk.Toplevel):
             return 1.0
         h = self.targets[0]
         own = h.get(self.layer) or self.host.fresh(h, self.layer)
-        got = self.host.loop_length(h, dict(self.pat, loops=LOOPS_DEFAULT, k=own["k"], scale=own.get("scale", 1.0)))
+        got = self.host.loop_length(h, dict(self.pat, loops=LOOPS_DEFAULT, k=own["k"], scale=own.get("scale", 1.0)),
+                                    layer=self.layer)
         return got if got > 1e-6 else 8.0
 
     def shown_loop(self):

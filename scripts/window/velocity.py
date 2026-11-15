@@ -15,7 +15,7 @@ from notes.envelope import env_at, env_values, paint_env, tidy_env, velocity_env
 from notes.custom import pack_notes, unpack_notes
 from notes.fx import pages, with_velocity
 from notes.gateflip import is_pasted_flipped, mirrored_runs
-from notes.pattern import loop_points
+from notes.pattern import SOFT_DEFAULT, flattened, loop_points
 from notes.ripples import free_span, grows_free
 from notes.sliced import note_drawn
 from roll.roll_shared import (ALT, CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, SELECTED_COLOR, SLOT_COLORS,
@@ -308,6 +308,9 @@ def formula_env(a, b, pat, pad, ppq=None):
     uu, vv = np.interp(t, np.linspace(0.0, 1.0, len(u)), u), np.interp(t, np.linspace(0.0, 1.0, len(v)), v)
     along = np.concatenate([np.tile(uu[:-1], count) + np.repeat(np.arange(count), per), [count - 1 + uu[-1]]])
     side = np.concatenate([np.tile(vv[:-1], count), [vv[-1]]])
+    if pat.get("flatten"):  # (a saved pattern's Flatten: the same pressed bumps as on a curve)
+        side = flattened(side, float(np.max(np.abs(v))) if len(v) else 0.0, pat["flatten"],
+                         pat.get("soft", SOFT_DEFAULT))
     along = np.maximum.accumulate(np.clip(along / loops, 0.0, None))  # (a loop drawn going back: straight up)
     keep = along <= 1.0
     if not keep.all():  # a part of a loop at the end: up to b exactly

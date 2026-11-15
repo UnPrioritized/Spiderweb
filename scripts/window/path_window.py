@@ -1016,7 +1016,7 @@ class PathHost(FormulaHost):
         self.changed()
         self.win.undo.mark()
 
-    def loop_length(self, holder, pat):
+    def loop_length(self, holder, pat, layer="pattern"):
         """One loop along the whole path, in keys as the piano roll looked."""
         cl, fr = clean_path(dict(holder, pattern=None)), self.win.frame()
         if cl is None or fr is None or pat.get("loops", 0) <= 0:

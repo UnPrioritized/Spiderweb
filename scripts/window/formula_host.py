@@ -111,7 +111,7 @@ class FormulaHost:
     def commit(self, snap, name):
         """The changes since snap as one undo step."""
 
-    def loop_length(self, holder, pat):
+    def loop_length(self, holder, pat, layer="pattern"):
         """One loop of the pattern on holder, in the pattern's own sizes (keys), 0 if it can't be worked out."""
         try:
             return loop_length(dict(holder, pattern=pat)) / pat.get("scale", 1.0)
@@ -260,7 +260,7 @@ class FormulaHost:
 
     def open_dialog(self, layer):
         from window.pattern_dialog import FormulaDialog
-        if self.targets():
+        if any(h.get("pattern") for h in self.targets()) if layer == "pattern2" else self.targets():
             FormulaDialog(self, layer)
 
 
@@ -308,8 +308,8 @@ def formula_menu(m, host, picks):
             for value, key in MIX_CHOICES:
                 mm.add_radiobutton(label=tr(key), value=value, variable=mix, command=lambda v=value: host.set_mix(v))
             menu.add_cascade(label=tr("formula_host.mix"), menu=mm, state="normal" if pat else "disabled")
-        sub.add_cascade(label=label, menu=menu,
-                        state="normal" if layer != "pattern2" or h.get("pattern") else "disabled")
+        on = layer != "pattern2" or any(t.get("pattern") for t in host.targets())  # (any selected one can take it)
+        sub.add_cascade(label=label, menu=menu, state="normal" if on else "disabled")
     sub.add_separator()
     on = "normal" if host.with_formula() else "disabled"
     sub.add_command(label=tr("roll_menu.remove_formula"), command=host.remove, state=on)
@@ -602,18 +602,28 @@ class PolygonHost(AppHost):
             update_polygon(sh)
         super().changed(final)
 
-    def loop_length(self, holder, pat):
-        """One loop along a side (Each piece) or round the whole outline (Across all), in hundredths."""
-        from notes.pattern import shape_paths
+    def loop_length(self, holder, pat, layer="pattern"):
+        """One loop along a side (Each piece) or round the whole outline (Across all), in hundredths: along the
+        sides the pattern really runs on (a second pattern On top: the first one's outline; Taking turns: every
+        other side)."""
+        from notes.pattern import pattern_paths, shape_paths
         from notes.polygon import polygon_strokes, side_paths
         k, scale = pat.get("k", 1.0), pat.get("scale", 1.0)
-        sides = [sum(math.hypot((b[0] - a[0]) / k, b[1] - a[1]) for a, b in zip(side, side[1:]))
-                 for st in polygon_strokes(dict(holder, pattern=None)) for side in
-                 (shape_paths(side_paths(st["pts"], st.get("corners")), st["shape"]) if st.get("shape")
-                  else side_paths(st["pts"], st.get("corners")))]
-        if not sides or scale <= 0:
+        turns = holder.get("pattern2") and holder.get("pattern") and holder.get("mix") == "turns"
+        paths = []
+        for st in polygon_strokes(dict(holder, pattern=None, pattern2=None)):
+            sides = side_paths(st["pts"], st.get("corners"))
+            if st.get("shape"):
+                sides = shape_paths(sides, st["shape"])
+            if layer == "pattern2" and not turns and holder.get("pattern"):
+                sides = pattern_paths(sides, holder["pattern"])
+            elif turns:
+                sides = sides[1::2] if layer == "pattern2" else sides[0::2]
+            paths += sides
+        lengths = [sum(math.hypot((b[0] - a[0]) / k, b[1] - a[1]) for a, b in zip(side, side[1:])) for side in paths]
+        if not lengths or scale <= 0:
             return 0.0
-        return (sides[0] if pat.get("each") else sum(sides)) / pat.get("loops", 1.0) / scale
+        return (lengths[0] if pat.get("each") else sum(lengths)) / pat.get("loops", 1.0) / scale
 
     def bake(self, holder):
         """Turn into plain curve: the polygon's outline as it is now (pattern and all) becomes a plain curve with as

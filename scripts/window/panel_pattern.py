@@ -62,19 +62,22 @@ class PatternPanel:
                 cb.bind("<<ComboboxSelected>>", lambda e: self.on_mix(e.widget.current()))
                 for w in (lb, cb):
                     Tooltip(w, tr("formula_host.mix_tip"))
-            if layer == "pattern":  # Flatten % + Softness %: any bump pressed flat like a balloon on a wall
+            if layer != "shape":  # Flatten % + Softness %: any bump pressed flat like a balloon on a wall
                 flat_row = ttk.Frame(row)
                 flat_row.pack(fill="x", pady=(2, 0))
-                self.flat_vars, self.flat_entries = {}, {}
+                if not hasattr(self, "flat_vars"):
+                    self.flat_vars, self.flat_entries = {}, {}
+                self.flat_vars[layer], self.flat_entries[layer] = {}, {}
                 for key in ("flatten", "soft"):
                     lb = ttk.Label(flat_row, text=tr("panel_pattern." + key))
                     lb.pack(side="left", padx=(0 if key == "flatten" else 10, 0))
-                    var = self.flat_vars[key] = tk.StringVar()
-                    e = self.flat_entries[key] = ttk.Entry(flat_row, textvariable=var, width=5)
+                    var = self.flat_vars[layer][key] = tk.StringVar()
+                    e = self.flat_entries[layer][key] = ttk.Entry(flat_row, textvariable=var, width=5)
                     e.pack(side="left", padx=(4, 0))
-                    e.bind("<Return>", lambda ev, k=key: self.on_flat_entry(k))
-                    leave_box(self, e, var, lambda left, k=key: self.on_flat_entry(k, left))
-                    Scrub(self, [(e, var, lambda k=key: self.on_flat_entry(k))], (5, 25, 1), 0, 100, label=lb)
+                    e.bind("<Return>", lambda ev, l=layer, k=key: self.on_flat_entry(l, k))
+                    leave_box(self, e, var, lambda left, l=layer, k=key: self.on_flat_entry(l, k, left))
+                    Scrub(self, [(e, var, lambda l=layer, k=key: self.on_flat_entry(l, k))], (5, 25, 1), 0, 100,
+                          label=lb)
                     for w in (lb, e):
                         Tooltip(w, tr("panel_pattern." + key + "_tip"))
             # (only while the Loops box is at the most, user)
@@ -153,10 +156,10 @@ class PatternPanel:
             ui["sym"].set(sym_label(p.get("sym")))
             if layer == "pattern2":
                 self.mix_var.set(tr(dict(MIX_CHOICES)[tgts[0].get("mix", "top")]))
-            if layer == "pattern":
-                for key, var in self.flat_vars.items():
+            if layer != "shape":
+                for key, var in self.flat_vars[layer].items():
                     var.set(fmt(p.get(key, SOFT_DEFAULT if key == "soft" else 0.0)))
-                    self.flat_entries[key].config(style="TEntry")
+                    self.flat_entries[layer][key].config(style="TEntry")
             self._loading = False
             for name, (b, mark) in ui.get("graph_marks", {}).items():
                 pack_shown(mark, name in graphed(p), side="left", padx=(3, 0), after=b)
@@ -266,7 +269,7 @@ class PatternPanel:
             bad(e)
             return
         good(e)
-        wanted = {id(sh): min(value, most_loops(sh)) if name == "loops" else value for sh in tgts}
+        wanted = {id(sh): min(value, most_loops(sh, layer=layer)) if name == "loops" else value for sh in tgts}
         if name == "loops" and tgts and wanted[id(tgts[0])] != value:  # (the box stops at the most)
             var.set(fmt(wanted[id(tgts[0])]))
         tgts = [sh for sh in tgts if (sh[layer]["loops"] if name == "loops" else sh[layer]["vars"][name]) !=
@@ -287,35 +290,37 @@ class PatternPanel:
             return
         PolygonHost(self).set_mix(MIX_CHOICES[picked][0])
 
-    def on_flat_entry(self, key, left=False):
-        """Flatten % / Softness % (Enter, stepped, or left: widgets.leave_box): on every selected pattern."""
-        e = self.flat_entries[key]
+    def on_flat_entry(self, layer, key, left=False):
+        """Flatten % / Softness % of the pattern / second pattern (Enter, stepped, or left: widgets.leave_box): on
+        every selected one."""
+        e = self.flat_entries[layer][key]
         if self._loading or left and unchanged(e):
             return
-        value = read_number(self.flat_vars[key].get(), 0, 100)
+        value = read_number(self.flat_vars[layer][key].get(), 0, 100)
         if value is None:
             bad(e)
             return
         good(e)
         now = SOFT_DEFAULT if key == "soft" else 0.0
-        tgts = [sh for sh in self.with_layer("pattern") if sh["pattern"].get(key, now) != value]
+        tgts = [sh for sh in self.with_layer(layer) if sh[layer].get(key, now) != value]
         if not tgts:
             return
-        self.begin_edit(("pattern", tuple(sorted(self.sels)), key))
+        self.begin_edit((layer, tuple(sorted(self.sels)), key))
         for sh in tgts:
             if key == "flatten" and not value:
-                sh["pattern"].pop("flatten", None)
+                sh[layer].pop("flatten", None)
             else:
-                sh["pattern"][key] = value
+                sh[layer][key] = value
         self.formulas_edited()
 
     def show_loops_most(self):
-        """The note under the Loops box: only while it's at the most (user)."""
-        ui = self.formula_ui["pattern"]
-        most = [most_loops(sh) for sh in self.with_layer("pattern") if sh["pattern"]["loops"] >= most_loops(sh)]
-        if most:  # (with Each piece the pieces share MAX_LOOPS)
-            ui["most"].config(text=tr("panel_pattern.loops_most", most=fmt(most[0])))
-        pack_shown(ui["most"], most, anchor="w", after=ui["numbers"])
+        """The note under a Loops box (pattern / second pattern): only while it's at the most (user)."""
+        for layer in ("pattern", "pattern2"):
+            ui = self.formula_ui[layer]
+            most = [m for sh in self.with_layer(layer) if sh[layer]["loops"] >= (m := most_loops(sh, layer=layer))]
+            if most:  # (with Each piece the pieces share MAX_LOOPS)
+                ui["most"].config(text=tr("panel_pattern.loops_most", most=fmt(most[0])))
+            pack_shown(ui["most"], most, anchor="w", after=ui["numbers"])
 
     def on_formula_sym(self, layer, picked=-1):
         """picked = the place in the list (two choices translated alike stay apart); -1: found by its word."""

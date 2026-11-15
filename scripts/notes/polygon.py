@@ -17,6 +17,8 @@ pattern's "to the side" (to the left of the way it goes) points outward."""
 import math
 import random
 
+import numpy as np
+
 from notes.pattern import clean_pattern, clean_shape_formula, formed_paths, pattern_paths, shape_paths
 
 STYLES = ("polygon", "star", "cross")
@@ -121,7 +123,7 @@ def polygon_loops(d):
                 pts.append((rad * math.cos(a), rad * math.sin(a)))
         return [pts + [pts[0]]]
     shift = uneven_shifts(d, n)
-    if d["style"] == "cross":
+    if d["style"] == "cross" and n > 2:  # (2 points: a line lying down, like the plain polygon's)
         k = d["skip"] % n or 1
         corners = [(math.cos(math.pi / 2 - 2 * math.pi * (i + shift[i]) / n),
                     math.sin(math.pi / 2 - 2 * math.pi * (i + shift[i]) / n)) for i in range(n)]
@@ -188,12 +190,19 @@ def polygon_strokes(d):
     x0, y0 = min(xs), min(ys)
     w, h = max(xs) - x0, max(ys) - y0
 
-    def spot(v, lo, size):  # (a flat drawing, 2 points, sits in the middle of its box: a pattern bulges both ways)
-        return round((v - lo) / size, 9) if size > 1e-9 else 0.5
+    if d["points"] == 2 and d["style"] != "star":  # a line: kept in its true proportions, centred (its longer way
+        size = max(w, h)                         # fills the box), so a little Twist / Uneven = a little S / tilt
+        mx, my = x0 + w / 2, y0 + h / 2
+
+        def place(x, y):
+            return [round(0.5 + (x - mx) / size, 9), round(0.5 + (y - my) / size, 9)]
+    else:
+        def place(x, y):
+            return [round((x - x0) / w, 9) if w > 1e-9 else 0.5, round((y - y0) / h, 9) if h > 1e-9 else 0.5]
 
     out = []
     for loop, corners in loops:
-        st = {"kind": "poly", "pts": [[spot(x, x0, w), spot(y, y0, h)] for x, y in loop], "sides": True}
+        st = {"kind": "poly", "pts": [place(x, y) for x, y in loop], "sides": True}
         st["pts"][-1] = list(st["pts"][0])
         if corners:
             st["corners"] = corners
@@ -239,7 +248,11 @@ def formed_sides(st):
         return out
     if st.get("shape"):
         sides = shape_paths(sides, st["shape"])
-    return pattern_paths(pattern_paths(sides, st["pattern"], arrays=True), p2)
+    first = pattern_paths(sides, st["pattern"], arrays=True)
+    out = pattern_paths(first, p2)
+    if out is first:  # (the second can't be worked out, e.g. from an edited file: the first one alone)
+        out = [[tuple(q) for q in np.asarray(a, float).tolist()] for a in first]
+    return out
 
 
 def clean_corners(corners, n):

@@ -577,7 +577,14 @@ def _pattern(a, b, f, rev):
         if pb.get("graphs"):
             pb["graphs"] = {key: [[1.0 - u, v] for u, v in reversed(g)] for key, g in pb["graphs"].items()}
     if pa and pb and all(pa.get(k) == pb.get(k) for k in PATTERN_SAME) and alike(pa["vars"], pb["vars"]):
-        out = mix(dict(pa, graphs=None), dict(pb, graphs=None), f)
+        from notes.pattern import SOFT_DEFAULT
+        flat = {}  # (Flatten / Softness blend too: a missing one = 0 / the shown 50, so both ends have them)
+        if any(p.get(k) is not None for p in (pa, pb) for k in ("flatten", "soft")):
+            flat = {k: [p.get(k, d) for p in (pa, pb)] for k, d in (("flatten", 0.0), ("soft", SOFT_DEFAULT))}
+        out = mix(dict(pa, graphs=None, **{k: v[0] for k, v in flat.items()}),
+                  dict(pb, graphs=None, **{k: v[1] for k, v in flat.items()}), f)
+        if not out.get("flatten", 1):
+            out.pop("flatten")
         graphs = _mix_graphs(pa.get("graphs"), pb.get("graphs"), f)
         if graphs:
             out["graphs"] = graphs
