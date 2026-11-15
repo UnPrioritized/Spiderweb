@@ -3059,6 +3059,7 @@
  "n.tracks": "{n:,} tracks",
  "n.tracks_one": "{n:,} track",
  "unit.percent": "%",
+ "unit.none": "",
  "panel_custom.gate": "Gate",
  "panel_custom.start": "Start",
  "project.one_note": "1 note",

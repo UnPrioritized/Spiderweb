@@ -46,8 +46,36 @@ def block_undo(win):
 class GraphSource:
     """What a GraphWindow edits: the shapes it changes and where their graphs live. Tumours: TumourGraphs."""
 
-    def __init__(self, owner):
-        self.owner, self.app = owner, owner.app  # (the window that opened it: the graph opens beside it)
+    def __init__(self, owner, anchor=None):
+        self.owner, self.app = owner, getattr(owner, "app", owner)  # (the window that opened it)
+        self.anchor = anchor or owner  # (the graph opens beside this, the first time)
+
+    def value_text(self, key, f):
+        """What f (a multiplier) means, when it isn't "f % = the box's number times f" (None)."""
+        return None
+
+    def info_text(self, key, label):
+        """The line at the top, when it isn't "100 % = the box's number" (None)."""
+        return None
+
+    def number_row(self, key):
+        """Point > Value… also offers the number it makes."""
+        return True
+
+    def hint(self, key):
+        """The help line under the graph."""
+        return HINT
+
+    def zero_text(self, label):
+        """Shown while the box's number is 0 (the graph multiplies it, so it changes nothing)."""
+        return tr("graph_window.box_is_zero", label=label)
+
+    def note(self, key, pts):
+        """An orange warning about the graph itself (None = none)."""
+        return None
+
+    def done(self, key):
+        """One change finished (a drag let go, a preset, a typed point...): the next one is its own undo step."""
 
     def targets(self):
         """The shapes the graph is on (empty = greyed: nothing fitting is selected)."""
@@ -108,7 +136,8 @@ class GraphWindow(tk.Toplevel):
         self.info = ttk.Label(box, text="")
         self.info.pack(anchor="w")
         # the box's number is 0: the graph multiplies it, so it changes nothing (shown only then, user)
-        self.zero_note = ttk.Label(box, text=tr("graph_window.box_is_zero", label=label), foreground=GAP_COLOR,
+        # (or what the source warns about: patterns' Loops graph at 0 everywhere)
+        self.zero_note = ttk.Label(box, text=src.zero_text(label), foreground=GAP_COLOR,
                                    wraplength=int(640 * s), justify="left")
         self.canvas = tk.Canvas(box, width=self.w, height=self.h, bg=look.CHART_BG, highlightthickness=1,
                                 highlightbackground=look.CHART_BORDER, cursor="crosshair")
@@ -148,7 +177,8 @@ class GraphWindow(tk.Toplevel):
         ttk.Button(row, text=tr("graph_window.apply"), command=self.apply_formula).pack(side="left")
         self.formula_note = ttk.Label(box, text=FORMULA_HINT, foreground=look.HINT, font=look.font(8))
         self.formula_note.pack(anchor="w")
-        ttk.Label(box, text=HINT, foreground=look.HINT, font=look.font(8), justify="left").pack(anchor="w", pady=(6, 0))
+        ttk.Label(box, text=src.hint(key), foreground=look.HINT, font=look.font(8), wraplength=int(640 * s),
+                  justify="left").pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(box)
         row.pack(anchor="e", pady=(6, 0))
         ttk.Button(row, text=tr("graph_window.ok"), command=self.ok).pack(side="left")
@@ -172,14 +202,19 @@ class GraphWindow(tk.Toplevel):
         self.update_idletasks()
         geo = placed(self, self.app.graph_pos)
         if not geo:
-            x, gap, w = tw.winfo_rootx() + tw.winfo_width() + int(8 * s), int(8 * s), self.winfo_reqwidth()
-            left, _, right, _ = work_area(self, tw.winfo_rootx(), tw.winfo_rooty())
-            if x + w + gap > right and tw.winfo_rootx() - gap - w - 2 * gap >= left:
-                x = tw.winfo_rootx() - gap - w - 2 * gap  # (the frame's edges too)
-            geo = f"+{x}+{tw.winfo_rooty()}"
+            at = src.anchor
+            x, gap, w = at.winfo_rootx() + at.winfo_width() + int(8 * s), int(8 * s), self.winfo_reqwidth()
+            left, _, right, _ = work_area(self, at.winfo_rootx(), at.winfo_rooty())
+            if x + w + gap > right and at.winfo_rootx() - gap - w - 2 * gap >= left:
+                x = at.winfo_rootx() - gap - w - 2 * gap  # (the frame's edges too)
+            geo = f"+{x}+{at.winfo_rooty()}"
         self.geometry(geo)
         fit_screen(self)
         self.bind("<Configure>", self.remember, add="+")
+        # opened from a window that holds the mouse and keys (Custom…): this one holds them till it closes
+        self.grab_back = tw if tw.grab_current() is tw else None
+        if self.grab_back:
+            self.grab_set()
 
     # ------------------------------------------------------------ the shapes' graph
 
@@ -222,7 +257,7 @@ class GraphWindow(tk.Toplevel):
             self.fit_view()
         self.draw()
         self.store()
-        self.hist.mark()
+        self.mark()
 
     def put_state(self, state):
         """Ctrl+Z / Ctrl+Y in the window: the graph as it was then."""
@@ -237,6 +272,7 @@ class GraphWindow(tk.Toplevel):
             self.fit_view()
         self.draw()
         self.store()
+        self.src.done(self.key)
 
     def apply_formula(self):
         try:
@@ -276,14 +312,29 @@ class GraphWindow(tk.Toplevel):
         if self.job:
             self.after_cancel(self.job)
             self.job = None
-        app, ses = self.app, self.session
-        if ses and any(t is s for t in ses["tgts"] for s in app.shapes):
+        ses = self.session
+        if ses:
             self.src.restore(ses["tgts"], ses["saved"], self.key)
         self.close()
 
     def close(self):
         self.src.closed(self)
         self.destroy()
+        if self.grab_back and self.grab_back.winfo_exists():
+            self.grab_back.grab_set()
+
+    def mark(self):
+        """A change done: a step for Ctrl+Z here, and for the source (its own undo step)."""
+        self.hist.mark()
+        self.src.done(self.key)
+
+    def open_point(self, i):
+        """Right-click > Value…: while it's open it holds the mouse and keys, then this window again if it did."""
+        d = PointDialog(self, i)
+        if self.grab_back:
+            self.wait_window(d)
+            if self.winfo_exists():
+                self.grab_set()
 
     def remember(self, e):
         if e.widget is self:
@@ -365,6 +416,9 @@ class GraphWindow(tk.Toplevel):
 
     def value_text(self, f):
         """What f (a multiplier) makes of the box's number, as the box shows it."""
+        own = self.src.value_text(self.key, f)
+        if own is not None:
+            return own
         v = fmt(round(self.box_number() * f, 2))
         return tr("graph_window.text", f=fmt(round(f * 100, 1)), v=v, unit=unit_text(v, self.unit))
 
@@ -413,12 +467,18 @@ class GraphWindow(tk.Toplevel):
             text = tr("graph_window.at_of_the_line", at=fmt(round(at[0] * 100, 1)), value_text=self.value_text(at[1]))
             cv.create_text(x1 - 4 * s, y_top + 4 * s, text=text, anchor="ne", fill=look.VALUE, font=look.font(8))
         name = self.label.lower()
-        self.info.config(text=tr("graph_window.along_the_line_100_the_box", label=self.label,
-                                 split=self.value_text(1).split('= ')[1])
+        own = self.src.info_text(self.key, self.label)
+        self.info.config(text=(own or tr("graph_window.along_the_line_100_the_box", label=self.label,
+                                         split=self.value_text(1).split('= ')[1]))
                          if self.src.targets() else self.src.empty_text(name))
-        zero = bool(self.src.targets()) and abs(self.box_number()) < 1e-12
-        if zero != bool(self.zero_note.winfo_manager()):
-            if zero:
+        note = None
+        if self.src.targets():
+            note = self.src.zero_text(self.label) if abs(self.box_number()) < 1e-12 else self.src.note(self.key,
+                                                                                                      self.pts)
+        if note and self.zero_note.cget("text") != note:
+            self.zero_note.config(text=note)
+        if bool(note) != bool(self.zero_note.winfo_manager()):
+            if note:
                 self.zero_note.pack(anchor="w", after=self.info)
             else:
                 self.zero_note.pack_forget()
@@ -476,7 +536,7 @@ class GraphWindow(tk.Toplevel):
     def release(self, e):
         self.drag = None
         self.draw()
-        self.hist.mark()
+        self.mark()
 
     def point_menu(self, e):
         """Right-click a point: type its exact value, or delete it (not when only the two ends are left)."""
@@ -484,7 +544,7 @@ class GraphWindow(tk.Toplevel):
         if i is None or not self.src.targets():
             return
         m = tk.Menu(self, tearoff=0)
-        m.add_command(label=tr("graph_window.value"), command=lambda: PointDialog(self, i))
+        m.add_command(label=tr("graph_window.value"), command=lambda: self.open_point(i))
         m.add_command(label=tr("graph_window.delete_point"), command=lambda: self.delete_point(i),
                       state="normal" if len(self.pts) > 2 else "disabled")
         m.tk_popup(e.x_root, e.y_root)
@@ -497,7 +557,7 @@ class GraphWindow(tk.Toplevel):
         self.pts[0][0], self.pts[-1][0] = 0.0, 1.0
         self.draw()
         self.store()
-        self.hist.mark()
+        self.mark()
 
     def set_point(self, i, u, f):
         """Point i typed in (PointDialog)."""
@@ -508,7 +568,7 @@ class GraphWindow(tk.Toplevel):
             self.fit_view()
         self.draw()
         self.store()
-        self.hist.mark()
+        self.mark()
 
     def on_hover(self, e):
         """Under the mouse: the graph's value at that spot along the line."""
@@ -541,7 +601,7 @@ class PointDialog(tk.Toplevel):
         rows = [("along", tr("graph_window.along"), fmt(round(u * 100, 4)), "unit.percent", (1, 10, 0.1), 0, 100),
                 ("value", tr("graph_window.value_box"), fmt(round(f * 100, 4)), "unit.percent", (5, 25, 1), -LIMIT,
                  LIMIT)]
-        if abs(self.number) > 1e-12:
+        if abs(self.number) > 1e-12 and gw.src.number_row(gw.key):
             rows.append(("number", "=", fmt(round(self.number * f, 4)), gw.unit, (1, 10, 0.1), None, None))
         for r, (key, text, value, unit, steps, lo, hi) in enumerate(rows):
             lb = ttk.Label(box, text=text)

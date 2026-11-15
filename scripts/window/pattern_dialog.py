@@ -29,7 +29,8 @@ from roll.roll_shared import ALT, grab_while_panning
 from window import look
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
-from window.widgets import ListTip, LocalUndo, Scrub, Tooltip, bad, good, remember_place, wheel_unit
+from window.pattern_graphs import DialogGraphs, graphed, open_graph
+from window.widgets import ListTip, LocalUndo, Scrub, Tooltip, bad, good, pack_shown, remember_place, wheel_unit
 
 PATTERNS_FILE = os.path.join(USER, "patterns.json")
 OLD_CURVES_FILE = os.path.join(USER, "curves.json")  # the funnel's saved curve formulas (before shapes of curves)
@@ -155,6 +156,8 @@ class FormulaDialog(tk.Toplevel):
                                                                                                           self.k)
         if not first and not shape and host.start_loops():  # (a path's: as many as its dropdown would start with)
             self.pat["loops"] = host.start_loops()
+        self.graph_window = None  # a number's graph, while open (pattern_graphs.py)
+        self.graph_marks = {}     # number name -> its "…" button, its "× graph" label
         self.ok = True      # the formulas work
         self.view = None    # (pixels per unit, left x, middle y, loop length in units) while dragging
         self.own_view = False  # zoomed / moved by hand (kept until Fit view or another pick in the list)
@@ -474,6 +477,10 @@ class FormulaDialog(tk.Toplevel):
             e.config(style="TEntry")
         self.sym.set(sym_label(self.pat.get("sym")))
         self._loading = False
+        for name, (b, mark) in self.graph_marks.items():
+            pack_shown(mark, name in graphed(self.pat), side="left", padx=(3, 0), after=b)
+        if self.graph_window:
+            self.graph_window.sync()
         self.ok = True
         if not self.pat.get("loop"):
             try:
@@ -498,7 +505,7 @@ class FormulaDialog(tk.Toplevel):
     def build_boxes(self, names):
         for w in self.numbers.winfo_children():
             w.destroy()
-        self.boxes = {}
+        self.boxes, self.graph_marks = {}, {}
         self._names = names
         for name in names:
             cell = ttk.Frame(self.numbers)
@@ -513,6 +520,11 @@ class FormulaDialog(tk.Toplevel):
             loops = name == "loops"
             Scrub(self.host.app, [(e, var, lambda n=name: self.on_number(n))], (1, 10, 0.1) if loops else (0.5, 5, 0.1),
                   0.01 if loops else None, None, label=lb)
+            if self.layer == "pattern":  # its graph along the line ("× graph" in blue while it has one)
+                b = ttk.Button(cell, text="…", width=2, command=lambda n=name: self.open_graph(n))
+                b.pack(side="left", padx=(2, 0))
+                Tooltip(b, tr("pattern_graph.loops_button_tip" if loops else "pattern_graph.button_tip"))
+                self.graph_marks[name] = (b, ttk.Label(cell, text=tr("panel_pattern.x_graph"), foreground=look.VALUE))
             tip = (tr("panel_pattern.loops_tip") if loops else
                    tr("panel_pattern.shape_number_tip" if self.layer == "shape" else self.host.number_tip,
                       name=name))
@@ -573,15 +585,30 @@ class FormulaDialog(tk.Toplevel):
         self.host.spread()
         self.host.changed(final=False)
 
+    def open_graph(self, name):
+        """The "…" after a number: its graph along the line (pattern_graphs.py)."""
+        open_graph(self, DialogGraphs(self, self.graph_marks[name][0]), name)
+
+    def drop_graph(self):
+        """The graph window shut (what it has shown so far is in self.pat already)."""
+        gw, self.graph_window = self.graph_window, None
+        if gw:
+            if gw.job:
+                gw.after_cancel(gw.job)
+                gw.store()
+            gw.destroy()
+
     def apply(self):
         if not self.ok and not self.pat.get("loop"):
             return
+        self.drop_graph()
         self.show_on_roll()
         self.destroy()
         step = "panel_pattern.shape_step" if self.layer == "shape" else "panel_pattern.pattern_step"
         self.host.commit(self.snap, tr(step, name=self.name_of(self.pat)))
 
     def cancel(self):
+        self.drop_graph()
         self.destroy()
         self.host.restore(self.snap)
 

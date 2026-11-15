@@ -26,7 +26,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     formula_host.py  where formulas go (piano roll curves, drawer strokes, funnel curves) + the Formula menu
     tumour_window.py the tumour window: the tumour settings (bumps along lines)
     history.py       undo / redo and the History list (named undo steps; docked in the side panel or its own window)
-    graph_window.py  a tumour setting's graph (the number changing along the line)
+    graph_window.py  a number's graph (the number changing along the line): tumour settings, pattern numbers
+    pattern_graphs.py the graph window on a pattern's numbers (side panel + Custom…; Loops = how crowded)
     join_split.py    Join (shapes -> one curve) and Split (cut in two, pieces -> separate shapes)
     join_merge.py    Join / Split's Gate sensitive merge (two shapes' touching notes made one)
     join_lines.py    Join / Split's line tools: Flip each line, Split pieces, plain copies

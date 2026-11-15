@@ -14,6 +14,7 @@ from notes.polygon import update_polygon
 from window import look
 from window.formula_host import SYM_CHOICES, layer_name, set_loop_sym, sym_label
 from window.panel_custom import GAP_COLOR
+from window.pattern_graphs import PanelGraphs, graphed, open_graph
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, unchanged
 
 LAYERS = ("shape", "pattern")  # (a curve's shape first: the pattern runs along it)
@@ -27,6 +28,7 @@ class PatternPanel:
     def _build_pattern(self):
         box = self.pattern_box = ttk.Frame(self.settings)
         self.formula_ui = {}
+        self.pattern_graph = None  # a pattern number's graph window, while open (pattern_graphs.py)
         for layer in LAYERS:
             row = ttk.Frame(box)
             top = ttk.Frame(row)
@@ -53,7 +55,15 @@ class PatternPanel:
             most = ttk.Label(row, text=tr("panel_pattern.loops_most", most=fmt(MAX_LOOPS)), foreground=GAP_COLOR,
                              font=look.font(8), wraplength=int(300 * self.scale), justify="left")
             self.formula_ui[layer] = {"row": row, "label": label, "numbers": numbers, "boxes": {}, "names": None,
-                                      "sym": sym, "most": most}
+                                      "sym": sym, "most": most, "cells": [], "lines": [], "laid": None}
+            numbers.bind("<Configure>", lambda e, l=layer: self.fit_formula_cells(l), add="+")
+        self.formula_narrow = False  # (one number a line while the side panel measures: side_narrows)
+
+        def narrow(on):
+            self.formula_narrow = on
+            for layer in LAYERS:
+                self.fit_formula_cells(layer)
+        self.side_narrows.append((lambda: narrow(True), lambda: narrow(False)))
         row = self.pattern_each_row = ttk.Frame(self.formula_ui["pattern"]["row"])
         self.pattern_each = tk.BooleanVar(value=False)
         for value, text, tip in ((False, tr("panel_pattern.across_all"), tr("panel_pattern.across_all_tip")),
@@ -114,7 +124,14 @@ class PatternPanel:
                 e.config(style="TEntry")
             ui["sym"].set(sym_label(p.get("sym")))
             self._loading = False
+            for name, (b, mark) in ui.get("graph_marks", {}).items():
+                pack_shown(mark, name in graphed(p), side="left", padx=(3, 0), after=b)
+            ui["numbers"].update_idletasks()
+            ui["laid"] = None  # ("× graph" came or went: the cells' widths changed)
+            self.fit_formula_cells(layer)
         self.show_loops_most()
+        if self.pattern_graph:
+            self.pattern_graph.sync()
         pats = self.with_layer("pattern")
         if pats:
             self.pattern_each.set(pats[0]["pattern"]["each"])
@@ -127,10 +144,11 @@ class PatternPanel:
         ui = self.formula_ui[layer]
         for w in ui["numbers"].winfo_children():
             w.destroy()
-        ui["boxes"], ui["names"] = {}, (names, polygon)
+        ui["boxes"], ui["names"], ui["graph_marks"] = {}, (names, polygon), {}
+        ui["cells"], ui["lines"], ui["laid"] = [], [], None
         for name in names:
             cell = ttk.Frame(ui["numbers"])
-            cell.pack(side="left", padx=(0, 8))
+            ui["cells"].append(cell)
             lb = ttk.Label(cell, text=tr("panel_pattern.loops") if name == "loops" else name)
             lb.pack(side="left")
             var = tk.StringVar()
@@ -141,12 +159,56 @@ class PatternPanel:
             loops = name == "loops"
             Scrub(self, [(e, var, lambda n=name: self.on_formula_entry(layer, n))],
                   LOOP_STEPS if loops else NUMBER_STEPS, 0.01 if loops else None, None, label=lb)
+            if layer == "pattern":  # its graph along the line ("× graph" in blue while it has one)
+                b = ttk.Button(cell, text="…", width=2, command=lambda n=name: self.open_pattern_graph(n))
+                b.pack(side="left", padx=(2, 0))
+                Tooltip(b, tr("pattern_graph.loops_button_tip" if loops else "pattern_graph.button_tip"))
+                ui["graph_marks"][name] = (b, ttk.Label(cell, text=tr("panel_pattern.x_graph"), foreground=look.VALUE))
             tip = (tr("panel_pattern.loops_tip") if loops else
                    tr("panel_pattern.shape_number_tip" if layer == "shape" else
                       "panel_pattern.number_tip_polygon" if polygon else "panel_pattern.number_tip", name=name))
             for w in (lb, e):
                 Tooltip(w, tip)
             ui["boxes"][name] = (var, e)
+        self.fit_formula_cells(layer)
+
+    def fit_formula_cells(self, layer):
+        """The number boxes side by side, on as many lines as the panel's width needs (like words; the panel
+        never widens for them). Before the row has a width (and while the side panel measures): one a line."""
+        ui = self.formula_ui[layer]
+        cells, frame = ui["cells"], ui["numbers"]
+        if not cells:
+            return
+        room = frame.winfo_width()
+        lines, used = [], None
+        for i, c in enumerate(cells):
+            w = c.winfo_reqwidth() + 8
+            if self.formula_narrow or room <= 1 or used is None or used + w > room:
+                lines.append([i])
+                used = w
+            else:
+                lines[-1].append(i)
+                used += w
+        laid = [tuple(line) for line in lines]
+        if laid == ui["laid"]:
+            return
+        ui["laid"] = laid
+        while len(ui["lines"]) < len(lines):
+            ui["lines"].append(ttk.Frame(frame))
+        for c in cells:
+            c.pack_forget()
+        for f in ui["lines"]:
+            f.pack_forget()
+        for f, line in zip(ui["lines"], lines):
+            f.pack(anchor="w")
+            for i in line:
+                cells[i].pack(in_=f, side="left", padx=(0, 8))
+                cells[i].lift(f)  # (the line frames are made later: they'd cover the cells)
+
+    def open_pattern_graph(self, name):
+        """The "…" after a pattern number: its graph along the line (pattern_graphs.py)."""
+        b = self.formula_ui["pattern"]["graph_marks"].get(name, (None,))[0]
+        open_graph(self, PanelGraphs(self, name, b), name)
 
     def on_formula_entry(self, layer, name, left=False):
         """A formula number box (Enter, stepped, or left: widgets.leave_box)."""

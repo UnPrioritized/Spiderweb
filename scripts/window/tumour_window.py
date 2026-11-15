@@ -80,6 +80,8 @@ class TumourGraphs(GraphSource):
     def restore(self, tgts, saved, key):
         # (still part of the tumour window's change: its Accept / X decides whether it's kept)
         shapes = self.app.shapes
+        if not any(t is s for t in tgts for s in shapes):
+            return
         for t, g in zip(tgts, saved):
             tm = t.get("tumour") if any(t is s for s in shapes) else None
             if not tm:
