@@ -21,7 +21,7 @@ The sides can also have a pattern: right-click the polygon → Formula → Patte
 
 The pattern's height is in hundredths of the polygon's height, so it grows with the shape. [page:symmetric|Symmetric halves] and [page:formulas#Flatten|Flatten] work on it too.
 
-A second pattern: right-click → Formula → Second pattern (once the sides have a pattern). Mix says how the two go together: On top = the second one rides along the first (small spikes on big bumps); Taking turns = the 1st, 3rd, 5th… sides get the first pattern, the 2nd, 4th… the second. The side panel shows its numbers and Mix under the first pattern's. Removing the first pattern moves the second one up.
+A second pattern: right-click → Formula → Second pattern (once the sides have a pattern). Mix says how the two go together: On top = the second one rides along the first (small spikes on big bumps); Taking turns = the 1st, 3rd, 5th… sides get the first pattern, the 2nd, 4th… the second. The side panel shows its numbers, Flatten and Mix under the first pattern's. Removing the first pattern moves the second one up.
 
 "Turn into plain curve" makes the result a plain curve you can reshape with its handles (the polygon settings go).
 
