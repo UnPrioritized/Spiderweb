@@ -23,7 +23,7 @@ STYLES = ("polygon", "star", "cross")
 UNEVEN_HOWS = ("random", "lengths")  # Uneven: random corners / typed side lengths repeating round
 MIXES = ("top", "turns")  # a second pattern: on top of the first (riding on it) / sides taking turns
 LENGTHS_DEFAULT = [1.0, 2.0]
-MOST_LENGTHS = 64
+MOST_LENGTHS = 24  # (4 lines of boxes in the side panel)
 LENGTH_RANGE = (0.01, 1000.0)
 POLYGON_DEFAULTS = {"points": 5, "style": "polygon", "inner": 50.0, "skip": 2, "twist": 0.0, "turn": 0.0,
                     "uneven": 0.0, "uneven_how": "random", "seed": 1, "lengths": LENGTHS_DEFAULT}
@@ -83,10 +83,6 @@ def clean_lengths(v):
         return None
     lo, hi = LENGTH_RANGE
     return out if all(math.isfinite(x) and lo <= x <= hi for x in out) else None
-
-
-def lengths_text(lengths):
-    return " ".join(f"{x:g}" for x in lengths)
 
 
 def uneven_shifts(d, count):
