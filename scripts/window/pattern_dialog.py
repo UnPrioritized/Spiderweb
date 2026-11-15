@@ -22,7 +22,8 @@ from files.about import USER
 from files.safefile import write_text
 from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
                           held_axis, keep_symmetric, nearest, pen_handles, sample)
-from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, clean_loop, formula_loop,
+from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, clean_loop,
+                           clean_pattern_graphs, formula_loop,
                            formula_shape, keep_sym, most_loops, new_pattern, new_shape, pattern_name, pattern_names,
                            shape_name, shape_names)
 from roll.roll_shared import ALT, grab_while_panning
@@ -54,6 +55,9 @@ def load_patterns(layer="pattern"):
         loop = clean_loop(p["loop"]) if isinstance(p.get("loop"), dict) else None
         if loop:
             item["loop"] = loop
+        graphs = clean_pattern_graphs(p.get("graphs"), item["vars"]) if layer == "pattern" else None
+        if graphs:
+            item["graphs"] = graphs
         return keep_sym(item, p)
     return saved_lists.entries(PATTERNS_FILE, FILE_KEYS[layer], clean)
 
@@ -122,6 +126,10 @@ def saved_pattern(item, k, old=None):
         out["along"] = item["along"]
     if item.get("loop"):
         out["loop"] = copy.deepcopy(item["loop"])
+    # (its own graphs; one saved without any keeps the Loops graph and fitting ones of the pattern it replaces)
+    graphs = clean_pattern_graphs(item.get("graphs") or old.get("graphs"), out["vars"])
+    if graphs:
+        out["graphs"] = graphs
     return keep_sym(out, item)
 
 
@@ -343,7 +351,7 @@ class FormulaDialog(tk.Toplevel):
             self.pat = new_shape(what, self.k, self.pat) if kind == "preset" else saved_shape(what, self.k)
         else:
             keep = {key: self.pat[key] for key in ("loops", "each")}
-            self.pat = new_pattern(what, self.k, self.pat) if kind == "preset" else saved_pattern(what, self.k)
+            self.pat = new_pattern(what, self.k, self.pat) if kind == "preset" else saved_pattern(what, self.k, self.pat)
             self.pat.update(keep)
         self._loading = True
         self.name.set(name)
@@ -370,6 +378,8 @@ class FormulaDialog(tk.Toplevel):
         item.update({key: self.pat[key] for key in self.texts if key in self.pat})
         if self.pat.get("loop"):
             item["loop"] = copy.deepcopy(self.pat["loop"])
+        if self.layer == "pattern" and self.pat.get("graphs"):  # (user: the saved list keeps the graphs)
+            item["graphs"] = copy.deepcopy(self.pat["graphs"])
         keep_sym(item, self.pat)
         if not self.save_file(name, item):
             return

@@ -572,11 +572,37 @@ PATTERN_SAME = ("formula", "along", "loop", "preset", "sym", "mirror")
 
 def _pattern(a, b, f, rev):
     pa, pb = a.get("pattern"), b.get("pattern")
-    if pb and rev:  # (the line runs the other way: the pattern stays on the same side)
+    if pb and rev:  # (the line runs the other way: the pattern stays on the same side, its graphs end to end)
         pb = dict(pb, mirror=not pb["mirror"])
+        if pb.get("graphs"):
+            pb["graphs"] = {key: [[1.0 - u, v] for u, v in reversed(g)] for key, g in pb["graphs"].items()}
     if pa and pb and all(pa.get(k) == pb.get(k) for k in PATTERN_SAME) and alike(pa["vars"], pb["vars"]):
-        return mix(pa, pb, f)
+        out = mix(dict(pa, graphs=None), dict(pb, graphs=None), f)
+        graphs = _mix_graphs(pa.get("graphs"), pb.get("graphs"), f)
+        if graphs:
+            out["graphs"] = graphs
+        else:
+            out.pop("graphs", None)
+        return out
     return _swap(pa, pb, f, "scale")
+
+
+def _mix_graphs(ga, gb, f):
+    """Two patterns' graphs (pattern.py) f of the way from ga to gb, point for point at every place either has a
+    point (a number without a graph = flat 100 %); None when none are left."""
+    from notes.tumour import clean_graph
+    ga, gb = ga or {}, gb or {}
+    out = {}
+    for key in sorted(set(ga) | set(gb)):
+        a = ga.get(key) or [[0.0, 1.0], [1.0, 1.0]]
+        b = gb.get(key) or [[0.0, 1.0], [1.0, 1.0]]
+        us = sorted({round(float(u), 9) for u, _ in a + b})
+        va = np.interp(us, [u for u, _ in a], [v for _, v in a])
+        vb = np.interp(us, [u for u, _ in b], [v for _, v in b])
+        g = clean_graph([[u, float(x + (y - x) * f)] for u, x, y in zip(us, va, vb)])
+        if g:
+            out[key] = [list(q) for q in g]
+    return out or None
 
 
 def blend(a, b, f, rev=False):

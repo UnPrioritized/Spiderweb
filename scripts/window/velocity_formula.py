@@ -23,6 +23,7 @@ def vel_pattern(preset=None, saved=None):
     if not saved and "height" in p["vars"]:
         p["vars"]["height"] = VEL_HEIGHT
     p["loops"] = VEL_LOOPS
+    p.pop("graphs", None)  # (a saved pattern's graphs: velocity lines have no graph buttons)
     return p
 
 
