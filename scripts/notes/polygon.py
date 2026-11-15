@@ -20,10 +20,13 @@ import random
 from notes.pattern import clean_pattern, clean_shape_formula, formed_paths, pattern_paths, shape_paths
 
 STYLES = ("polygon", "star", "cross")
-UNEVEN_HOWS = ("random", "turns")
+UNEVEN_HOWS = ("random", "lengths")  # Uneven: random corners / typed side lengths repeating round
 MIXES = ("top", "turns")  # a second pattern: on top of the first (riding on it) / sides taking turns
+LENGTHS_DEFAULT = [1.0, 2.0]
+MOST_LENGTHS = 64
+LENGTH_RANGE = (0.01, 1000.0)
 POLYGON_DEFAULTS = {"points": 5, "style": "polygon", "inner": 50.0, "skip": 2, "twist": 0.0, "turn": 0.0,
-                    "uneven": 0.0, "uneven_how": "random", "seed": 1}
+                    "uneven": 0.0, "uneven_how": "random", "seed": 1, "lengths": LENGTHS_DEFAULT}
 MOST_SEED = 999999
 MAX_POINTS = 200
 MIN_POINTS = 2  # (2 = a flat line, two sides on top of each other: a pattern on them pulls them apart)
@@ -49,7 +52,8 @@ def clean_polygon(d):
                "twist": _signed(d, "twist", MOST_TWIST), "turn": _signed(d, "turn", MOST_TURN),
                "uneven": max(0.0, _signed(d, "uneven", 100.0)),
                "uneven_how": d.get("uneven_how") if d.get("uneven_how") in UNEVEN_HOWS else "random",
-               "seed": max(1, min(MOST_SEED, int(d.get("seed", 1))))}
+               "seed": max(1, min(MOST_SEED, int(d.get("seed", 1)))),
+               "lengths": clean_lengths(d.get("lengths")) or list(LENGTHS_DEFAULT)}
     except (TypeError, ValueError, OverflowError):
         return None
     pat, form = clean_pattern(d.get("pattern")), clean_shape_formula(d.get("shape"))
@@ -66,15 +70,42 @@ def clean_polygon(d):
     return out
 
 
+def clean_lengths(v):
+    """Typed side lengths ("1 2", "1, 1, 3" or a list) -> a list of 1..MOST_LENGTHS numbers, each
+    LENGTH_RANGE, or None."""
+    if isinstance(v, str):
+        v = v.replace(",", " ").replace(";", " ").split()
+    if not isinstance(v, (list, tuple)) or not 1 <= len(v) <= MOST_LENGTHS:
+        return None
+    try:
+        out = [float(x) for x in v]
+    except (TypeError, ValueError):
+        return None
+    lo, hi = LENGTH_RANGE
+    return out if all(math.isfinite(x) and lo <= x <= hi for x in out) else None
+
+
+def lengths_text(lengths):
+    return " ".join(f"{x:g}" for x in lengths)
+
+
 def uneven_shifts(d, count):
     """How far each of count points round the circle slides along it (in steps between points; 0 = even), for
-    "uneven" %: Random (by "seed": the same number = the same shape) or In turns (every other side longer). Never
-    past a neighbour: at most 0.45 of a step each way."""
+    "uneven" %: Random (by "seed": the same number = the same shape; never past a neighbour: at most 0.45 of a
+    step each way) or Typed lengths ("lengths" repeating round: how much of the way round each side takes; 100 % =
+    exactly that share, less = blended with even sides)."""
     u = d.get("uneven", 0.0) / 100
     if not u:
         return [0.0] * count
-    if d.get("uneven_how") == "turns":
-        return [(0.225 if i % 2 else -0.225) * u for i in range(count)]
+    if d.get("uneven_how") == "lengths":
+        ls = d.get("lengths") or LENGTHS_DEFAULT
+        spans = [ls[i % len(ls)] for i in range(count)]
+        mean = sum(spans) / count
+        out, at = [], 0.0
+        for i in range(count):
+            out.append(u * (at - i))
+            at += spans[i] / mean
+        return out
     rng = random.Random(d.get("seed", 1))
     return [rng.uniform(-0.45, 0.45) * u for _ in range(count)]
 

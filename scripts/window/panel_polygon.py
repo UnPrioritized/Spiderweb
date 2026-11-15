@@ -10,7 +10,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import fmt
 from notes.polygon import (MAX_POINTS, MIN_POINTS, MOST_SEED, MOST_TURN, MOST_TWIST, STYLES, UNEVEN_HOWS,
-                           update_polygon)
+                           clean_lengths, lengths_text, update_polygon)
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, read_number, unchanged
 
@@ -60,7 +60,7 @@ class PolygonPanel:
                 cb.pack(side="left", padx=(4, 0))
                 cb.bind("<<ComboboxSelected>>", lambda ev: (self.on_polygon_style(), self.roll.focus_set()))
                 Tooltip(cb, tr("panel_polygon.kind_tip"))
-            if name == "uneven":  # how: Random (+ New random) / In turns
+            if name == "uneven":  # how: Random (+ New random) / Typed lengths (+ their box)
                 self.polygon_how = tk.StringVar()
                 cb = self.polygon_how_box = ttk.Combobox(row_u, textvariable=self.polygon_how, values=HOW_NAMES,
                                                          state="readonly", width=max(map(len, HOW_NAMES)))
@@ -70,6 +70,11 @@ class PolygonPanel:
                 b = self.polygon_reroll = ttk.Button(row_u, text=tr("panel_polygon.new_random"),
                                                      command=self.on_polygon_reroll)
                 Tooltip(b, tr("panel_polygon.new_random_tip"))
+                var = self.polygon_lengths_var = tk.StringVar()
+                e = self.polygon_lengths = ttk.Entry(row_u, textvariable=var, width=10)
+                e.bind("<Return>", lambda ev: self.on_polygon_lengths())
+                leave_box(self, e, var, lambda left: self.on_polygon_lengths(left))
+                Tooltip(e, tr("panel_polygon.lengths_tip"))
         # 2 points and nothing on the sides: just a flat line (a pattern on the sides changes its shape)
         self.polygon_flat = ttk.Label(box, text=tr("panel_polygon.flat"), foreground=look.WARN, font=look.font(8),
                                       wraplength=int(260 * self.scale), justify="left")
@@ -101,8 +106,11 @@ class PolygonPanel:
             self.polygon_entries[name].config(style="TEntry")
         self.polygon_style.set(STYLE_NAMES[STYLES.index(d["style"])])
         self.polygon_how.set(HOW_NAMES[UNEVEN_HOWS.index(d["uneven_how"])])
+        self.polygon_lengths_var.set(lengths_text(d["lengths"]))
+        self.polygon_lengths.config(style="TEntry")
         self._loading = False
         pack_shown(self.polygon_reroll, d["uneven_how"] == "random", side="left", padx=(6, 0))
+        pack_shown(self.polygon_lengths, d["uneven_how"] == "lengths", side="left", padx=(6, 0))
         want = SHOWN_FOR.get(d["style"], ())
         for name in ("inner", "turn", "skip"):
             self.polygon_entries[name].config(state="normal" if name in want else "disabled")
@@ -153,6 +161,18 @@ class PolygonPanel:
             return
         picked = self.polygon_how_box.current()
         self.set_polygon("uneven_how", UNEVEN_HOWS[picked if picked >= 0 else HOW_NAMES.index(self.polygon_how.get())])
+
+    def on_polygon_lengths(self, left=False):
+        """The typed side lengths box (Enter, or left: widgets.leave_box)."""
+        e = self.polygon_lengths
+        if self._loading or left and unchanged(e):
+            return
+        got = clean_lengths(self.polygon_lengths_var.get())
+        if got is None:
+            bad(e)
+            return
+        good(e)
+        self.set_polygon("lengths", got, ("polygon", tuple(sorted(self.sels)), "lengths"))
 
     def on_polygon_reroll(self):
         """New random: each selected polygon (and the next one drawn) gets its own new uneven corners, one step."""
