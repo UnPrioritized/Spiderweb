@@ -21,6 +21,8 @@ import numpy as np
 
 STEP = 1 / 16  # spacing along a row (in row heights) of the samples the evening-out sums over
 LEVELS = 400
+MOST_ROWS = 256  # (taller shapes: neighbouring keys worked out together as one strip, user 2026-11-16: the solve's
+# time and memory grow with rows^4 / rows^3: 512 rows took 7 s and 1.4 GB)
 
 _outlines = {}  # outline (inside rows, ppq, view) -> Outline
 _solved = {}  # (outline key, centre) -> Solved
@@ -118,12 +120,25 @@ class Outline:
     def __init__(self, base, ppq, view):
         a, h = view
         s, e, k = base[:, 0], base[:, 1], base[:, 2]
-        self.a, self.h, self.ppq = a, h, ppq
-        self.k0 = int(k.min())
-        n = self.N = int(k.max()) - self.k0 + 1
-        row = k - self.k0
+        self.a, self.ppq = a, ppq
+        self.kmin = int(k.min())
+        tall = int(k.max()) - self.kmin + 1
+        g = self.g = -(-tall // MOST_ROWS)  # (keys per strip: 1 up to MOST_ROWS keys, then as few as fit)
+        self.h = h * g  # (a strip's height; strip r's middle line at y = h (r + off))
+        self.off = (self.kmin + (g - 1) / 2) / g
+        n = self.N = -(-tall // g)
         x0 = np.round((s / ppq + a * k) * 1e9) / 1e9  # (rounded: equal ends on different rows meet exactly)
         x1 = np.round((e / ppq + a * k) * 1e9) / 1e9
+        row = (k - self.kmin) // g
+        if g > 1:  # (a strip = its keys' stretches joined)
+            order = np.lexsort((x0, row))
+            row, x0, x1 = row[order], x0[order], x1[order]
+            start = np.r_[True, row[1:] != row[:-1]]
+            far = np.empty(len(x1))
+            for i in range(len(x1)):  # (the furthest end so far in the strip)
+                far[i] = x1[i] if start[i] else max(far[i - 1], x1[i])
+            new = start | (x0 > np.r_[-np.inf, far[:-1]])  # (a stretch not touching the ones before it)
+            x0, x1, row = x0[new], np.maximum.reduceat(x1, np.flatnonzero(new)), row[new]
         self.x0, self.x1, self.row = x0, x1, row
         nodes = self.nodes = np.unique(np.concatenate([x0, x1]))
         pieces = self.E = len(nodes) - 1
@@ -133,7 +148,7 @@ class Outline:
         np.add.at(d, (row, i1), -1)
         alive = self.alive = np.cumsum(d, axis=1)[:, :pieces] > 0
         dl = self.dl = np.diff(nodes)
-        self.seg = [Piece(np.flatnonzero(alive[:, j]), dl[j], h) if alive[:, j].any() else None
+        self.seg = [Piece(np.flatnonzero(alive[:, j]), dl[j], self.h) if alive[:, j].any() else None
                     for j in range(pieces)]
         # where each (piece, row) sits among its piece's modes: first mode of its run, run length, place in run
         self.mode_at = np.full((pieces, n), -1, np.int32)
@@ -215,7 +230,7 @@ def place(o, centre, view):
     a, h = view
     cx, cy = centre[0] + a * centre[1], h * centre[1]
     if o.nodes[0] < cx < o.nodes[-1]:
-        r = cy / h - o.k0
+        r = cy / o.h - o.off
         lo = int(math.floor(r))
         f = r - lo
         j = int(np.clip(np.searchsorted(o.nodes, cx, "right") - 1, 0, o.E - 1))
@@ -223,8 +238,8 @@ def place(o, centre, view):
         if w:
             total = sum(w.values())
             return cx, cy, {k: v / total for k, v in w.items()}
-    yk = h * (o.row + o.k0)
-    m = np.minimum(0.5 * h, (o.x1 - o.x0) / 2)
+    yk = o.h * (o.row + o.off)
+    m = np.minimum(0.5 * o.h, (o.x1 - o.x0) / 2)
     px = np.clip(cx, o.x0 + m, o.x1 - m)
     i = int(np.argmin((px - cx) ** 2 + (yk - cy) ** 2))
     return float(px[i]), float(yk[i]), {int(o.row[i]): 1.0}
@@ -319,12 +334,13 @@ def heat_at(o, s, ri, xs):
 
 
 def circle_mean(o, s, rho):
-    """The heat's mean on the circle of radius rho round the centre (where it crosses key rows inside)."""
+    """The heat's mean on the circle of radius rho round the centre (where it crosses the strips' middle lines
+    inside)."""
     h = o.h
-    kk = np.arange(int(math.ceil((s.cy - rho) / h)), int(math.floor((s.cy + rho) / h)) + 1)
-    kk = kk[np.abs(h * kk - s.cy) <= rho]
-    half = np.sqrt(np.maximum(rho ** 2 - (h * kk - s.cy) ** 2, 0))
-    ri = np.concatenate([kk - o.k0, kk - o.k0])
+    rr = np.arange(int(math.ceil((s.cy - rho) / h - o.off)), int(math.floor((s.cy + rho) / h - o.off)) + 1)
+    rr = rr[np.abs(h * (rr + o.off) - s.cy) <= rho]
+    half = np.sqrt(np.maximum(rho ** 2 - (h * (rr + o.off) - s.cy) ** 2, 0))
+    ri = np.concatenate([rr, rr])
     xs = np.concatenate([s.cx - half, s.cx + half])
     g = heat_at(o, s, ri, xs)
     ok = (ri >= 0) & (ri < o.N)
@@ -381,7 +397,7 @@ def solved(base, ppq, centre, view):
         wt = np.full(len(xs), dx)
         wt[0] *= 0.5
         wt[-1] *= 0.5
-        y = h * (rows + o.k0)
+        y = h * (rows + o.off)
         us.append((g / s.hot).ravel())
         ws.append(np.tile(wt, len(rows)))
         rs.append(np.hypot(xs[None, :] - cx, (y - cy)[:, None]).ravel())
@@ -489,7 +505,7 @@ class Mixed:
         o, s = self.s.o, self.s
         out = []
         for j, xs, rows, g, _ in s.sm:
-            d = distances(self.seg, xs, o.h * (rows + o.k0), 1.5 * self.deepest + o.h)
+            d = distances(self.seg, xs, o.h * (rows + o.off), 1.5 * self.deepest + o.h)
             out.append((1 - self.mix) * d / self.deepest + self.mix * value_of_heat(s, g / s.hot))
         return out
 
@@ -497,7 +513,7 @@ class Mixed:
         """fn for roots: the value minus its line, in each bracket (row index, [x0, x1]); only the segments that
         can be nearest somewhere in a bracket are measured (within its middle's distance + its length)."""
         o = self.s.o
-        y = o.h * (row + o.k0)
+        y = o.h * (row + o.off)
         mx = (x0 + x1) / 2
         seg = self.seg
         ax, ay, bx, by = (seg[:, i][None, :] for i in range(4))
@@ -582,11 +598,19 @@ def blend_steps(sizes, ppq, base, centre, view, merged_rows, mix=1.0, seg=None, 
         m = which == ti
         rr, xx, uu = row[m], xr[m], up[m]
         i = np.flatnonzero(uu[:-1] & ~uu[1:] & (rr[:-1] == rr[1:]))
-        key = rr[i] + o.k0
-        st = np.floor((xx[i] - a * key) * ppq + 0.5).astype(np.int64)
-        en = np.floor((xx[i + 1] - a * key) * ppq + 0.5).astype(np.int64)
+        xa, xb, strip = xx[i], xx[i + 1], rr[i]
+        if o.g > 1:  # (every key of the strip, then cut to that key's own inside)
+            xa, xb = np.repeat(xa, o.g), np.repeat(xb, o.g)
+            key = np.repeat(o.kmin + o.g * strip, o.g) + np.tile(np.arange(o.g), len(strip))
+        else:
+            key = strip + o.kmin
+        st = np.floor((xa - a * key) * ppq + 0.5).astype(np.int64)
+        en = np.floor((xb - a * key) * ppq + 0.5).astype(np.int64)
         keep = en > st
         got = np.column_stack([st[keep], en[keep], key[keep]])
+        if o.g > 1 and len(got):
+            from notes.custom import cut_out
+            got = cut_out(got, cut_out(got, base))
         steps.append(merged_rows(got) if len(got) else np.zeros((0, 3), np.int64))
     return steps
 
@@ -596,7 +620,7 @@ def values(base, ppq, centre, view, beats, keys, mix=1.0, seg=None, deepest=None
     s = solved(np.asarray(base, np.int64).reshape(-1, 3), ppq, centre, view)
     keys = np.asarray(keys)
     xs = np.asarray(beats, float) + view[0] * keys
-    ri = np.round(keys).astype(np.int64) - s.o.k0
+    ri = (np.round(keys).astype(np.int64) - s.o.kmin) // s.o.g
     if mix < 1:
         return Mixed(s, mix, seg, deepest).value(ri, xs, seg_dist(seg, xs, view[1] * keys))
     return value_of_heat(s, heat_at(s.o, s, ri, xs) / s.hot)
