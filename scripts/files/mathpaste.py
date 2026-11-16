@@ -291,8 +291,10 @@ def _functions(toks, funcs):
                 k += 1
                 if depth == 0:
                     break
-            inner = "".join(t for _, t in _functions(toks[j + 1:k - 1], funcs)) if k - 1 > j else ""
-            out.append(f"{name}({inner})")
+            shut = depth == 0  # (left open, "cos(t" half typed: stays open = "check the brackets", its t kept)
+            inner = "".join(t for _, t in _functions(toks[j + 1:k - 1 if shut else k], funcs)) if k - 1 > j or \
+                not shut else ""
+            out.append(f"{name}({inner}" + (")" if shut else ""))
             i = k
         elif j < n and (toks[j][0] in ("num", "name")):  # no brackets: the next term
             k = _atom_end(toks, j, funcs)
@@ -407,6 +409,12 @@ ZERO_WIDTH = dict.fromkeys(map(ord, "​‌‍⁠﻿­"))  # (hidden signs web c
 LOOK_ALIKES = {"∗": "*", "∕": "/", "⁄": "/", "‐": "-", "‑": "-", "‒": "-", "∛": PAD + "∛", "√": PAD + "√"}
 
 
+def normalise(text):
+    """Hidden signs gone, ² as ^2, full-width （）＝，２ as plain signs (as_written's first step)."""
+    text = _superscripts(text.translate(ZERO_WIDTH))  # (before NFKC: it makes ² a plain 2 = t2, one name)
+    return unicodedata.normalize("NFKC", text)  # (ϑ = θ too)
+
+
 def as_written(text, var, funcs, constants):
     """text as people write it -> the words mathexpr reads (see the top). var: the position's name (θ = it when it's
     t); funcs / constants: the names mathexpr knows. ValueError (UnknownWord) for a LaTeX word it can't read."""
@@ -417,11 +425,10 @@ def as_written(text, var, funcs, constants):
         most = max(most, depth)
     if most > MOST_NESTED or text.count("|") > 2 * MOST_NESTED or text.count("\\") > 20 * MOST_NESTED:
         raise RecursionError
-    text = _superscripts(text.translate(ZERO_WIDTH))  # (before NFKC: it makes ² a plain 2 = t2, one name)
-    text = unicodedata.normalize("NFKC", text)  # (full-width （）＝，２ as plain signs, ϑ = θ)
-    text = without_lead(from_latex(text, funcs)).strip()
+    text = without_lead(from_latex(normalise(text), funcs)).strip()
     text = re.sub(r"[;,.]\s*$", "", text) if not re.search(r"\d\.\s*$", text) else text  # (a line's own end)
     text = _PREFIX.sub("", text)
+    text = re.sub(r"\.(?=[*/^])", "", text)  # (code's a.*b, a./b, a.^2 = the same; 2.*t is 2.0 * t anyway)
     text = re.sub(r"\blog_\(?(10|2|e)\)?(?!\d)", lambda m: {"10": "log10", "2": "log2", "e": "ln"}[m.group(1)] + PAD,
                   text)  # (log_10 t, log_2(t) as typed)
     for sign, word in {**SIGNS, **LOOK_ALIKES}.items():

@@ -30,6 +30,7 @@ from files.clipboard import put_text
 from roll.roll_shared import ALT, grab_while_panning
 from window import look
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
+from window.formula_paste import FormulaPaste
 from window.panel_custom import GAP_COLOR
 from window.pattern_graphs import DialogGraphs, graphed, open_graph
 from window.widgets import (ListTip, LocalUndo, Scrub, Tooltip, bad, good, pack_shown, read_number, remember_place,
@@ -214,8 +215,16 @@ class FormulaDialog(tk.Toplevel):
         right.columnconfigure(1, weight=1)
         self.name = tk.StringVar(value=self.pat.get("name") or self.preset_name())
         ttk.Label(right, text=tr("pattern_dialog.name")).grid(row=0, column=0, sticky="w")
-        self.name_box = ttk.Entry(right, textvariable=self.name, width=30)
-        self.name_box.grid(row=0, column=1, sticky="ew", padx=(5, 0), pady=1)
+        row = ttk.Frame(right)  # Name [ ] Copy formula, Paste formula… (user: near the formula, not at the bottom)
+        row.grid(row=0, column=1, sticky="ew", padx=(5, 0), pady=1)
+        self.name_box = ttk.Entry(row, textvariable=self.name, width=24)
+        self.name_box.pack(side="left", fill="x", expand=True)
+        b = ttk.Button(row, text=tr("pattern_dialog.copy_formula"), command=self.copy_formula)
+        b.pack(side="left", padx=(6, 0))
+        Tooltip(b, tr("pattern_dialog.copy_formula_tip"))
+        b = ttk.Button(row, text=tr("pattern_dialog.paste_formula"), command=self.open_paste)
+        b.pack(side="left", padx=(4, 0))
+        Tooltip(b, tr("pattern_dialog.paste_formula_tip"))
         self.name_box.bind("<Return>", lambda e: (self.save(), "break")[1])  # (a name typed: Enter saves, user)
         # the formula boxes: y = and along = (a pattern) or x(t) = and y(t) = (a shape)
         keys = ("x", "y") if shape else ("formula", "along")
@@ -337,9 +346,6 @@ class FormulaDialog(tk.Toplevel):
         btns = ttk.Frame(right)
         btns.grid(row=r + 4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         ttk.Button(btns, text=tr("pattern_dialog.save"), command=self.save).pack(side="left")
-        b = ttk.Button(btns, text=tr("pattern_dialog.copy_formula"), command=self.copy_formula)
-        b.pack(side="left", padx=4)
-        Tooltip(b, tr("pattern_dialog.copy_formula_tip"))
         ttk.Button(btns, text=tr("pattern_dialog.cancel"), command=self.cancel).pack(side="right")
         ttk.Button(btns, text=tr("pattern_dialog.apply"), command=self.apply).pack(side="right", padx=4)
 
@@ -665,6 +671,26 @@ class FormulaDialog(tk.Toplevel):
         if self.kind == "pattern" and graphed(self.pat):
             notes.append(tr("pattern_dialog.copied_graphs"))
         self.set_info(" ".join(notes), look.GOOD, back=by_hand)
+
+    def open_paste(self):
+        """Paste formula…: its own window (formula_paste.py); Use it comes back to use_pasted."""
+        self.drop_graph()
+        FormulaPaste(self)
+
+    def use_pasted(self, pat):
+        """A pasted formula (formula_paste.pasted_pattern) in place of everything typed before (user): one undo step."""
+        self.pat, self.polar, self.drag, self.pan = pat, "polar" in pat, None, None
+        self._loading = True
+        self.name.set("")
+        for key, var in self.texts.items():
+            var.set(pat.get(key, ""))
+        self._loading = False
+        self.ok, self.own_view = True, False
+        self.pick_current()
+        self.refresh()
+        self.mark()
+        if self.ok:
+            self.set_info(tr("pattern_dialog.pasted"), look.GOOD)
 
     def on_formula(self):
         if self._loading:

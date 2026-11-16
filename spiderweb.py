@@ -23,6 +23,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     panel_pattern.py the panel's pattern numbers (a formula along a curve) + the Formula menu's actions
     panel_polygon.py the panel's polygon settings (points, polygon / star / crossing star)
     pattern_dialog.py the Custom... windows for a curve's shape and pattern (presets, formulas, edited by hand)
+    formula_paste.py the Paste formula... window (a pasted block of text read into a shape's / pattern's formula)
     formula_host.py  where formulas go (piano roll curves, drawer strokes, funnel curves) + the Formula menu
     tumour_window.py the tumour window: the tumour settings (bumps along lines)
     history.py       undo / redo and the History list (named undo steps; docked in the side panel or its own window)
