@@ -42,6 +42,52 @@ def fit_dropdowns(root):
     root.bind_class("TCombobox", "<<ComboboxSelected>>", lambda e: unhighlight(e.widget), add="+")
 
 
+TEXT_DRAG_PX = 4  # dragging text past a text box's edge: one more letter a step for every this many pixels past it
+
+
+def faster_text_drag(root):
+    """Dragging a selection past a text box's edge scrolls faster the further past it the mouse is (user
+    2026-11-16: Tk's own 2 letters a step, 20 a second, crawled through a long Output file path). Every text box in
+    every window (Tk's own scroll steps, rewritten once)."""
+    try:
+        root.tk.eval("""
+            namespace eval ::ttk::entry {
+                proc AutoScroll {w} {
+                    variable State
+                    if {![winfo exists $w]} return
+                    set x $State(x)
+                    set past [expr {$x > [winfo width $w] ? $x - [winfo width $w] : -$x}]
+                    set n [expr {2 + int($past / %(px)d)}]
+                    if {$x > [winfo width $w]} {
+                        $w xview scroll $n units
+                        DragTo $w $x
+                    } elseif {$x < 0} {
+                        $w xview scroll [expr {-$n}] units
+                        DragTo $w $x
+                    }
+                }
+            }
+            namespace eval ::tk {
+                proc EntryAutoScan {w} {
+                    variable ::tk::Priv
+                    set x $Priv(x)
+                    if {![winfo exists $w]} return
+                    set past [expr {$x >= [winfo width $w] ? $x - [winfo width $w] : -$x}]
+                    set n [expr {2 + int($past / %(px)d)}]
+                    if {$x >= [winfo width $w]} {
+                        $w xview scroll $n units
+                        EntryMouseSelect $w $x
+                    } elseif {$x < 0} {
+                        $w xview scroll [expr {-$n}] units
+                        EntryMouseSelect $w $x
+                    }
+                    set Priv(afterId) [after 50 [list tk::EntryAutoScan $w]]
+                }
+            }""" % {"px": TEXT_DRAG_PX})
+    except tk.TclError:  # (another Tk's own names: its slow way stays)
+        pass
+
+
 def unhighlight(cb):
     if isinstance(cb, ttk.Combobox) and cb.winfo_exists() and "readonly" in str(cb.cget("state")):
         cb.selection_clear()  # (after the box's own handler: it may have closed its window)
