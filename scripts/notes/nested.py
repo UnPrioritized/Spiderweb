@@ -32,7 +32,7 @@ from files import speed
 from notes.custom import (carried_fill, clean_of_at, cut_out, drawn_view, edge_loops, find_spans, fill_plan,
                           frame_spans, frame_to_bp, frame_to_uv, has_nested, has_tiles, in_turns, inside_rows, merged_rows, poly_edges, rows_spans)
 from notes.paths import pitch_of, top_key
-from notes.shrink import field, inner_rows, proportion
+from notes.shrink import band_all_rows, field, inner_rows, proportion
 
 WAYS = ("scale", "band", "blend")
 NESTED_DEFAULTS = {"way": "scale", "steps": 8, "last": 0.0, "spacing": 0, "turn": 0.0, "colours": 4, "skip": False,
@@ -301,6 +301,11 @@ def band_steps(sh, ppq, base, view):
     (shrink.inner_rows, exact like the outline gate, in the view it was first drawn in)."""
     loops, walled = edge_loops(sh)
     deepest = deepest_field(sh, view)[1]
+    rs = [(1 - size) * deepest for size, _ in step_sizes(sh["nested"])[1:]]
+    flat = sum(r <= 0 for r in rs)  # (steps not shrunk at all: the inside itself)
+    got = band_all_rows(loops, walled, sorted(set(base[:, 2].tolist())), rs[flat:], ppq, view) if rs else None
+    if got is not None:  # (every step at once, as a compiled loop: the same rows)
+        return [base] * (flat + 1) + got
     steps = [base]
     memo = {}  # (shrink.inner_rows' work shared by the steps: each line's inside, what the step before kept)
     for size, _ in step_sizes(sh["nested"])[1:]:

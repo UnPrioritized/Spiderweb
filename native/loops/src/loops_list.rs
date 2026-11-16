@@ -93,6 +93,9 @@ py_loops! {
     blend_heat(nodes: &[f64], dl: &[f64], mu: &[f64], wsc: &[f64], wec: &[f64], mode_at: &[i64], run_m: &[i64],
                run_p: &[i64], width: i64, j: &[i64], r: &[i64], xs: &[f64], j0: i64, q: &[f64], cx: f64,
                out: &mut [f64]) => crate::fills::blend_heat;
+    band_all(ax: &[f64], ay: &[f64], bx: &[f64], by: &[f64], length: &[f64], ys: &[f64], shift: &[f64],
+             lkey: &[i64], in_off: &[i64], in_lo: &[f64], in_hi: &[f64], rs: &[f64], ppq: i64, per: i64)
+             -> arrays => crate::fills::band_all;
     short_pieces(bs: &[i64], be: &[i64], bk: &[i64], rs: &[i64], re: &[i64], rk: &[i64], rd: &[i64], least: i64)
                  -> arrays => crate::fills::short_pieces;
     dc_block(x: NdMut<f32, 2>, c: &[f64], z: NdMut<f64, 2>) => crate::misc::dc_block;

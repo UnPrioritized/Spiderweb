@@ -48,6 +48,8 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   face_build     faces.Faces' build: the drawing cut into slabs at every crossing, the areas joined, their depth
   blend_heat     notes/blend_rows.heat_at: Nested Blend's heat at spots (finding each ring edge)
   short_pieces   nested.shortest_pieces (Nested's Shortest piece box): pieces on top, short ones merged, a heap
+  band_all       nested.band_steps (Nested Even band): every step at once, key by key, a heap of the edges near
+                 what each line still keeps
   band_rows      shrink.near_rows (Even band, Outline gate): each outline edge's band on each line, joined line by line
   field_dist     shrink.field's distances to the outline on a grid (Nested's centre, Blend, the Outline gate preview)
   gap_ticks      tempo_file.keep_gaps' work on one Keep timing part (export, Conductor pane checks)
@@ -3551,6 +3553,228 @@ def short_pieces(bs, be, bk, rs, re, rk, rd, least):
 
 
 @njit(nogil=True)
+def _fh_push(hk, hv, n, k, v):
+    """(k, v) into the min-heap hk[:n] / hv[:n] (by k, then v) -> the new size."""
+    i = n
+    hk[i], hv[i] = k, v
+    while i > 0:
+        p = (i - 1) // 2
+        if hk[p] < hk[i] or (hk[p] == hk[i] and hv[p] <= hv[i]):
+            break
+        hk[p], hk[i] = hk[i], hk[p]
+        hv[p], hv[i] = hv[i], hv[p]
+        i = p
+    return n + 1
+
+
+@njit(nogil=True)
+def _fh_pop(hk, hv, n):
+    """The smallest of the min-heap hk[:n] / hv[:n] taken off (read [n - 1] after) -> the new size."""
+    n -= 1
+    hk[0], hk[n] = hk[n], hk[0]
+    hv[0], hv[n] = hv[n], hv[0]
+    i = 0
+    while True:
+        a = 2 * i + 1
+        if a >= n:
+            break
+        b = a + 1
+        if b < n and (hk[b] < hk[a] or (hk[b] == hk[a] and hv[b] < hv[a])):
+            a = b
+        if hk[i] < hk[a] or (hk[i] == hk[a] and hv[i] <= hv[a]):
+            break
+        hk[a], hk[i] = hk[i], hk[a]
+        hv[a], hv[i] = hv[i], hv[a]
+        i = a
+    return n
+
+
+@njit(nogil=True)
+def _box_gap(x0, x1, y0, y1, y, lo, hi, s, t):
+    """A lower bound of how far the box x0..x1, y0..y1 (an edge's) is from the stretches lo[s:t] / hi[s:t] (sorted,
+    apart) of the line at y: the gap between their boxes."""
+    gy = max(0.0, max(y0 - y, y - y1))
+    a, b = s, t  # (the last stretch starting at or before x1)
+    while a < b:
+        mid = (a + b) // 2
+        if lo[mid] <= x1:
+            a = mid + 1
+        else:
+            b = mid
+    j = a - 1
+    if j >= s and hi[j] > x0:
+        gx = 0.0
+    else:
+        gx = np.inf
+        if j >= s:
+            gx = x0 - hi[j]
+        if j + 1 < t:
+            gx = min(gx, lo[j + 1] - x1)
+    return math.sqrt(gx * gx + gy * gy)
+
+
+@njit(nogil=True)
+def _band_key(q, per, ax, ay, bx, by, length, ex0, ex1, ey0, ey1, ys, shift, lkey, in_off, in_lo, in_hi, rs, ppq,
+              rmax, out, no):
+    """band_all for key q (its lines q * per ..): every step's rows into out (grown) -> (out, count)."""
+    ne = len(ax)
+    m = len(rs)
+    cap = ne + 1
+    for j in range(per):
+        g = q * per + j
+        cap = max(cap, in_off[g + 1] - in_off[g] + ne + 1)
+    klo = np.empty((per, cap))
+    khi = np.empty((per, cap))
+    kn = np.zeros(per, np.int64)
+    hk = np.empty((per, ne + 1))
+    hv = np.empty((per, ne + 1), np.int64)
+    hn = np.zeros(per, np.int64)
+    act = np.empty(ne + 1, np.int64)
+    act_l = np.empty(ne + 1)
+    blo = np.empty(ne + 1)
+    bhi = np.empty(ne + 1)
+    nlo = np.empty(ne + 1)
+    nhi = np.empty(ne + 1)
+    tlo = np.empty(per * cap)
+    thi = np.empty(per * cap)
+    wlo = np.empty(cap)
+    whi = np.empty(cap)
+    for j in range(per):
+        g = q * per + j
+        s, t = in_off[g], in_off[g + 1]
+        for x in range(s, t):
+            klo[j, x - s], khi[j, x - s] = in_lo[x], in_hi[x]
+        kn[j] = t - s
+        if t > s:
+            for e in range(ne):
+                gap = _box_gap(ex0[e], ex1[e], ey0[e], ey1[e], ys[g], in_lo, in_hi, s, t)
+                if gap < rmax:
+                    hn[j] = _fh_push(hk[j], hv[j], hn[j], gap, e)
+    for i in range(m):
+        r = rs[i]
+        rm = r * (1 + 1e-9) + 1e-9
+        nt = 0
+        for j in range(per):
+            n = kn[j]
+            if n == 0:
+                continue
+            g = q * per + j
+            y = ys[g]
+            na = 0
+            while hn[j] > 0 and hk[j, 0] < rm:
+                hn[j] = _fh_pop(hk[j], hv[j], hn[j])
+                e = hv[j, hn[j]]
+                gap = _box_gap(ex0[e], ex1[e], ey0[e], ey1[e], y, klo[j], khi[j], 0, n)
+                if gap < rm:
+                    act[na], act_l[na] = e, gap
+                    na += 1
+                else:  # (can't reach what's kept yet: looked at again once r gets that far)
+                    hn[j] = _fh_push(hk[j], hv[j], hn[j], gap, e)
+            nb = 0
+            for x in range(na):
+                e = act[x]
+                lo, hi = _band_at(ax[e], ay[e], bx[e], by[e], length[e], y, r)
+                if hi > lo:
+                    blo[nb], bhi[nb] = lo, hi
+                    nb += 1
+                hn[j] = _fh_push(hk[j], hv[j], hn[j], act_l[x], e)
+            nn = 0
+            if nb:  # (joined like band_rows)
+                o = np.argsort(blo[:nb], kind="mergesort")
+                reach = -np.inf
+                for x in o:
+                    a, b = blo[x], bhi[x]
+                    if a > reach:
+                        nlo[nn], nhi[nn] = a, b
+                        nn += 1
+                        reach = b
+                    elif b > reach:
+                        nhi[nn - 1] = b
+                        reach = b
+            if n + nn > cap:  # (more pieces than room: rare, room doubled)
+                cap2 = 2 * (n + nn)
+                k2, h2, t2, u2 = np.empty((per, cap2)), np.empty((per, cap2)), np.empty(per * cap2), np.empty(per * cap2)
+                k2[:, :cap], h2[:, :cap], t2[:nt], u2[:nt] = klo, khi, tlo[:nt], thi[:nt]
+                klo, khi, tlo, thi, wlo, whi, cap = k2, h2, t2, u2, np.empty(cap2), np.empty(cap2), cap2
+            w = 0  # (shrink.minus: what's kept with the bands taken out)
+            k = 0
+            for x in range(n):
+                a, b = klo[j, x], khi[j, x]
+                while k < nn and nhi[k] <= a:
+                    k += 1
+                for z in range(k, nn):
+                    c, d = nlo[z], nhi[z]
+                    if c >= b:
+                        break
+                    if d <= a:
+                        continue
+                    if c > a:
+                        wlo[w], whi[w] = a, c
+                        w += 1
+                    a = max(a, d)
+                    if a >= b:
+                        break
+                if a < b:
+                    wlo[w], whi[w] = a, b
+                    w += 1
+            for x in range(w):
+                klo[j, x], khi[j, x] = wlo[x], whi[x]
+                tlo[nt], thi[nt] = wlo[x] - shift[g], whi[x] - shift[g]
+                nt += 1
+            kn[j] = w
+        made = 0
+        if nt:
+            o = np.argsort(tlo[:nt], kind="mergesort")
+            ca, cb = tlo[o[0]], thi[o[0]]
+            for s in range(1, nt + 1):
+                if s < nt and tlo[o[s]] <= cb:
+                    cb = max(cb, thi[o[s]])
+                    continue
+                a = math.floor(ca * ppq + 0.5)
+                b = math.floor(cb * ppq + 0.5)
+                if b > a:
+                    if no == out.shape[1]:
+                        bigger = np.empty((4, 2 * no + 64), np.int64)
+                        bigger[:, :no] = out[:, :no]
+                        out = bigger
+                    out[0, no], out[1, no], out[2, no], out[3, no] = a, b, lkey[q * per], i
+                    no += 1
+                    made += 1
+                if s < nt:
+                    ca, cb = tlo[o[s]], thi[o[s]]
+        if made == 0:  # (a key with no notes is left out of the steps after it)
+            break
+    return out, no
+
+
+@njit(nogil=True)
+def band_all(ax, ay, bx, by, length, ys, shift, lkey, in_off, in_lo, in_hi, rs, ppq, per):
+    """nested.band_steps' steps after the first deeper one (shrink.inner_rows with its memo, step after step: the
+    same rows): edges (ax, ay, bx, by, length) in the view; lines ys (per lines a key, keys rising: lkey; shift =
+    each line's view slant back in beats), each line's inside (in_off / in_lo / in_hi); rs = the steps' depths
+    (rising, > 0). A line keeps what's left after each step's bands; an edge's band is only worked out once its box
+    comes within r of what the line still keeps (a heap of edges by that gap: bands that can't reach it change
+    nothing). A key's lines moved back, merged, rounded to ticks; a key with no notes leaves the steps after.
+    -> (start, end, key, step i) rows, key by key."""
+    ne = len(ax)
+    ex0 = np.empty(ne)
+    ex1 = np.empty(ne)
+    ey0 = np.empty(ne)
+    ey1 = np.empty(ne)
+    for e in range(ne):
+        ex0[e], ex1[e] = min(ax[e], bx[e]), max(ax[e], bx[e])
+        ey0[e], ey1[e] = min(ay[e], by[e]), max(ay[e], by[e])
+    out = np.empty((4, 64), np.int64)
+    no = 0
+    if len(rs):
+        rmax = rs[len(rs) - 1] * (1 + 1e-9) + 1e-9
+        for q in range(len(ys) // per):
+            out, no = _band_key(q, per, ax, ay, bx, by, length, ex0, ex1, ey0, ey1, ys, shift, lkey, in_off, in_lo,
+                                in_hi, rs, ppq, rmax, out, no)
+    return out[0, :no].copy(), out[1, :no].copy(), out[2, :no].copy(), out[3, :no].copy()
+
+
+@njit(nogil=True)
 def band_rows(ax, ay, bx, by, length, ys, first, n, r, row_out, lo_out, hi_out):
     """shrink.near_rows after its line ranges (edge e reaches lines first[e] .. first[e] + n[e] - 1; length =
     np.hypot of its sides): every edge's band across every line it reaches, a line's stretches sorted and joined
@@ -4703,6 +4927,8 @@ def warm():
                np.zeros(1), 0, np.zeros(1), 0.0, np.zeros(1))
     band_rows(f1, f1, f1 + 1, f1 + 1, f1 + 1, np.full(1, 0.5), i1 * 0, i1, 1.0, i1.copy(), f1.copy(), f1.copy())
     short_pieces(z1, z1 + 9, z1, z1 + 1, z1 + 3, z1, z1 + 1, 5)
+    band_all(f1, f1, f1 + 1, f1 + 1, f1 + 1, np.full(1, 0.5), np.zeros(1), z1, np.array([0, 1], np.int64),
+             np.zeros(1), np.ones(1), np.full(1, 0.25), 960, 1)
     field_dist(f1, f1, f1 + 1, f1 + 1, f1, f1, 1.0, 24, np.zeros((1, 1)))
     t3 = np.array([0, 1, 3], np.int64)
     gap_ticks(0, 3, t3, t3[:0], np.full(3, 500000, np.int64), t3[:0], 500000, 0xFFFFFF)

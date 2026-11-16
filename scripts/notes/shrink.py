@@ -284,6 +284,32 @@ def inner_rows(polys, walled, keys, r, ppq, view=None, memo=None):
     return np.asarray(out, np.int64).reshape(-1, 3)
 
 
+def band_all_rows(polys, walled, keys, rs, ppq, view):
+    """inner_rows with one memo for each depth in rs (rising, > 0) on these keys, a deeper one only on the keys the
+    one before had notes on (Nested Even band's steps: nested.band_steps), all at once in a compiled loop
+    (fastloops.band_all; 480 steps on a tall patterned shape took 18 s): the very same rows, a list per depth.
+    None = no compiled loop (inner_rows step by step then)."""
+    fast = compiled("band_all")
+    if fast is None:
+        return None
+    va, vc = view
+    seg = warp(segments(polys), view)
+    keys = np.unique(np.asarray(list(keys), np.int64))
+    ys = ((keys[:, None] - 0.5 + (np.arange(SAMPLES) + 0.5) / SAMPLES) * vc).ravel()
+    spans = [inside_at(seg, y, walled, view, x) for y, x in zip(ys.tolist(), crossings_all(seg, ys.tolist()))]
+    off = np.r_[0, np.cumsum([len(s) for s in spans])].astype(np.int64)
+    flat = np.asarray([p for s in spans for p in s], float).reshape(-1, 2)
+    ax, ay, bx, by = (np.ascontiguousarray(seg[:, i], float) for i in range(4))
+    a, b, k, step = fast.band_all(ax, ay, bx, by, np.hypot(bx - ax, by - ay), ys, va * ys / vc,
+                                  np.repeat(keys, SAMPLES), off, np.ascontiguousarray(flat[:, 0]),
+                                  np.ascontiguousarray(flat[:, 1]), np.ascontiguousarray(rs, float), int(ppq),
+                                  SAMPLES)
+    o = np.argsort(step, kind="stable")
+    rows = np.column_stack([a[o], b[o], k[o]]).astype(np.int64).reshape(-1, 3)
+    at = np.searchsorted(step[o], np.arange(len(rs) + 1)).tolist()
+    return [rows[at[i]:at[i + 1]] for i in range(len(rs))]
+
+
 def _could_be_nearest(seg, x0, x1, y0, y1):
     """The edges that can be the nearest one to some spot in the box x0..x1, y0..y1: an edge whose box is further
     from the whole box than the nearest edge is from the box's middle plus half its diagonal can't be (so the

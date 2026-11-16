@@ -22,7 +22,7 @@ NEEDS = {
     "warp_soft2": ("warp_soft2",),
     "midi_events": ("midi_events", "take_bytes"), "midi_track": ("midi_track", "take_bytes"), "nearest": ("nearest",),
     "spread_line": ("spread_line",), "area_spots": ("area_spots",),
-    "band_rows": ("band_rows",), "short_pieces": ("short_pieces",), "field_dist": ("field_dist",), "blend_heat": ("blend_heat",),
+    "band_rows": ("band_rows",), "short_pieces": ("short_pieces",), "band_all": ("band_all",), "field_dist": ("field_dist",), "blend_heat": ("blend_heat",),
     "dc_block": ("dc_block",),
     "wave_fill": ("wave_fill",), "bez_solve": ("bez_solve",), "note_ends": ("note_ends",), "hz_expand": ("hz_expand",), "hz_late": ("hz_late",),
     "hz_order": ("hz_order",), "hz_finish": ("hz_finish", "hz_finish_i"),
@@ -329,6 +329,11 @@ class Wraps:
         if not hasattr(self.x, "face_build"):
             return None
         return self._tuple("face_build", (x0, y0, x1, y1, levels, hy, hx0, hx1, eps, len(x0) >= FACES_MANY))
+
+    def band_all(self, ax, ay, bx, by, length, ys, shift, lkey, in_off, in_lo, in_hi, rs, ppq, per):
+        args = (ax, ay, bx, by, length, ys, shift, lkey, in_off, in_lo, in_hi, rs, ppq, per)
+        got = self._tuple("band_all", args)
+        return got if got is not None else self.base.band_all(*args)
 
     def short_pieces(self, bs, be, bk, rs, re, rk, rd, least):
         args = (bs, be, bk, rs, re, rk, rd, least)
