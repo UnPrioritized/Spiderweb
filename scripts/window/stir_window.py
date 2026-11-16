@@ -1240,25 +1240,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         past OUTLINE_KEPT_MOST notes aren't checked (a second making of them)."""
         if not any(s["turn"] or s["twist"] or s["bulge"] or bends(s) for s in sts):
             return False
-        app, seen = self.app, False
-        for t in tgts:
-            r = t.get("recolour")
-            if not isinstance(r, dict) or not shape_tabs(r, t.get("off")):
-                continue
-            notes = app.notes_of(t)
-            if len(notes) > OUTLINE_KEPT_MOST:
-                return False
-            rest = colour_part(r)
-            plain = app.notes_of(dict(t, recolour=rest) if rest else without_recolour(t))
-            if len(plain) != len(notes):
-                return False
-            a, b = np.asarray(notes)[:, :3], np.asarray(plain)[:, :3]
-            a, b = a[np.lexsort((a[:, 0], a[:, 2]))], b[np.lexsort((b[:, 0], b[:, 2]))]  # (by key, then start)
-            # (same rows, each end within 1/32 beat: a bent curve is fitted again, a few ticks off)
-            if (a[:, 2] != b[:, 2]).any() or np.abs(a[:, :2] - b[:, :2]).max(initial=0) > max(app.ppq // 32, 1):
-                return False
-            seen = True
-        return seen
+        return outline_kept(self.app, tgts, lambda r, t: shape_tabs(r, t.get("off")))
 
     # ---- changes
 
@@ -1710,6 +1692,31 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.destroy()
         self.app.roll.focus_set()
         self.app.roll.request_redraw()
+
+
+def outline_kept(app, tgts, has):
+    """Whether every selected shape tgts with a Shape step (has(its recolour, it): Stir tabs / the Warp set to Shape)
+    makes the same notes as without its Shape steps (to 1/32 beat): the bend leaves the outline as it was (the
+    orange line in the Stir / Warp window). Shapes past OUTLINE_KEPT_MOST notes aren't checked."""
+    seen = False
+    for t in tgts:
+        r = t.get("recolour")
+        if not isinstance(r, dict) or not has(r, t):
+            continue
+        notes = app.notes_of(t)
+        if len(notes) > OUTLINE_KEPT_MOST:
+            return False
+        rest = colour_part(r)
+        plain = app.notes_of(dict(t, recolour=rest) if rest else without_recolour(t))
+        if len(plain) != len(notes):
+            return False
+        a, b = np.asarray(notes)[:, :3], np.asarray(plain)[:, :3]
+        a, b = a[np.lexsort((a[:, 0], a[:, 2]))], b[np.lexsort((b[:, 0], b[:, 2]))]  # (by key, then start)
+        # (same rows, each end within 1/32 beat: a bent curve is fitted again, a few ticks off)
+        if (a[:, 2] != b[:, 2]).any() or np.abs(a[:, :2] - b[:, :2]).max(initial=0) > max(app.ppq // 32, 1):
+            return False
+        seen = True
+    return seen
 
 
 def open_stir(app):

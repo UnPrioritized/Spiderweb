@@ -353,7 +353,8 @@ class RecolourPanel:
             self.recolour_mode.config(state="readonly" if tgts else "disabled")
         else:
             # (Off + a Stir counts too: it says why the stir shows nothing, hunt 2026-11-02)
-            lonely, single = self.recolour_trouble(tgts, act)
+            from notes.shape_bend import colour_part  # (Shape steps bend in every Channels mode: never orange)
+            lonely, single = self.recolour_trouble(tgts, [colour_part(r) if r else r for r in act])
             owns = [self.colour_owns(t) if r else [] for t, r in zip(tgts, on)]
             self.recolour_mode.config(state="readonly" if tgts else "disabled",
                                       style="Gap.TCombobox" if lonely or single else "TCombobox")

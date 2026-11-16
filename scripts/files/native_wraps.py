@@ -18,7 +18,7 @@ NEEDS = {
     "stir_wrap_one": ("stir_wrap",), "stir_bounce": ("stir_bounce",), "stir_bounce_one": ("stir_bounce",),
     "liquify_sample": ("liquify_sample",), "liquify_sample_one": ("liquify_sample",),
     "dice_mix": ("dice_mix",), "recolour_apart": ("recolour_apart",),
-    "warp_newton": ("warp_newton",), "warp_soft": ("warp_soft",), "warp_exact": ("warp_exact",),
+    "warp_newton": ("warp_newton",), "warp_soft": ("warp_soft",), "warp_exact": ("warp_exact",), "warp_bend": ("warp_bend",),
     "warp_soft2": ("warp_soft2",),
     "midi_events": ("midi_events", "take_bytes"), "midi_track": ("midi_track", "take_bytes"), "nearest": ("nearest",),
     "spread_line": ("spread_line",), "area_spots": ("area_spots",),
@@ -259,6 +259,9 @@ class Wraps:
 
     def warp_exact(self, P, smooth, lx, ly, a, near, x, y, steps, ox, oy):
         self._run("warp_exact", (P, smooth, lx, ly, a, near, x, y, steps, ox, oy, True), "warp_exact")
+
+    def warp_bend(self, P, smooth, lx, ly, x, y, ox, oy):
+        self._run("warp_bend", (P, smooth, lx, ly, x, y, ox, oy, True), "warp_bend")
 
     def warp_soft(self, at, idx, x, y, ox, oy, a, c, fp, ring, tstart, ta, tb, keys, first, last, line, ms, o, base,
                   top, gap, now, out):

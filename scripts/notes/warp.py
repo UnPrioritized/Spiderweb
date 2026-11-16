@@ -12,7 +12,8 @@ later, planned-features.md).
 Saved as {"cols": cells across, "rows": cells up, "pts": [[dx, dy], ...] row by row from the bottom left ((cols + 1)
 x (rows + 1) of them), "smooth": False (only for Straight cells), "strength": % (only != 100), "on": False (only when
 hidden), "edge": STIR_EDGES (only != "escape"), "edges": "smooth" (only for Colour edges: Smooth), "folds": "under"
-(only for Folds: pulled part underneath), "h": [[point, side, dx, dy], ...] (only curve handles dragged: each
+(only for Folds: pulled part underneath), "moves": "shape" (only when it bends the shape, not the colours;
++ "bend_colours": False when Colours bend too is off), "h": [[point, side, dx, dy], ...] (only curve handles dragged: each
 cell then a bicubic patch, net / _inner), "corners": [point, ...] (its handles move alone), "in": [[cell, slot, dx,
 dy], ...] (only after a split that needs them: a cell's inner controls off _inner's rule), "xs" / "ys": the inner
 grid lines' places across / up in the box (only when not evenly spaced: Split, user 2026-11-09), "preset": [name,
@@ -111,6 +112,11 @@ def clean_warp(d, keep=False):
         out["edges"] = "smooth"
     if d.get("folds") == "under":
         out["folds"] = "under"
+    if d.get("moves") == "shape":  # (bends the shape itself, not its colours: notes/shape_bend.py, PLAN.md "Deform
+        # shapes" stage F; "bend_colours": False = Colours bend too off, only with Shape)
+        out["moves"] = "shape"
+        if d.get("bend_colours") is False:
+            out["bend_colours"] = False
     h = _clean_handles(d.get("h"), c, r)
     inner = _clean_inner(d.get("in"), c, r)
     preset = None
@@ -1347,6 +1353,16 @@ def remove_mirrored(wp, way, k):
 
 
 REFIT_STEPS = 8  # (spots per cell the re-fit compares at)
+
+
+KIND_KEYS = ("moves", "bend_colours")  # (what the Warp bends: Colours / Shape + Colours bend too, stage F)
+
+
+def kind_kept(new, old):
+    """A Warp new made from old (a split, removed line, grid size, preset) keeping what old bends (Shape)."""
+    if not new or not isinstance(old, dict) or "moves" in new:
+        return new
+    return dict(new, **{k: old[k] for k in KIND_KEYS if k in old})
 
 
 def shows(d):

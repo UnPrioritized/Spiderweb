@@ -50,6 +50,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   rows_fill      custom.rows_spans: closed loops' inside on key rows, in ticks (each Nested / Ripples copy)
   cut_rows       custom.cut_out: stretches with what others cover on their key taken out
   box_rows       shape_bend._boxes_rows (Stir Shape tabs on notes): bent note boxes cut by key rows
+  warp_bend      warp.bend_at: the Warp's bend forwards at each spot (the Warp set to Shape: note corners)
   short_pieces   nested.shortest_pieces (Nested's Shortest piece box): pieces on top, short ones merged, a heap
   band_all       nested.band_steps (Nested Even band): every step at once, key by key, a heap of the edges near
                  what each line still keeps
@@ -945,6 +946,39 @@ def warp_newton(P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps, give_st
     """warp_newton_one on half the cores (on_cores)."""
     on_cores(_warp_newton_cores, warp_newton_one, len(px), P, px, py, smooth, lx, ly, sx, sy, bounds, has_b, steps,
              give_step, give_far, bx, by, best)
+
+
+@njit(nogil=True)
+def _bend_one(i, P, smooth, lx, ly, x, y, ox, oy):
+    """warp.bend_at for spot i: how far it moves forward (the same sums in the same order)."""
+    ex = _even_at(x[i], lx)[0] if len(lx) else x[i]
+    ey = _even_at(y[i], ly)[0] if len(ly) else y[i]
+    if smooth == 2:
+        v = _net_at(P, ex, ey)
+    elif smooth:
+        v = _eased_at(P, ex, ey)
+    else:
+        v = _straight_at(P, ex, ey)
+    ox[i], oy[i] = v[0], v[1]
+
+
+@njit(nogil=True)
+def warp_bend_one(P, smooth, lx, ly, x, y, ox, oy):
+    """warp.bend_at forwards at every spot (ox, oy: how far each moves); smooth = the kind (0 Straight cells,
+    1 Smooth, 2 a control net), lx / ly a split grid's lines (empty = even). One core."""
+    for i in range(len(x)):
+        _bend_one(i, P, smooth, lx, ly, x, y, ox, oy)
+
+
+@njit(nogil=True, parallel=True)
+def _warp_bend_cores(P, smooth, lx, ly, x, y, ox, oy):
+    for i in prange(len(x)):
+        _bend_one(i, P, smooth, lx, ly, x, y, ox, oy)
+
+
+def warp_bend(P, smooth, lx, ly, x, y, ox, oy):
+    """warp_bend_one on half the cores (on_cores)."""
+    on_cores(_warp_bend_cores, warp_bend_one, len(x), P, smooth, lx, ly, x, y, ox, oy)
 
 
 @njit(nogil=True)
@@ -5245,6 +5279,9 @@ def warm():
     short_pieces(z1, z1 + 9, z1, z1 + 1, z1 + 3, z1, z1 + 1, 5)
     cut_rows(z1, z1 + 9, z1, z1, z1 + 2, z1 + 4, np.zeros((3, 2), np.int64))
     box_rows(np.array([0.0, 9.0, 9.0, 0.0]), np.array([-0.5, -0.5, 0.5, 0.5]), z1, z1 + 1, np.zeros((4, 4), np.int64))
+    for kind, g in ((0, 2), (1, 2), (2, 4)):
+        warp_bend(np.zeros((g, g, 2)), kind, np.zeros(0), np.zeros(0), np.full(1, 0.5), np.full(1, 0.5), np.zeros(1),
+                  np.zeros(1))
     sq = np.array([0.0, 1.0])
     rows_fill(sq, np.array([0.0, 3.0]), sq, np.array([3.0, 0.0]), 0, 3, 960, False)
     rows_fill(sq, np.array([0.0, 3.0]), sq, np.array([3.0, 0.0]), 0, 3, 960, True)

@@ -81,7 +81,7 @@ class WarpGrid:
                 g = wp_.full(got)
             else:
                 g = wp_.full(dict(wp_.empty(w.cols, w.rows), smooth=w.smooth, edge=w.edge, edges=w.edges,
-                                     folds=w.folds))
+                                     folds=w.folds, **w.kind_picks()))
             out.append({"sh": sh, "made": made, "wp": g, "P": wp_.offsets(g, strength=False)})
         return out
 
@@ -974,7 +974,7 @@ class WarpGrid:
             if self.app.colour_edit_start(("warp", 0)):
                 self.redraw()
             job["a"], job["exact"] = self.warp_map(g), self.warp_solver(g)
-            st["way"] = self.liquify_way(st["jobs"])
+            st["way"] = self.warp_way(st)
         if hw is not None:
             hw["on"] = g["wp"].get("on", True)  # (warp_first may have shown a hidden Warp)
             g["wp"] = job["warp"] = wp_.full(hw)
@@ -1013,6 +1013,13 @@ class WarpGrid:
             self.warp_apply(st, now=True)
             self.redraw()
             st["jobs"][0]["made"] = g["made"] = self.stir_made(st["sh"], "warp") or g["made"]
+
+    def warp_way(self, st):
+        """How a drag shows (liquify_way's): a Warp set to Shape moves notes, so never the colours-only Live
+        painting: its notes made again every LIVE_MS ("full"; PLAN.md "Deform shapes" stage F)."""
+        if st["g"]["wp"].get("moves") == "shape":
+            return "full"
+        return self.liquify_way(st["jobs"])
 
     @staticmethod
     def warp_map(g):
@@ -1058,7 +1065,7 @@ class WarpGrid:
             job["made"] = st["g"]["made"] = self.stir_made(job["sh"], "warp") or job["made"]
             # (Live starts from the grid as it's now made)
             job["a"], job["exact"] = self.warp_map(st["g"]), self.warp_solver(st["g"])
-        st["way"] = self.liquify_way(st["jobs"])
+        st["way"] = self.warp_way(st)
         if st["way"] == "later":
             st["way"] = "full"
 
@@ -1069,7 +1076,7 @@ class WarpGrid:
         base = dict(old) if old else {"mode": KEEP, "seed": new_seed()}
         got = wp_.clean_warp(dict(g["wp"], pts=g["P"].reshape(-1, 2).tolist()))
         if got:
-            base["warp"] = got
+            base["warp"] = wp_.kind_kept(got, (old or {}).get("warp"))  # (a split / removed line keeps Shape)
         else:
             base.pop("warp", None)
         new = ordered(old, clean_recolour(base))  # (a first Warp goes at the end of the colour steps' order)

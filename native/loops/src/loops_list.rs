@@ -101,6 +101,8 @@ py_loops! {
     cut_rows(s: &[i64], e: &[i64], k: &[i64], ok: &[i64], os: &[i64], oe: &[i64], out: NdMut<i64, 2>)
              => crate::fills::cut_rows;
     box_rows(xs: &[f64], ys: &[f64], lo: &[i64], cnt: &[i64], out: NdMut<i64, 2>) => crate::fills::box_rows;
+    warp_bend(p: Nd<f64, 3>, kind: i64, lx: &[f64], ly: &[f64], x: &[f64], y: &[f64], ox: &mut [f64],
+              oy: &mut [f64], many: bool) => crate::recolour::warp_bend;
     short_pieces(bs: &[i64], be: &[i64], bk: &[i64], rs: &[i64], re: &[i64], rk: &[i64], rd: &[i64], least: i64)
                  -> arrays => crate::fills::short_pieces;
     dc_block(x: NdMut<f32, 2>, c: &[f64], z: NdMut<f64, 2>) => crate::misc::dc_block;

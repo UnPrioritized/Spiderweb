@@ -74,6 +74,10 @@ class WarpWindow(tk.Toplevel):
         self.edges = edges if edges in wp_.EDGES else wp_.DEFAULTS["edges"]
         folds = settings.get("warp", "folds", wp_.DEFAULTS["folds"])
         self.folds = folds if folds in wp_.FOLDS else wp_.DEFAULTS["folds"]
+        # (Moves: Colours / Shape, PLAN.md "Deform shapes" stage F; + Colours bend too: shapes without a Warp take
+        # them at their first drag, settings.ini [warp] moves / bend_colours)
+        self.moves = "shape" if settings.get("warp", "moves", "colours") == "shape" else "colours"
+        self.bend_colours_pick = settings.get("warp", "bend_colours", "1") != "0"
         self._fit = {}  # fit_key(the Warp a size change left) -> the Warp before the first size change
         # (Preset: the last one picked + its Bend % / way, for shapes without one yet; settings.ini [warp])
         p = pr.ok([settings.get("warp", "preset", "arc"), _number(settings.get("warp", "preset_bend", "50"), 50.0),
@@ -90,6 +94,22 @@ class WarpWindow(tk.Toplevel):
         self.what.pack(anchor="w", fill="x")
         form = ttk.Frame(box)
         form.pack(anchor="w", fill="x", pady=(8, 0))
+        # (Moves: Colours / Shape on top (row 0), like the Stir window's; Colours bend too beside it, live on Shape)
+        word = ttk.Label(form, text=tr("stir.moves"))
+        word.grid(row=0, column=0, sticky="w", pady=(0, 6))
+        Tooltip(word, tr("warp.moves_tip"))
+        top = ttk.Frame(form)
+        top.grid(row=0, column=1, sticky="w", padx=(6, 0), pady=(0, 6))
+        values = [tr("stir.moves_colours"), tr("stir.moves_shape")]
+        b = self.moves_box = ttk.Combobox(top, values=values, state="readonly", width=max(len(v) for v in values) + 1)
+        b.pack(side="left")
+        b.bind("<<ComboboxSelected>>", lambda e: self.on_moves())
+        Tooltip(b, tr("warp.moves_tip"))
+        self.bend_colours = tk.BooleanVar(value=True)
+        t = self.bend_colours_tick = ttk.Checkbutton(top, text=tr("stir.bend_colours"), variable=self.bend_colours,
+                                                     command=self.on_bend_colours)
+        t.pack(side="left", padx=(12, 0))
+        Tooltip(t, tr("warp.bend_colours_tip"))
         self.boxes = {}
         grids = [tr("warp.grid_n", cols=c, rows=r) for c, r in wp_.GRIDS] + [tr("warp.custom")]
         # (rows: Grid size, its Custom boxes, Preset, its Bend % + way, then Cells (the old "Bend:" row, renamed so
@@ -102,21 +122,21 @@ class WarpWindow(tk.Toplevel):
                 ("edge", [tr(f"stir.edge_{c}") for c in STIR_EDGES], self.on_edge, 7))
         for name, values, act, r in rows:
             word = ttk.Label(form, text=tr(f"warp.{name}"))
-            word.grid(row=r, column=0, sticky="w", pady=2)
+            word.grid(row=r + 1, column=0, sticky="w", pady=2)
             Tooltip(word, tr(f"warp.{name}_tip"))
             wide = values + ([tr("warp.preset_none"), tr("warp.preset_custom")] if name == "preset" else [])
             b = ttk.Combobox(form, values=values, state="readonly", width=max(len(v) for v in wide) + 1)
-            b.grid(row=r, column=1, sticky="w", padx=(6, 0), pady=2)
+            b.grid(row=r + 1, column=1, sticky="w", padx=(6, 0), pady=2)
             b.bind("<<ComboboxSelected>>", lambda e, act=act: act())
             Tooltip(b, tr(f"warp.{name}_tip"))
             self.boxes[name] = b
         # (the preset's Bend % (-100 .. 100, a number box like Strength) + Across / Up (greyed for the round ones);
         # each change lays the preset again: one undo step, a held label drag one step too)
         word = ttk.Label(form, text=tr("warp.amount"))
-        word.grid(row=3, column=0, sticky="w", pady=2)
+        word.grid(row=4, column=0, sticky="w", pady=2)
         Tooltip(word, tr("warp.amount_tip"))
         arow = ttk.Frame(form)
-        arow.grid(row=3, column=1, sticky="w", padx=(6, 0), pady=2)
+        arow.grid(row=4, column=1, sticky="w", padx=(6, 0), pady=2)
         self.amount_var = tk.StringVar()
         e = self.amount_entry = ttk.Entry(arow, textvariable=self.amount_var, width=6)
         e.pack(side="left")
@@ -137,11 +157,11 @@ class WarpWindow(tk.Toplevel):
         # (Mirror: a drawing aid (user 2026-11-09, PLAN C3): a dragged point's twins move mirrored across the grid's
         # middle as shown on the piano roll; settings.ini only, never the shapes')
         word = ttk.Label(form, text=tr("warp.mirror"))
-        word.grid(row=8, column=0, sticky="w", pady=2)
+        word.grid(row=9, column=0, sticky="w", pady=2)
         Tooltip(word, tr("warp.mirror_tip"))
         values = [tr(f"warp.mirror_{m}") for m in MIRRORS]
         b = ttk.Combobox(form, values=values, state="readonly", width=max(len(v) for v in values) + 1)
-        b.grid(row=8, column=1, sticky="w", padx=(6, 0), pady=2)
+        b.grid(row=9, column=1, sticky="w", padx=(6, 0), pady=2)
         b.bind("<<ComboboxSelected>>", lambda e: self.on_mirror())
         Tooltip(b, tr("warp.mirror_tip"))
         self.boxes["mirror"] = b
@@ -169,10 +189,10 @@ class WarpWindow(tk.Toplevel):
         # (Strength % + the show tick: the shapes' own (user 2026-11-09: inside this window, not the side panel);
         # one undo step each, several picked and different = blank box / half tick, typing sets all)
         word = ttk.Label(form, text=tr("warp.strength"))
-        word.grid(row=9, column=0, sticky="w", pady=2)
+        word.grid(row=10, column=0, sticky="w", pady=2)
         Tooltip(word, tr("warp.strength_tip"))
         srow = ttk.Frame(form)
-        srow.grid(row=9, column=1, sticky="w", padx=(6, 0), pady=2)
+        srow.grid(row=10, column=1, sticky="w", padx=(6, 0), pady=2)
         self.strength_var = tk.StringVar()
         e = self.strength_entry = ttk.Entry(srow, textvariable=self.strength_var, width=6)
         e.pack(side="left")
@@ -190,10 +210,10 @@ class WarpWindow(tk.Toplevel):
         # (Split, PLAN.md "Warp Split" B: a button picked = the next click on a grid on the piano roll adds the
         # line(s) there; it lets go after one click, a second click on it or Esc lets go too)
         word = ttk.Label(form, text=tr("warp.split"))
-        word.grid(row=10, column=0, sticky="w", pady=2)
+        word.grid(row=11, column=0, sticky="w", pady=2)
         Tooltip(word, tr("warp.split_tip"))
         prow = ttk.Frame(form)
-        prow.grid(row=10, column=1, sticky="w", padx=(6, 0), pady=2)
+        prow.grid(row=11, column=1, sticky="w", padx=(6, 0), pady=2)
         self.split_mode = ""
         self.split_var = tk.StringVar(value="")
         self.split_buttons = {}
@@ -251,14 +271,55 @@ class WarpWindow(tk.Toplevel):
                 self._keys.pop(next(iter(self._keys)))
         return hit[1]
 
-    def _change(self, set_to, name):
+    def hint_text(self):
+        """The hint: bending the shape (every selected Warp, or the window's pick, set to Shape) or its colours."""
+        ws = self.warps() if self.targets() else []
+        kinds = {(w.get("moves") if w else self.moves) or "colours" for w in ws} or {self.moves}
+        return tr("warp.hint_shape" if kinds == {"shape"} else "warp.hint")
+
+    def kind_picks(self):
+        """What a shape's first drag takes from the window: Moves (+ Colours bend too off), as saved in a Warp."""
+        if self.moves != "shape":
+            return {}
+        return {"moves": "shape", **({} if self.bend_colours_pick else {"bend_colours": False})}
+
+    def on_moves(self):
+        """Moves: Colours / Shape picked: the selected shapes' Warps bend that (one undo step); the window's pick for
+        shapes without a Warp yet."""
+        i = self.moves_box.current()
+        if i < 0:
+            return
+        self.moves = ("colours", "shape")[i]
+        put("moves", self.moves)
+
+        def set_to(w, sh):
+            out = {k: v for k, v in w.items() if k not in wp_.KIND_KEYS}
+            return dict(out, moves="shape") if self.moves == "shape" else out
+        self._change(set_to, tr("warp.undo_moves"), keep_kind=False)
+
+    def on_bend_colours(self):
+        v = bool(self.bend_colours.get())
+        self.bend_colours_tick.state(["!alternate"])
+        self.bend_colours_pick = v
+        put("bend_colours", "1" if v else "0")
+
+        def set_to(w, sh):
+            if w.get("moves") != "shape":
+                return w
+            out = {k: x for k, x in w.items() if k != "bend_colours"}
+            return out if v else dict(out, bend_colours=False)
+        self._change(set_to, tr("warp.undo_bend_colours"), keep_kind=False)
+
+    def _change(self, set_to, name, keep_kind=True):
         """Every selected shape's Warp changed by set_to(its warp, the shape) -> new warp (None = no Warp); one undo
-        step."""
+        step. keep_kind: the new Warp bends what the old one did (Colours / Shape)."""
         def change(old, sh):
             got = (old or {}).get("warp")
             if not got:
                 return old
             new = set_to(got, sh)
+            if keep_kind:
+                new = wp_.kind_kept(new, got)
             out = dict(old)
             if new:
                 out["warp"] = new
@@ -482,7 +543,7 @@ class WarpWindow(tk.Toplevel):
         """The Split button picked ("" = none): the hint says what a click does, the piano roll's pointer follows."""
         self.split_mode = mode
         self.split_var.set(mode)
-        self.hint.config(text=tr("warp.split_hint" if mode else "warp.hint"))
+        self.hint.config(text=tr("warp.split_hint") if mode else self.hint_text())
         roll = self.app.roll
         roll.configure(cursor="crosshair" if mode else "")
         if mode:
@@ -534,10 +595,38 @@ class WarpWindow(tk.Toplevel):
                          tr("warp.shape", name=app.shape_label(tgts[0])) if len(tgts) == 1 else
                          tr("warp.n_shapes", n=len(tgts)))
         rcs = [self.cleaned(t)[0] for t in tgts]
-        lonely, single = app.recolour_trouble(tgts, [r or {"mode": KEEP} for r in rcs])
         ws = self.warps()
+        # (Moves: each shape's own, a shape without a Warp = the window's pick; Shape greys the colour-only rows)
+        kinds = {(w.get("moves") if w else self.moves) or "colours" for w in ws} or {self.moves}
+        shape = kinds == {"shape"}
+        if len(kinds) > 1:
+            self.moves_box.set("")
+        else:
+            self.moves_box.current(("colours", "shape").index(next(iter(kinds))))
+        bends_ = {w.get("bend_colours", True) if w else self.bend_colours_pick
+                  for w in ws if (w.get("moves") if w else self.moves) == "shape"} or {self.bend_colours_pick}
+        self.bend_colours.set(bends_ == {True})
+        self.bend_colours_tick.state(["alternate" if len(bends_) > 1 else "!alternate",
+                                      "!disabled" if "shape" in kinds else "disabled"])
+        pictures = tgts and all("picture" in t or "picture_notes" in t for t in tgts)  # (pictures: Shape greyed, user)
+        self.moves_box.config(state="readonly" if tgts and not pictures else "disabled")
+        for name in ("edges", "folds", "edge"):  # (which colour a note takes: nothing to do with a bent shape)
+            self.boxes[name].config(state="disabled" if shape else "readonly")
+        if not self.split_mode:
+            text = tr("warp.hint_shape" if shape else "warp.hint")
+            if self.hint.cget("text") != text:
+                self.hint.config(text=text)
+        if shape:  # (any Channels mode, any colours: the shape bends; orange when its outline stays as it was)
+            from notes.shape_bend import warp_shape
+            from window.stir_window import outline_kept
+            lonely = single = False
+            same = outline_kept(app, tgts, lambda r, t: warp_shape(r, t.get("off")) is not None)
+        else:
+            lonely, single = app.recolour_trouble(tgts, [r or {"mode": KEEP} for r in rcs])
+            same = False
         zero = ws and all(w and w["strength"] == 0 for w in ws)
-        text = tr("warp.needs") if lonely else tr("warp.one") if single else tr("warp.zero") if zero else ""
+        text = (tr("warp.needs") if lonely else tr("warp.one") if single else tr("warp.zero") if zero else
+                tr("warp.shape_same") if same else "")
         if text != self.warn.cget("text"):
             self.warn.config(text=text)
             if text:
@@ -597,7 +686,7 @@ class WarpWindow(tk.Toplevel):
         if show != self.cells_shown:
             self.cells_shown = show
             if show:
-                self.cells_row.grid(row=1, column=1, sticky="w", padx=(6, 0), pady=2)
+                self.cells_row.grid(row=2, column=1, sticky="w", padx=(6, 0), pady=2)
             else:
                 self.cells_row.grid_remove()
         if not getattr(app.roll, "wp", None):  # (the grid on the piano roll: as the shapes are now)

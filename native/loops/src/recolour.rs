@@ -628,6 +628,55 @@ pub fn warp_newton(p: Nd<f64, 3>, px: &[f64], py: &[f64], kind: i64, lx: &[f64],
     0
 }
 
+/// fastloops._warp_bend_one: the Warp's bend FORWARD at each spot (warp.bend_at: how far it moves, (across, up));
+/// the Warp set to Shape bends a shape's note corners with it (PLAN.md "Deform shapes" stage F).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn bend_range_inner(x: &[f64], y: &[f64], p: &[f64], gy: usize, gx: usize, kind: i64, lx: &[f64], ly: &[f64],
+                    ox: &mut [f64], oy: &mut [f64]) {
+    for j in 0..x.len() {
+        let ex = if lx.is_empty() { x[j] } else { even_at(x[j], lx).0 };
+        let ey = if ly.is_empty() { y[j] } else { even_at(y[j], ly).0 };
+        let v = if kind == 2 {
+            net_at(p, gy, gx, ex, ey)
+        } else if kind == 1 {
+            eased_at(p, gy, gx, ex, ey)
+        } else {
+            straight_at(p, gy, gx, ex, ey)
+        };
+        (ox[j], oy[j]) = (v[0], v[1]);
+    }
+}
+level_builds!(fn bend_range(x: &[f64], y: &[f64], p: &[f64], gy: usize, gx: usize, kind: i64, lx: &[f64],
+                            ly: &[f64], ox: &mut [f64], oy: &mut [f64]) => bend_range_inner);
+
+/// fastloops.warp_bend (p / kind / lx / ly as warp_newton's; many = shared out) -> 0.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub fn warp_bend(p: Nd<f64, 3>, kind: i64, lx: &[f64], ly: &[f64], x: &[f64], y: &[f64], ox: &mut [f64],
+                 oy: &mut [f64], many: bool) -> i64 {
+    let n = x.len();
+    let (gy, gx) = (p.sh[0], p.sh[1]);
+    if p.sh[2] != 2 || gy < 2 || gx < 2 || !(0..=2).contains(&kind)
+        || (kind == 2 && (gy < 4 || gx < 4 || (gy - 1) % 3 != 0 || (gx - 1) % 3 != 0))
+        || lx.len() == 1 || ly.len() == 1 || y.len() < n || ox.len() < n || oy.len() < n {
+        return crate::FAILED;
+    }
+    let (y, ox, oy) = (&y[..n], &mut ox[..n], &mut oy[..n]);
+    match crate::pool_for(many, n, 1) {
+        None => bend_range(x, y, p.d, gy, gx, kind, lx, ly, ox, oy),
+        Some(pool) => {
+            let chunk = (n / (pool.current_num_threads() * 8)).max(256);
+            pool.install(|| {
+                (x.par_chunks(chunk), y.par_chunks(chunk), ox.par_chunks_mut(chunk), oy.par_chunks_mut(chunk))
+                    .into_par_iter()
+                    .for_each(|(xc, yc, oa, ob)| bend_range(xc, yc, p.d, gy, gx, kind, lx, ly, oa, ob));
+            });
+        }
+    }
+    0
+}
+
 /// fastloops._landed: the spot's map cell is one a fold lands on (near: (gy - 1) x (gx - 1), or empty).
 #[inline(always)]
 fn landed(near: &[u8], gy: usize, gx: usize, x: f64, y: f64) -> bool {

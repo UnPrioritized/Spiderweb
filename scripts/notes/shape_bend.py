@@ -73,6 +73,36 @@ def shape_tabs(r, off=()):
     return [s for s in stack if is_shape(s) and _moves(s)]
 
 
+def is_shape_warp(r):
+    """Whether a saved Recolour's Warp bends the shape (Warp set to Shape, stage F), however flat."""
+    return isinstance(r, dict) and isinstance(r.get("warp"), dict) and r["warp"].get("moves") == "shape"
+
+
+def has_shape(r):
+    """Whether a saved Recolour holds a Shape step (a Stir tab or the Warp set to Shape)."""
+    return bool(shape_places(r)) or is_shape_warp(r)
+
+
+def warp_shape(r, off=()):
+    """A saved Recolour's Warp when it is set to Shape and bends something now (clean), else None: switched off in
+    Properties, hidden, flat, or skipped while a Shape Stir tab is edited (Shape steps run Stir tabs -> Warp)."""
+    if not is_shape_warp(r) or ["warp", 0] in [list(e) for e in off or ()]:
+        return None
+    from notes.warp import clean_warp, shows
+    wp = shows(clean_warp(r["warp"]))
+    if wp is None:
+        return None
+    u = r.get("_upto")
+    if isinstance(u, int) and not isinstance(u, bool):
+        order = rc.order_of(rc.clean_recolour(r) or {})
+        if 0 <= u < len(order) and order[u] == "stir":
+            stack = rc.stir_stack(r.get("stir"))
+            n = order[:u + 1].count("stir") - 1
+            if n < len(stack) and is_shape(stack[n]):
+                return None
+    return wp
+
+
 def _moves(st):
     """Whether a filled-in Shape stir moves anything at all."""
     return bool(st["turn"] % 360 or st["twist"] or st["bulge"] or st["polar"] or st["ripple"] or st["wring"]
@@ -86,12 +116,13 @@ def colour_part(r):
         return r
     s = r.get("stir")
     items = s if isinstance(s, list) else ([s] if isinstance(s, dict) else [])
-    if not any(is_shape(x) for x in items):
+    warp = is_shape_warp(r)  # (the Warp set to Shape goes too, stage F)
+    if not any(is_shape(x) for x in items) and not warp:
         return r
     keep, gone = [], []
     for i, x in enumerate(items):
         (gone if is_shape(x) else keep).append(i if is_shape(x) else x)
-    out = {k: v for k, v in r.items() if k not in ("stir", "order")}
+    out = {k: v for k, v in r.items() if k not in ("stir", "order") and not (warp and k == "warp")}
     if keep:
         out["stir"] = keep if len(keep) > 1 else keep[0]
     o = r.get("order")
@@ -102,6 +133,8 @@ def colour_part(r):
                 n += 1
                 if n in gone:
                     continue
+            if k == "warp" and warp:
+                continue
             new.append(k)
         out["order"] = new
     u = r.get("_upto")  # (a step being edited, later ones skipped: App.edit_shapes. Counted again without the
@@ -109,6 +142,8 @@ def colour_part(r):
     if isinstance(u, int) and not isinstance(u, bool):
         n, gone_at = -1, []
         for j, k in enumerate(rc.order_of(rc.clean_recolour(r) or {})):
+            if k == "warp" and warp:
+                gone_at.append(j)
             if k == "stir":
                 n += 1
                 if n in gone:
@@ -128,17 +163,25 @@ def shape_only(r):
         return None
     s = r.get("stir")
     tabs = [x for x in (s if isinstance(s, list) else [s]) if is_shape(x)]
-    if not tabs:
+    warp = is_shape_warp(r)
+    if not tabs and not warp:
         return None
-    out = {"mode": "keep", "seed": 1, "stir": tabs if len(tabs) > 1 else tabs[0]}
+    out = {"mode": "keep", "seed": 1}
+    if tabs:
+        out["stir"] = tabs if len(tabs) > 1 else tabs[0]
+    if warp:
+        out["warp"] = r["warp"]
     for k in ("frame", "ppq"):
         if k in r:
             out[k] = r[k]
     u = r.get("_upto")  # (a Shape tab being edited: the same tab marked among the Shape tabs kept (hunt 2026-11-17);
-    # a colour step being edited hides no Shape tab: they all run first)
+    # a colour step being edited hides no Shape tab: they all run first. Kept order: the tabs, then the Warp)
     if isinstance(u, int) and not isinstance(u, bool):
         n, m = -1, -1
         for j, k in enumerate(rc.order_of(rc.clean_recolour(r) or {})):
+            if k == "warp" and warp and j == u:
+                out["_upto"] = len(tabs)
+                break
             if k == "stir":
                 n += 1
                 items = s if isinstance(s, list) else [s]
@@ -160,10 +203,15 @@ def grown_reach(sh, r):
     if r is None or not isinstance(sh.get("recolour"), dict):
         return r
     tabs = shape_tabs(sh["recolour"], sh.get("off"))
-    if not tabs:
+    wp = warp_shape(sh["recolour"], sh.get("off"))
+    if not tabs and wp is None:
         return r
     w, h = max(r[3] - r[0], 1e-9), max(r[2] - r[1], 1e-9)
     x0, x1, y0, y1 = 0.0, 1.0, 0.0, 1.0
+    if wp is not None:  # (a Warp moves a spot by a blend of its points / handles: never farther than the farthest)
+        from notes.warp import shape_of
+        P = np.abs(shape_of(wp)[0]).reshape(-1, 2).max(0)
+        x0, x1, y0, y1 = -P[0], 1 + P[0], -P[1], 1 + P[1]
     for st in tabs:
         cx, cy = (v / 100 for v in st["centre"])
         rx = ry = 1.0
@@ -335,6 +383,68 @@ class StirBend:
         return np.column_stack((t, k))
 
 
+class WarpBend(StirBend):
+    """The Warp set to Shape (stage F), forwards: a spot goes where the grid's bend takes it (warp.bend_at: the
+    colour at a point's place shows where it went = the outline at a point's place goes where it went). Measured in
+    the same colour box as the Stir tabs (the box stays put). Backwards (look: holes between bent notes, Colours bend
+    too) = the Warp's own turned-round map + its exact Newton fetch, as the colours use (warp.warped)."""
+
+    def __init__(self, wp, r, box, own, ppq):
+        from notes import warp
+        self.wp, self.r = wp, dict(r or {}, ppq=ppq)
+        self.box, self.own = box, own
+        f = self.r.get("frame") or rc.SAME
+        self.turned = bool(f[1])
+        self.flip_x = not self.turned and f[0] < 0
+        self.flip_y = not self.turned and f[3] < 0
+        self.P, self.kind = warp.shape_of(wp)
+        self.L = warp.uneven(wp)
+        self.worst = 0.0
+        self.st = {"ripple": 0.0, "ripple_len": 100.0}
+        self._map = None
+
+    def forward_unit(self, qx, qy):
+        from notes.warp import bend_at
+        qx, qy = np.array(qx, np.float64, ndmin=1), np.array(qy, np.float64, ndmin=1)
+        if not len(qx):
+            return qx, qy
+        fast = compiled("warp_bend") if len(qx) >= FAST_LEAST else None
+        if fast:  # (files/fastloops.warp_bend: bend_at's very sums, on half the cores)
+            to = np.ascontiguousarray
+            X, Y = self.L or (None, None)
+            ox, oy = np.empty_like(qx), np.empty_like(qy)
+            fast.warp_bend(to(self.P, np.float64), int(self.kind), to(X, np.float64) if X is not None else np.zeros(0),
+                           to(Y, np.float64) if Y is not None else np.zeros(0), to(qx), to(qy), ox, oy)
+            return qx + ox, qy + oy
+        d = np.asarray(bend_at(self.P, qx, qy, self.kind, self.L), np.float64).reshape(-1, 2)
+        return qx + d[:, 0], qy + d[:, 1]
+
+    def look(self, x, y, st=None):
+        from notes import warp
+        from notes.liquify import sample
+        x, y = np.array(x, np.float64, ndmin=1), np.array(y, np.float64, ndmin=1)
+        shape = x.shape
+        x, y = x.ravel(), y.ravel()
+        if self._map is None:
+            self._map = warp.inverse_map(self.wp)
+        a = self._map
+        d = sample(a, x, y) if len(x) else np.zeros((0, 2))
+        ox, oy = warp.exact_offsets(warp.solver(self.wp), a, x, y)
+        ox = np.where(np.isfinite(ox), ox, d[:, 0])
+        oy = np.where(np.isfinite(oy), oy, d[:, 1])
+        return (x + ox).reshape(shape), (y + oy).reshape(shape)
+
+    def look_tk(self, t, k):
+        x, y = self.to_unit(t, k)
+        x, y = self.look(x, y)
+        return self.from_unit(x, y)
+
+    def within(self, t, k):
+        x, y = self.to_unit(t, k)
+        P = np.abs(self.P).reshape(-1, 2).max(0)
+        return (x >= -P[0] - 1e-9) & (x <= 1 + P[0] + 1e-9) & (y >= -P[1] - 1e-9) & (y <= 1 + P[1] + 1e-9)
+
+
 class Board(dict):
     """A bender for notes/deform.py's line work: its own board (u, v) both ways to (tick, key), every Shape tab's
     bend in turn between. "ripple" / "ripple_len": the shortest wave of the tabs, in % of the board (deform checks a
@@ -365,24 +475,35 @@ AS_NOTES = "notes"  # (bent_shape: lines this way can't be bent (funnel, Glissan
 # Last note per dot): its notes bent like pasted notes, hunt 2026-11-17)
 
 
-def bent_shape(sh, tabs, r, box, own, ppq):
+def bent_shape(sh, tabs, r, box, own, ppq, wp=None):
     """sh (its Recolour already without the Shape tabs) with its lines bent by Stir tabs (filled in, Shape, in tab
-    order), None when it can't be bent this way (left as it is), or PULL when a tab folds the shape (Straight to
-    round, Kaleidoscope, or a point found with no single place to go). r: the Recolour (frame / ppq); box, own: the
-    colour box of its notes before the bend (recolour.colour_box). Custom shapes: each stroke bent on its own board
-    (curves stay curves, deform.bent_stroke); text and polygons become their strokes. Lines: the drawn path."""
+    order) and then the Warp wp set to Shape (clean, or None), None when it can't be bent this way (left as it is),
+    or PULL when a tab folds the shape (Straight to round, Kaleidoscope, or a point found with no single place to go).
+    r: the Recolour (frame / ppq); box, own: the colour box of its notes before the bend (recolour.colour_box). Custom
+    shapes: each stroke bent on its own board (curves stay curves, deform.bent_stroke); text and polygons become their
+    strokes. Lines: the drawn path. (A folded Warp grid only makes lines cross: lines way.)"""
     if any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
         return PULL
     try:
-        return _bent_shape(sh, tabs, r, box, own, ppq)
+        return _bent_shape(sh, tabs, r, box, own, ppq, wp)
     except Folded:
         return PULL
 
 
-def _bent_shape(sh, tabs, r, box, own, ppq):
+def benders_of(tabs, wp, r, box, own, ppq):
+    """Every Shape step's bender in the order they run: the Stir tabs, then the Warp."""
+    out = [StirBend(st, r, box, own, ppq) for st in tabs]
+    if wp is not None:
+        out.append(WarpBend(wp, r, box, own, ppq))
+    return out
+
+
+def _bent_shape(sh, tabs, r, box, own, ppq, wp=None):
     from notes import deform
-    benders = [StirBend(st, r, box, own, ppq) for st in tabs]
+    benders = benders_of(tabs, wp, r, box, own, ppq)
     waves = [st["ripple_len"] / 100 for st in tabs if st["ripple"]]
+    if wp is not None:  # (lines looked at finer than a grid cell: deform cuts them where the bend curves them)
+        waves.append(0.5 / max(wp["cols"], wp["rows"]))
     wave = min(waves) if waves else None
     kind = sh.get("kind")
     if kind == "custom":

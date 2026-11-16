@@ -1,4 +1,4 @@
-Warp… (side panel, Deform row, between [page:stir|Stir…] and [page:liquify|Liquify…]; also the shape's right-click menu, Deform ▸) bends the colours inside a shape with a grid of points, the way the Warp tool of photo editing programs bends a picture. Drag a point on the piano roll and the colours around it follow like rubber. The notes themselves never move or change length: only which colour (channel) each note has changes. No colour is added or blended: every note takes the colour of the note the bend pulled into its place.
+Warp… (side panel, Deform row, between [page:stir|Stir…] and [page:liquify|Liquify…]; also the shape's right-click menu, Deform ▸) bends the colours inside a shape (or the shape itself: see "Bending the shape itself" below) with a grid of points, the way the Warp tool of photo editing programs bends a picture. Drag a point on the piano roll and the colours around it follow like rubber. The notes themselves never move or change length: only which colour (channel) each note has changes. No colour is added or blended: every note takes the colour of the note the bend pulled into its place.
 
 The grid is kept with the shape as points, never baked in. Come back any time and move them again; change the colours underneath (Recolour, Stir, Colours) and they flow along the same bend; move or stretch the shape and the bend goes with it. The colour effects work in the order you added them: a Warp added after a Stir bends the stirred colours (Properties… shows and changes the order; Help → [page:properties|Properties]).
 
@@ -54,6 +54,16 @@ What is pulled in where the bend reaches past the shape's edge, as in Stir: Esca
 Mirror moves a point's twin too while you drag, so both sides bend alike. Sideways and Up / down mirror across the grid's middle line, 4-way across both. Half turn moves the point opposite through the middle the opposite way, so a bend at 10 o'clock repeats at 4 o'clock.
 
 The mirror lines (or Half turn's ring) are drawn over the grid, and the twins of the point under the mouse light up. A point on a mirror line only slides along it; in 4-way and Half turn the middle point (the cross) can't move. Picking a mirror changes nothing by itself: only your next drags are mirrored. Mirror is a drawing aid and isn't saved with the shape.
+
+## Bending the shape itself
+
+"Moves" at the top of the Warp window picks what the Warp bends. Colours (the start) bends the colours, as everything above says. Shape bends the shape itself: its outline goes where you drag the grid, and its notes are made from the bent shape (Fill, Spam and its own colours follow the new lines). The grid stays on the box the shape had before the bend, and notes may go past it. Shapes without a Warp yet take the window's choice with their first drag. In Properties a Warp set to Shape is called "Warp ◇" and is listed at the top.
+
+Shape bends always run first, before every colour step: first the [page:stir|Stir] tabs set to Shape, then the Warp. While a point is dragged the notes are made again every moment instead of the colours being repainted, so on big shapes they follow a little behind the mouse.
+
+Only the outline matters for a drawn shape: a point in the middle of a filled square bends its inside, which is all filled anyway, so nothing changes (the window says so in orange). Drag points on or near the outline. Pasted notes and plain notes bend everywhere: each note bends like a tiny box and is cut into pieces where the bend curves it, as with Stir.
+
+"Colours bend too" (beside Moves, ticked at first) keeps the shape's colours on the notes they were on, so a Colours pattern or coloured areas bend along with the shape. Unticked, the colours are laid out again on the bent shape. Colour edges, Folds and At the edges only choose colours, so they're greyed for Shape. It works in every Channels mode.
 
 ## Strength and Show the bend
 
