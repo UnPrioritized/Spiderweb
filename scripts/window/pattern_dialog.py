@@ -699,6 +699,12 @@ class FormulaDialog(tk.Toplevel):
                                                          [k for k in texts if k != "polar"]))
             self.set_info(tr("pattern_dialog.can_t_use_it", e=e) if typed else tr("pattern_dialog.type_a_formula"),
                           look.ERROR_DARK if typed else look.HINT)
+            bare = ["loops"] if self.kind == "pattern" else []
+            if not typed and self._names != bare:  # (all wiped: its number boxes go too; values come back if retyped)
+                self.build_boxes(bare)
+                for var, _ in self.boxes.values():
+                    var.set(fmt(self.pat["loops"]))
+                self.lay_cells()
             return
         old = self.pat["vars"]
         if self.name.get() in [n for _, _, n in self.items]:  # it's not that preset / saved one any more
