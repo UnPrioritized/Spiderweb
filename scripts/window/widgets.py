@@ -904,10 +904,13 @@ class Scrub:
         if self.drag and self.drag["job"]:
             self.app.after_cancel(self.drag["job"])
             self.flush()
+        gesture = self.drag["gesture"] if self.drag else None
         self.drag = None
         self.app.scrubbing = False
         self.app.held_scrub = None
         self.app.catch_up_notes()
+        if gesture is not None and hasattr(self.app, "scrub_let_go"):  # (questions put off while held: now)
+            self.app.scrub_let_go(gesture)
 
 
 # Undo / redo keys. Upper case = Caps Lock on; Ctrl+Shift+Z is redo too (it wins over <Control-Z>: Shift is named)

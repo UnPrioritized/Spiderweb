@@ -226,11 +226,14 @@ class NestedPanel:
         if not tgts:
             return self.sync_custom()
         placed = [t for t in tgts if t is not self.custom_defaults]
-        tries = [copy.deepcopy(t) for t in placed]
-        for t in tries:
-            fn(t)
-        if not self.confirm_big(tries):
-            return self.sync_custom()
+        if self.scrubbing is True and placed:  # (a box's label dragged: asked once at the let go, scrub_let_go;
+            self._scrub_ask = placed            # counting at every step made the whole fill each time, 480 steps)
+        else:
+            tries = [copy.deepcopy(t) for t in placed]
+            for t in tries:
+                fn(t)
+            if not self.confirm_big(tries):
+                return self.sync_custom()
         if placed:
             self.push_undo(name=name)
         for t in tgts:
@@ -238,6 +241,17 @@ class NestedPanel:
         self.shapes_changed()
         self.sync_custom()
         self.sync_colours()
+
+    def scrub_let_go(self, gesture):
+        """A number box's label let go (widgets.Scrub.release): a Nested / Ripples box dragged asks "lots of notes"
+        now, once (user 2026-11-16: dragging Steps got slower the higher it went); No = the whole drag taken back."""
+        shapes, self._scrub_ask = getattr(self, "_scrub_ask", None), None
+        if shapes and not self.confirm_big(shapes):
+            self.take_back_scrub(gesture)
+            self.shapes_changed(now=True)
+            self.sync_custom()
+        elif self.count_owed and not self._bg_notes:  # (the panel's count waited for the let go: counted now)
+            self.sync_custom()
 
     def colours_most(self):
         """The most colours a Nested / Ripples / Tiles fill's Colours box takes: 16 with "Use channel 10"."""

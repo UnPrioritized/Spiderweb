@@ -230,6 +230,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
           Playback, KestrelSetup, Pictures, AppClip, AppTransform, AppOffrange, AppKeys, HistoryPanel, ScrollingSide, tk.Tk):
     _bg_notes = False  # the notes are being made in the background after an edit (shapes_changed, notes_wait.py)
     count_owed = False  # the side panel's note count waits for them (panel_custom.sync_custom)
+    _count_time = 0.0  # how long the side panel's last note count took (a held number box waits when slow)
     _recolour_owed = False  # the panel's Recolour row waits for those notes (panel_recolour.sync_recolour)
     _bg_serial = None  # (the event that started it: its other bindings don't wait for it)
     _bg_carry = None  # (the selected shapes whose old notes go along meanwhile: roll_draw.carry_from)

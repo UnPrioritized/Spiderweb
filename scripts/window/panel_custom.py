@@ -2,6 +2,7 @@
 
 import copy
 import math
+import time
 import tkinter as tk
 
 import numpy as np
@@ -33,6 +34,7 @@ from window.widgets import (Scrub, Tooltip, bad, good, leave_box, line_up, name_
 GAP_COLOR = look.WARN  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 MISSING_MARK = "✕ "  # in the Shape box: a placed shape whose library shape was renamed or deleted (user, 2026-10-05)
 MISSING_COLOR = look.MISSING_SHAPE
+COUNT_HELD_S = 0.03  # a number box held: a note count slower than this waits for the let go ("Counting notes…")
 FILL_CHOICES = [
     ("empty", tr("panel_custom.empty"), tr("panel_custom.just_the_outline_like_lines")),
     ("fill", tr("panel_custom.fill"), tr("panel_custom.one_long_note_per_key_inside")),
@@ -478,11 +480,16 @@ class CustomPanel:
             # (a merged shape: its own notes, not its two shapes' as they were: some rows may be "Merge leftovers")
             counted = ([self.shapes[i] for i in sorted(self.sels) if self.shapes[i]["kind"] == "custom"]
                        if any(self.merge_part(t, parts) for t in tgts) else tgts)
-            if self._bg_notes:  # (being made in the background: counted when they're in, not made twice at once
-                info = tr("panel_custom.counting")  # here: a Nested fill held the window 1.4 s, user's file)
+            # (being made in the background: counted when they're in, not made twice at once here: a Nested fill held
+            # the window 1.4 s, user's file; a number box held while counting is slow: counted at the let go,
+            # scrub_let_go: 480 Nested steps made every drag step wait for the whole fill, user 2026-11-16)
+            if self._bg_notes or self.scrubbing is True and self._count_time > COUNT_HELD_S:
+                info = tr("panel_custom.counting")
                 self.count_owed = True  # (shapes_changed syncs again once they're in)
             else:
+                started = time.perf_counter()
                 total = sum(self.note_count(t) for t in counted)
+                self._count_time = time.perf_counter() - started
                 info = trn("panel_custom.n_notes", total, n=total)
             if gaps and fill in ("fill", "spam"):
                 info += (tr("panel_custom.one_gap_in_the_outline_filled") if gaps == 1 else
