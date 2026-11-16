@@ -171,6 +171,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     convert.py       Turn into live shape: shapes -> one custom shape (and back)
     envelope.py      velocity envelopes
     slice.py         Slice tool maths: where a line crosses shapes, a custom shape cut in two halves
+    deform.py        the drawer's Deform: points moved by Turn, Twist, Ripple and Bulge inside an area
     gaterange.py     spam gate Range: the gate going from one to another across a shape, along a graph
     chop.py          chop: notes cut into a repeating rhythm
     glue.py          glue: touching notes on a key made one long note (all of a shape or in boxes), first
