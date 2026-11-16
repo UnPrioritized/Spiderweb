@@ -521,22 +521,44 @@ class LiquifyBend(StirBend):
         self.turned = bool(f[1])
         self.flip_x = not self.turned and f[0] < 0
         self.flip_y = not self.turned and f[3] < 0
-        self.A = np.ascontiguousarray(L.map_of(L.full(lq)) * (L.full(lq)["strength"] / 100.0), np.float64)
+        # (the map in its own units over its span (the colour box, or grown past it: liquify.span_of); every sum below
+        # works in those, so a map that never grew gives the very same numbers)
+        self.span = L.span_of(lq)
+        self.S = np.array([self.span[2] - self.span[0], self.span[3] - self.span[1]])
+        # (pushes in the colour box's units; in the map's own units for the sums here: the same while not grown)
+        A = L.map_of(L.full(lq)) * (L.full(lq)["strength"] / 100.0)
+        self.A = np.ascontiguousarray(A if self.span == L.SPAN else A / self.S, np.float64)
         self.worst = 0.0
         self.st = {"ripple": 0.0, "ripple_len": 100.0}
 
     @staticmethod
     def offsets(lq):
+        """The farthest a spot moves each way, in the colour box's units, and how far the map reaches past the box."""
         from notes import liquify as L
-        return np.abs(L.map_of(L.full(lq))).reshape(-1, 2).max(0) * (L.full(lq)["strength"] / 100.0)
+        sp = L.span_of(lq)
+        P = np.abs(L.map_of(L.full(lq))).reshape(-1, 2).max(0) * (L.full(lq)["strength"] / 100.0)
+        return P + np.array([max(-sp[0], sp[2] - 1, 0.0), max(-sp[1], sp[3] - 1, 0.0)])
+
+    def _to(self, x, y):
+        return (x - self.span[0]) / self.S[0], (y - self.span[1]) / self.S[1]
+
+    def _back(self, mx, my):
+        return self.span[0] + mx * self.S[0], self.span[1] + my * self.S[1]
+
+    def _look_map(self, mx, my):
+        """look() in the map's own units: a spot shows what is at spot + Strength x map."""
+        from notes.liquify import sample
+        mx, my = np.array(mx, np.float64, ndmin=1), np.array(my, np.float64, ndmin=1)
+        shape = mx.shape
+        mx, my = mx.ravel(), my.ravel()
+        d = sample(self.A, mx, my) if len(mx) else np.zeros((0, 2))
+        return (mx + d[:, 0]).reshape(shape), (my + d[:, 1]).reshape(shape)
 
     def look(self, x, y, st=None):
-        from notes.liquify import sample
-        x, y = np.array(x, np.float64, ndmin=1), np.array(y, np.float64, ndmin=1)
-        shape = x.shape
-        x, y = x.ravel(), y.ravel()
-        d = sample(self.A, x, y) if len(x) else np.zeros((0, 2))
-        return (x + d[:, 0]).reshape(shape), (y + d[:, 1]).reshape(shape)
+        if self.span == (0.0, 0.0, 1.0, 1.0):
+            return self._look_map(x, y)
+        mx, my = self._to(np.asarray(x, np.float64), np.asarray(y, np.float64))
+        return self._back(*self._look_map(mx, my))
 
     def look_tk(self, t, k):
         x, y = self.to_unit(t, k)
@@ -549,14 +571,17 @@ class LiquifyBend(StirBend):
         qx, qy = np.array(qx, np.float64, ndmin=1), np.array(qy, np.float64, ndmin=1)
         if not len(qx):
             return qx, qy
+        plain = self.span == (0.0, 0.0, 1.0, 1.0)
+        if not plain:
+            qx, qy = self._to(qx, qy)
         d = sample(self.A, qx, qy)
         x, y, err = _newton(self.A, qx, qy, False, qx - d[:, 0], qy - d[:, 1])
         bad = np.flatnonzero(err > 1e-9)
         if len(bad):  # (a sharp twirl's middle: the first guess too far off; Stir's way, a fine search's seed)
             if getattr(self, "_seed", None) is None:
-                self._seed = searcher(self.look)
-            bx, by = solve(self.look, qx[bad], qy[bad], x[bad], y[bad], self._seed)
-            lx, ly = self.look(bx, by)
+                self._seed = searcher(self._look_map)
+            bx, by = solve(self._look_map, qx[bad], qy[bad], x[bad], y[bad], self._seed)
+            lx, ly = self._look_map(bx, by)
             e = np.hypot(lx - qx[bad], ly - qy[bad])
             ok = e < err[bad]
             k = bad[ok]
@@ -565,7 +590,7 @@ class LiquifyBend(StirBend):
             self.worst = max(self.worst, float(np.max(err)))
             if self.worst > FOLD:
                 raise Folded
-        return x, y
+        return (x, y) if plain else self._back(x, y)
 
     def within(self, t, k):
         x, y = self.to_unit(t, k)

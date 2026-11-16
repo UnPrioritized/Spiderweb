@@ -12,7 +12,8 @@ of strokes (user: like the editors; mistakes are fixed with Restore / undo).
 Saved as {"grid": [across, up], "map": text (zlib + base64 of int16 pairs, 1 / SCALE of the box each), "frozen":
 text (zlib + base64 of uint8 per grid point, 255 = fully frozen), "strength": % (only != 100), "on": False (only when
 hidden), "edge": STIR_EDGES (only != "escape"), "moves": "shape" (only when it bends the shape itself, Deform
-shapes stage G; + "bend_colours": False when Colours bend too is off)}. "map" / "frozen" only when something is pushed / frozen; neither = no
+shapes stage G; + "bend_colours": False when Colours bend too is off), "span": [x0, y0, x1, y1] (only when the map
+grew past the colour box: where it lies in the box's units, span_of; its pushes stay in the box's units)}. "map" / "frozen" only when something is pushed / frozen; neither = no
 Liquify (clean_liquify: None).
 
 THE FREEZE MASK (stage D, image editors' Freeze / Thaw Mask): spots the brushes leave alone (partly frozen = partly
@@ -26,6 +27,7 @@ units per screen pixel there, so a round brush stays round however the shape is 
 
 import base64
 import json
+import math
 import weakref
 import zlib
 
@@ -171,7 +173,80 @@ def clean_liquify(d):
         out["moves"] = "shape"
         if d.get("bend_colours") is False:
             out["bend_colours"] = False
+    span = _clean_span(d.get("span"))
+    if span:  # (the map grown past the box: span_of)
+        out["span"] = span
     return out
+
+
+SPAN = (0.0, 0.0, 1.0, 1.0)  # (the box the map covers, in the colour box's units: the box itself)
+MOST_SPAN = 4.0  # (a grown map reaches at most this many boxes past each side)
+
+
+def span_of(lq):
+    """(x0, y0, x1, y1): where a Liquify's map lies in the colour box's units. The box itself, unless a stroke of a
+    Liquify set to Shape reached past it and the map grew (hunt 2026-11-17, user: brush the part pushed out)."""
+    s = (lq or {}).get("span")
+    return tuple(s) if s else SPAN
+
+
+def to_map(x, y, span):
+    """Spots of the colour box -> the map's own 0..1 (the very same numbers while the map covers the box)."""
+    if span == SPAN:
+        return x, y
+    return (np.asarray(x, np.float64) - span[0]) / (span[2] - span[0]), \
+        (np.asarray(y, np.float64) - span[1]) / (span[3] - span[1])
+
+
+def map_scale(span):
+    """How many colour box units one map unit is, each way (the map's PUSHES stay in the box's units: only where a
+    grid point sits changes; the brush works in the map's own units, roll_liquify divides / multiplies by this)."""
+    return np.array([span[2] - span[0], span[3] - span[1]])
+
+
+def _clean_span(v):
+    """A saved "span" -> 4 numbers (x0 < 0 .. 1 < x1 grown at most MOST_SPAN), or None (the box: not saved)."""
+    if not (isinstance(v, list) and len(v) == 4 and all(number(x) for x in v)):
+        return None
+    x0, y0, x1, y1 = (round(float(x), 9) for x in v)
+    x0, y0 = max(min(x0, 0.0), -MOST_SPAN), max(min(y0, 0.0), -MOST_SPAN)
+    x1, y1 = min(max(x1, 1.0), 1 + MOST_SPAN), min(max(y1, 1.0), 1 + MOST_SPAN)
+    return None if (x0, y0, x1, y1) == SPAN else [x0, y0, x1, y1]
+
+
+def grown_span(old, want, shape):
+    """The span holding want, grown from old by WHOLE steps of the map's grid (shape: (up, across, ...)) each side,
+    so the old grid points stay grid points (regrid exact); each way at most MOST_GRID points (then as far as that
+    reaches) and MOST_SPAN past the box. -> (span, (left, down, right, up) steps added)."""
+    gy, gx = shape[:2]
+    sx, sy = (old[2] - old[0]) / (gx - 1), (old[3] - old[1]) / (gy - 1)
+    lo_x = max(0, math.ceil((old[0] - max(want[0], -MOST_SPAN)) / sx - 1e-9))
+    hi_x = max(0, math.ceil((min(want[2], 1 + MOST_SPAN) - old[2]) / sx - 1e-9))
+    lo_y = max(0, math.ceil((old[1] - max(want[1], -MOST_SPAN)) / sy - 1e-9))
+    hi_y = max(0, math.ceil((min(want[3], 1 + MOST_SPAN) - old[3]) / sy - 1e-9))
+    room_x, room_y = MOST_GRID - gx, MOST_GRID - gy  # (past MOST_GRID: shared out, the far side first cut)
+    if lo_x + hi_x > room_x:
+        lo_x, hi_x = min(lo_x, room_x - min(hi_x, room_x // 2)), min(hi_x, room_x // 2 if lo_x else room_x)
+    if lo_y + hi_y > room_y:
+        lo_y, hi_y = min(lo_y, room_y - min(hi_y, room_y // 2)), min(hi_y, room_y // 2 if lo_y else room_y)
+    lo_x, hi_x, lo_y, hi_y = (max(0, v) for v in (lo_x, hi_x, lo_y, hi_y))
+    span = (old[0] - lo_x * sx, old[1] - lo_y * sy, old[2] + hi_x * sx, old[3] + hi_y * sy)
+    return span, (lo_x, lo_y, hi_x, hi_y)
+
+
+def regrid(a, m, old, new):
+    """The map a (and freeze mask m or None) laid on the span new (grown_span's: old plus whole steps) instead of old:
+    every old grid point kept as it was, the new ones past the old span = its edge's (the map was read so past its
+    edge already), so every spot bends exactly as before. Pushes stay in the colour box's units (the same saved
+    numbers)."""
+    gy, gx = a.shape[:2]
+    sx, sy = (old[2] - old[0]) / (gx - 1), (old[3] - old[1]) / (gy - 1)
+    lo_x, lo_y = int(round((old[0] - new[0]) / sx)), int(round((old[1] - new[1]) / sy))
+    hi_x, hi_y = int(round((new[2] - old[2]) / sx)), int(round((new[3] - old[3]) / sy))
+    pad = ((lo_y, hi_y), (lo_x, hi_x))
+    b = np.pad(np.asarray(a, np.float64), pad + ((0, 0),), mode="edge")
+    mm = None if m is None else np.pad(np.asarray(m, np.float64), pad, mode="edge")
+    return b, mm
 
 
 def full(lq):
@@ -297,7 +372,11 @@ def _fetched(w, a, x, y, rc, box, own, exact=None):
     """(middle in ticks, key) the spots (x, y) of the colour box fetch their colour from under the map a
     (liquify_from's second half: the edge choices like stir_from's). exact: (ox, oy) a Warp's exact fetches
     (warp.exact_offsets; NaN = the map's)."""
-    d = sample(a, x, y) * (w["lq"]["strength"] / 100)
+    sp = span_of(w["lq"])
+    if sp == SPAN:
+        d = sample(a, x, y) * (w["lq"]["strength"] / 100)
+    else:  # (a map grown past the box: looked up at its own places; its pushes are in the box's units)
+        d = sample(a, *to_map(x, y, sp)) * (w["lq"]["strength"] / 100)
     if exact is not None:
         ox, oy = exact
         got = ~np.isnan(ox)
@@ -637,7 +716,7 @@ def liquify_from(at, rc, box, own, colours=None):
     lq = full(clean_liquify(rc.get("liquify")))
     a = map_of(lq)
     w = _where(at, rc, box, own, colours=colours)
-    idx = np.flatnonzero(touched(a, w["x"], w["y"]))
+    idx = np.flatnonzero(touched(a, *to_map(w["x"], w["y"], span_of(lq))))
     mid, key = _fetched(w, a, w["x"][idx], w["y"][idx], rc, box, own)
     return idx, mid, key
 
@@ -957,6 +1036,8 @@ def blend(x, y, f):
     if not x and not y:
         return None
     near = (x if f < 0.5 else y) or x or y
+    if x and y and span_of(x) != span_of(y):  # (maps grown differently past the box: the nearer end's, whole)
+        return near
     g = near["grid"]
     gx, gy = g
     jj, ii = np.mgrid[0:gy, 0:gx]

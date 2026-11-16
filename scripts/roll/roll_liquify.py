@@ -18,8 +18,9 @@ from files.lang import tr
 from files.system import ALT
 from notes import liquify as lq
 from files.speed import key_sort
-from notes.recolour import (KEEP, before_liquify, box_of, can_recolour, centre_at, clean_recolour, new_seed, rule_of,
-                            liquify_last, order_of, ordered, page_split, step_place, turned_map, with_most,
+from notes.recolour import (KEEP, before_liquify, box_of, can_recolour, centre_at, centre_spot, clean_recolour,
+                            new_seed, rule_of, liquify_last, order_of, ordered, page_split, step_place, turned_map,
+                            with_most,
                             with_order, without_recolour)
 from roll.roll_shared import CTRL, SHIFT
 from window import look
@@ -68,14 +69,67 @@ class LiquifyBrush:
         ux, uy = self.liquify_unit(made, x + 1, y), self.liquify_unit(made, x, y + 1)
         return [[ux[0] - u0[0], uy[0] - u0[0]], [ux[1] - u0[1], uy[1] - u0[1]]]
 
+    def liquify_at(self, made, span, x, y):
+        """(spot, units per screen pixel) of screen (x, y) in the map's own 0..1 (its span: the colour box, or grown
+        past it, liquify.span_of): the same as liquify_unit / liquify_jac while it covers the box."""
+        c = self.liquify_unit(made, x, y)
+        J = self.liquify_jac(made, x, y, at=c)
+        if span == lq.SPAN:
+            return c, J
+        w, h = span[2] - span[0], span[3] - span[1]
+        return ((c[0] - span[0]) / w, (c[1] - span[1]) / h), [[J[0][0] / w, J[0][1] / w], [J[1][0] / h, J[1][1] / h]]
+
+    def liquify_reach(self, sh, made, span):
+        """Where a Liquify set to Shape can be brushed, in ticks / keys: the shape's notes box, its bent notes (a part
+        pushed past the box can be pushed again; hunt 2026-11-17, user) and its map's span."""
+        t0, t1, k0, k1 = box_of(made[1])
+        notes = self.app.notes_of(sh)
+        if len(notes):
+            b = box_of(notes)
+            t0, t1, k0, k1 = min(t0, b[0]), max(t1, b[1]), min(k0, b[2]), max(k1, b[3])
+        if span != lq.SPAN:
+            rc, n, own, _ = made
+            for u, v in ((span[0], span[1]), (span[2], span[3]), (span[0], span[3]), (span[2], span[1])):
+                t, k = centre_spot(rc, n, own, [100 * u, 100 * v])
+                t0, t1, k0, k1 = min(t0, t), max(t1, t), min(k0, k), max(k1, k)
+        return t0, t1, k0, k1
+
+    def liquify_grow(self, job, c, rj, J):
+        """A Shape stroke's dab at map spot c (radius rj px, J map units per px) reaching past the map's span: the span
+        grows to hold the dab (and a little more), the map and the freeze mask laid on it again (liquify.regrid).
+        -> (c, J) in the new span's units (as they were when nothing grew)."""
+        ex = rj * math.hypot(J[0][0], J[0][1]) * 1.25
+        ey = rj * math.hypot(J[1][0], J[1][1]) * 1.25
+        if c[0] - ex >= 0 and c[0] + ex <= 1 and c[1] - ey >= 0 and c[1] + ey <= 1:
+            return c, J
+        sp = job["span"]
+        w, h = sp[2] - sp[0], sp[3] - sp[1]
+        ux, uy = sp[0] + c[0] * w, sp[1] + c[1] * h  # (the dab in the colour box's units)
+        want = (ux - ex * w, uy - ey * h, ux + ex * w, uy + ey * h)
+        new, added = lq.grown_span(sp, want, job["a"].shape)  # (whole map steps: what's there bends exactly as before)
+        if not any(added):
+            return c, J
+        job["a"], job["m"] = lq.regrid(job["a"], job["m"], sp, new)
+        job["span"] = new
+        nw, nh = new[2] - new[0], new[3] - new[1]
+        c = ((ux - new[0]) / nw, (uy - new[1]) / nh)
+        J = [[J[0][0] * w / nw, J[0][1] * w / nw], [J[1][0] * h / nh, J[1][1] * h / nh]]
+        return c, J
+
     def liquify_shapes_at(self, x, y, r):
-        """[(shape, made)] of the selected shapes Liquify can brush whose box (grown by the brush) holds (x, y)."""
+        """[(shape, made)] of the selected shapes Liquify can brush whose box (grown by the brush) holds (x, y): a
+        Liquify set to Shape also where its notes are bent to (liquify_reach)."""
         out = []
+        w = self.app.liquify_window
         for sh in self.app.recolour_targets():
             made = self.stir_made(sh, "liquify")
             if made is None:
                 continue
-            x0, y0, x1, y1 = self.liquify_box(made)
+            if w is not None and w.kind_of(sh) == "shape":
+                got = (clean_recolour(sh.get("recolour")) or {}).get("liquify")
+                x0, y0, x1, y1 = self.liquify_box(made, self.liquify_reach(sh, made, lq.span_of(got)))
+            else:
+                x0, y0, x1, y1 = self.liquify_box(made)
             if x0 - r <= x <= x1 + r and y0 - r <= y <= y1 + r:
                 out.append((sh, made))
         return out
@@ -136,6 +190,7 @@ class LiquifyBrush:
                 self.redraw()
         jobs = []
         finer = False
+        w = app.liquify_window
         for sh, made in hit:
             got = (clean_recolour(sh.get("recolour")) or {}).get("liquify")
             tb = box_of(made[1])
@@ -145,15 +200,18 @@ class LiquifyBrush:
             else:
                 x0, y0, x1, y1 = self.liquify_box(made, tb)
                 a, m = lq.empty(lq.new_grid(x1 - x0, y1 - y0)), None
+            span = lq.span_of(got)
             # (a brush smaller than the map's steps (a long shape zoomed in): the map made finer first, its bends
             # kept exactly, so the brush does what its circle shows)
-            c = self.liquify_unit(made, e.x, e.y)
-            J = self.liquify_jac(made, e.x, e.y, at=c)
+            c, J = self.liquify_at(made, span, e.x, e.y)
             ka, km = lq.finer(a, m, self.liquify_radius(), J)
             if ka is not a:
                 finer = finer or bool(got)
                 a, m = ka, km
-            jobs.append({"sh": sh, "made": made, "a": a, "m": m, "tb": tb})
+            # (Shape: the stroke may reach past the shape's box and grow the map there; hunt 2026-11-17, user)
+            shape = w is not None and w.kind_of(sh) == "shape"
+            jobs.append({"sh": sh, "made": made, "a": a, "m": m, "tb": tb, "span": span, "shape": shape,
+                         "reach": self.liquify_reach(sh, made, span) if shape else None})
         if finer:  # (a map made finer: given to its shape first, the notes as made from it (the very same colours,
             self.liquify_apply(now=True, jobs=jobs)  # bar a rounding), so the live colours start from what's shown)
             self.redraw()
@@ -371,19 +429,30 @@ class LiquifyBrush:
             vec = (q[0] - prev[0], q[1] - prev[1])
             prev = q
             for job in st["jobs"]:
-                x0, y0, x1, y1 = self.liquify_box(job["made"], job["tb"])  # (as on screen now: zoomed / scrolled)
+                # (as on screen now: zoomed / scrolled; a Liquify set to Shape: where its notes are bent to too)
+                x0, y0, x1, y1 = self.liquify_box(job["made"], job.get("reach") or job["tb"])
                 if not (x0 - r <= q[0] <= x1 + r and y0 - r <= q[1] <= y1 + r):
                     continue
-                c = self.liquify_unit(job["made"], *q)
-                J = self.liquify_jac(job["made"], *q, at=c)
+                span = job.get("span", lq.SPAN)
+                c, J = self.liquify_at(job["made"], span, *q)
                 rj = lq.least_radius(job["a"].shape, J, r)  # (never smaller than the map's step: a finer map
+                if job.get("shape"):  # (a dab reaching past the map: it grows there, hunt 2026-11-17, user)
+                    c, J = self.liquify_grow(job, c, rj, J)
+                    rj = lq.least_radius(job["a"].shape, J, r)
+                    if job["span"] != span:  # (the stroke may go on out there)
+                        job["reach"] = self.liquify_reach(job["sh"], job["made"], job["span"])
                 if mask:                                     # can't be made past MOST_GRID)
                     m = job["m"] if job["m"] is not None else np.zeros(job["a"].shape[:2])
                     job["m"] = lq.mask_dab(m, c, rj, J, pressure, density, freeze=tool == "freeze")
                     st["masked"] = True
-                else:
+                elif span == lq.SPAN and job.get("span", lq.SPAN) == lq.SPAN:
                     job["a"] = lq.dab(job["a"], tool, c, rj, J, pressure, density, vec=vec, turn=turn,
                                       frozen=job["m"])
+                    st["changed"] = True
+                else:  # (a grown map: the dab in its own units, its pushes kept in the box's)
+                    S = lq.map_scale(job["span"])
+                    job["a"] = lq.dab(job["a"] / S, tool, c, rj, J, pressure, density, vec=vec, turn=turn,
+                                      frozen=job["m"]) * S
                     st["changed"] = True
         if mask:
             if st["masked"] and not st["mask_job"]:
@@ -469,6 +538,9 @@ class LiquifyBrush:
             w = self.app.liquify_window
             # (a shape's first Liquify: At the edges as the window shows it)
             settings = base.get("liquify") or ({"edge": w.edge, **w.kind_picks(sh)} if w else {})
+            settings = {k: v for k, v in settings.items() if k != "span"}
+            if job.get("span", lq.SPAN) != lq.SPAN:  # (the map grown past the box by this stroke: hunt 2026-11-17)
+                settings["span"] = list(job["span"])
             got = lq.with_arrays(settings, job["a"], job["m"])
             if got:
                 base["liquify"] = got
@@ -501,6 +573,8 @@ class LiquifyBrush:
         w = app.liquify_window
         if (got.get("moves") if isinstance(got, dict) else (w.kind_of(sh) if w else None)) == "shape":
             return None
+        if job.get("span", lq.SPAN) != lq.SPAN or (isinstance(got, dict) and got.get("span")):
+            return None  # (a map grown past the box: Live counts on the box's own cells)
         from notes.engine import is_gate_flipped, is_pasted_flipped, keeps_laps, made_from, past_edges
         from notes.mask import is_mask
         from notes.sustain import is_sustained, sustain_on
@@ -890,22 +964,24 @@ class LiquifyBrush:
         for sh in self.app.recolour_targets():
             job = stroke.get(id(sh))
             if job is not None:
-                m, made = job["m"], job["made"]
-                mark = ("stroke", st.get("mask_n", 0))
+                m, made, span = job["m"], job["made"], job.get("span", lq.SPAN)
+                mark = ("stroke", st.get("mask_n", 0), span)
             else:
-                m = lq.mask_of((clean_recolour(sh.get("recolour")) or {}).get("liquify"))
+                g = (clean_recolour(sh.get("recolour")) or {}).get("liquify")
+                m = lq.mask_of(g)
                 if m is None:
                     continue
+                span = lq.span_of(g)
                 old = kept.get(id(sh))
                 # (its notes' box: looked up again only after a change of the shapes (a whole note pass on a big one))
                 made = old[2] if old and old[3] == self.app.shapes_gen else self.stir_made(sh, "liquify")
-                mark = (sh["recolour"]["liquify"]["frozen"],)
+                mark = (sh["recolour"]["liquify"]["frozen"], span)
             if m is None or made is None:
                 continue
             key = (id(made[1]), mark, view)
             got = kept.get(id(sh))
             if got is None or got[0] != key:
-                got = (key, self.liquify_mask_pic(made, m, W, H))
+                got = (key, self.liquify_mask_pic(made, m, W, H, span))
             got = got[:2] + (made, self.app.shapes_gen)
             self._lq_masks[id(sh)] = got
             if got[1]:
@@ -914,10 +990,19 @@ class LiquifyBrush:
         self.tag_raise("lqmask")
         self.tag_raise("lqbrush")
 
-    def liquify_mask_pic(self, made, m, W, H):
-        """(picture, x, y) of the red tint of mask m over a shape on screen, or None (nothing frozen in view)."""
+    def liquify_mask_pic(self, made, m, W, H, span=lq.SPAN):
+        """(picture, x, y) of the red tint of mask m over a shape on screen, or None (nothing frozen in view). span:
+        where the map lies (grown past the box: the tint reaches there too)."""
         from roll.tiles import see_through
-        x0, y0, x1, y1 = self.liquify_box(made)
+        if span == lq.SPAN:
+            x0, y0, x1, y1 = self.liquify_box(made)
+        else:
+            t0, t1, k0, k1 = box_of(made[1])
+            rc, n, own, _ = made
+            for a, b in ((span[0], span[1]), (span[2], span[3]), (span[0], span[3]), (span[2], span[1])):
+                t, k = centre_spot(rc, n, own, [100 * a, 100 * b])
+                t0, t1, k0, k1 = min(t0, t), max(t1, t), min(k0, k), max(k1, k)
+            x0, y0, x1, y1 = self.liquify_box(made, (t0, t1, k0, k1))
         # (from the first column / row wholly past the keyboard's and the ruler's edge lines: the tint never over
         # them, whichever way the piano roll was painted)
         X0 = max(int(math.floor(x0)), int(math.floor(self.kb_w)) + 1)
@@ -929,8 +1014,7 @@ class LiquifyBrush:
         nx, ny = -(-(X1 - X0) // s), -(-(Y1 - Y0) // s)
         # (the colour box is the screen's, turned / flipped / stretched: straight lines stay straight, so 3 spots tell
         # every pixel's place)
-        u0 = self.liquify_unit(made, X0 + s / 2, Y0 + s / 2)
-        J = self.liquify_jac(made, X0 + s / 2, Y0 + s / 2, at=u0)
+        u0, J = self.liquify_at(made, span, X0 + s / 2, Y0 + s / 2)  # (in the map's own units)
         i, j = np.meshgrid(np.arange(nx) * s, np.arange(ny) * s)
         u = u0[0] + J[0][0] * i + J[0][1] * j
         v = u0[1] + J[1][0] * i + J[1][1] * j
