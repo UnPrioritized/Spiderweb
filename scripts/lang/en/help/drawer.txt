@@ -25,6 +25,8 @@ Rename (or F2, or click the picked name again) changes a saved shape's name; Del
 
 Export copies the whole drawing as a line of text to share; Import adds a shared drawing to your library (see [page:sharing|Sharing shapes]).
 
+Deform… (under the library) bends the drawing with Turn, Twist, Bulge and Ripple, live on the board (see [page:drawer_deform|Drawer: Deform]).
+
 Lines and curves that meet end to end count as one outline, and so does a line whose ends land on another line or on itself. Closed: Empty, Fill and Spam all work. Gaps (red dots at the loose ends): Fill and Spam close each one with a straight line (see [page:fill|Inside fill]).
 
 Wheel = zoom, middle-drag = scroll, Reset view = back to the middle of the board.

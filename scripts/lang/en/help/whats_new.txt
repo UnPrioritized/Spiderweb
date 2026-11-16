@@ -6,6 +6,8 @@ What's new:
 
 • Graphs on patterns: every number of a pattern along a line, Loops too, has a "…" button that opens a graph, so it can change along the line. The Loops graph makes the loops bunch up or spread out while their number stays the same; Height, Sharp, Waves and the others can grow or shrink toward the end (spikes getting taller and sharper, say). Works on lines, curves, arcs, live shape and drawer strokes, polygons and funnel curves; saved patterns keep their graphs. See [page:formulas#Graphs along the line|Formulas].
 
+• Deform… in the custom shape drawer bends the drawing itself with Turn, Twist, Bulge / Pinch and Ripple, live on the board, round a Centre you drag. Like Stir, it can work inside an area (a circle, square, diamond or any library drawing) that you move, size, turn and slant right on the board. Curves stay curves, points stuck on lines stay on them, and coloured areas follow. See [page:drawer_deform|Drawer: Deform].
+
 • Polygon: Twist bends every side into an S for a pinwheel swirl; a star's Inner turn swirls its inner points; Uneven makes the sides different lengths (Random, or your own lengths repeating round the shape); Points goes down to 2 (a line whose two sides a pattern pulls apart). A polygon's sides can also get a second pattern, on top of the first or taking turns side by side. See [page:box|Circle and Polygon].
 • Flatten for patterns along a line: presses the bumps' tops flat like a balloon on a wall, with Softness for round or sharp edges. Patterns along lines are also made faster. See [page:formulas#Flatten|Formulas].
 

@@ -1,0 +1,27 @@
+Deform… (in the drawer's side panel, under the library) bends the drawing itself: its strokes change shape the way [page:stir|Stir] bends colours on the piano roll. It changes the strokes like editing them by hand: nothing is remembered afterwards, and Ctrl+Z undoes it.
+
+With strokes picked ([page:drawer_select|Select tool]), only those bend; otherwise the whole drawing, except locked layers (hidden ones bend too). With Mirror on, the mirrored copies bend as mirror images, so the drawing stays symmetric.
+
+## The bends
+
+Turn turns the strokes round the Centre. Twist turns them more the farther they are from the Centre, like a whirlpool. Bulge / Pinch swells the middle out or pulls it in. Ripple makes waves: Ripple moves picks whether points move sideways, up and down, or in and out in rings round the Centre; Wave length sets how far apart the waves are.
+
+All the bends work together and show live on the board. Apply keeps them; Cancel, Esc or the window's X puts everything back.
+
+Each slider has a number box beside it for exact numbers, also past the slider's range. Middle-click a slider to put it back to 0. Dragging Turn, Twist or Bulge near 0 stops there. The boxes work like the program's other number boxes: Up / Down, the mouse wheel once clicked, or drag the box or its name sideways (Shift = big steps, Ctrl = fine).
+
+## The Centre and the area
+
+The Centre is the green ring on the board. It starts in the middle of the strokes. Drag it to move it; right-click it to put it back.
+
+Area limits the bends to part of the drawing, like Stir's area: a Circle, Square or Diamond, or any drawing from your library (its inside counts). Its dashed line shows where the bending stops; inside it fades out softly toward the line, or stops sharp with Hard edge. Points outside the area stay exactly where they are. Bulge inside an area swells round the area's own middle.
+
+On the board, drag inside the area to move it. Its green box sizes it: a corner or side handle stretches it, Ctrl on a corner makes it bigger or smaller and keeps its shape. Drag just outside a corner to turn it (15° steps, Shift = free), or just outside a side's middle to slant it. A small area has no box: drag its line to size it. Size, Stretch, Angle and Slant can also be typed in the window.
+
+## What happens to the strokes
+
+Strokes get extra points only where the bend curves them; a straight side the bend doesn't touch stays two points. Curves stay curves with handles you can still edit. Circles, arcs, freehand strokes, polygon sides and strokes with a [page:formulas|Formula] become fine polylines. A curve bent very hard (short ripples) also becomes a fine line; the window says how many before you Apply.
+
+Points stuck on other lines stay on them, so closed areas stay closed, and coloured areas follow their strokes. While a slider moves, the colours wait and catch up a moment after you stop.
+
+While the window is open, the rest of the drawer waits; the wheel and middle-drag still move the view.

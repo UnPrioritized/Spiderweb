@@ -115,6 +115,8 @@ class DeformWindow(tk.Toplevel):
         self.block(True)
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.bind("<Escape>", lambda e: self.cancel())
+        self.bind("<F1>", lambda e: (dr.app.open_help("drawer_deform"), "break")[1])
+        self.after_idle(lambda: self.winfo_exists() and dr.app.tips.show("drawer_deform", parent=self, wait=True))
         self.after_idle(self.focus_first)
 
     # ------------------------------------------------------------ building

@@ -139,6 +139,7 @@ TOPIC_LIST = [
     ("drawer_areas", "Custom shape drawer"),
     ("drawer_slice", "Custom shape drawer"),
     ("drawer_lasso", "Custom shape drawer"),
+    ("drawer_deform", "Custom shape drawer"),
     ("shortcuts", "Reference"),
 ]
 TOPICS = []
@@ -277,6 +278,7 @@ SEE = {
     "drawer_erase": ["drawer", "drawer_select"],
     "drawer_areas": ["drawer", "drawer_select", "fill", "channels"],
     "drawer_slice": ["drawer", "drawer_erase", "slice", "drawer_lasso"],
+    "drawer_deform": ["drawer", "drawer_select", "stir", "drawer_areas"],
     "shortcuts": ["selecting", "view", "numbers", "curves_pen"],
 }
 # the tip for each tool (Circle / Polygon share one)
