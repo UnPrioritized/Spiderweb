@@ -11,7 +11,7 @@ from tkinter import messagebox
 from files.about import USER
 from files.lang import tr
 from files.safefile import write_text
-from notes.recolour import MOST_STIRS, full_stir, one_stir, order_of, stirs_of, with_order
+from notes.recolour import MOST_STIRS, clean_stir, full_stir, one_stir, order_of, stirs_of, with_order
 
 PRESETS_FILE = os.path.join(USER, "stir_presets.json")
 
@@ -29,11 +29,12 @@ def read_file():
 
 
 def clean_stirs(stirs):
-    """A preset's saved stirs -> [one_stir or {}] (1..MOST_STIRS), or None when there's nothing usable."""
+    """A preset's saved stirs -> [one_stir or {}] (1..MOST_STIRS), or None when nothing in it stirs (an empty
+    preset would match every unstirred shape)."""
     if not isinstance(stirs, list) or not stirs:
         return None
     out = [one_stir(s) or {} for s in stirs[:MOST_STIRS] if isinstance(s, dict)]
-    return out or None
+    return out if clean_stir(out) else None
 
 
 def load_presets():
@@ -64,7 +65,11 @@ def change_presets(name, stirs, parent):
             messagebox.showwarning(tr("stir.preset_save_title"), tr("stir.preset_file_broken", path=broken),
                                    parent=parent)
             items = []
-        items = [p for p in items if not same_name(p, name)]
+        if stirs is None and any(isinstance(p, dict) and str(p.get("name", "")).strip() == name for p in items):
+            # (deleting: only the entry with exactly this name; a hand-edited twin in other capitals stays)
+            items = [p for p in items if not (isinstance(p, dict) and str(p.get("name", "")).strip() == name)]
+        else:
+            items = [p for p in items if not same_name(p, name)]
         if stirs is not None:
             items.append({"name": name, "stirs": stirs})
         write_text(PRESETS_FILE, json.dumps({"presets": items}, indent=1))

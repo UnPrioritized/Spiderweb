@@ -1881,6 +1881,7 @@
  "stir.preset_replace": "There's already a preset called \"{name}\". Replace it?",
  "stir.preset_delete_title": "Delete Stir preset",
  "stir.preset_delete_ask": "Delete the preset \"{name}\"? The stirs on your shapes stay.",
+ "stir.preset_nothing": "There's no stir to save: every setting here is still at its start.",
  "stir.preset_differ": "The selected shapes are stirred differently. Select one shape to save its stir.",
  "stir.preset_too_many": "\"{name}\" has {n} tabs. Put in place of this tab, a selected shape would have more than {most} stirs. Nothing was changed.",
  "stir.preset_file_broken": "The Stir presets file couldn't be read, so it was kept aside as:\n{path}\nA new one is started.",

@@ -244,10 +244,15 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             messagebox.showinfo(tr("stir.preset_save_title"), tr("stir.preset_differ"), parent=self)
             return
         stirs = [one_stir(s) or {} for s in stacks[0]]
+        if not sp.clean_stirs(stirs):  # (a tab at its defaults: an empty preset would match every unstirred shape)
+            messagebox.showinfo(tr("stir.preset_save_title"), tr("stir.preset_nothing"), parent=self)
+            return
         name = self.preset_shown["name"] if self.preset_shown else ""
         while True:
             name = simpledialog.askstring(tr("stir.preset_save_title"), tr("stir.preset_save_prompt"), parent=self,
                                           initialvalue=name)
+            if not self.winfo_exists():  # (the window closed while the name was asked: nothing saved)
+                return
             if not name or not name.strip():
                 return
             name = name.strip()
