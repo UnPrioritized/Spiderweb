@@ -57,7 +57,7 @@ The mirror lines (or Half turn's ring) are drawn over the grid, and the twins of
 
 ## Bending the shape itself
 
-"Moves" at the top of the Warp window picks what the Warp bends. Colours (the start) bends the colours, as everything above says. Shape bends the shape itself: its outline goes where you drag the grid, and its notes are made from the bent shape (Fill, Spam and its own colours follow the new lines). The grid stays on the box the shape had before the bend, and notes may go past it. Shapes without a Warp yet take the window's choice with their first drag. In Properties a Warp set to Shape is called "Warp ◇" and is listed at the top.
+"Moves" at the top of the Warp window picks what the Warp bends (how Stir, Warp and Liquify fit together: [page:deform|Deform: Colours or Shape]). Colours (the start) bends the colours, as everything above says. Shape bends the shape itself: its outline goes where you drag the grid, and its notes are made from the bent shape (Fill, Spam and its own colours follow the new lines). The grid stays on the box the shape had before the bend, and notes may go past it. Shapes without a Warp yet take the window's choice with their first drag. In Properties a Warp set to Shape is called "Warp ◇" and is listed at the top.
 
 Shape bends always run first, before every colour step: first the [page:stir|Stir] tabs set to Shape, then the Warp. While a point is dragged the notes are made again every moment instead of the colours being repainted, so on big shapes they follow a little behind the mouse.
 
