@@ -1730,20 +1730,31 @@ def stirred(notes, at, low, now, rc, which, pals, pick, box, own, laps=None):
     if inside is not None and full["reverse"] and inside.any():  # (tester 11-04: inside the area the tracks'
         # order turned round, each colour set on its own: its first colour <-> its last)
         new = new.copy()
-        for p in pals:
-            p = np.sort(np.asarray(p, np.int64))
-            if len(p) < 2:
-                continue
-            j = np.clip(np.searchsorted(p, new), 0, len(p) - 1)
-            m = inside & (p[j] == new)
-            new[m] = p[::-1][j[m]]
+        sets = [np.sort(np.asarray(p, np.int64)) for p in pals]
+        flat = np.concatenate(sets)
+        if len(np.unique(flat)) == len(flat):  # (no colour in two sets: one look-up for all, the same as set by set;
+            # 256 tracks = 270 sets, each looked up over every note took ~1 s at 600k notes, heavy sweep 11-16)
+            o = np.argsort(flat, kind="stable")
+            fs, rv = flat[o], np.concatenate([p[::-1] for p in sets])[o]
+            j = np.clip(np.searchsorted(fs, new), 0, len(fs) - 1)
+            m = inside & (fs[j] == new)
+            new[m] = rv[j[m]]
+        else:
+            for p in sets:
+                if len(p) < 2:
+                    continue
+                j = np.clip(np.searchsorted(p, new), 0, len(p) - 1)
+                m = inside & (p[j] == new)
+                new[m] = p[::-1][j[m]]
     if move and len(pals) > 1:
         return kept_apart(notes, low, new, np.unique(np.concatenate(pals)), pick)
     if move:
         return kept_apart(notes, low, new, pals[0], pick) if len(pals[0]) >= 2 else new
     mine = set_of[o[np.clip(np.searchsorted(pool[o], new), 0, len(pool) - 1)]]  # (Per chord: the leader's set)
+    by_set = np.argsort(mine, kind="stable")  # (each set's notes in their order, sorted once: a pass over every
+    ends = np.cumsum(np.bincount(mine, minlength=len(pals)))  # note per set was slow with 270 sets)
     for s, p in enumerate(pals):
-        m = np.flatnonzero(mine == s)
+        m = by_set[ends[s - 1] if s else 0:ends[s]]
         if len(p) >= 2 and len(m):
             new[m] = kept_apart(notes[m], low[m], new[m], p, pick[m])
     return new

@@ -1616,59 +1616,248 @@ def recolour_apart(order, ss, e, old, new, pick, bstart, bsize, nc):
     in place): a note keeps no colour that a note sounding with it, of ANOTHER colour before, has now (its own one
     first, else the free one its dice pick, its own one when none is free). The notes still sounding are counted per
     colour now and per (colour before, colour now) and kept in a heap by their ends, so a note looks at the colours,
-    never at every note sounding with it (long held notes: 4x the notes took 14x, 2026-11-11); more colours than
-    APART_TABLE_MOST allows a table for: the old note-by-note walk (_apart_scan)."""
-    if nc * nc > APART_TABLE_MOST:
-        _apart_scan(order, ss, e, old, new, pick, bstart, bsize, nc)
-        return
+    never at every note sounding with it (long held notes: 4x the notes took 14x, 2026-11-11).
+    Only the colours sounding now (act, now > 0) can be taken: a note whose own colour now isn't taken looks at
+    nothing more; the free one is found from the taken ones in order. Up to APART_TABLE_MOST colours x colours the
+    pair counts are a full table; past it a small hash of the pairs sounding in the burst (_pslot; 256 tracks = 4096
+    colours went note against note: 16 s at 1 M Sustain-held notes, heavy sweep 2026-11-16).
+    A note whose colour now AND its own one are taken needs the free colours: those with no note sounding (fen = a
+    running count of the sounding colours, _kth_free) + those whose sounding notes all share its colour before
+    (found through mine = the sounding notes per colour before, _apart_mine), when it has fewer such notes than there
+    are sounding colours; else every sounding colour is looked at (act). Both give the same colour."""
     most = max(1, bsize.max() if len(bsize) else 1)
-    he = np.empty(most, np.int64)  # (the heap: each sounding note's end + the note)
+    he = np.empty(most, np.int64)  # (the heap: each sounding note's end + its place in the burst)
     hi = np.empty(most, np.int64)
     now = np.zeros(nc, np.int64)  # (sounding notes per colour now)
-    pair = np.zeros(nc * nc, np.int64)  # (sounding notes per colour before * nc + colour now)
-    taken = np.zeros(nc, np.bool_)
+    fen = np.zeros(nc + 1, np.int64)  # (colours with now > 0, as a Fenwick tree: how many below any colour)
+    top = 1
+    while top * 2 <= nc:
+        top *= 2
+    head = np.full(nc, -1, np.int64)  # (mine: per colour before, its sounding notes (places in the burst), linked)
+    nxt = np.empty(most, np.int64)
+    prv = np.empty(most, np.int64)
+    cnt = np.zeros(nc, np.int64)  # (sounding notes per colour before)
+    mark = np.zeros(nc, np.bool_)
+    sl = np.empty(nc, np.int64)  # (the free sounding colours of one note)
+    many = nc > APART_FEW  # (few colours: walking the sounding ones is cheap, fen + mine not kept)
+    if nc * nc <= APART_TABLE_MOST:  # (pair counts: per colour before * nc + colour now)
+        mask = -1
+        pair = np.zeros(nc * nc, np.int64)
+        hk = np.empty(0, np.int64)
+    else:  # (a burst holds at most `most` pairs: a hash twice that, cleared after each burst)
+        size = 16
+        while size < 2 * most:
+            size *= 2
+        mask = size - 1
+        pair = np.zeros(size, np.int64)
+        hk = np.full(size, -1, np.int64)
+    used = np.empty(most if mask >= 0 else 0, np.int64)  # (hash slots filled in this burst)
+    nu = 0
+    act = np.empty(nc, np.int64)  # (the colours with now > 0, in no order; apos = each one's place there)
+    apos = np.zeros(nc, np.int64)
+    tl = np.empty(nc, np.int64)  # (the taken colours of one note)
+    na = 0
     for w in range(len(bstart)):
         hn = 0
-        for j in range(bstart[w], bstart[w] + bsize[w]):
+        b0 = bstart[w]
+        for j in range(b0, b0 + bsize[w]):
             i = order[j]
             while hn > 0 and he[0] <= ss[j]:  # (ending where this one starts: touching, fine)
-                x = hi[0]
-                now[new[x]] -= 1
-                pair[old[x] * nc + new[x]] -= 1
+                jj = hi[0]  # (the heap holds the note's place in its burst (many) or the note itself)
+                na = _apart_let_go(jj, order[b0 + jj] if many else jj, old, new, nc, now, pair, hk, mask, act, apos,
+                                   na, fen, head, nxt, prv, cnt, many)
                 hn -= 1
                 _heap_down(he, hi, hn)
-            count = 0
-            base = old[i] * nc
-            for c in range(nc):
-                t = now[c] - pair[base + c] > 0
-                taken[c] = t
-                if t:
-                    count += 1
-            if taken[new[i]]:
-                free = nc - count
-                if free == 0 or not taken[old[i]]:
-                    new[i] = old[i]
+            oi = old[i]
+            base = oi * nc
+            ni = new[i]
+            if now[ni] - pair[_pslot(hk, base + ni, mask)] > 0:  # (its colour now is taken)
+                if now[oi] - pair[_pslot(hk, base + oi, mask)] <= 0:
+                    new[i] = oi
+                elif many and cnt[oi] < na:  # (few notes share its colour before: the free ones from them + fen)
+                    s = _apart_mine(head[oi], nxt, order, b0, new, now, pair, hk, mask, base, mark, sl)
+                    free = nc - na + s
+                    if free == 0:
+                        new[i] = oi
+                    else:
+                        new[i] = _rth_merged(fen, nc, top, sl, s, min(int(pick[i] * free), free - 1))
                 else:
-                    r = min(int(pick[i] * free), free - 1)
-                    for c in range(nc):
-                        if not taken[c]:
-                            if r == 0:
-                                new[i] = c
-                                break
-                            r -= 1
-            now[new[i]] += 1
-            pair[old[i] * nc + new[i]] += 1
-            _heap_up(he, hi, hn, e[i], i)
+                    count = 0
+                    for q in range(na):
+                        c = act[q]
+                        if now[c] - pair[_pslot(hk, base + c, mask)] > 0:
+                            tl[count] = c
+                            count += 1
+                    free = nc - count
+                    if free == 0:
+                        new[i] = oi
+                    else:
+                        new[i] = _rth_free(tl, count, min(int(pick[i] * free), free - 1))
+            ni = new[i]
+            if now[ni] == 0:
+                act[na] = ni
+                apos[ni] = na
+                na += 1
+                if many:
+                    _fen_add(fen, nc, ni, 1)
+            now[ni] += 1
+            h = _pslot(hk, base + ni, mask)
+            if mask >= 0 and hk[h] < 0:
+                hk[h] = base + ni
+                used[nu] = h
+                nu += 1
+            pair[h] += 1
+            jj = j - b0
+            if many:
+                nxt[jj] = head[oi]
+                prv[jj] = -1
+                if head[oi] >= 0:
+                    prv[head[oi]] = jj
+                head[oi] = jj
+                cnt[oi] += 1
+            _heap_up(he, hi, hn, e[i], jj if many else i)
             hn += 1
         while hn > 0:  # (the burst over: its notes let go)
-            x = hi[0]
-            now[new[x]] -= 1
-            pair[old[x] * nc + new[x]] -= 1
+            jj = hi[0]
+            na = _apart_let_go(jj, order[b0 + jj] if many else jj, old, new, nc, now, pair, hk, mask, act, apos, na,
+                               fen, head, nxt, prv, cnt, many)
             hn -= 1
             _heap_down(he, hi, hn)
+        for k in range(nu):  # (every count is back at 0: the hash emptied for the next burst)
+            hk[used[k]] = -1
+        nu = 0
 
 
-APART_TABLE_MOST = 1 << 22  # (recolour_apart: colours x colours counted at most; past it the old walk)
+@njit(nogil=True)
+def _apart_let_go(jj, x, old, new, nc, now, pair, hk, mask, act, apos, na, fen, head, nxt, prv, cnt, many):
+    """recolour_apart: note x (place jj in its burst) stops sounding: taken out of every count -> na."""
+    c = new[x]
+    o = old[x]
+    now[c] -= 1
+    pair[_pslot(hk, o * nc + c, mask)] -= 1
+    if now[c] == 0:
+        na = _act_out(act, apos, na, c)
+        if many:
+            _fen_add(fen, nc, c, -1)
+    if not many:
+        return na
+    if prv[jj] >= 0:
+        nxt[prv[jj]] = nxt[jj]
+    else:
+        head[o] = nxt[jj]
+    if nxt[jj] >= 0:
+        prv[nxt[jj]] = prv[jj]
+    cnt[o] -= 1
+    return na
+
+
+@njit(nogil=True)
+def _apart_mine(jj, nxt, order, b0, new, now, pair, hk, mask, base, mark, sl):
+    """recolour_apart: the sounding colours not taken for a note of colour before base / nc = those whose every
+    sounding note has that colour before, found through its sounding notes (from jj on, linked by nxt) -> how many,
+    in sl[:n] (marks cleared again)."""
+    s = 0
+    j0 = jj
+    while jj >= 0:
+        c = new[order[b0 + jj]]
+        if not mark[c]:
+            mark[c] = True
+            if now[c] == pair[_pslot(hk, base + c, mask)]:
+                sl[s] = c
+                s += 1
+        jj = nxt[jj]
+    jj = j0
+    while jj >= 0:  # (every mark set cleared, also the colours left out)
+        mark[new[order[b0 + jj]]] = False
+        jj = nxt[jj]
+    return s
+
+
+@njit(nogil=True)
+def _fen_add(fen, nc, c, d):
+    """recolour_apart's running count of the sounding colours: colour c in (d = 1) or out (d = -1)."""
+    q = c + 1
+    while q <= nc:
+        fen[q] += d
+        q += q & -q
+
+
+@njit(nogil=True)
+def _fen_below(fen, c):
+    """How many sounding colours are below colour c."""
+    t = 0
+    q = c
+    while q > 0:
+        t += fen[q]
+        q -= q & -q
+    return t
+
+
+@njit(nogil=True)
+def _kth_free(fen, nc, top, k):
+    """The k-th (from 0) colour, counting up, with no note sounding (k below their number)."""
+    pos = 0
+    step = top
+    while step > 0:
+        q = pos + step
+        if q <= nc and step - fen[q] <= k:
+            pos = q
+            k -= step - fen[q]
+        step >>= 1
+    return pos
+
+
+@njit(nogil=True)
+def _rth_merged(fen, nc, top, sl, s, r):
+    """The r-th (from 0) colour, counting up, that is either silent or one of sl[:s] (sounding, free; sorted here)."""
+    if s > 1:
+        sl[:s] = np.sort(sl[:s])
+    for k in range(s):
+        at = k + sl[k] - _fen_below(fen, sl[k])  # (its place among the free ones: k listed + the silent below)
+        if at == r:
+            return sl[k]
+        if at > r:
+            return _kth_free(fen, nc, top, r - k)
+    return _kth_free(fen, nc, top, r - s)
+
+
+@njit(nogil=True)
+def _pslot(hk, key, mask):
+    """recolour_apart's pair counts: key's place (mask < 0 = the full table: the key itself; else in the hash hk,
+    the slot holding key or the empty one where it goes, -1 = empty, looked up from a multiplicative hash)."""
+    if mask < 0:
+        return key
+    h = ((key * 2654435761) >> 16) & mask
+    while hk[h] != key and hk[h] != -1:
+        h = (h + 1) & mask
+    return h
+
+
+@njit(nogil=True)
+def _act_out(act, apos, na, c):
+    """recolour_apart: colour c taken out of the sounding colours (the last one moved into its place) -> na."""
+    p = apos[c]
+    last = act[na - 1]
+    act[p] = last
+    apos[last] = p
+    return na - 1
+
+
+@njit(nogil=True)
+def _rth_free(tl, count, r):
+    """recolour_apart: the r-th (from 0) colour, counting up, that isn't one of tl[:count] (sorted here, distinct)."""
+    s = np.sort(tl[:count])
+    c = r
+    for k in range(count):
+        if s[k] <= c:
+            c += 1
+        else:
+            break
+    return c
+
+
+APART_TABLE_MOST = 1 << 22  # (recolour_apart: colours x colours in a full table at most; past it a hash)
+APART_FEW = 64  # (recolour_apart: up to this many colours no fen / mine kept: their upkeep cost 10-20 % there)
 
 
 @njit(nogil=True)
@@ -1702,46 +1891,6 @@ def _heap_down(he, hi, hn):
         he[p], hi[p] = he[q], hi[q]
         p = q
     he[p], hi[p] = end, i
-
-
-@njit(nogil=True)
-def _apart_scan(order, ss, e, old, new, pick, bstart, bsize, nc):
-    """recolour_apart's old walk (every sounding note looked at, for each note): many colours only."""
-    act = np.empty(max(1, bsize.max() if len(bsize) else 1), np.int64)
-    taken = np.zeros(nc, np.bool_)
-    for w in range(len(bstart)):
-        na = 0
-        for j in range(bstart[w], bstart[w] + bsize[w]):
-            i = order[j]
-            m = 0
-            for q in range(na):  # (ending where this one starts: touching, fine)
-                x = act[q]
-                if e[x] > ss[j]:
-                    act[m] = x
-                    m += 1
-            na = m
-            for c in range(nc):
-                taken[c] = False
-            count = 0
-            for q in range(na):
-                x = act[q]
-                if old[x] != old[i] and not taken[new[x]]:
-                    taken[new[x]] = True
-                    count += 1
-            if taken[new[i]]:
-                free = nc - count
-                if free == 0 or not taken[old[i]]:
-                    new[i] = old[i]
-                else:
-                    r = min(int(pick[i] * free), free - 1)
-                    for c in range(nc):
-                        if not taken[c]:
-                            if r == 0:
-                                new[i] = c
-                                break
-                            r -= 1
-            act[na] = i
-            na += 1
 
 
 @njit(nogil=True)

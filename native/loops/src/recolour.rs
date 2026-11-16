@@ -4,7 +4,7 @@
 use rayon::prelude::*;
 
 use crate::maths::{f2i, npmod, pmax, pmin, rint};
-use crate::{need, rd, wr, zeros, Nd, NdMut};
+use crate::{filled, need, rd, wr, zeros, Nd, NdMut};
 
 /// A place counted from the end when below 0 (Numba's a[-1]).
 #[inline(always)]
@@ -1189,17 +1189,34 @@ pub fn dice_mix(seed: u64, c0: &[u64], c1: &[u64], c2: &[u64], c3: &[u64], out: 
 #[inline(always)]
 pub fn recolour_apart(order: &[i64], ss: &[i64], e: &[i64], old: &[i64], new: &mut [i64], pick: &[f64],
                       bstart: &[i64], bsize: &[i64], nc: i64) -> i64 {
-    let table = nc > 0 && nc.saturating_mul(nc) <= APART_TABLE_MOST;
-    match (apart_plain(order, ss, e, old, new, pick, bstart, bsize, nc), table) {
-        (true, true) => apart_counts::<false>(order, ss, e, old, new, pick, bstart, bsize, nc),
-        (false, true) => apart_counts::<true>(order, ss, e, old, new, pick, bstart, bsize, nc),
-        (true, false) => apart_walk::<false>(order, ss, e, old, new, pick, bstart, bsize, nc),
-        (false, false) => apart_walk::<true>(order, ss, e, old, new, pick, bstart, bsize, nc),
+    if apart_plain(order, ss, e, old, new, pick, bstart, bsize, nc) {
+        apart_counts::<false>(order, ss, e, old, new, pick, bstart, bsize, nc)
+    } else {
+        apart_counts::<true>(order, ss, e, old, new, pick, bstart, bsize, nc)
     }
 }
 
-/// fastloops.APART_TABLE_MOST: colours x colours counted at most; past it the old note-by-note walk.
+/// fastloops.APART_TABLE_MOST: colours x colours in a full table at most; past it a hash (pslot).
 const APART_TABLE_MOST: i64 = 1 << 22;
+/// fastloops.APART_FEW: up to this many colours no fen / mine kept (their upkeep cost 10-20 % there).
+const APART_FEW: i64 = 64;
+
+/// fastloops._pslot: key's place in the pair counts (mask < 0: the full table, the key itself; else the hash
+/// slot holding key or the empty one (-1) where it goes).
+#[inline(always)]
+fn pslot(hk: &[i64], key: i64, mask: i64) -> usize {
+    if mask < 0 {
+        return key as usize;
+    }
+    let mut h = (key.wrapping_mul(2654435761) >> 16) & mask;
+    loop {
+        let k = hk[h as usize];
+        if k == key || k == -1 {
+            return h as usize;
+        }
+        h = (h + 1) & mask;
+    }
+}
 
 /// fastloops.recolour_apart's counting walk: the notes still sounding counted per colour now and per (colour
 /// before, colour now), kept in a heap by their ends (fastloops._heap_up / _heap_down, the same steps).
@@ -1208,69 +1225,276 @@ const APART_TABLE_MOST: i64 = 1 << 22;
 fn apart_counts<const CHECK: bool>(order: &[i64], ss: &[i64], e: &[i64], old: &[i64], new: &mut [i64],
                                    pick: &[f64], bstart: &[i64], bsize: &[i64], nc: i64) -> i64 {
     let most = if bsize.is_empty() { 1 } else { bsize.iter().copied().max().unwrap_or(1).max(1) } as usize;
-    let mut he = need!(zeros::<i64>(most));
-    let mut hi = need!(zeros::<i64>(most));
+    // the heap (ends + places in the burst) + mine (per colour before, its sounding notes linked: nxt / prv): ONE list
+    let mut heap = need!(zeros::<i64>(4 * most));
+    let (he, rest) = heap.split_at_mut(most);
+    let (hi, rest) = rest.split_at_mut(most);
+    let (nxt, prv) = rest.split_at_mut(most);
     let ncu = nc.max(0) as usize;
-    let mut now = need!(zeros::<i64>(ncu));
-    let mut pair = need!(zeros::<i64>(ncu * ncu));
-    let mut taken = need!(zeros::<bool>(ncu));
+    // pair counts (colour before * nc + colour now): a full table, or past APART_TABLE_MOST a hash twice the
+    // biggest burst (a burst holds at most that many pairs), emptied after each burst
+    let dense = nc.saturating_mul(nc) <= APART_TABLE_MOST;
+    let (mask, psize) = if dense {
+        (-1i64, ncu * ncu)
+    } else {
+        let mut size = 16usize;
+        while size < 2 * most {
+            size *= 2;
+        }
+        (size as i64 - 1, size)
+    };
+    let mut pair = need!(zeros::<i64>(psize));
+    let mut hk = need!(filled::<i64>(if dense { 0 } else { psize }, -1));
+    let mut used = need!(zeros::<usize>(if dense { 0 } else { most }));
+    let mut nu = 0usize;
+    // now + act (colours with now > 0, in no order; apos = each one's place) + tl (one note's taken colours) + head
+    // / cnt (mine: first sounding note / how many per colour before) + sl (one note's free sounding colours) + mark
+    // + fen (the sounding colours as a Fenwick tree): ONE list (tiny calls: each list made cost ~20 ns)
+    let mut cols = need!(zeros::<i64>(9 * ncu + 1)); // (8 lists of nc + fen's nc + 1)
+    let (now, rest) = cols.split_at_mut(ncu);
+    let (act, rest) = rest.split_at_mut(ncu);
+    let (apos, rest) = rest.split_at_mut(ncu);
+    let (tl, rest) = rest.split_at_mut(ncu);
+    let (head, rest) = rest.split_at_mut(ncu);
+    let (cnt, rest) = rest.split_at_mut(ncu);
+    let (sl, rest) = rest.split_at_mut(ncu);
+    let (mark, fen) = rest.split_at_mut(ncu);
+    head.fill(-1);
+    let many = nc > APART_FEW; // (few colours: walking the sounding ones is cheap, fen + mine not kept)
+    let mut top = 1i64;
+    while top * 2 <= nc {
+        top *= 2;
+    }
+    let mut na = 0usize;
     for w in 0..bstart.len() {
         let mut hn = 0usize;
-        for j in bstart[w]..bstart[w] + bsize[w] {
+        let b0 = bstart[w];
+        for j in b0..b0 + bsize[w] {
             let ju = j as usize;
             let i = at::<_, CHECK>(order, ju) as usize;
             let sj = at::<_, CHECK>(ss, ju);
             while hn > 0 && he[0] <= sj {
-                let x = hi[0] as usize;
-                let (ox, nx) = (at::<_, CHECK>(old, x) as usize, at::<_, CHECK>(new, x) as usize);
-                now[nx] -= 1;
-                pair[ox * ncu + nx] -= 1;
+                let jj = hi[0]; // (the heap holds the note's place in its burst (many) or the note itself)
+                let x = if many { at::<_, CHECK>(order, (b0 + jj) as usize) as usize } else { jj as usize };
+                na = let_go(jj as usize, x, old, new, nc, now, &mut pair, &hk, mask, act, apos, na, fen, head, nxt,
+                            prv, cnt, many);
                 hn -= 1;
-                heap_down(&mut he, &mut hi, hn);
+                heap_down(he, hi, hn);
             }
             let oi = at::<_, CHECK>(old, i);
-            let base = oi as usize * ncu;
-            let mut count = 0i64;
-            for c in 0..ncu {
-                let t = now[c] - pair[base + c] > 0;
-                taken[c] = t;
-                if t {
-                    count += 1;
-                }
-            }
-            if taken[at::<_, CHECK>(new, i) as usize] {
-                let free = nc - count;
-                if free == 0 || !taken[oi as usize] {
+            let base = oi * nc;
+            let ni = at::<_, CHECK>(new, i) as usize;
+            if now[ni] - pair[pslot(&hk, base + ni as i64, mask)] > 0 {
+                let ou = oi as usize;
+                if now[ou] - pair[pslot(&hk, base + oi, mask)] <= 0 {
                     new[i] = oi;
+                } else if many && (cnt[ou] as usize) < na {
+                    let s = apart_mine(head[ou], nxt, order, b0, new, now, &pair, &hk, mask, base, mark, sl);
+                    let free = nc - na as i64 + s as i64;
+                    if free == 0 {
+                        new[i] = oi;
+                    } else {
+                        let r = crate::maths::f2i(pick[i] * free as f64).min(free - 1);
+                        new[i] = rth_merged(fen, nc, top, &mut sl[..s], r);
+                    }
                 } else {
-                    let mut r = crate::maths::f2i(pick[i] * free as f64).min(free - 1);
-                    for c in 0..ncu {
-                        if !taken[c] {
-                            if r == 0 {
-                                new[i] = c as i64;
-                                break;
-                            }
-                            r -= 1;
+                    let mut count = 0usize;
+                    for q in 0..na {
+                        let c = act[q];
+                        if now[c as usize] - pair[pslot(&hk, base + c, mask)] > 0 {
+                            tl[count] = c;
+                            count += 1;
                         }
+                    }
+                    let free = nc - count as i64;
+                    if free == 0 {
+                        new[i] = oi;
+                    } else {
+                        let r = crate::maths::f2i(pick[i] * free as f64).min(free - 1);
+                        new[i] = rth_free(&mut tl[..count], r);
                     }
                 }
             }
             let ni = new[i] as usize;
+            if now[ni] == 0 {
+                act[na] = ni as i64;
+                apos[ni] = na as i64;
+                na += 1;
+                if many {
+                    fen_add(fen, nc, ni as i64, 1);
+                }
+            }
             now[ni] += 1;
-            pair[base + ni] += 1;
-            heap_up(&mut he, &mut hi, hn, at::<_, CHECK>(e, i), i as i64);
+            let h = pslot(&hk, base + ni as i64, mask);
+            if !dense && hk[h] < 0 {
+                hk[h] = base + ni as i64;
+                used[nu] = h;
+                nu += 1;
+            }
+            pair[h] += 1;
+            let jj = j - b0;
+            if many {
+                let ou = oi as usize;
+                nxt[jj as usize] = head[ou];
+                prv[jj as usize] = -1;
+                if head[ou] >= 0 {
+                    prv[head[ou] as usize] = jj;
+                }
+                head[ou] = jj;
+                cnt[ou] += 1;
+            }
+            heap_up(he, hi, hn, at::<_, CHECK>(e, i), if many { jj } else { i as i64 });
             hn += 1;
         }
         while hn > 0 {
-            let x = hi[0] as usize;
-            let (ox, nx) = (old[x] as usize, new[x] as usize);
-            now[nx] -= 1;
-            pair[ox * ncu + nx] -= 1;
+            let jj = hi[0];
+            let x = if many { order[(b0 + jj) as usize] as usize } else { jj as usize };
+            na = let_go(jj as usize, x, old, new, nc, now, &mut pair, &hk, mask, act, apos, na, fen, head, nxt, prv,
+                        cnt, many);
             hn -= 1;
-            heap_down(&mut he, &mut hi, hn);
+            heap_down(he, hi, hn);
         }
+        for &h in used[..nu].iter() {
+            hk[h] = -1;
+        }
+        nu = 0;
     }
     0
+}
+
+/// fastloops._apart_let_go: note x (place jj in its burst) stops sounding: out of every count -> na.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn let_go(jj: usize, x: usize, old: &[i64], new: &[i64], nc: i64, now: &mut [i64], pair: &mut [i64], hk: &[i64],
+          mask: i64, act: &mut [i64], apos: &mut [i64], mut na: usize, fen: &mut [i64], head: &mut [i64],
+          nxt: &mut [i64], prv: &mut [i64], cnt: &mut [i64], many: bool) -> usize {
+    let c = new[x] as usize;
+    let o = old[x];
+    now[c] -= 1;
+    pair[pslot(hk, o * nc + c as i64, mask)] -= 1;
+    if now[c] == 0 {
+        na = act_out(act, apos, na, c);
+        if many {
+            fen_add(fen, nc, c as i64, -1);
+        }
+    }
+    if !many {
+        return na;
+    }
+    if prv[jj] >= 0 {
+        nxt[prv[jj] as usize] = nxt[jj];
+    } else {
+        head[o as usize] = nxt[jj];
+    }
+    if nxt[jj] >= 0 {
+        prv[nxt[jj] as usize] = prv[jj];
+    }
+    cnt[o as usize] -= 1;
+    na
+}
+
+/// fastloops._apart_mine: the sounding colours not taken for a note of colour before base / nc (every sounding note
+/// of the colour has that colour before), found through its sounding notes from place jj on -> how many, in sl.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn apart_mine(j0: i64, nxt: &[i64], order: &[i64], b0: i64, new: &[i64], now: &[i64], pair: &[i64], hk: &[i64],
+              mask: i64, base: i64, mark: &mut [i64], sl: &mut [i64]) -> usize {
+    let mut s = 0usize;
+    let mut jj = j0;
+    while jj >= 0 {
+        let c = new[order[(b0 + jj) as usize] as usize];
+        if mark[c as usize] == 0 {
+            mark[c as usize] = 1;
+            if now[c as usize] == pair[pslot(hk, base + c, mask)] {
+                sl[s] = c;
+                s += 1;
+            }
+        }
+        jj = nxt[jj as usize];
+    }
+    jj = j0;
+    while jj >= 0 {
+        mark[new[order[(b0 + jj) as usize] as usize] as usize] = 0;
+        jj = nxt[jj as usize];
+    }
+    s
+}
+
+/// fastloops._fen_add: colour c in (d = 1) or out (d = -1) of the running count of sounding colours.
+#[inline(always)]
+fn fen_add(fen: &mut [i64], nc: i64, c: i64, d: i64) {
+    let mut q = c + 1;
+    while q <= nc {
+        fen[q as usize] += d;
+        q += q & -q;
+    }
+}
+
+/// fastloops._fen_below: how many sounding colours are below colour c.
+#[inline(always)]
+fn fen_below(fen: &[i64], c: i64) -> i64 {
+    let (mut t, mut q) = (0i64, c);
+    while q > 0 {
+        t += fen[q as usize];
+        q -= q & -q;
+    }
+    t
+}
+
+/// fastloops._kth_free: the k-th (from 0) colour counting up with no note sounding.
+#[inline(always)]
+fn kth_free(fen: &[i64], nc: i64, top: i64, mut k: i64) -> i64 {
+    let (mut pos, mut step) = (0i64, top);
+    while step > 0 {
+        let q = pos + step;
+        if q <= nc && step - fen[q as usize] <= k {
+            pos = q;
+            k -= step - fen[q as usize];
+        }
+        step >>= 1;
+    }
+    pos
+}
+
+/// fastloops._rth_merged: the r-th (from 0) colour counting up that is silent or one of sl (sorted here).
+#[inline(always)]
+fn rth_merged(fen: &[i64], nc: i64, top: i64, sl: &mut [i64], r: i64) -> i64 {
+    sl.sort_unstable();
+    for (k, &c) in sl.iter().enumerate() {
+        let at = k as i64 + c - fen_below(fen, c);
+        if at == r {
+            return c;
+        }
+        if at > r {
+            return kth_free(fen, nc, top, r - k as i64);
+        }
+    }
+    kth_free(fen, nc, top, r - sl.len() as i64)
+}
+
+/// fastloops._act_out: colour c out of the sounding colours (the last one moved into its place) -> na.
+#[inline(always)]
+fn act_out(act: &mut [i64], apos: &mut [i64], na: usize, c: usize) -> usize {
+    let p = apos[c] as usize;
+    let last = act[na - 1];
+    act[p] = last;
+    apos[last as usize] = p as i64;
+    na - 1
+}
+
+/// fastloops._rth_free: the r-th (from 0) colour counting up that isn't in tl (distinct; sorted here in place).
+#[inline(always)]
+fn rth_free(tl: &mut [i64], r: i64) -> i64 {
+    tl.sort_unstable();
+    let mut c = r;
+    for &t in tl.iter() {
+        if t <= c {
+            c += 1;
+        } else {
+            break;
+        }
+    }
+    c
 }
 
 #[inline(always)]
@@ -1352,62 +1576,4 @@ fn at<T: Copy, const CHECK: bool>(s: &[T], i: usize) -> T {
     } else {
         unsafe { *s.get_unchecked(i) }
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-#[inline(always)]
-fn apart_walk<const CHECK: bool>(order: &[i64], ss: &[i64], e: &[i64], old: &[i64], new: &mut [i64], pick: &[f64],
-                                 bstart: &[i64], bsize: &[i64], nc: i64) -> i64 {
-    let most = if bsize.is_empty() { 1 } else { bsize.iter().copied().max().unwrap_or(1).max(1) };
-    let mut act = need!(zeros::<i64>(most as usize));
-    let ncu = nc.max(0) as usize;
-    let mut taken = need!(zeros::<bool>(ncu));
-    for w in 0..bstart.len() {
-        let mut na = 0usize;
-        for j in bstart[w]..bstart[w] + bsize[w] {
-            let ju = j as usize;
-            let i = at::<_, CHECK>(order, ju) as usize;
-            let sj = at::<_, CHECK>(ss, ju);
-            let mut m = 0usize;
-            for q in 0..na {
-                let x = at::<_, CHECK>(&act, q);
-                if at::<_, CHECK>(e, x as usize) > sj {
-                    act[m] = x;
-                    m += 1;
-                }
-            }
-            na = m;
-            taken.iter_mut().for_each(|t| *t = false);
-            let mut count = 0i64;
-            let oi = at::<_, CHECK>(old, i);
-            for q in 0..na {
-                let x = at::<_, CHECK>(&act, q) as usize;
-                let nx = at::<_, CHECK>(new, x) as usize;
-                if at::<_, CHECK>(old, x) != oi && !at::<_, CHECK>(&taken, nx) {
-                    taken[nx] = true;
-                    count += 1;
-                }
-            }
-            if at::<_, CHECK>(&taken, at::<_, CHECK>(new, i) as usize) {
-                let free = nc - count;
-                if free == 0 || !at::<_, CHECK>(&taken, oi as usize) {
-                    new[i] = old[i];
-                } else {
-                    let mut r = crate::maths::f2i(pick[i] * free as f64).min(free - 1);
-                    for c in 0..ncu {
-                        if !taken[c] {
-                            if r == 0 {
-                                new[i] = c as i64;
-                                break;
-                            }
-                            r -= 1;
-                        }
-                    }
-                }
-            }
-            act[na] = i as i64;
-            na += 1;
-        }
-    }
-    0
 }
