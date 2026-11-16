@@ -4,7 +4,8 @@
 use crate::maths::{pmax, pmin};
 use rayon::prelude::*;
 
-use crate::{filled, need, zeros, NdMut, FAILED};
+use crate::pyext::{Out, Outs};
+use crate::{filled, grow, need, zeros, NdMut, FAILED};
 
 /// fastloops._band_at: one edge's round-ended band on the line at y -> (lo, hi), lo >= hi = none.
 #[inline(always)]
@@ -400,4 +401,230 @@ impl Heat<'_> {
         }
         u + src
     }
+}
+
+/// fastloops._short_emit: row (a, b, k, t) onto out, joined to step t's last row when it touches it.
+#[inline(always)]
+fn short_emit(out: &mut [Vec<i64>; 4], last: &mut [i64], a: i64, b: i64, k: i64, t: usize) -> Result<(), i64> {
+    let j = last[t];
+    if j >= 0 && out[2][j as usize] == k && out[1][j as usize] == a {
+        out[1][j as usize] = b;
+        return Ok(());
+    }
+    last[t] = out[0].len() as i64;
+    for (o, v) in out.iter_mut().zip([a, b, k, t as i64]) {
+        grow(o, v)?;
+    }
+    Ok(())
+}
+
+/// Min-heap of (first, second) pairs (fastloops._pair_push / _pair_pop: the same order).
+#[inline(always)]
+fn pair_less(h: &[[i64; 2]], i: usize, j: usize) -> bool {
+    h[i][0] < h[j][0] || (h[i][0] == h[j][0] && h[i][1] < h[j][1])
+}
+#[inline(always)]
+fn pair_push(h: &mut [[i64; 2]], n: usize, x: [i64; 2]) -> usize {
+    let mut i = n;
+    h[i] = x;
+    while i > 0 {
+        let p = (i - 1) / 2;
+        if !pair_less(h, i, p) {
+            break;
+        }
+        h.swap(p, i);
+        i = p;
+    }
+    n + 1
+}
+#[inline(always)]
+fn pair_pop(h: &mut [[i64; 2]], n: usize) -> usize {
+    let n = n - 1;
+    h.swap(0, n);
+    let mut i = 0;
+    loop {
+        let mut a = 2 * i + 1;
+        if a >= n {
+            break;
+        }
+        let b = a + 1;
+        if b < n && pair_less(h, b, a) {
+            a = b;
+        }
+        if !pair_less(h, a, i) {
+            break;
+        }
+        h.swap(a, i);
+        i = a;
+    }
+    n
+}
+
+/// fastloops.short_pieces (nested.shortest_pieces): the inside's stretches (bs, be, bk) and the later steps' (rs,
+/// re, rk, step rd >= 1), both sorted by key, then start -> (a, b, key, t) rows (see there).
+pub fn short_pieces(bs: &[i64], be: &[i64], bk: &[i64], rs: &[i64], re: &[i64], rk: &[i64], rd: &[i64],
+                    least: i64) -> Outs {
+    let (nb, m) = (bs.len(), rs.len());
+    if be.len() < nb || bk.len() < nb || re.len() < m || rk.len() < m || rd.len() < m {
+        return Err(FAILED);
+    }
+    let mut top: Vec<i64> = zeros(m)?;
+    let mut most = 0i64;
+    for j in 0..m {
+        top[j] = if j == 0 || rk[j] != rk[j - 1] { re[j] } else { top[j - 1].max(re[j]) };
+        most = most.max(rd[j]);
+    }
+    if most < 0 {
+        return Err(FAILED);
+    }
+    let most = most as usize;
+    let mut last: Vec<i64> = filled(most + 1, -1)?;
+    let mut opened: Vec<i64> = zeros(most + 1)?;
+    let (mut ca, mut cb, mut cd): (Vec<i64>, Vec<i64>, Vec<i64>) = (zeros(m)?, zeros(m)?, zeros(m)?);
+    let mut cuts: Vec<i64> = zeros(2 * m + 2)?;
+    let mut heap: Vec<[i64; 2]> = filled(4 * m + 4, [0, 0])?;
+    let p = 2 * m + 1;
+    let (mut ps, mut pe, mut pd): (Vec<i64>, Vec<i64>, Vec<i64>) = (zeros(p)?, zeros(p)?, zeros(p)?);
+    let (mut prv, mut nxt): (Vec<i64>, Vec<i64>) = (zeros(p)?, zeros(p)?);
+    let mut alive: Vec<bool> = zeros(p)?;
+    let mut out: [Vec<i64>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
+    for i in 0..nb {
+        let (s0, e0, k) = (bs[i], be[i], bk[i]);
+        let (mut lo, mut hi) = (0usize, m); // (the first stretch at or past (k, e0))
+        while lo < hi {
+            let mid = (lo + hi) / 2;
+            if rk[mid] < k || (rk[mid] == k && rs[mid] < e0) {
+                lo = mid + 1;
+            } else {
+                hi = mid;
+            }
+        }
+        let mut c = 0usize;
+        let mut j = lo;
+        while j > 0 && rk[j - 1] == k && top[j - 1] > s0 {
+            j -= 1;
+            if re[j] > s0 {
+                let (a, b) = (rs[j].max(s0), re[j].min(e0));
+                if b > a {
+                    ca[c] = a;
+                    cb[c] = b;
+                    cd[c] = rd[j];
+                    c += 1;
+                }
+            }
+        }
+        if c == 0 {
+            continue;
+        }
+        ca[..c].reverse(); // (start order)
+        cb[..c].reverse();
+        cd[..c].reverse();
+        cuts[0] = s0;
+        cuts[1] = e0;
+        for x in 0..c {
+            cuts[2 + 2 * x] = ca[x];
+            cuts[3 + 2 * x] = cb[x];
+        }
+        let cu = &mut cuts[..2 * c + 2];
+        cu.sort_unstable();
+        let mut nc = 0usize;
+        for x in 0..cu.len() {
+            if nc == 0 || cu[x] != cu[nc - 1] {
+                cu[nc] = cu[x];
+                nc += 1;
+            }
+        }
+        let (mut n, mut nh, mut q) = (0usize, 0usize, 0usize);
+        for x in 0..nc - 1 {
+            let at = cu[x];
+            while q < c && ca[q] <= at {
+                nh = pair_push(&mut heap, nh, [-cd[q], cb[q]]);
+                q += 1;
+            }
+            while nh > 0 && heap[0][1] <= at {
+                nh = pair_pop(&mut heap, nh);
+            }
+            let d = if nh > 0 { -heap[0][0] } else { 0 };
+            if n > 0 && pd[n - 1] == d {
+                pe[n - 1] = cu[x + 1];
+            } else {
+                ps[n] = at;
+                pe[n] = cu[x + 1];
+                pd[n] = d;
+                n += 1;
+            }
+        }
+        nh = 0;
+        for x in 0..n {
+            prv[x] = x as i64 - 1;
+            nxt[x] = if x + 1 < n { x as i64 + 1 } else { -1 };
+            alive[x] = true;
+            if pe[x] - ps[x] < least {
+                nh = pair_push(&mut heap, nh, [pe[x] - ps[x], x as i64]);
+            }
+        }
+        let mut left_n = n;
+        while left_n > 1 && nh > 0 {
+            nh = pair_pop(&mut heap, nh);
+            let [ln, xi] = heap[nh];
+            let x = xi as usize;
+            if !alive[x] || pe[x] - ps[x] != ln {
+                continue;
+            }
+            let (le, ri) = (prv[x], nxt[x]);
+            let take = if le >= 0 && ri >= 0 && pd[le as usize] != pd[ri as usize] {
+                let (l, r) = (le as usize, ri as usize);
+                if pe[l] - ps[l] >= pe[r] - ps[r] { l } else { r }
+            } else if le >= 0 {
+                le as usize
+            } else {
+                ri as usize
+            };
+            pd[x] = pd[take];
+            let mut node = x;
+            if le >= 0 && pd[le as usize] == pd[x] {
+                let l = le as usize;
+                pe[l] = pe[x];
+                nxt[l] = nxt[x];
+                if nxt[x] >= 0 {
+                    prv[nxt[x] as usize] = le;
+                }
+                alive[x] = false;
+                left_n -= 1;
+                node = l;
+            }
+            if ri >= 0 && pd[ri as usize] == pd[node] {
+                let r = ri as usize;
+                pe[node] = pe[r];
+                nxt[node] = nxt[r];
+                if nxt[r] >= 0 {
+                    prv[nxt[r] as usize] = node as i64;
+                }
+                alive[r] = false;
+                left_n -= 1;
+            }
+            if pe[node] - ps[node] < least {
+                nh = pair_push(&mut heap, nh, [pe[node] - ps[node], node as i64]);
+            }
+        }
+        let mut was = 0usize;
+        let mut x = 0i64;
+        while x >= 0 {
+            let xu = x as usize;
+            let d = pd[xu].max(0) as usize;
+            for t in was + 1..=d {
+                opened[t] = ps[xu];
+            }
+            for t in d + 1..=was {
+                short_emit(&mut out, &mut last, opened[t], ps[xu], k, t)?;
+            }
+            was = d;
+            x = nxt[xu];
+        }
+        for t in 1..=was {
+            short_emit(&mut out, &mut last, opened[t], e0, k, t)?;
+        }
+    }
+    let [a, b, c, d] = out;
+    Ok(vec![Out::I64(a, 0), Out::I64(b, 0), Out::I64(c, 0), Out::I64(d, 0)])
 }

@@ -28,6 +28,7 @@ import math
 
 import numpy as np
 
+from files import speed
 from notes.custom import (carried_fill, clean_of_at, cut_out, drawn_view, edge_loops, find_spans, fill_plan,
                           frame_spans, frame_to_bp, frame_to_uv, has_nested, has_tiles, in_turns, inside_rows, merged_rows, poly_edges, rows_spans)
 from notes.paths import pitch_of, top_key
@@ -213,6 +214,33 @@ def shortest_pieces(steps, least):
     as "every piece of this step or a later one"."""
     if least <= 0 or len(steps) < 2 or not len(steps[0]):
         return steps
+    fast = speed.loops()
+    got = fast.short_pieces(*short_inputs(steps), int(least)) if fast else None
+    if got is None:
+        return shortest_numpy(steps, least)
+    a, b, k, t = got  # (the same, as a compiled loop: files/fastloops.py; 480 steps took 5.7 s here, 11-16)
+    o = np.argsort(t, kind="stable")
+    rows = np.column_stack([a[o], b[o], k[o]]).astype(np.int64).reshape(-1, 3)
+    at = np.searchsorted(t[o], np.arange(1, len(steps) + 1)).tolist()
+    return [steps[0]] + [rows[at[i]:at[i + 1]] for i in range(len(steps) - 1)]
+
+
+def short_inputs(steps):
+    """shortest_pieces' inside stretches and the later steps' (with their step), each sorted by key, then start:
+    (bs, be, bk, rs, re, rk, rd), contiguous int64."""
+    base = np.asarray(steps[0], np.int64).reshape(-1, 3)
+    base = base[np.lexsort((base[:, 0], base[:, 2]))]
+    rest = [np.asarray(st, np.int64).reshape(-1, 3) for st in steps[1:]]
+    rows = np.concatenate(rest) if rest else np.zeros((0, 3), np.int64)
+    d = np.repeat(np.arange(1, len(steps), dtype=np.int64), [len(r) for r in rest])
+    o = np.lexsort((rows[:, 0], rows[:, 2]))
+    rows, d = rows[o], d[o]
+    c = np.ascontiguousarray
+    return c(base[:, 0]), c(base[:, 1]), c(base[:, 2]), c(rows[:, 0]), c(rows[:, 1]), c(rows[:, 2]), c(d)
+
+
+def shortest_numpy(steps, least):
+    """shortest_pieces without the compiled loop (no library / Numba): the same pieces, a key row at a time."""
     by_key = []  # each step's stretches by key
     for st in steps:
         st = np.asarray(st, np.int64).reshape(-1, 3)

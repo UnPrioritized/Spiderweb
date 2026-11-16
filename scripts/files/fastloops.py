@@ -47,6 +47,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   area_spots     faces.Faces.area_at: the area each spot is in (custom shapes' Fill / Spam, area colours)
   face_build     faces.Faces' build: the drawing cut into slabs at every crossing, the areas joined, their depth
   blend_heat     notes/blend_rows.heat_at: Nested Blend's heat at spots (finding each ring edge)
+  short_pieces   nested.shortest_pieces (Nested's Shortest piece box): pieces on top, short ones merged, a heap
   band_rows      shrink.near_rows (Even band, Outline gate): each outline edge's band on each line, joined line by line
   field_dist     shrink.field's distances to the outline on a grid (Nested's centre, Blend, the Outline gate preview)
   gap_ticks      tempo_file.keep_gaps' work on one Keep timing part (export, Conductor pane checks)
@@ -3402,6 +3403,154 @@ def _band_at(ax, ay, bx, by, length, y, r):
 
 
 @njit(nogil=True)
+def _short_emit(out, no, last, a, b, k, t):
+    """Row (a, b, k, t) onto out[:, :no] (grown when full), joined to step t's last row when it touches it ->
+    (out, the new count)."""
+    j = last[t]
+    if j >= 0 and out[2, j] == k and out[1, j] == a:
+        out[1, j] = b
+        return out, no
+    if no == out.shape[1]:
+        bigger = np.empty((4, 2 * no + 64), np.int64)
+        bigger[:, :no] = out[:, :no]
+        out = bigger
+    out[0, no], out[1, no], out[2, no], out[3, no] = a, b, k, t
+    last[t] = no
+    return out, no + 1
+
+
+@njit(nogil=True)
+def short_pieces(bs, be, bk, rs, re, rk, rd, least):
+    """nested.shortest_pieces (Nested's Shortest piece box): the inside's stretches (bs, be, bk) and the later
+    steps' (rs, re, rk, their step rd >= 1), both sorted by key, then start. On each inside stretch: the step on top
+    at every moment (the latest step there), runs of one step = pieces; the shortest piece under least (the leftmost
+    of equals) takes its neighbours' step when both match, else the longer one's (the left on a tie), the one
+    neighbour's at an end; again until none is short or one piece is left. -> (a, b, key, t) rows: for every step
+    t >= 1, the runs of pieces of step t or later, each step's rows in key / start order, touching ones joined."""
+    m = len(rs)
+    top = np.empty(m, np.int64)  # (the furthest end of a key's stretches up to here)
+    most = 0
+    for j in range(m):
+        top[j] = re[j] if j == 0 or rk[j] != rk[j - 1] else max(top[j - 1], re[j])
+        most = max(most, rd[j])
+    last = np.full(most + 1, -1, np.int64)  # (each step's last row)
+    opened = np.zeros(most + 1, np.int64)  # (where each step's run started)
+    ca = np.empty(m, np.int64)
+    cb = np.empty(m, np.int64)
+    cd = np.empty(m, np.int64)
+    cuts = np.empty(2 * m + 2, np.int64)
+    heap = np.empty((4 * m + 4, 2), np.int64)  # (pieces <= 2m + 1, each pushed again at most once a merge)
+    ps = np.empty(2 * m + 1, np.int64)
+    pe = np.empty(2 * m + 1, np.int64)
+    pd = np.empty(2 * m + 1, np.int64)
+    prv = np.empty(2 * m + 1, np.int64)
+    nxt = np.empty(2 * m + 1, np.int64)
+    alive = np.empty(2 * m + 1, np.int64)
+    pair = np.zeros(2, np.int64)
+    out = np.empty((4, 64), np.int64)
+    no = 0
+    for i in range(len(bs)):
+        s0, e0, k = bs[i], be[i], bk[i]
+        lo, hi = 0, m  # (the first stretch at or past (k, e0))
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if rk[mid] < k or (rk[mid] == k and rs[mid] < e0):
+                lo = mid + 1
+            else:
+                hi = mid
+        c = 0
+        j = lo - 1
+        while j >= 0 and rk[j] == k and top[j] > s0:
+            if re[j] > s0:
+                a, b = max(rs[j], s0), min(re[j], e0)
+                if b > a:
+                    ca[c], cb[c], cd[c] = a, b, rd[j]
+                    c += 1
+            j -= 1
+        if c == 0:
+            continue
+        for x in range(c // 2):  # (start order)
+            y = c - 1 - x
+            ca[x], ca[y] = ca[y], ca[x]
+            cb[x], cb[y] = cb[y], cb[x]
+            cd[x], cd[y] = cd[y], cd[x]
+        cuts[0], cuts[1] = s0, e0
+        for x in range(c):
+            cuts[2 + 2 * x], cuts[3 + 2 * x] = ca[x], cb[x]
+        srt = np.sort(cuts[:2 * c + 2])
+        nc = 0
+        for x in range(len(srt)):
+            if nc == 0 or srt[x] != cuts[nc - 1]:
+                cuts[nc] = srt[x]
+                nc += 1
+        n = 0  # (pieces)
+        nh = 0
+        q = 0
+        for x in range(nc - 1):
+            at = cuts[x]
+            while q < c and ca[q] <= at:
+                pair[0], pair[1] = -cd[q], cb[q]
+                nh = _pair_push(heap, nh, pair)
+                q += 1
+            while nh > 0 and heap[0, 1] <= at:
+                nh = _pair_pop(heap, nh)
+            d = -heap[0, 0] if nh > 0 else 0
+            if n > 0 and pd[n - 1] == d:
+                pe[n - 1] = cuts[x + 1]
+            else:
+                ps[n], pe[n], pd[n] = at, cuts[x + 1], d
+                n += 1
+        nh = 0
+        for x in range(n):
+            prv[x], nxt[x], alive[x] = x - 1, x + 1 if x + 1 < n else -1, 1
+            if pe[x] - ps[x] < least:
+                pair[0], pair[1] = pe[x] - ps[x], x
+                nh = _pair_push(heap, nh, pair)
+        left_n = n
+        while left_n > 1 and nh > 0:
+            nh = _pair_pop(heap, nh)
+            ln, x = heap[nh, 0], heap[nh, 1]
+            if not alive[x] or pe[x] - ps[x] != ln:
+                continue
+            le, ri = prv[x], nxt[x]
+            if le >= 0 and ri >= 0 and pd[le] != pd[ri]:
+                take = le if pe[le] - ps[le] >= pe[ri] - ps[ri] else ri
+            else:
+                take = le if le >= 0 else ri
+            pd[x] = pd[take]
+            node = x
+            if le >= 0 and pd[le] == pd[x]:
+                pe[le], nxt[le] = pe[x], nxt[x]
+                if nxt[x] >= 0:
+                    prv[nxt[x]] = le
+                alive[x] = 0
+                left_n -= 1
+                node = le
+            if ri >= 0 and pd[ri] == pd[node]:
+                pe[node], nxt[node] = pe[ri], nxt[ri]
+                if nxt[ri] >= 0:
+                    prv[nxt[ri]] = node
+                alive[ri] = 0
+                left_n -= 1
+            if pe[node] - ps[node] < least:
+                pair[0], pair[1] = pe[node] - ps[node], node
+                nh = _pair_push(heap, nh, pair)
+        was = 0
+        x = 0
+        while x >= 0:
+            d = pd[x]
+            for t in range(was + 1, d + 1):
+                opened[t] = ps[x]
+            for t in range(d + 1, was + 1):
+                out, no = _short_emit(out, no, last, opened[t], ps[x], k, t)
+            was = d
+            x = nxt[x]
+        for t in range(1, was + 1):
+            out, no = _short_emit(out, no, last, opened[t], e0, k, t)
+    return out[0, :no].copy(), out[1, :no].copy(), out[2, :no].copy(), out[3, :no].copy()
+
+
+@njit(nogil=True)
 def band_rows(ax, ay, bx, by, length, ys, first, n, r, row_out, lo_out, hi_out):
     """shrink.near_rows after its line ranges (edge e reaches lines first[e] .. first[e] + n[e] - 1; length =
     np.hypot of its sides): every edge's band across every line it reaches, a line's stretches sorted and joined
@@ -4553,6 +4702,7 @@ def warm():
     blend_heat(np.zeros(2), np.ones(1), np.ones(1), np.zeros(1), np.zeros(1), z1, z1 + 1, z1, 1, z1, z1,
                np.zeros(1), 0, np.zeros(1), 0.0, np.zeros(1))
     band_rows(f1, f1, f1 + 1, f1 + 1, f1 + 1, np.full(1, 0.5), i1 * 0, i1, 1.0, i1.copy(), f1.copy(), f1.copy())
+    short_pieces(z1, z1 + 9, z1, z1 + 1, z1 + 3, z1, z1 + 1, 5)
     field_dist(f1, f1, f1 + 1, f1 + 1, f1, f1, 1.0, 24, np.zeros((1, 1)))
     t3 = np.array([0, 1, 3], np.int64)
     gap_ticks(0, 3, t3, t3[:0], np.full(3, 500000, np.int64), t3[:0], 500000, 0xFFFFFF)
