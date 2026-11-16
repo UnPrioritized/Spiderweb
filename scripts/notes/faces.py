@@ -135,6 +135,26 @@ def _segments(paths):
     return seg[(seg[:, 0] != seg[:, 2]) | (seg[:, 1] != seg[:, 3])]
 
 
+HEIGHT_SAME = 1e-12  # (heights closer than this share of the drawing's size count as one: rounding noise)
+
+
+def _even_heights(seg, size):
+    """seg with heights a rounding error apart made one (each the lowest of its bunch): a line level but for ~1e-16
+    (cos / sin maths, e.g. a star's bar) made a slab so thin that the crossings in it couldn't get a level of their
+    own, its lines stayed out of order and a star's middle came out empty (planned-features "NEARLY-LEVEL EDGE")."""
+    if not len(seg) or not size:
+        return seg
+    ys = np.concatenate([seg[:, 1], seg[:, 3]])
+    u, back = np.unique(ys, return_inverse=True)
+    if len(u) < 2 or not (np.diff(u) <= size * HEIGHT_SAME).any():
+        return seg
+    head = np.maximum.accumulate(np.where(np.r_[True, np.diff(u) > size * HEIGHT_SAME], np.arange(len(u)), 0))
+    ys = u[head][back.reshape(-1)]
+    seg = seg.copy()
+    seg[:, 1], seg[:, 3] = ys[:len(seg)], ys[len(seg):]
+    return seg[(seg[:, 0] != seg[:, 2]) | (seg[:, 1] != seg[:, 3])]
+
+
 def _runs(first, n):
     """For counts n starting at first: (which one, first + 0 .. n - 1) for all of them."""
     i = np.repeat(np.arange(len(n)), n)
@@ -161,6 +181,9 @@ class Faces:
     def __init__(self, paths, size=None):
         """size: the whole drawing's (its line-closeness margin), when these lines are one part of it (Apart)."""
         seg = _segments(paths)
+        if size is None and len(seg):
+            size = max(np.ptp(seg[:, [0, 2]]), np.ptp(seg[:, [1, 3]]))
+        seg = _even_heights(seg, size)
         level = seg[:, 1] == seg[:, 3]
         h, s = seg[level], seg[~level]
         up = s[:, 1] < s[:, 3]

@@ -1247,6 +1247,46 @@ def rows_spans(edges, q0, q1, ppq, wind=False):
         q, s, t = fast.rows_fill(c(xa, float), c(ya, float), c(xb, float), c(yb, float), int(q0), int(q1), int(ppq),
                                  bool(wind))
         return list(zip(q.tolist(), s.tolist(), t.tolist()))
+    got = rows_gaps(xa, ya, xb, yb, q0, q1)
+    if got is None:
+        return none
+    e, gap, y0, y1, mid, lv_row = got
+    xa, ya, xb, yb = xa[e], ya[e], xb[e], yb[e]
+
+    def x_at(y):
+        return xa + (xb - xa) * (y - ya) / (yb - ya)
+
+    order = np.lexsort((x_at(mid), gap))
+    gap = gap[order]
+    left, right = np.minimum(x_at(y0), x_at(y1))[order], np.maximum(x_at(y0), x_at(y1))[order]
+    new = np.ones(len(gap), bool)
+    new[1:] = gap[1:] != gap[:-1]
+    at = np.arange(len(gap))
+    first_at = np.maximum.accumulate(np.where(new, at, 0))
+    if wind:  # (each crossing's way up or down: in from where the count leaves 0, out where it's back at 0)
+        d = np.sign(yb - ya)[order].astype(np.int64)
+        run = np.cumsum(d)
+        run -= (run - d)[first_at]
+        was = run - d
+        ins, outs = np.flatnonzero((was == 0) & (run != 0)), np.flatnonzero((was != 0) & (run == 0))
+        wind = len(ins) == len(outs)  # (always, for closed loops; else even-odd as a fallback)
+        if wind:
+            if not len(ins):
+                return none
+            a, b, q = left[ins], right[outs], lv_row[gap[ins]]
+    if not wind:
+        rank = at - first_at
+        pair = np.flatnonzero((rank % 2 == 0) & np.append(~new[1:], False))
+        if not len(pair):
+            return none
+        a, b, q = left[pair], right[pair + 1], lv_row[gap[pair]]
+    return rows_merged(a, b, q, q0, q1, ppq)
+
+
+def rows_gaps(xa, ya, xb, yb, q0, q1):
+    """row_gaps for every row q0..q1 at once (rows_spans, walled_rows): (e, gap, y0, y1, mid, lv_row) with gap a
+    place in one list of every row's levels (row by row) and lv_row[gap] its row, or None when no edge reaches a
+    row."""
     mn, mx = np.minimum(ya, yb), np.maximum(ya, yb)
 
     def first_row(v, below):  # the first row q with v < q + 0.5 (below) / the last with v > q - 0.5
@@ -1260,7 +1300,7 @@ def rows_spans(edges, q0, q1, ppq, wind=False):
     r1 = np.minimum(first_row(mx, False), q1).astype(np.int64)
     n = np.maximum(r1 - r0 + 1, 0)
     if not n.sum():
-        return none
+        return None
     # every edge with every row it reaches, row by row and in each row in the edges' order (as row_spans)
     e = np.repeat(np.arange(len(xa)), n)
     row = np.repeat(r0, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
@@ -1303,38 +1343,16 @@ def rows_spans(edges, q0, q1, ppq, wind=False):
     e = np.repeat(e, n)
     gap = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
     if not len(gap):
-        return none
+        return None
     y0, y1 = levels[gap], levels[gap + 1]
-    mid = (y0 + y1) / 2
-    xa, ya, xb, yb = xa[e], ya[e], xb[e], yb[e]
+    return e, gap, y0, y1, (y0 + y1) / 2, lv_row
 
-    def x_at(y):
-        return xa + (xb - xa) * (y - ya) / (yb - ya)
 
-    order = np.lexsort((x_at(mid), gap))
-    gap = gap[order]
-    left, right = np.minimum(x_at(y0), x_at(y1))[order], np.maximum(x_at(y0), x_at(y1))[order]
-    new = np.ones(len(gap), bool)
-    new[1:] = gap[1:] != gap[:-1]
-    at = np.arange(len(gap))
-    first_at = np.maximum.accumulate(np.where(new, at, 0))
-    if wind:  # (each crossing's way up or down: in from where the count leaves 0, out where it's back at 0)
-        d = np.sign(yb - ya)[order].astype(np.int64)
-        run = np.cumsum(d)
-        run -= (run - d)[first_at]
-        was = run - d
-        ins, outs = np.flatnonzero((was == 0) & (run != 0)), np.flatnonzero((was != 0) & (run == 0))
-        wind = len(ins) == len(outs)  # (always, for closed loops; else even-odd as a fallback)
-        if wind:
-            if not len(ins):
-                return none
-            a, b, q = left[ins], right[outs], lv_row[gap[ins]]
-    if not wind:
-        rank = at - first_at
-        pair = np.flatnonzero((rank % 2 == 0) & np.append(~new[1:], False))
-        if not len(pair):
-            return none
-        a, b, q = left[pair], right[pair + 1], lv_row[gap[pair]]
+def rows_merged(a, b, q, q0, q1, ppq):
+    """Stretches a..b (beats) on rows q -> [(pitch, start tick, end tick)] merged per row like merge_spans, in
+    ticks like find_spans (a bit under a tick only if the row has nothing else)."""
+    if not len(a):
+        return []
     # merge_spans row by row: the running end compared as ranks, so one row's ends never reach the next row
     order = np.lexsort((b, a, q))
     a, b, q = a[order], b[order], q[order]
@@ -1351,6 +1369,46 @@ def rows_spans(edges, q0, q1, ppq, wind=False):
     keep = (t > s) | ~some[q - q0]
     s, t = s[keep].astype(np.int64), t[keep].astype(np.int64)
     return list(zip(q[keep].tolist(), s.tolist(), np.maximum(t, s + 1).tolist()))
+
+
+def walled_rows(edges, q0, q1, ppq, test):
+    """find_spans' walled rows (fill_test = test, nothing coloured by hand) q0..q1 all at once: the same notes as
+    row_pieces row by row (each piece asked at its middle spot, as fill_test reads it; filled neighbours meet where
+    their line crosses the slice's middle, else a piece reaches as far as its line does), with one question for every
+    row (row by row was most of the time: the user's shape with 128 Nested steps, 1.3 s a centre point move)."""
+    xa, ya, xb, yb = edges[:4]
+    if q1 < q0 or not len(xa):
+        return []
+    got = rows_gaps(xa, ya, xb, yb, q0, q1)
+    if got is None:
+        return []
+    e, gap, y0, y1, mid, lv_row = got
+    xa, ya, xb, yb = xa[e], ya[e], xb[e], yb[e]
+
+    def x_at(y):
+        return xa + (xb - xa) * (y - ya) / (yb - ya)
+
+    xm = x_at(mid)
+    order = np.lexsort((xm, gap))
+    gap, xm = gap[order], xm[order]
+    xl, xr = np.minimum(x_at(y0), x_at(y1))[order], np.maximum(x_at(y0), x_at(y1))[order]
+    start = np.ones(len(gap), bool)
+    start[1:] = gap[1:] != gap[:-1]
+    pi = np.flatnonzero(~np.append(start[1:], True))  # pieces: from crossing i to i + 1 in the same slice
+    if not len(pi):
+        return []
+    y = y0 + (y1 - y0) * 0.5  # (row_cut's first spot: the piece's middle)
+    xy = x_at(y)[order]
+    filled = np.asarray(test(xy[pi] + (xy[pi + 1] - xy[pi]) * 0.5, y[order][pi]), bool).reshape(-1)
+    joined = np.zeros(len(pi), bool)
+    joined[1:] = pi[1:] == pi[:-1] + 1  # (the piece before it is in the same slice)
+    left_full = np.zeros(len(pi), bool)
+    left_full[1:] = joined[1:] & filled[:-1]
+    right_full = np.zeros(len(pi), bool)
+    right_full[:-1] = joined[1:] & filled[1:]
+    left = np.where(left_full, xm[pi], xl[pi])
+    right = np.where(right_full, xm[pi + 1], xr[pi + 1])
+    return rows_merged(left[filled], right[filled], lv_row[gap[pi]][filled], q0, q1, ppq)
 
 
 def merge_spans(a, b):
@@ -1390,12 +1448,11 @@ def find_spans(sh, ppq):
     ps = [p for poly in polys for _, p in poly]
     if not ps:
         return []
-    edges = None if tx else poly_edges(polys)
-    if walled:  # (every piece of a row between two lines: filled as fill_test says)
-        edges += (np.zeros(len(edges[0]), np.int64),)
     q0, q1 = max(0, pitch_of(min(ps))), min(top_key(), pitch_of(max(ps)))
-    if not tx and not walled:
-        return rows_spans(edges, q0, q1, ppq)
+    if walled:  # (every piece of a row between two lines: filled as fill_test says)
+        return walled_rows(poly_edges(polys), q0, q1, ppq, walled)
+    if not tx:
+        return rows_spans(poly_edges(polys), q0, q1, ppq)
     out = []
     rows = None
     if tx:
@@ -1405,7 +1462,7 @@ def find_spans(sh, ppq):
     for q in range(q0, q1 + 1):
         row = [(math.floor(a * ppq + 0.5), math.floor(b * ppq + 0.5)) for a, b, *_ in (
             rows[q - q0] if rows is not None else
-            threshold_spans(polys, q, tx["threshold"]) if tx else row_pieces(edges, q, walled, as_normal))]
+            threshold_spans(polys, q, tx["threshold"]))]
         # a bit under a tick only if the row has nothing else (like find_area_spans): two shapes sharing a stretch
         # of the same side made a column of 1-tick notes along it where they overlap
         some = any(e > s for s, e in row)
@@ -1448,14 +1505,7 @@ def frame_spans(carried, frame, ppq):
             return np.zeros(len(x), bool)
         d = fc.depth_at(at[:, 0], at[:, 1])
         return d >= 1 if union else d % 2 == 1
-    edges += (np.zeros(len(edges[0]), np.int64),)
-    out = []
-    for q in range(q0, q1 + 1):  # (as find_spans)
-        row = [(math.floor(a * ppq + 0.5), math.floor(b * ppq + 0.5)) for a, b, *_ in row_pieces(edges, q, test,
-                                                                                                    as_normal)]
-        some = any(e > s for s, e in row)
-        out += [(q, s, max(e, s + 1)) for s, e in row if e > s or not some]
-    return out
+    return walled_rows(edges, q0, q1, ppq, test)
 
 
 # ---------------------------------------------------------------- areas coloured by hand (areas.py)
