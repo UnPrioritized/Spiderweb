@@ -33,8 +33,8 @@ def step_name(rc, kind, n=0, sh=None):
         return tr("stir.tab_shape" if n < len(tabs) and tabs[n]["moves"] == "shape" else "stir.tab", n=n + 1)
     if kind == "turned":
         return tr("join_split.reverse_tracks")
-    if kind == "warp" and isinstance((rc or {}).get("warp"), dict) and rc["warp"].get("moves") == "shape":
-        return tr("warp.title_shape")  # (the Warp set to Shape: "Warp ◇", stage F)
+    if kind in ("warp", "liquify") and isinstance((rc or {}).get(kind), dict) and rc[kind].get("moves") == "shape":
+        return tr(kind + ".title_shape")  # (the Warp / Liquify set to Shape: "Warp ◇", stages F / G)
     return tr(kind + ".title")
 
 
@@ -44,6 +44,9 @@ def is_shape_tag(sh, tag):
     if tag[0] == "warp":
         from notes.shape_bend import is_shape_warp
         return is_shape_warp(sh.get("recolour"))
+    if tag[0] == "liquify":
+        from notes.shape_bend import is_shape_liquify
+        return is_shape_liquify(sh.get("recolour"))
     if tag[0] != "stir":
         return False
     from notes.recolour import clean_recolour, stirs_of

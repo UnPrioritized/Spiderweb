@@ -78,9 +78,34 @@ def is_shape_warp(r):
     return isinstance(r, dict) and isinstance(r.get("warp"), dict) and r["warp"].get("moves") == "shape"
 
 
+def is_shape_liquify(r):
+    """Whether a saved Recolour's Liquify bends the shape (Liquify set to Shape, stage G)."""
+    return isinstance(r, dict) and isinstance(r.get("liquify"), dict) and r["liquify"].get("moves") == "shape"
+
+
 def has_shape(r):
-    """Whether a saved Recolour holds a Shape step (a Stir tab or the Warp set to Shape)."""
-    return bool(shape_places(r)) or is_shape_warp(r)
+    """Whether a saved Recolour holds a Shape step (a Stir tab, the Warp or the Liquify set to Shape)."""
+    return bool(shape_places(r)) or is_shape_warp(r) or is_shape_liquify(r)
+
+
+SHAPE_KINDS = ("stir", "warp", "liquify")  # (the order Shape steps run in: every Stir tab, the Warp, the Liquify)
+
+
+def _skipped(r, kind):
+    """Whether r's Shape step of kind ("warp" / "liquify") is skipped: a Shape step before it (in SHAPE_KINDS order)
+    is being edited (rc "_upto"), so the ones after it are hidden like later colour steps."""
+    u = r.get("_upto")
+    if not isinstance(u, int) or isinstance(u, bool):
+        return False
+    order = rc.order_of(rc.clean_recolour(r) or {})
+    if not 0 <= u < len(order):
+        return False
+    k = order[u]
+    if k == "stir":
+        stack = rc.stir_stack(r.get("stir"))
+        n = order[:u + 1].count("stir") - 1
+        return n < len(stack) and is_shape(stack[n])
+    return k == "warp" and kind == "liquify" and is_shape_warp(r)
 
 
 def warp_shape(r, off=()):
@@ -90,17 +115,21 @@ def warp_shape(r, off=()):
         return None
     from notes.warp import clean_warp, shows
     wp = shows(clean_warp(r["warp"]))
-    if wp is None:
+    if wp is None or _skipped(r, "warp"):
         return None
-    u = r.get("_upto")
-    if isinstance(u, int) and not isinstance(u, bool):
-        order = rc.order_of(rc.clean_recolour(r) or {})
-        if 0 <= u < len(order) and order[u] == "stir":
-            stack = rc.stir_stack(r.get("stir"))
-            n = order[:u + 1].count("stir") - 1
-            if n < len(stack) and is_shape(stack[n]):
-                return None
     return wp
+
+
+def liquify_shape(r, off=()):
+    """A saved Recolour's Liquify when it is set to Shape and bends something now (clean), else None: switched off,
+    hidden, Strength 0, nothing pushed (a freeze mask alone), or skipped while an earlier Shape step is edited."""
+    if not is_shape_liquify(r) or ["liquify", 0] in [list(e) for e in off or ()]:
+        return None
+    from notes.liquify import clean_liquify
+    lq = clean_liquify(r["liquify"])
+    if not lq or not lq.get("map") or lq.get("on") is False or not lq.get("strength", 100.0) or _skipped(r, "liquify"):
+        return None
+    return lq
 
 
 def _moves(st):
@@ -116,13 +145,14 @@ def colour_part(r):
         return r
     s = r.get("stir")
     items = s if isinstance(s, list) else ([s] if isinstance(s, dict) else [])
-    warp = is_shape_warp(r)  # (the Warp set to Shape goes too, stage F)
-    if not any(is_shape(x) for x in items) and not warp:
+    # (the Warp / Liquify set to Shape go too, stages F / G)
+    whole = {k for k, yes in (("warp", is_shape_warp(r)), ("liquify", is_shape_liquify(r))) if yes}
+    if not any(is_shape(x) for x in items) and not whole:
         return r
     keep, gone = [], []
     for i, x in enumerate(items):
         (gone if is_shape(x) else keep).append(i if is_shape(x) else x)
-    out = {k: v for k, v in r.items() if k not in ("stir", "order") and not (warp and k == "warp")}
+    out = {k: v for k, v in r.items() if k not in ("stir", "order") and k not in whole}
     if keep:
         out["stir"] = keep if len(keep) > 1 else keep[0]
     o = r.get("order")
@@ -133,7 +163,7 @@ def colour_part(r):
                 n += 1
                 if n in gone:
                     continue
-            if k == "warp" and warp:
+            if k in whole:
                 continue
             new.append(k)
         out["order"] = new
@@ -142,7 +172,7 @@ def colour_part(r):
     if isinstance(u, int) and not isinstance(u, bool):
         n, gone_at = -1, []
         for j, k in enumerate(rc.order_of(rc.clean_recolour(r) or {})):
-            if k == "warp" and warp:
+            if k in whole:
                 gone_at.append(j)
             if k == "stir":
                 n += 1
@@ -163,24 +193,29 @@ def shape_only(r):
         return None
     s = r.get("stir")
     tabs = [x for x in (s if isinstance(s, list) else [s]) if is_shape(x)]
-    warp = is_shape_warp(r)
-    if not tabs and not warp:
+    warp, liq = is_shape_warp(r), is_shape_liquify(r)
+    if not tabs and not warp and not liq:
         return None
     out = {"mode": "keep", "seed": 1}
     if tabs:
         out["stir"] = tabs if len(tabs) > 1 else tabs[0]
     if warp:
         out["warp"] = r["warp"]
+    if liq:
+        out["liquify"] = r["liquify"]
     for k in ("frame", "ppq"):
         if k in r:
             out[k] = r[k]
     u = r.get("_upto")  # (a Shape tab being edited: the same tab marked among the Shape tabs kept (hunt 2026-11-17);
-    # a colour step being edited hides no Shape tab: they all run first. Kept order: the tabs, then the Warp)
+    # a colour step being edited hides no Shape tab: they all run first. Kept order: the tabs, the Warp, the Liquify)
     if isinstance(u, int) and not isinstance(u, bool):
         n, m = -1, -1
         for j, k in enumerate(rc.order_of(rc.clean_recolour(r) or {})):
             if k == "warp" and warp and j == u:
                 out["_upto"] = len(tabs)
+                break
+            if k == "liquify" and liq and j == u:
+                out["_upto"] = len(tabs) + warp
                 break
             if k == "stir":
                 n += 1
@@ -204,14 +239,11 @@ def grown_reach(sh, r):
         return r
     tabs = shape_tabs(sh["recolour"], sh.get("off"))
     wp = warp_shape(sh["recolour"], sh.get("off"))
-    if not tabs and wp is None:
+    lq = liquify_shape(sh["recolour"], sh.get("off"))
+    if not tabs and wp is None and lq is None:
         return r
     w, h = max(r[3] - r[0], 1e-9), max(r[2] - r[1], 1e-9)
     x0, x1, y0, y1 = 0.0, 1.0, 0.0, 1.0
-    if wp is not None:  # (a Warp moves a spot by a blend of its points / handles: never farther than the farthest)
-        from notes.warp import shape_of
-        P = np.abs(shape_of(wp)[0]).reshape(-1, 2).max(0)
-        x0, x1, y0, y1 = -P[0], 1 + P[0], -P[1], 1 + P[1]
     for st in tabs:
         cx, cy = (v / 100 for v in st["centre"])
         rx = ry = 1.0
@@ -222,6 +254,10 @@ def grown_reach(sh, r):
         far = max(math.hypot((X - cx) * rx, (Y - cy) * ry) for X in (0, 1) for Y in (0, 1))
         far = (far + abs(st["ripple"]) / 100 * max(rx, ry)) / min(rx, ry)
         x0, x1, y0, y1 = min(x0, cx - far), max(x1, cx + far), min(y0, cy - far), max(y1, cy + far)
+    # (the Warp / Liquify after the tabs: each moves a spot at most its biggest offset each way)
+    for P in ([np.abs(WarpBend.offsets(wp))] if wp is not None else []) + \
+             ([np.abs(LiquifyBend.offsets(lq))] if lq is not None else []):
+        x0, x1, y0, y1 = x0 - P[0], x1 + P[0], y0 - P[1], y1 + P[1]
     return (min(r[0], r[0] + x0 * w), min(r[1], r[1] + y0 * h), max(r[2], r[1] + y1 * h), max(r[3], r[0] + x1 * w))
 
 
@@ -439,9 +475,82 @@ class WarpBend(StirBend):
         x, y = self.look(x, y)
         return self.from_unit(x, y)
 
+    @staticmethod
+    def offsets(wp):
+        """The farthest a spot moves each way (box units): a Warp's bend blends its points / handles."""
+        from notes.warp import shape_of
+        return np.abs(shape_of(wp)[0]).reshape(-1, 2).max(0)
+
     def within(self, t, k):
         x, y = self.to_unit(t, k)
         P = np.abs(self.P).reshape(-1, 2).max(0)
+        return (x >= -P[0] - 1e-9) & (x <= 1 + P[0] + 1e-9) & (y >= -P[1] - 1e-9) & (y <= 1 + P[1] + 1e-9)
+
+
+class LiquifyBend(StirBend):
+    """The Liquify set to Shape (stage G). Its map looks BACKWARDS (a spot shows what is at spot + Strength x map), so
+    look() is the map itself and forwards is turned round: each point solves p + Strength x map(p) = where it was,
+    Newton's steps from where the map at that spot points back (the Warp's own steps: the map is a grid of offsets
+    blended like the Warp's Straight cells, compiled warp_newton). A point that doesn't settle (the brush folded the
+    shape over itself) = Folded: the notes are pulled from where each spot looks, like the colours (pulled())."""
+
+    def __init__(self, lq, r, box, own, ppq):
+        from notes import liquify as L
+        self.lq, self.r = lq, dict(r or {}, ppq=ppq)
+        self.box, self.own = box, own
+        f = self.r.get("frame") or rc.SAME
+        self.turned = bool(f[1])
+        self.flip_x = not self.turned and f[0] < 0
+        self.flip_y = not self.turned and f[3] < 0
+        self.A = np.ascontiguousarray(L.map_of(L.full(lq)) * (L.full(lq)["strength"] / 100.0), np.float64)
+        self.worst = 0.0
+        self.st = {"ripple": 0.0, "ripple_len": 100.0}
+
+    @staticmethod
+    def offsets(lq):
+        from notes import liquify as L
+        return np.abs(L.map_of(L.full(lq))).reshape(-1, 2).max(0) * (L.full(lq)["strength"] / 100.0)
+
+    def look(self, x, y, st=None):
+        from notes.liquify import sample
+        x, y = np.array(x, np.float64, ndmin=1), np.array(y, np.float64, ndmin=1)
+        shape = x.shape
+        x, y = x.ravel(), y.ravel()
+        d = sample(self.A, x, y) if len(x) else np.zeros((0, 2))
+        return (x + d[:, 0]).reshape(shape), (y + d[:, 1]).reshape(shape)
+
+    def look_tk(self, t, k):
+        x, y = self.to_unit(t, k)
+        x, y = self.look(x, y)
+        return self.from_unit(x, y)
+
+    def forward_unit(self, qx, qy):
+        from notes.liquify import sample
+        from notes.warp import _newton
+        qx, qy = np.array(qx, np.float64, ndmin=1), np.array(qy, np.float64, ndmin=1)
+        if not len(qx):
+            return qx, qy
+        d = sample(self.A, qx, qy)
+        x, y, err = _newton(self.A, qx, qy, False, qx - d[:, 0], qy - d[:, 1])
+        bad = np.flatnonzero(err > 1e-9)
+        if len(bad):  # (a sharp twirl's middle: the first guess too far off; Stir's way, a fine search's seed)
+            if getattr(self, "_seed", None) is None:
+                self._seed = searcher(self.look)
+            bx, by = solve(self.look, qx[bad], qy[bad], x[bad], y[bad], self._seed)
+            lx, ly = self.look(bx, by)
+            e = np.hypot(lx - qx[bad], ly - qy[bad])
+            ok = e < err[bad]
+            k = bad[ok]
+            x[k], y[k], err[k] = bx[ok], by[ok], e[ok]
+        if len(err):
+            self.worst = max(self.worst, float(np.max(err)))
+            if self.worst > FOLD:
+                raise Folded
+        return x, y
+
+    def within(self, t, k):
+        x, y = self.to_unit(t, k)
+        P = self.offsets(self.lq)
         return (x >= -P[0] - 1e-9) & (x <= 1 + P[0] + 1e-9) & (y >= -P[1] - 1e-9) & (y <= 1 + P[1] + 1e-9)
 
 
@@ -475,35 +584,39 @@ AS_NOTES = "notes"  # (bent_shape: lines this way can't be bent (funnel, Glissan
 # Last note per dot): its notes bent like pasted notes, hunt 2026-11-17)
 
 
-def bent_shape(sh, tabs, r, box, own, ppq, wp=None):
+def bent_shape(sh, tabs, r, box, own, ppq, wp=None, lq=None):
     """sh (its Recolour already without the Shape tabs) with its lines bent by Stir tabs (filled in, Shape, in tab
-    order) and then the Warp wp set to Shape (clean, or None), None when it can't be bent this way (left as it is),
-    or PULL when a tab folds the shape (Straight to round, Kaleidoscope, or a point found with no single place to go).
-    r: the Recolour (frame / ppq); box, own: the colour box of its notes before the bend (recolour.colour_box). Custom
-    shapes: each stroke bent on its own board (curves stay curves, deform.bent_stroke); text and polygons become their
-    strokes. Lines: the drawn path. (A folded Warp grid only makes lines cross: lines way.)"""
+    order), then the Warp wp and the Liquify lq set to Shape (clean, or None), None when it can't be bent this way
+    (left as it is), or PULL when a step folds the shape (Straight to round, Kaleidoscope, or a point found with no
+    single place to go). r: the Recolour (frame / ppq); box, own: the colour box of its notes before the bend
+    (recolour.colour_box). Custom shapes: each stroke bent on its own board (curves stay curves, deform.bent_stroke);
+    text and polygons become their strokes. Lines: the drawn path. (A folded Warp grid only makes lines cross.)"""
     if any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
         return PULL
     try:
-        return _bent_shape(sh, tabs, r, box, own, ppq, wp)
+        return _bent_shape(sh, tabs, r, box, own, ppq, wp, lq)
     except Folded:
         return PULL
 
 
-def benders_of(tabs, wp, r, box, own, ppq):
-    """Every Shape step's bender in the order they run: the Stir tabs, then the Warp."""
+def benders_of(tabs, wp, r, box, own, ppq, lq=None):
+    """Every Shape step's bender in the order they run: the Stir tabs, the Warp, the Liquify."""
     out = [StirBend(st, r, box, own, ppq) for st in tabs]
     if wp is not None:
         out.append(WarpBend(wp, r, box, own, ppq))
+    if lq is not None:
+        out.append(LiquifyBend(lq, r, box, own, ppq))
     return out
 
 
-def _bent_shape(sh, tabs, r, box, own, ppq, wp=None):
+def _bent_shape(sh, tabs, r, box, own, ppq, wp=None, lq=None):
     from notes import deform
-    benders = benders_of(tabs, wp, r, box, own, ppq)
+    benders = benders_of(tabs, wp, r, box, own, ppq, lq)
     waves = [st["ripple_len"] / 100 for st in tabs if st["ripple"]]
     if wp is not None:  # (lines looked at finer than a grid cell: deform cuts them where the bend curves them)
         waves.append(0.5 / max(wp["cols"], wp["rows"]))
+    if lq is not None:  # (a brush reaches a few map steps at least)
+        waves.append(4.0 / max(lq["grid"]))
     wave = min(waves) if waves else None
     kind = sh.get("kind")
     if kind == "custom":

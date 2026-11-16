@@ -70,9 +70,28 @@ class LiquifyWindow(tk.Toplevel):
         form = ttk.Frame(box)
         form.pack(anchor="w", fill="x", pady=(8, 0))
         form.columnconfigure(3, weight=1)  # (the wide rows' room goes there: the units stay by their boxes)
-        ttk.Label(form, text=tr("liquify.tool")).grid(row=0, column=0, sticky="nw", pady=(0, 6))
+        # (Moves: Colours / Shape on top, like Stir's and Warp's (PLAN.md "Deform shapes" stage G); Colours bend too
+        # beside it; a shape without a Liquify takes them with its first stroke: settings.ini [liquify])
+        self.moves = "shape" if settings.get("liquify", "moves", "colours") == "shape" else "colours"
+        self.bend_colours_pick = settings.get("liquify", "bend_colours", "1") != "0"
+        word = ttk.Label(form, text=tr("stir.moves"))
+        word.grid(row=0, column=0, sticky="w", pady=(0, 6))
+        Tooltip(word, tr("liquify.moves_tip"))
+        top = ttk.Frame(form)
+        top.grid(row=0, column=1, columnspan=3, sticky="w", padx=(6, 0), pady=(0, 6))
+        values = [tr("stir.moves_colours"), tr("stir.moves_shape")]
+        b = self.moves_box = ttk.Combobox(top, values=values, state="readonly", width=max(len(v) for v in values) + 1)
+        b.pack(side="left")
+        b.bind("<<ComboboxSelected>>", lambda e: self.on_moves())
+        Tooltip(b, tr("liquify.moves_tip"))
+        self.bend_colours = tk.BooleanVar(value=True)
+        t = self.bend_colours_tick = ttk.Checkbutton(top, text=tr("stir.bend_colours"), variable=self.bend_colours,
+                                                     command=self.on_bend_colours)
+        t.pack(side="left", padx=(12, 0))
+        Tooltip(t, tr("liquify.bend_colours_tip"))
+        ttk.Label(form, text=tr("liquify.tool")).grid(row=1, column=0, sticky="nw", pady=(0, 6))
         tools = ttk.Frame(form)
-        tools.grid(row=0, column=1, columnspan=3, sticky="w", pady=(0, 6))
+        tools.grid(row=1, column=1, columnspan=3, sticky="w", pady=(0, 6))
         for r, names in enumerate(TOOL_ROWS):
             for c, t in enumerate(names):
                 b = ttk.Radiobutton(tools, text=tr("liquify." + t), value=t, variable=self.tool, command=self.on_tool)
@@ -80,10 +99,10 @@ class LiquifyWindow(tk.Toplevel):
                 Tooltip(b, tr(f"liquify.{t}_tip"))
         # (Twirl's way round: easy to find here; Alt held turns it back, like the editors; user 11-07)
         self.twirl_word = ttk.Label(form, text=tr("liquify.twirl_way"))
-        self.twirl_word.grid(row=1, column=0, sticky="w", pady=(0, 6))
+        self.twirl_word.grid(row=2, column=0, sticky="w", pady=(0, 6))
         Tooltip(self.twirl_word, tr("liquify.twirl_way_tip"))
         ways = ttk.Frame(form)
-        ways.grid(row=1, column=1, columnspan=3, sticky="w", pady=(0, 6))
+        ways.grid(row=2, column=1, columnspan=3, sticky="w", pady=(0, 6))
         self.twirl_buttons = []
         for way in ("left", "right"):
             b = ttk.Radiobutton(ways, text=tr("liquify.twirl_" + way), value=way, variable=self.twirl,
@@ -92,7 +111,7 @@ class LiquifyWindow(tk.Toplevel):
             Tooltip(b, tr("liquify.twirl_way_tip"))
             self.twirl_buttons.append(b)
         self.boxes = {}
-        for row, name in enumerate(BRUSH, start=2):
+        for row, name in enumerate(BRUSH, start=3):
             d, lo, hi, unit, steps = BRUSH[name]
             word = ttk.Label(form, text=tr(f"liquify.{name}"))
             word.grid(row=row, column=0, sticky="w", pady=2)
@@ -106,7 +125,7 @@ class LiquifyWindow(tk.Toplevel):
             e.bind("<Return>", lambda ev, name=name: self.on_box(name))
             e.bind("<FocusOut>", lambda ev, name=name: self.on_box(name), add="+")
             self.boxes[name] = (e, var, word)
-        row = len(BRUSH) + 2
+        row = len(BRUSH) + 3
         # (At the edges: Stir's choices, the shapes' own)
         self.edge_word = ttk.Label(form, text=tr("liquify.edge"))
         self.edge_word.grid(row=row, column=0, sticky="w", pady=(6, 2))
@@ -166,6 +185,54 @@ class LiquifyWindow(tk.Toplevel):
 
     def targets(self):
         return self.app.recolour_targets()
+
+    def kind_picks(self):
+        """What a shape's first stroke takes from the window: Moves (+ Colours bend too off), as saved."""
+        if self.moves != "shape":
+            return {}
+        return {"moves": "shape", **({} if self.bend_colours_pick else {"bend_colours": False})}
+
+    def kinds(self):
+        """What each selected shape's Liquify bends ("colours" / "shape"; none yet = the window's pick)."""
+        out = []
+        for t in self.targets():
+            g = (clean_recolour(t.get("recolour")) or {}).get("liquify")
+            out.append((g.get("moves") if g else self.moves) or "colours")
+        return out
+
+    def on_moves(self):
+        """Moves: Colours / Shape: the selected shapes' Liquifies bend that (one undo step); the window's pick for
+        shapes without one yet."""
+        i = self.moves_box.current()
+        if i < 0:
+            return
+        self.moves = ("colours", "shape")[i]
+        put("moves", self.moves)
+        kind = self.moves
+
+        def change(old, sh):
+            got = (old or {}).get("liquify")
+            if not got:
+                return old
+            new = {k: v for k, v in got.items() if k not in ("moves", "bend_colours")}
+            return dict(old, liquify=dict(new, moves="shape") if kind == "shape" else new)
+        self.app.change_recolour(change, tr("liquify.undo_moves"))
+        self.sync()
+
+    def on_bend_colours(self):
+        v = bool(self.bend_colours.get())
+        self.bend_colours_tick.state(["!alternate"])
+        self.bend_colours_pick = v
+        put("bend_colours", "1" if v else "0")
+
+        def change(old, sh):
+            got = (old or {}).get("liquify")
+            if not got or got.get("moves") != "shape":
+                return old
+            new = {k: x for k, x in got.items() if k != "bend_colours"}
+            return dict(old, liquify=new if v else dict(new, bend_colours=False))
+        self.app.change_recolour(change, tr("liquify.undo_bend_colours"))
+        self.sync()
 
     def size_px(self):
         """The brush's width on screen in real pixels (the window's scale taken in)."""
@@ -281,10 +348,37 @@ class LiquifyWindow(tk.Toplevel):
                          tr("liquify.shape", name=app.shape_label(tgts[0])) if len(tgts) == 1 else
                          tr("liquify.n_shapes", n=len(tgts)))
         rcs = [clean_recolour(t.get("recolour")) for t in tgts]
-        lonely, single = app.recolour_trouble(tgts, [r or {"mode": KEEP} for r in rcs])
         lqs = [(r or {}).get("liquify") for r in rcs]
+        # (Moves: each shape's own (none yet = the window's pick); Shape greys At the edges, never warns about
+        # Channels, says in orange when the outline stays as it was)
+        kinds = set(self.kinds()) or {self.moves}
+        shape = kinds == {"shape"}
+        if len(kinds) > 1:
+            self.moves_box.set("")
+        else:
+            self.moves_box.current(("colours", "shape").index(next(iter(kinds))))
+        pictures = tgts and all("picture" in t or "picture_notes" in t for t in tgts)  # (pictures: Shape greyed)
+        self.moves_box.config(state="readonly" if tgts and not pictures else "disabled")
+        bends_ = {g.get("bend_colours", True) if g else self.bend_colours_pick
+                  for g, k in zip(lqs, self.kinds()) if k == "shape"} or {self.bend_colours_pick}
+        self.bend_colours.set(bends_ == {True})
+        self.bend_colours_tick.state(["alternate" if len(bends_) > 1 else "!alternate",
+                                      "!disabled" if "shape" in kinds else "disabled"])
+        self.edge_box.config(state="disabled" if shape else "readonly")
+        if shape:
+            from notes.shape_bend import liquify_shape
+            from window.stir_window import outline_kept
+            lonely = single = False
+            same = outline_kept(app, tgts, lambda r, t: liquify_shape(r, t.get("off")) is not None)
+        else:
+            lonely, single = app.recolour_trouble(tgts, [r or {"mode": KEEP} for r in rcs])
+            same = False
+        hint = tr("liquify.hint_shape" if shape else "liquify.hint")
+        if self.hint.cget("text") != hint:
+            self.hint.config(text=hint)
         zero = lqs and all(g and g.get("strength", 100.0) == 0 for g in lqs)  # (Strength 0 %)
-        text = tr("liquify.needs") if lonely else tr("liquify.one") if single else tr("liquify.zero") if zero else ""
+        text = (tr("liquify.needs") if lonely else tr("liquify.one") if single else tr("liquify.zero") if zero else
+                tr("liquify.shape_same") if same else "")
         if text != self.warn.cget("text"):
             self.warn.config(text=text)
             if text:

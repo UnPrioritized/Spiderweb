@@ -11,7 +11,8 @@ of strokes (user: like the editors; mistakes are fixed with Restore / undo).
 
 Saved as {"grid": [across, up], "map": text (zlib + base64 of int16 pairs, 1 / SCALE of the box each), "frozen":
 text (zlib + base64 of uint8 per grid point, 255 = fully frozen), "strength": % (only != 100), "on": False (only when
-hidden), "edge": STIR_EDGES (only != "escape")}. "map" / "frozen" only when something is pushed / frozen; neither = no
+hidden), "edge": STIR_EDGES (only != "escape"), "moves": "shape" (only when it bends the shape itself, Deform
+shapes stage G; + "bend_colours": False when Colours bend too is off)}. "map" / "frozen" only when something is pushed / frozen; neither = no
 Liquify (clean_liquify: None).
 
 THE FREEZE MASK (stage D, image editors' Freeze / Thaw Mask): spots the brushes leave alone (partly frozen = partly
@@ -165,6 +166,11 @@ def clean_liquify(d):
     from notes.recolour import STIR_EDGES
     if d.get("edge") in STIR_EDGES and d["edge"] != DEFAULTS["edge"]:
         out["edge"] = d["edge"]
+    if d.get("moves") == "shape":  # (bends the shape itself: notes/shape_bend.py, PLAN.md "Deform shapes" stage G;
+        # "bend_colours": False = Colours bend too off, only with Shape)
+        out["moves"] = "shape"
+        if d.get("bend_colours") is False:
+            out["bend_colours"] = False
     return out
 
 

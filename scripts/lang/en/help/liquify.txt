@@ -1,4 +1,4 @@
-Liquify… (side panel, Deform row, beside [page:stir|Stir…] and [page:warp|Warp…]; also the shape's right-click menu, Deform ▸) is a brush you paint with on the piano roll. It pushes the colours inside a shape around, like a finger through wet paint, the way the Liquify tool of photo editing programs bends a picture. The notes themselves never move or change length: only which colour (channel) each note has changes. No colour is added or blended: every note takes the colour of the note the brush pulled into its place.
+Liquify… (side panel, Deform row, beside [page:stir|Stir…] and [page:warp|Warp…]; also the shape's right-click menu, Deform ▸) is a brush you paint with on the piano roll. It pushes the colours inside a shape around (or bends the shape itself: see "Bending the shape itself" below), like a finger through wet paint, the way the Liquify tool of photo editing programs bends a picture. The notes themselves never move or change length: only which colour (channel) each note has changes. No colour is added or blended: every note takes the colour of the note the brush pulled into its place.
 [clip:liquify-brush]
 
 The bends are kept with the shape and worked out again after every change. Change the colours underneath (Recolour, Stir, Colours) and they flow along the same bends; move or stretch the shape and the bends go with it. Colour settings work in the order they were added: a Liquify added after a Stir or a [page:warp|Warp] bends their colours, one added before them is bent by them.
@@ -42,6 +42,14 @@ At the edges: what is pulled in where the brush pushes colours past the shape's 
 ## Straight strokes
 
 A straight stroke takes two clicks: Shift+click where it starts (a dashed circle stays there), then Shift+click where it ends. While you hold Shift, a line with arrows shows the way it will push. Keep holding the second click and the same stroke goes on and on, pushing further the longer you hold (as fast as Rate says). The next straight stroke starts with a new first click. Add Ctrl (Shift+Ctrl+click) to snap the line to every 15° (flat, upright, 45° and in between). Esc forgets the start.
+
+## Bending the shape itself
+
+"Moves" at the top of the Liquify window picks what the brush bends. Colours (the start) pushes the colours, as everything above says. Shape bends the shape itself: brush across its outline and the outline goes where you push it, and its notes are made again from the bent shape as you brush (Fill, Spam and its own colours follow the new lines). Notes may go past the shape's box. Shapes without a Liquify yet take the window's choice with their first stroke. In Properties a Liquify set to Shape is called "Liquify ◇" and is listed at the top.
+
+Shape bends always run first, before every colour step: the [page:stir|Stir] tabs set to Shape, then the [page:warp|Warp], then the Liquify. Only the outline matters for a drawn shape: pushing inside a filled shape changes nothing (the window says so in orange). Pasted notes and plain notes bend everywhere: each note bends like a tiny box, cut into pieces where the brush curves it. Where a push squeezes notes together they bunch up, and behind it they spread apart. A very strong twirl can fold the shape over itself; then each spot takes the note found where the brush brings it from, like the colours do.
+
+"Colours bend too" (beside Moves, ticked at first) keeps the shape's colours on the notes they were on, so a Colours pattern or coloured areas bend along with the shape. At the edges only chooses colours, so it's greyed for Shape; Freeze, Restore, Smooth and Strength work as always. On very big pastes (a million notes) each update while brushing takes about a second.
 
 ## Strength and Show the bends
 

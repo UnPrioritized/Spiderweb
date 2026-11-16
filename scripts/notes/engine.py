@@ -1407,10 +1407,10 @@ def colour_step(notes, tracks, rc, ppq):
 
 
 def _has_shape_tab(r):
-    """A Shape step in Recolour r: a Stir tab or the Warp set to Shape (notes/shape_bend.has_shape)."""
+    """A Shape step in Recolour r: a Stir tab, the Warp or the Liquify set to Shape (notes/shape_bend.has_shape)."""
     s = r.get("stir")
     return (any(isinstance(x, dict) and x.get("moves") == "shape" for x in (s if isinstance(s, list) else [s]))
-            or (isinstance(r.get("warp"), dict) and r["warp"].get("moves") == "shape"))
+            or any(isinstance(r.get(k), dict) and r[k].get("moves") == "shape" for k in ("warp", "liquify")))
 
 
 def shape_tabs_done(sh, ppq, keys, get):
@@ -1418,22 +1418,23 @@ def shape_tabs_done(sh, ppq, keys, get):
     tabs taken out of its Recolour (the colour steps stay). The box the tabs measure in = its notes' before the bend
     (the box stays put, user). A shape that can't be bent this way keeps its lines. A bend folding the shape over
     itself (shape_bend.PULL): (notes, tracks) made here, its notes pulled into place, then its colour steps."""
-    from notes.shape_bend import (PULL, benders_of, bent_shape, colour_part, is_shape_warp, off_without, pulled,
-                                  shape_places, shape_tabs, warp_shape)
+    from notes.shape_bend import (PULL, benders_of, bent_shape, colour_part, is_shape_liquify, is_shape_warp,
+                                  liquify_shape, off_without, pulled, shape_places, shape_tabs, warp_shape)
     r = sh["recolour"]
     tabs = shape_tabs(r, sh.get("off"))  # (a tab switched off in Properties bends nothing)
     wp = warp_shape(r, sh.get("off"))  # (the Warp set to Shape, stage F: after the Stir tabs)
+    lq = liquify_shape(r, sh.get("off"))  # (the Liquify set to Shape, stage G: last)
     rest = colour_part(r)
     out = dict(sh, recolour=rest) if rest else without_recolour(sh)
     if sh.get("off"):  # (the colour steps' numbers once the Shape tabs are out)
         off = off_without(sh["off"], shape_places(r))
-        if is_shape_warp(r):
-            off = [e for e in off if list(e) != ["warp", 0]]
+        gone = [[k, 0] for k, yes in (("warp", is_shape_warp(r)), ("liquify", is_shape_liquify(r))) if yes]
+        off = [e for e in off if list(e) not in gone]
         if off:
             out["off"] = off
         else:
             out.pop("off", None)
-    if (not tabs and wp is None) or not can_recolour(sh):
+    if (not tabs and wp is None and lq is None) or not can_recolour(sh):
         return out
     if sh.get("cut") and not sh["cut"].get("mould"):
         # (A SLICED PIECE of a bent shape, hunt 2026-11-17, user took A: the WHOLE bent, then cut by the knife where it
@@ -1463,7 +1464,7 @@ def shape_tabs_done(sh, ppq, keys, get):
     rule["ppq"] = ppq
     from notes.recolour import colour_box
     box, own = colour_box(notes, rule, free_box(base, notes, get, keys))
-    benders = benders_of(tabs, wp, rule, box, own, ppq)
+    benders = benders_of(tabs, wp, rule, box, own, ppq, lq)
 
     def look(t, k):  # (the last tab first: tab 2 bent what tab 1 left; the Warp last)
         for b in reversed(benders):
@@ -1477,7 +1478,7 @@ def shape_tabs_done(sh, ppq, keys, get):
         return ok
     from notes.shape_bend import AS_NOTES, Folded, note_boxes_bent
     as_notes = "notes" in base and "picture" not in base and "picture_notes" not in base
-    got = AS_NOTES if as_notes else bent_shape(out, tabs, rule, box, own, ppq, wp)
+    got = AS_NOTES if as_notes else bent_shape(out, tabs, rule, box, own, ppq, wp, lq)
     if got is None:
         return out
     if got in (AS_NOTES, PULL):
@@ -1501,7 +1502,8 @@ def shape_tabs_done(sh, ppq, keys, get):
     # (COLOURS BEND TOO, user 2026-11-17, a tick per tab, on by default: each note of the bent shape takes the
     # colour of the note found where the bend brings it from in the shape before, so a Colours cycle / drawn areas
     # keep their look instead of being laid again on the new outline. Off = made on the bent shape)
-    bend = any(st["bend_colours"] for st in tabs) or (wp is not None and wp.get("bend_colours", True))
+    bend = (any(st["bend_colours"] for st in tabs) or (wp is not None and wp.get("bend_colours", True))
+            or (lq is not None and lq.get("bend_colours", True)))
     if not bend or before is None or not len(before):
         return got
     from notes.recolour import nearest

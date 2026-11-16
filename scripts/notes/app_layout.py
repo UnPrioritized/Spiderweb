@@ -55,7 +55,7 @@ def recolour_alone(sh):
             if isinstance(e, list) and len(e) == 2 and e[0] in COLOURS:
                 if e[0] == "stir" and e[1] in places:
                     off.append(["stir", places.index(e[1])])
-                elif e[0] == "warp" and keep and "warp" in keep:  # (the Warp set to Shape, stage F)
+                elif e[0] in ("warp", "liquify") and keep and e[0] in keep:  # (set to Shape, stages F / G)
                     off.append(list(e))
             else:
                 off.append(e)
