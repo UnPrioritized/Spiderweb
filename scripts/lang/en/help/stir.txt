@@ -125,6 +125,12 @@ The Preset row above the tabs keeps stirs you like, so you can use them again in
 
 Reset puts the shown stir back to nothing; the tab keeps its place in the order of the steps ([page:properties|Properties…]) until you take it away with ×. An area picked after Reset starts plain (Size 50 %, no stretch, angle or slant). The button reads "Stir… (on)" while a selected shape has one. Picking Off in the Recolour dropdown keeps the stir; with Off, only the shape's own colours are stirred (Shuffle's settings such as Per chord or Colours wait until you pick Shuffle again).
 
+## Bending the shape itself
+
+"Moves" at the top of each tab picks what that stir bends. Colours (the start) bends the colours, as everything above says. Shape bends the shape itself: its lines bend the way the colours would, and its notes are made from the bent shape (Fill, Spam and its own colours follow the new lines). The box and its handles stay where they are, and notes may go past it. A tab set to Shape shows ◇ after its name. Shape tabs always run first, before every colour step, so a Colours tab after them stirs the bent shape's colours. It works in every Channels mode.
+
+The settings that only change colours (At the edges, Squeeze, Colour sets, the flips, Reverse inside) are greyed on a Shape tab. A strong twist can make a line cross another one: where the shape now overlaps itself, "Overlaps cancel out" leaves a hole there, as with any shape drawn that way. Straight to round, Kaleidoscope and very strong bends fold the shape over itself; then each spot takes the note found where the bend brings it from, exactly like the colours do.
+
 ## With the rest of Spiderweb
 
 A sliced piece of a stirred shape shows the colours it had in the whole, also after a [page:gate_flip|Gate aware flip] or a Flip (mirrored with it). After Turn 90° or a change to its outline it becomes a shape of its own, stirred by itself.

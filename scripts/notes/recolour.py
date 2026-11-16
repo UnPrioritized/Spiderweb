@@ -104,7 +104,10 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
                  "bulge": 0.0, "area_bulge": True,
                  "polar": 0.0, "ripple": 0.0, "ripple_len": 10.0, "ripple_kind": "side", "kaleido": 0,
                  "kaleido_turn": 0.0, "wring": 0.0, "wring_angle": 0.0, "round_edge": "cut", "area_polar": True,
-                 "area_ripple": True, "area_kaleido": True, "area_wring": True}
+                 "area_ripple": True, "area_kaleido": True, "area_wring": True, "moves": "colours"}
+# ("moves" = what the tab bends: "colours" (every stir before 2026-11-17) / "shape" = the shape itself, its notes made
+# from the bent lines (notes/shape_bend.py, PLAN.md "Deform shapes"; user 2026-11-16: one choice per tab))
+STIR_MOVES = ("colours", "shape")
 # (MORE BENDS, user 11-07 after example pictures; each round the Centre point (its Area tick: round the area's own
 # middle, only inside it), the order as SEEN: Turn / Twist -> Straight to round -> Twist along a line -> Ripple ->
 # Kaleidoscope -> Bulge. "polar" = Straight to round % (angle -> across, distance -> up: stripes -> rays, Turn 90 ->
@@ -118,7 +121,8 @@ ROUND_EDGES = ("cut", "fade")
 MOST_SLICES = 32
 MOST_RIPPLE, MOST_RIPPLE_LEN, LEAST_RIPPLE_LEN = 100.0, 200.0, 0.5
 MOST_WRING = 50.0
-SETTINGS_ONLY = {"smooth", "bend_smooth", "ripple_len", "ripple_kind", "kaleido_turn", "wring_angle"}  # (alone: no stir)
+SETTINGS_ONLY = {"smooth", "bend_smooth", "ripple_len", "ripple_kind", "kaleido_turn", "wring_angle"}  # (alone: no
+# stir; "moves" alone IS kept: a tab just set to Shape keeps that choice, it bends nothing yet)
 # ("bulge" = Bulge %, BMC tester 11-07 (their "local expansion / collapse", op art's bulging grid): + = the colours
 # swell out from the middle like a lens, packed tight at the edge; - = pinched in. Never adds or loses a colour inside
 # its reach: each spot looks along its own ray from the middle, the reach's outline stays put. Its reach = the Area
@@ -789,6 +793,8 @@ def one_stir(s):
         out["kaleido"] = int(round(v))
     if s.get("ripple_kind") in RIPPLE_KINDS[1:]:
         out["ripple_kind"] = s["ripple_kind"]
+    if s.get("moves") in STIR_MOVES[1:]:
+        out["moves"] = s["moves"]
     c = s.get("centre")
     if isinstance(c, list) and len(c) == 2 and all(number(x) and SPOT_LEAST <= x <= SPOT_MOST for x in c) and \
             [round(x, 3) for x in c] != [50, 50]:

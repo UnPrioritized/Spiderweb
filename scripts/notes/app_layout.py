@@ -39,7 +39,11 @@ def recolour_alone(sh):
     overlaps), except on a Domino paste (its tracks kept in every mode: hunt 2026-11-01)."""
     if "recolour" not in sh:
         return sh
-    return with_most(sh, False) if pasted_notes(sh) else without_recolour(sh)
+    if pasted_notes(sh):
+        return with_most(sh, False)
+    from notes.shape_bend import shape_only  # (Stir tabs bending the shape itself: in every mode)
+    keep = shape_only(sh["recolour"])
+    return dict(without_recolour(sh), recolour=keep) if keep else without_recolour(sh)
 
 
 def colours_apart(sh, mode):

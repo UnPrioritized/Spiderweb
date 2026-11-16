@@ -69,7 +69,11 @@ def _spot(p):
 
 
 def moves(d):
-    """Whether settings d (cleaned) move anything."""
+    """Whether settings d (cleaned) move anything. d may also be a bender of its own (notes/shape_bend.py: Stir's
+    Shape tabs, any "spot goes there" maths): a dict with "ripple" / "ripple_len" (how finely lines are checked) and
+    a bend2((n, 2) points) -> (n, 2) method."""
+    if hasattr(d, "bend2"):
+        return True
     return bool(d["turn"] % 360 or d["twist"] or d["bulge"] or d["ripple"])
 
 
@@ -101,6 +105,9 @@ def weight(x, y, area):
 def bend(x, y, d):
     """Points (x, y) on the board -> where settings d (cleaned) put them, as two float arrays."""
     x, y = np.array(x, np.float64, ndmin=1), np.array(y, np.float64, ndmin=1)
+    if hasattr(d, "bend2"):
+        p = d.bend2(np.column_stack((x, y)))
+        return p[:, 0], p[:, 1]
     area = d["area"]
     cx, cy = d["centre"]
     w = weight(x, y, area) if area is not None and (d["turn"] or d["twist"] or d["ripple"]) else None
@@ -184,6 +191,8 @@ def bend_points(pts, d):
 
 def _bend2(p, d):
     """bend on an (n, 2) array -> (n, 2)."""
+    if hasattr(d, "bend2"):
+        return d.bend2(p)
     x, y = bend(p[:, 0], p[:, 1], d)
     return np.column_stack((x, y))
 

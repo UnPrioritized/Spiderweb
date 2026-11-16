@@ -15,7 +15,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_STRETCH, MAKE_SHAPE_POINTS, MOST_BULGE,
                             MOST_RIPPLE, MOST_RIPPLE_LEN, MOST_SKEW, MOST_SLICES, MOST_STIRS, MOST_WRING, RIPPLE_KINDS,
-                            ROUND_EDGES, bends, flip_of_matters, order_of,
+                            ROUND_EDGES, STIR_MOVES, bends, flip_of_matters, order_of,
                             MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, one_stir,
                             size_scale, stir_removed, stir_stack, stirs_of)
@@ -134,6 +134,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         form = self.form = ttk.Frame(box)
         form.pack(anchor="w", fill="x", pady=(8, 0))
         self.grid_row, self.parts, self.gap = 0, {}, int(8 * app.scale)
+        self.picks = {}  # key -> {row, box, tip, choices}
+        self._build_moves(form)
         self._build_knobs(form)
         self._build_centre(form)
         self._build_bends(form)
@@ -357,6 +359,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         w.pack(side="left", padx=(6, 0))
         Tooltip(w, tr("stir.draw_cancel_tip"))
 
+    def _build_moves(self, form):
+        """Moves: Colours / Shape at the top (PLAN.md "Deform shapes", user 2026-11-16: one choice per tab, no
+        window of its own; Shape = the tab bends the shape itself, notes/shape_bend.py)."""
+        word = ttk.Label(form, text=tr("stir.moves"))
+        self._put(None, (1, word), (2, self._pick(form, "moves", STIR_MOVES, word), 2), pady=0)
+
     def _build_knobs(self, form):
         """Turn / Twist / Bulge knobs with their boxes, and At the edges + Bend's Smooth corners beside them."""
         app = self.app
@@ -389,7 +397,6 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 Tooltip(w, tr(f"stir.{name}_tip"))
         # (a user's feedback 2026-11-02, recolour.stir_from / stirred: At the edges beside the knobs, where the
         # user's picture asked, name over the dropdown)
-        self.picks = {}  # key -> {row, box, tip, choices}
         cell = ttk.Frame(knobs)
         cell.pack(side="left", anchor="n")
         self._pick(cell, "edge", STIR_EDGES, ttk.Label(cell, text=tr("stir.edge"))).pack(anchor="w", pady=(4, 0))
@@ -397,7 +404,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         # (Bend with the outline's Smooth corners, under its dropdown: live only with Bend, Chinese tester 11-05)
         self._cell(cell, "bend_smooth", 0, MOST_SMOOTH, "stir.bend_smooth", "stir.bend_smooth_tip",
                    "%").pack(anchor="w", pady=(4, 0))
-        self._put(None, (1, knobs, 4), pady=0)
+        self._put(None, (1, knobs, 4), pady=8)
 
     def _build_centre(self, form):
         """The Centre point row (+ Middle), the squeeze tick and the Colour sets row."""
@@ -881,6 +888,14 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         elif self.tab_var.get() != self.tab:
             self.after_idle(lambda: self.see_tab() if self.winfo_exists() else None)
         self.tab_var.set(self.tab)
+        # (a tab set to Shape on any selected shape: "Stir n ◇", user 2026-11-17)
+        stacks = [stirs_of(r) for r in rcs]
+        radios = [w for w in self.tab_buttons.winfo_children() if isinstance(w, ttk.Radiobutton)]
+        for i, w in enumerate(radios):
+            text = tr("stir.tab_shape" if any(i < len(s) and s[i]["moves"] == "shape" for s in stacks)
+                      else "stir.tab", n=i + 1)
+            if w.cget("text") != text:
+                w.config(text=text)
         on = bool(tgts) and not self.drawing  # (an area being drawn: the whole window waits, hunt C 6)
         for w in self.tab_buttons.winfo_children():
             if isinstance(w, ttk.Radiobutton):
@@ -1153,6 +1168,21 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         many = any(len(app.colour_owns(t)) > 1 for t in tgts)
         for w in self.sets_row:
             grid_shown(w, many)
+        # (a Shape tab, user 2026-11-16: the settings that only change colours do nothing there: greyed)
+        shape = bool(sts) and all(s["moves"] == "shape" for s in sts)
+        if shape:
+            for key in ("edge", "sets", "flip_of", "flip_in", "mirror", "flip_by"):
+                self.picks[key]["box"].config(state="disabled")
+            for key in ("bend_smooth", "smooth"):
+                self.boxes[key]["entry"].config(state="disabled")
+            self.squeeze_tick.state(["disabled"])
+            for _, tick in self.flips.values():
+                tick.state(["disabled"])
+            for key in ("reverse", "area_squeeze"):
+                self.area_ticks[key][1].state(["disabled"])
+        hint = tr("stir.hint_shape" if shape else "stir.hint")
+        if self.hint.cget("text") != hint:
+            self.hint.config(text=hint)
         self.sync_parts(sts, areas)
         self.reset.state(["!disabled" if on and any(s != full_stir(None) for s in sts) else "disabled"])
         d = self.drawing
@@ -1164,7 +1194,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 self.after_idle(lambda: self.drawing and self.drawing["pick"] and app.select(None))
         lonely, single = app.recolour_trouble(tgts, [clean_recolour(t.get("recolour")) or {"mode": KEEP}
                                                      for t in tgts])
-        text = tr("stir.needs") if lonely else tr("stir.one") if single else ""
+        # (a Shape tab bends the shape in every mode, with any colours: nothing to warn about)
+        text = "" if shape else tr("stir.needs") if lonely else tr("stir.one") if single else ""
         if text != self.warn.cget("text"):
             self.warn.config(text=text)
             if text:

@@ -27,8 +27,10 @@ def step_name(rc, kind, n=0, sh=None):
         return tr(f"{ps[n]['tool']}.tab", n=n + 1) + (tr("tool_window.off_mark") if ps[n].get("off") else "")
     if kind == "mode":
         return tr("recolour." + (rc or {}).get("mode", "shuffle"))
-    if kind == "stir":
-        return tr("stir.tab", n=n + 1)
+    if kind == "stir":  # (a tab set to Shape: "Stir n ◇", PLAN.md "Deform shapes")
+        from notes.recolour import stirs_of
+        tabs = stirs_of(rc)
+        return tr("stir.tab_shape" if n < len(tabs) and tabs[n]["moves"] == "shape" else "stir.tab", n=n + 1)
     if kind == "turned":
         return tr("join_split.reverse_tracks")
     return tr(kind + ".title")

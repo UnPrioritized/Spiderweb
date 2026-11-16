@@ -46,8 +46,8 @@ from notes.merge import (LAP as merge_lap, clean_merge, clean_unmerge, recipe_no
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
 from notes.trim import apply_trim
-from notes.recolour import (KEEP, PAGE, box_of, clean_recolour, is_recoloured, page_split, recoloured, rule_of,
-                            without_recolour)
+from notes.recolour import (KEEP, PAGE, box_of, can_recolour, clean_recolour, is_recoloured, page_split, recoloured,
+                            rule_of, without_recolour)
 from notes.subtract import clean_subtract, is_subtracted, side_used, subtracted
 from notes.extend import clean_extend, extended, is_extended
 from notes.sustain import auto_gap, clean_sustain, cut_by, held, is_sustained, sustain_on
@@ -1398,6 +1398,68 @@ def colour_step(notes, tracks, rc, ppq):
     return recoloured(notes, tracks, rule, True, False, None)
 
 
+def _has_shape_tab(r):
+    s = r.get("stir")
+    return any(isinstance(x, dict) and x.get("moves") == "shape" for x in (s if isinstance(s, list) else [s]))
+
+
+def shape_tabs_done(sh, ppq, keys, get):
+    """sh with its Stir tabs set to Shape done (PLAN.md "Deform shapes", notes/shape_bend.py): its lines bent, those
+    tabs taken out of its Recolour (the colour steps stay). The box the tabs measure in = its notes' before the bend
+    (the box stays put, user). A shape that can't be bent this way keeps its lines. A bend folding the shape over
+    itself (shape_bend.PULL): (notes, tracks) made here, its notes pulled into place, then its colour steps."""
+    from notes.shape_bend import PULL, StirBend, bent_shape, colour_part, off_without, pulled, shape_places, shape_tabs
+    r = sh["recolour"]
+    tabs = shape_tabs(r, sh.get("off"))  # (a tab switched off in Properties bends nothing)
+    rest = colour_part(r)
+    out = dict(sh, recolour=rest) if rest else without_recolour(sh)
+    if sh.get("off"):  # (the colour steps' numbers once the Shape tabs are out)
+        off = off_without(sh["off"], shape_places(r))
+        if off:
+            out["off"] = off
+        else:
+            out.pop("off", None)
+    if not tabs or not can_recolour(sh):
+        return out
+    plain = without_recolour(sh)
+    notes, _ = get(plain)
+    if not len(notes):
+        return out
+    rule = rule_of(r) or {}
+    rule["ppq"] = ppq
+    from notes.recolour import colour_box
+    box, own = colour_box(notes, rule, free_box(plain, notes, get, keys))
+    got = bent_shape(out, tabs, rule, box, own, ppq)
+    if got != PULL:
+        return got if got is not None else out
+    notes, tracks = get(dict(plain, _free=True) if "pts" in plain else plain)  # (past the edges too: cut after)
+    benders = [StirBend(st, rule, box, own, ppq) for st in tabs]
+
+    def look(t, k):  # (the last tab first: tab 2 bent what tab 1 left)
+        for b in reversed(benders):
+            t, k = b.look_tk(t, k)
+        return t, k
+    def within(t, k):
+        ok = benders[0].within(t, k)
+        for b in benders[1:]:
+            ok = ok | b.within(t, k)
+        return ok
+    notes, tracks = pulled(notes, tracks, look, box, ppq, joined="notes" not in sh, within=within)
+    if len(notes):
+        keep = (notes[:, 2] >= 0) & (notes[:, 2] < keys) & (notes[:, 1] > 0)
+        notes = notes[keep]
+        notes[:, 0] = np.maximum(notes[:, 0], 0)
+        tracks = tracks[keep] if tracks is not None else None
+    if rest and is_recoloured(out):
+        held_ = sustain_on(sh) or sh.get("held") is True or keeps_laps(sh) or sh.get("_sus") is True
+        gate = is_pasted_flipped(sh) or is_gate_flipped(sh) or sh.get("_gate") is True
+        rule2 = rule_of(rest)
+        if rule2.get("stir"):
+            rule2["ppq"] = ppq
+        notes, tracks = recoloured(notes, tracks, rule2, held_, gate, None)
+    return notes, tracks
+
+
 DEEP = 50  # steps: more, and fx_notes makes the notes before each one first (see there)
 _warming = threading.local()
 
@@ -1407,6 +1469,9 @@ def fx_notes(sh, ppq, keys, get):
     get(shape) = another shape's notes and tracks (remembered by the caller: the steps before the last one, the
     notes flipped back). A hidden "_m" = the notes made flipped along those axes (the steps before a flip)."""
     sh = made_from(sh)  # (a Hz bass's CC lines make no notes: never from them, whoever asks)
+    if isinstance(sh.get("recolour"), dict) and _has_shape_tab(sh["recolour"]):
+        got = shape_tabs_done(sh, ppq, keys, get)  # (Stir tabs bending the shape: before every other step)
+        return got if isinstance(got, tuple) else get(got)
     run = expanded(sh)  # (an order of its own / steps switched off: every step one entry, in that order: steps.py)
     if run is not None:
         return get(run)
