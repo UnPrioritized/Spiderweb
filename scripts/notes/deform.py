@@ -190,8 +190,8 @@ def _bend2(p, d):
 
 # STROKES MADE BENDABLE (stage B). A bent straight piece is no longer straight: points are added along it only
 # where the bent line would stray more than TOL from the straight piece between them (a piece the bend leaves
-# alone or only turns / moves stays 2 points). Curves stay curves: each piece's handles follow the bend's own
-# stretch at its anchor (smooth anchors stay smooth), split in two where that strays more than TOL.
+# alone or only turns / moves stays 2 points). Curves stay curves: their bent stretches fitted again with as few
+# anchors as stay within TOL (_curve_fitted); one bent too wavy (too_heavy) becomes a fine polyline (user).
 TOL = 0.0005  # (board units: under half a pixel on a 1000 px board)
 MOST_DEPTH = 12  # (each piece split in two at most this many times: 4096 pieces; a Hard edge never settles)
 CHECK_STEP = 0.02  # (a piece is checked at least every this much of its length, and 8 times a ripple's wave)
@@ -256,16 +256,6 @@ def _line_pieces(p, d, tol):
     return out[~drop]
 
 
-def _stretch(p, d, h=1e-6):
-    """The bend's stretch at points p (n, 2): (n, 2, 2), column 0 = where a step across goes, 1 = a step up."""
-    out = np.empty((len(p), 2, 2))
-    for k in (0, 1):
-        e = np.zeros(2)
-        e[k] = h
-        out[:, :, k] = (_bend2(p + e, d) - _bend2(p - e, d)) / (2 * h)
-    return out
-
-
 def _bez(c, t):
     """Points at t (k,) on cubic pieces c (n, 4, 2) -> (n, k, 2)."""
     t = t[None, :, None]
@@ -274,64 +264,91 @@ def _bez(c, t):
     return mt ** 3 * p0 + 3 * mt * mt * t * p1 + 3 * mt * t * t * p2 + t ** 3 * p3
 
 
-def _halves(c):
-    """Cubic pieces c (n, 4, 2) split at t = 0.5 -> (left, right), each (n, 4, 2), the same curve exactly."""
-    p0, p1, p2, p3 = (c[:, j] for j in range(4))
-    a, b, e = (p0 + p1) / 2, (p1 + p2) / 2, (p2 + p3) / 2
-    f, g = (a + b) / 2, (b + e) / 2
-    m = (f + g) / 2
-    return np.stack((p0, a, f, m), 1), np.stack((m, g, e, p3), 1)
+HEAVY = 4  # (a bent curve needing more than this many times its pieces (+ this many) becomes a fine polyline: each
+# curve piece is drawn / made into notes with custom.CURVE_STEPS 240 points however short, so a short ripple on a
+# curve made 50,000+ points and ran a test drawing out of memory; user 2026-11-16 picked lines for those)
 
 
-def _bent_cubics(c, d):
-    """Cubic pieces c (n, 4, 2) -> bent pieces: anchors bent exactly, handles moved by the bend's stretch at
-    their anchor (a smooth anchor's two handles stay in one line)."""
-    A = _bend2(c[:, [0, 3]].reshape(-1, 2), d).reshape(-1, 2, 2)
-    J = _stretch(c[:, [0, 3]].reshape(-1, 2), d).reshape(-1, 2, 2, 2)
-    h1 = A[:, 0] + np.einsum("nij,nj->ni", J[:, 0], c[:, 1] - c[:, 0])
-    h2 = A[:, 1] + np.einsum("nij,nj->ni", J[:, 1], c[:, 2] - c[:, 3])
-    # (an anchor the bend leaves alone keeps its handles EXACTLY: the stretch there is 1 only up to float noise)
-    still = (A == c[:, [0, 3]]).all(2) & (np.abs(J - np.eye(2)).max((2, 3)) < 1e-7)
-    h1 = np.where(still[:, :1], c[:, 1], h1)
-    h2 = np.where(still[:, 1:], c[:, 2], h2)
-    return np.stack((A[:, 0], h1, h2, A[:, 1]), 1)
+def too_heavy(old, new):
+    """Whether a bent curve (new points) has too many pieces against the curve it came from (old points)."""
+    a, b = (len(old) - 1) // 3, (len(new) - 1) // 3
+    return b > HEAVY * a + HEAVY
 
 
-def _curve_pieces(pts, sharp, d, tol):
-    """A curve's points (bezier.py list) -> (bent points, sharp anchors): pieces split in two where the bent
-    handles stray more than tol from the bent curve."""
+def _thin(p, tol):
+    """Points p (n, 2) of a fine line with the ones left out that it doesn't need: what's left strays at most tol
+    from every point (Ramer-Douglas-Peucker; both ends kept)."""
+    if len(p) < 3:
+        return p
+    keep = np.zeros(len(p), bool)
+    keep[[0, -1]] = True
+    todo = [(0, len(p) - 1)]
+    while todo:
+        i, j = todo.pop()
+        if j - i < 2:
+            continue
+        a, e = p[i], p[j] - p[i]
+        m = p[i + 1:j]
+        ee = float((e * e).sum())
+        if ee > 1e-300:
+            s = np.clip(((m - a) * e).sum(1) / ee, 0, 1)
+            off = np.hypot(*(a + s[:, None] * e - m).T)
+        else:
+            off = np.hypot(*(m - a).T)
+        k = int(np.argmax(off))
+        if off[k] > tol:
+            keep[i + 1 + k] = True
+            todo += [(i, i + 1 + k), (i + 1 + k, j)]
+    return p[keep]
+
+
+def _curve_fitted(pts, sharp, d, tol):
+    """A curve's points (bezier.py list) -> (bent points, sharp anchors), with as few anchors as fit within tol:
+    pieces the bend leaves alone stay EXACTLY as they were; each run of bent pieces (between those, and between
+    corners) is drawn finely, bent, and fitted again (bezier.fit: about half the anchors halving needed). Corners
+    stay corners; fit may find new sharp turns."""
+    from notes.bezier import fit, sample
     p = np.asarray(pts, np.float64)
     n = (len(p) - 1) // 3
     cs = np.stack([p[3 * i:3 * i + 4] for i in range(n)])
-    seg = np.arange(n)
-    t0 = np.zeros(n)
-    w = np.ones(n)
-    done = []
-    for depth in range(MOST_DEPTH + 1):
-        if not len(seg):
-            break
-        bc = _bent_cubics(cs, d)
-        size = float(np.hypot(*(cs[:, 3] - cs[:, 0]).T).max() + np.hypot(*(cs[:, 1] - cs[:, 0]).T).max())
-        k = _checks(size, d)
-        ts = np.arange(1, k + 1) / (k + 1)
-        S = _bend2(_bez(cs, ts).reshape(-1, 2), d).reshape(-1, k, 2)
-        off = np.hypot(*(_bez(bc, ts) - S).transpose(2, 0, 1)).max(1)
-        ok = (off <= tol) | (depth == MOST_DEPTH)
-        done.append((seg[ok], t0[ok], bc[ok]))
-        bad = ~ok
-        left, right = _halves(cs[bad])
-        cs = np.concatenate((left, right))
-        seg = np.concatenate((seg[bad], seg[bad]))
-        t0 = np.concatenate((t0[bad], t0[bad] + w[bad] / 2))
-        w = np.concatenate((w[bad] / 2, w[bad] / 2))
-    seg, t0, bc = (np.concatenate([x[k] for x in done]) for k in range(3))
-    order = np.lexsort((t0, seg))
-    seg, bc = seg[order], bc[order]
-    out = [bc[0, 0]]
-    for c in bc:
-        out += [c[1], c[2], c[3]]
-    first = {int(s): i for i, s in reversed(list(enumerate(seg)))}  # (each old piece's first new piece)
-    return [[float(u), float(v)] for u, v in out], [first[a] for a in sharp if a in first]
+    longest = float(np.hypot(*(cs[:, 3] - cs[:, 0]).T).max() + np.hypot(*(cs[:, 1] - cs[:, 0]).T).max())
+    k = _checks(longest, d)
+    ts = np.arange(0, k + 2) / (k + 1)
+    spots = _bez(cs, ts)
+    moved = (_bend2(spots.reshape(-1, 2), d) != spots.reshape(-1, 2)).any(1).reshape(n, -1).any(1)
+    corners = set(sharp)
+    out, new_sharp = [list(map(float, _bend2(p[:1], d)[0]))], []  # (moved or not: bent exactly)
+    i = 0
+    while i < n:
+        if i and i in corners:
+            new_sharp.append((len(out) - 1) // 3)
+        if not moved[i]:
+            out += [list(map(float, q)) for q in p[3 * i + 1:3 * i + 4]]
+            i += 1
+            continue
+        j = i + 1  # (the run of bent pieces: up to an unbent one or a corner)
+        while j < n and moved[j] and j not in corners:
+            j += 1
+        run = p[3 * i:3 * j + 1].tolist()
+        step = min(0.002, d["ripple_len"] / 100 / 16) if d["ripple"] else 0.002
+        fine = _bend2(np.asarray(sample(run, int(min(max(math.ceil(longest / step), 32), 2000))), np.float64), d)
+        found = []
+        got = fit([tuple(q) for q in fine], tol=tol, sharp=found)
+        got[0], got[-1] = list(map(float, fine[0])), list(map(float, fine[-1]))  # (the ends exactly the bent anchors)
+        start = (len(out) - 1) // 3
+        new_sharp += [start + a for a in found]
+        out += [list(map(float, q)) for q in got[1:]]
+        i = j
+    return out, sorted(set(new_sharp))
+
+
+def _moves_between(p, d):
+    """Whether the bend moves any spot along the line p (n, 2) between its points (a small area there)."""
+    seg = np.hypot(*(p[1:] - p[:-1]).T)
+    k = _checks(float(seg.max()), d) if len(seg) else 0
+    ts = np.arange(1, k + 1) / (k + 1)
+    s = (p[:-1, None, :] + (p[1:] - p[:-1])[:, None, :] * ts[None, :, None]).reshape(-1, 2)
+    return bool((_bend2(s, d) != s).any()) if len(s) else False
 
 
 def _plain_line(st):
@@ -350,9 +367,11 @@ def bent_stroke(st, d, tol=TOL):
     if not moves(d):
         return st
     if st["kind"] == "curve" and not has_formula(st):  # (unchanged = nothing split, every point where it was)
-        pts, sharp = _curve_pieces(st["pts"], st.get("sharp", ()), d, tol)
+        pts, sharp = _curve_fitted(st["pts"], st.get("sharp", ()), d, tol)
         if pts == [[float(u), float(v)] for u, v in st["pts"]]:
             return st
+        if too_heavy(st["pts"], pts):  # (user 2026-11-16: a wavy curve becomes a fine line instead)
+            return dict(keep, kind="poly", pts=_thin(preview_points(st, d, step=2 * tol, thin=0.0), tol).tolist())
         out = dict(keep, kind="curve", pts=pts)
         if sharp:
             out["sharp"] = sharp
@@ -361,18 +380,180 @@ def bent_stroke(st, d, tol=TOL):
     p = np.asarray(st["pts"] if plain else stroke_points(st), np.float64)
     if len(p) < 2:
         return st
-    got = _line_pieces(p, d, tol)
-    if len(got) == len(p) and not (got != p).any():
-        return st
+    if plain:  # (every point drawn kept)
+        got = _line_pieces(p, d, tol)
+        if len(got) == len(p) and not (got != p).any():
+            return st
+    else:  # (an ellipse / arc / formula's points weren't drawn by hand: only those needed, like a wavy curve)
+        if not (_bend2(p, d) != p).any() and not _moves_between(p, d):
+            return st
+        got = _thin(preview_points(st, d, step=2 * tol, thin=0.0), tol)
     out = dict(keep, kind="poly", pts=[[float(u), float(v)] for u, v in got])
     if plain and st.get("free"):
         out.update(free=True, k=st.get("k", 1.0))
     return out
 
 
-def preview_points(st, d, step=0.004):
+# TOUCHES KEPT EXACT (the drawer's rule: a point stuck on a line counts as touching only when it's exactly on it):
+# a bent point and the bent line it sat on agree only within TOL, so after the bend each such point is put back
+# exactly onto the bent line (onto both, where two cross); it moves at most about TOL.
+# A point counts as sitting on a line as near as the drawer counts an end landing on one (custom.LAND_SHARE of the
+# drawing's size: user 2026-11-16, stuck points saved to 5 decimals sat 5e-6 off an ellipse; turned, they came loose)
+
+
+def _key_points(st):
+    """[(place in st["pts"], point)] of a stroke's points that can be stuck onto another stroke and come back from
+    bent_stroke exactly bent: every point of a line / polyline / freehand, a curve's ends and corners, an arc's
+    ends."""
+    from notes.custom import has_formula
+    if "pts" not in st or has_formula(st) or st.get("smooth") or st.get("sides"):
+        return []
+    p = st["pts"]
+    if st["kind"] == "curve":
+        n = (len(p) - 1) // 3
+        return [(3 * a, p[3 * a]) for a in sorted({0, n} | set(st.get("sharp", ())))]
+    if st["kind"] == "arc":
+        return [(0, p[0]), (len(p) - 1, p[-1])]
+    return list(enumerate(p))
+
+
+def touches(strokes, idx):
+    """Of strokes idx (the ones bent): [([strokes with a point here], the point (u, v), [strokes b it sits on])], b
+    also in idx, the point on one of b's pieces as near as the drawer counts it touching."""
+    from notes.custom import LAND_SHARE, stroke_points
+    idx = list(idx)
+    every = np.asarray([p for s in strokes for p in stroke_points(s)], np.float64).reshape(-1, 2)
+    TOUCH = LAND_SHARE * (float(np.ptp(every, 0).max()) if len(every) else 1.0)
+    owner, pts = [], []
+    for a in idx:
+        for _, p in _key_points(strokes[a]):
+            owner.append(a)
+            pts.append(p)
+    if not pts:
+        return []
+    owner, P = np.asarray(owner), np.asarray(pts, np.float64)
+    found = {}
+    for b in idx:  # (each stroke against the points inside its box, its pieces in chunks)
+        q = np.asarray(stroke_points(strokes[b]), np.float64).reshape(-1, 2)
+        if len(q) < 2:
+            continue
+        lo, hi = q.min(0) - TOUCH, q.max(0) + TOUCH
+        near = np.nonzero(((P >= lo) & (P <= hi)).all(1) & (owner != b))[0]
+        if not len(near):
+            continue
+        s0, e = q[:-1], q[1:] - q[:-1]
+        ee = np.maximum((e * e).sum(1), 1e-300)
+        step = max(1, 2_000_000 // len(s0))  # (points x pieces per go: memory stays small)
+        for c in range(0, len(near), step):
+            k = near[c:c + step]
+            w = P[k][:, None, :] - s0[None]
+            t = np.clip((w * e[None]).sum(2) / ee[None], 0, 1)
+            gap = np.hypot(*(w - t[..., None] * e[None]).transpose(2, 0, 1)).min(1)
+            for j in k[gap <= TOUCH]:
+                found.setdefault(int(j), []).append(b)
+    # (one entry per spot: every stroke with a point there goes to the same place; only lines passing THROUGH it
+    # (not ending / turning there themselves) say where. Ends meeting on a line stayed apart by a hair when each
+    # went onto the line on its own)
+    spots = {}
+    for j in range(len(P)):
+        key = (float(P[j, 0]), float(P[j, 1]))
+        spots.setdefault(key, (set(), set()))[0].add(int(owner[j]))
+    for j, on in found.items():
+        spots[(float(P[j, 0]), float(P[j, 1]))][1].update(on)
+    return [(sorted(own), p, sorted(on - own)) for p, (own, on) in spots.items() if on - own]
+
+
+def _onto(p, q):
+    """Point p put exactly onto the nearest piece of the line q (n, 2)."""
+    s0, e = q[:-1], q[1:] - q[:-1]
+    ee = np.maximum((e * e).sum(1), 1e-300)
+    t = np.clip(((p - s0) * e).sum(1) / ee, 0, 1)
+    spots = s0 + t[:, None] * e
+    k = int(np.argmin(np.hypot(*(spots - p).T)))
+    return s0[k] + t[k] * e[k]
+
+
+def _crossing(p, q1, q2, near):
+    """Where lines q1 and q2 cross nearest p (within near), or None."""
+    def pieces(q):
+        s0, e = q[:-1], q[1:] - q[:-1]
+        lo, hi = np.minimum(q[:-1], q[1:]) - near, np.maximum(q[:-1], q[1:]) + near
+        ok = ((lo <= p) & (p <= hi)).all(1)
+        return s0[ok], e[ok]
+    a0, ea = pieces(q1)
+    b0, eb = pieces(q2)
+    if not len(a0) or not len(b0):
+        return None
+    den = ea[:, None, 0] * eb[None, :, 1] - ea[:, None, 1] * eb[None, :, 0]
+    ok = np.abs(den) > 1e-300
+    den = np.where(ok, den, 1.0)
+    w = b0[None, :, :] - a0[:, None, :]
+    s = (w[..., 0] * eb[None, :, 1] - w[..., 1] * eb[None, :, 0]) / den
+    u = (w[..., 0] * ea[:, None, 1] - w[..., 1] * ea[:, None, 0]) / den
+    hit = ok & (s >= 0) & (s <= 1) & (u >= 0) & (u <= 1)
+    if not hit.any():
+        return None
+    i, j = np.nonzero(hit)
+    spots = a0[i] + s[i, j][:, None] * ea[i]
+    k = int(np.argmin(np.hypot(*(spots - p).T)))
+    return spots[k] if np.hypot(*(spots[k] - p)) <= near else None
+
+
+def keep_touching(new, touched, d):
+    """new: {stroke: its bent stroke} (bent_stroke's); touched = touches() of the strokes before. Each point that
+    sat on another bent stroke is put back exactly onto it (where it sat on two: onto their crossing)."""
+    from notes.custom import stroke_points
+    lines = {}
+
+    def line(b):
+        if b not in lines:
+            lines[b] = np.asarray(stroke_points(new[b]), np.float64).reshape(-1, 2)
+        return lines[b]
+    now = {}  # (each spot: where its points are now; bent at first)
+    for _ in range(3):  # (a line a point went onto may itself move a hair at its own touch: again till still)
+        moved = False
+        for owners, p, on in touched:
+            on = [b for b in on if b in new]
+            if not on:
+                continue
+            if p not in now:
+                x, y = bend([p[0]], [p[1]], d)
+                now[p] = np.array([x[0], y[0]])
+            hp = now[p]
+            to = _crossing(hp, line(on[0]), line(on[1]), 4 * TOL) if len(on) > 1 else None
+            if to is None:
+                to = _onto(hp, line(on[0]))
+            if np.hypot(*(to - hp)) <= 1e-15:  # (already on it but for float noise: left)
+                continue
+            for a in owners:
+                st = new.get(a)
+                j = None if st is None or "pts" not in st else next(
+                    (k for k, q in enumerate(st["pts"]) if q[0] == hp[0] and q[1] == hp[1]), None)
+                if j is None:
+                    continue
+                pts = [list(q) for q in st["pts"]]
+                pts[j] = [float(to[0]), float(to[1])]
+                if st["kind"] == "curve":  # (an anchor's handles come along: the curve leaves it the same way)
+                    for h in (j - 1, j + 1):
+                        if 0 <= h < len(pts):
+                            pts[h] = [pts[h][0] + to[0] - hp[0], pts[h][1] + to[1] - hp[1]]
+                if len(pts) > 2 and st["pts"][0] == st["pts"][-1] and j in (0, len(pts) - 1):
+                    pts[0] = pts[-1] = pts[j]  # (closed: both ends)
+                new[a] = dict(st, pts=pts)
+                lines.pop(a, None)
+            now[p] = np.array([float(to[0]), float(to[1])])
+            moved = True
+        if not moved:
+            break
+    return new
+
+
+PREVIEW_TOL = 0.0003  # (the live look: a third of a pixel on a 1000 px board)
+
+
+def preview_points(st, d, step=0.004, thin=PREVIEW_TOL):
     """A stroke's look bent by d, quickly (the live preview: no fitting): its drawn points, each piece cut to at
-    most step long (shorter for short ripples), all bent."""
+    most step long (shorter for short ripples), all bent, then only those needed to stay within thin of it."""
     from notes.custom import stroke_points
     p = np.asarray(stroke_points(st), np.float64)
     if len(p) < 2:
@@ -384,4 +565,6 @@ def preview_points(st, d, step=0.004):
         idx = np.repeat(np.arange(len(n)), n)
         f = np.arange(len(idx)) - np.repeat(np.cumsum(n) - n, n)
         p = np.vstack((p[:-1][idx] + (p[1:] - p[:-1])[idx] * (f / n[idx])[:, None], p[-1:]))
-    return _bend2(p, d)
+    # (only the points the look needs: hundreds of tiny pieces drew 1 px jogs on straight runs, and the area colours
+    # worked out on 28,000 preview points took 8 s on a busy drawing)
+    return _thin(_bend2(p, d), thin)

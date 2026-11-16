@@ -232,6 +232,9 @@ class DrawerAreas:
         """The board with the areas' colours, as a picture of the whole canvas (None: no areas to show)."""
         if not (self.areas or self.tool.get() == "areas"):  # (finding the areas is slow on big drawings)
             return None
+        if self.areas_wait:  # (Deform's slider moving, user 2026-11-16: the last colours stay until it rests)
+            img = self._area_img
+            return img if img is not None and (img.width(), img.height()) == (cw, ch) else None
         amap, _ = self.area_info()
         if amap is None:
             return None

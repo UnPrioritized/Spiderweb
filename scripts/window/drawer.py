@@ -30,6 +30,7 @@ from window import look
 from window.help import open_help
 from window.canvas_keep import KeptItems
 from window.drawer_areas import AREA_FRAME, BOARD, OFF_BOARD, DrawerAreas
+from window.drawer_deform import DrawerDeform
 from window.drawer_lasso import DrawerLasso
 from window.drawer_mouse import CTRL, MOD_KEYS, SHIFT, STICK_RANK, DrawerMouse
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
@@ -63,7 +64,7 @@ from window.drawer_library import (LIBRARY, BUILT_IN, BAD_CHARS, NAME_MAX, DEVIC
 
 # ---------------------------------------------------------------- window
 
-class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide, tk.Toplevel):
+class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, ScrollingSide, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -229,6 +230,9 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
         b = ttk.Button(btns, text=tr("drawer.import"), command=self.import_shared)
         b.pack(side="left", padx=4)
         Tooltip(b, tr("drawer.import_tip"))
+        b = ttk.Button(side, text=tr("deform.button"), command=self.open_deform)
+        b.pack(anchor="w", pady=(8, 0))
+        Tooltip(b, tr("deform.button_tip"))
         self.pos_label = wrap_to_room(ttk.Label(side, text="", foreground=look.INFO, font=look.font(9),
                                                 justify="left"))
         self.pos_label.pack(fill="x", pady=(8, 0))
@@ -1413,6 +1417,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
             self.app.use_custom(name)
 
     def close(self):
+        if self.deform_win is not None:  # (a Deform being tried: put back first)
+            self.deform_win.cancel()
         if self.keep_changes():
             self.app.drawer = None
             self.destroy()
@@ -1487,12 +1493,13 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
         s = self.scale
         r, h = 4 * s, 3.5 * s
         sel = self.strokes[self.sel] if self.sel is not None and self.pickable(self.sel) else None
-        curve = sel if sel and sel["kind"] == "curve" else None
+        curve = sel if sel and sel["kind"] == "curve" and not self.deform_win else None
+        points = self.tool.get() == "select" and not self.deform_win  # (Deform shows fine bent lines: no points)
         if curve:  # handle lines: blue on a white edge
             for width, color in ((max(3, round(3.5 * s)), look.HANDLE_FILL), (max(1, round(1.5 * s)), look.HANDLE)):
                 for a, b in handle_lines(curve["pts"]):
                     c.create_line(*self.to_screen(*a), *self.to_screen(*b), fill=color, width=width)
-        if self.tool.get() == "select":  # the ends of strokes, ellipse corners: squares
+        if points:  # the ends of strokes, ellipse corners: squares
             for i, j, u, v in self.handles():
                 if not self.is_pen_point(i, j):
                     x, y = self.to_screen(u, v)
@@ -1532,7 +1539,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
                     c.create_line(*coords, fill=look.STICK_GUIDE, width=max(1, round(s)), dash=(2, 4))
             c.create_oval(x - q, y - q, x + q, y + q, outline=STICK_COLOR, width=max(1, round(s)), dash=(2, 3))
             c.create_oval(x - p, y - p, x + p, y + p, fill=STICK_COLOR, outline="")
-        if self.chosen() and self.tool.get() == "select":  # the kept select boxes
+        if self.chosen() and points:  # the kept select boxes
             for box in self.screen_boxes():
                 c.create_rectangle(*box, outline=look.HANDLE, width=max(1, round(s)), dash=(4, 2))
         if self.drag and self.drag[0] in ("boxsel", "erasebox"):  # a select / eraser box being dragged
