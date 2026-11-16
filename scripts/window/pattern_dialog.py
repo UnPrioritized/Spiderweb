@@ -25,7 +25,8 @@ from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_
 from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, SOFT_DEFAULT, clean_loop,
                            clean_pattern_graphs, formula_loop,
                            formula_shape, keep_sym, most_loops, new_pattern, new_shape, pattern_name, pattern_names,
-                           polar_of, polar_xy, shape_name, shape_names)
+                           polar_of, polar_ok, polar_xy, shape_name, shape_names)
+from files.clipboard import put_text
 from roll.roll_shared import ALT, grab_while_panning
 from window import look
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
@@ -53,7 +54,7 @@ def load_patterns(layer="pattern"):
         for key in (("x", "y") if layer == "shape" else ("formula", "along")):
             if key != "along" or str(p.get(key, "")).strip():
                 item[key] = str(p.get(key, ""))
-        if layer == "shape" and isinstance(p.get("polar"), str):  # (typed as one polar line: x / y come from it)
+        if layer == "shape" and polar_ok(p.get("polar")):  # (typed as one polar line: x / y come from it)
             item["polar"] = p["polar"]
             item["x"], item["y"] = polar_xy(p["polar"])
         loop = clean_loop(p["loop"]) if isinstance(p.get("loop"), dict) else None
@@ -356,8 +357,13 @@ class FormulaDialog(tk.Toplevel):
         self._loading = False
         self.pick_current()
         self.refresh()
-        if any(d["texts"][key] != self.pat.get(key, "") for key in self.texts):
-            self.on_formula()  # (a formula that was being typed and doesn't work yet)
+        if any(d["texts"][key] != self.pat.get(key, "") for key in self.shown_keys()):
+            self.on_formula()  # (a formula that was being typed and doesn't work yet; only the boxes shown: the
+            # hidden r(t) box left filled took every undo for a retyped formula: name + hand edits gone, hunt)
+
+    def shown_keys(self):
+        """The formula boxes shown (as typed): r(t), or x(t) + y(t), or a pattern's y + along."""
+        return ("polar",) if self.polar else ("x", "y") if self.layer == "shape" else ("formula", "along")
 
     def mark(self, key=None):
         """A change done: an undo step (see LocalUndo)."""
@@ -464,9 +470,10 @@ class FormulaDialog(tk.Toplevel):
     def on_edit_mode(self):
         for e in self.entries:
             e.config(state="normal" if self.editing.get() else "readonly")
-        if self.editing.get():
-            self.entries[0].focus_set()
-            self.entries[0].icursor("end")
+        if self.editing.get():  # (the typing cursor in the first box shown: r(t) while typed as polar)
+            e = self.rows[self.shown_keys()[0]][2]
+            e.focus_set()
+            e.icursor("end")
 
     def on_type(self, polar):
         """Type as x(t), y(t) / Polar r(t) picked. They never both count: x / y are written from the polar line; typed
@@ -512,21 +519,31 @@ class FormulaDialog(tk.Toplevel):
     def copy_formula(self):
         """The formula as text with the boxes' numbers in place of their names (to share it or keep it)."""
         values = self.pat["vars"]
+        by_hand = bool(self.pat.get("loop"))
+        if not self.ok and not by_hand:  # (a formula that doesn't work yet, or an empty r(t) box)
+            self.set_info(tr("pattern_dialog.copy_nothing"), look.ERROR_DARK)
+            return
 
-        def filled(text):
-            def number(m):
-                if m.group() not in values:
-                    return m.group()
-                v = values[m.group()]
-                return f"({fmt(v)})" if v < 0 else fmt(v)
-            return re.sub(r"\b[A-Za-z_]\w*\b", number, text)
-        keys = ("polar",) if self.polar else ("x", "y") if self.layer == "shape" else ("formula", "along")
-        lines = [f"{self.labels[key]} {filled(self.texts[key].get())}" for key in keys
+        def exact(v):  # (in full, hunt: the boxes' 3 places copied depth 0.0004 as 0 = a circle)
+            s = repr(float(v))
+            s = s[:-2] if s.endswith(".0") else s
+            return f"({s})" if v < 0 else s
+
+        def filled(text):  # (names as the formula reader takes them: any letter first, like élan or 深さ)
+            return re.sub(r"\b[^\W\d]\w*\b", lambda m: exact(values[m.group()]) if m.group() in values else m.group(),
+                          text)
+        lines = [f"{self.labels[key]} {filled(self.texts[key].get())}" for key in self.shown_keys()
                  if key != "along" or self.texts[key].get().strip()]
-        self.clipboard_clear()
-        self.clipboard_append("\n".join(lines))
-        self.set_info(tr("pattern_dialog.copied_by_hand" if self.pat.get("loop") else "pattern_dialog.copied"),
-                      look.GOOD, back=bool(self.pat.get("loop")))
+        if not put_text("\n".join(lines)):
+            self.set_info(tr("pattern_dialog.clipboard_busy"), look.ERROR_DARK, back=by_hand)
+            return
+        self.app.remember_clip()  # (so Ctrl+V on the piano roll doesn't take it for new shapes)
+        notes = [tr("pattern_dialog.copied")]
+        if by_hand:
+            notes.append(tr("pattern_dialog.copied_by_hand"))
+        if self.kind == "pattern" and graphed(self.pat):
+            notes.append(tr("pattern_dialog.copied_graphs"))
+        self.set_info(" ".join(notes), look.GOOD, back=by_hand)
 
     def on_formula(self):
         if self._loading:
@@ -538,6 +555,8 @@ class FormulaDialog(tk.Toplevel):
             if self.layer == "shape":
                 if self.polar and not texts["polar"].strip():
                     raise ValueError
+                if self.polar:  # (on its own first: "1) + (2" only worked inside the brackets around it, hunt)
+                    shape_names(texts["polar"], "0")
                 names = shape_names(texts["x"], texts["y"])
             else:
                 names = pattern_names(texts["formula"], texts["along"])

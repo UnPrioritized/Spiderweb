@@ -337,10 +337,21 @@ def polar_xy(r):
     return f"({r}) * cos(t * 2 * pi)", f"({r}) * sin(t * 2 * pi)"
 
 
+def polar_ok(r):
+    """r is a polar line that reads as a formula ON ITS OWN (inside polar_xy's brackets "1) + (2" worked too)."""
+    if not isinstance(r, str):
+        return False
+    try:
+        formula(r, named=True, var="t")
+        return True
+    except ValueError:
+        return False
+
+
 def polar_of(x, y):
     """The polar line x(t), y(t) were written from (polar_xy), or None."""
     m = re.fullmatch(r"\((.*)\) \* cos\(t \* 2 \* pi\)", x)
-    return m.group(1) if m and polar_xy(m.group(1)) == (x, y) else None
+    return m.group(1) if m and polar_xy(m.group(1)) == (x, y) and polar_ok(m.group(1)) else None
 
 
 # Flower: sharpness 0 = the plain cos wave (1 - 2 * (1 - cos) / 2 = cos), plus = pointed tips (1 = straight-sided
@@ -389,6 +400,8 @@ def clean_shape_formula(p):
         try:
             tx, ty = str(p.get("x", "")), str(p.get("y", ""))
             if isinstance(p.get("polar"), str):  # (its x / y always come from the polar line)
+                if not polar_ok(p["polar"]):
+                    raise ValueError
                 tx, ty = polar_xy(p["polar"])
             names = shape_names(tx, ty)
         except ValueError:
