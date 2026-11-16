@@ -19,8 +19,8 @@ from notes import recolour as rc
 from notes.custom import stroke_points
 from window import look
 from window.drawer_mirror import mirror_fns
-from window.widgets import (Scrub, Tooltip, bad, good, name_index, name_list, read_number, remember_place,
-                            set_names)
+from window.widgets import (LocalUndo, Scrub, Tooltip, bad, good, name_index, name_list, read_number,
+                            remember_place, set_names)
 
 # key: (text key, slider low, slider high, box low, box high, default)
 SLIDERS = {"turn": ("deform.turn", -360.0, 360.0, -rc.MOST_TURN, rc.MOST_TURN, 0.0),
@@ -40,7 +40,7 @@ STICK_PX = 6  # (that near, in pixels along the slider)
 AREAS = ("whole", "circle", "square", "diamond")
 REST_MS = 300  # (the sliders resting this long: area colours worked out again)
 BLOCK = "DrawerDeformBlock"  # (the board's bind tag while the window is open: its own clicks / keys wait)
-BLOCKED = ("<Double-Button-1>", "<ButtonRelease-3>", "<Double-Button-3>", "<Key>", "<KeyRelease>")
+BLOCKED = ("<Double-Button-1>", "<ButtonRelease-3>", "<Double-Button-3>", "<KeyRelease>")
 GRAB = 8  # px: how near the Centre mark / the area's line the mouse must be to grab it
 BOX_LEAST = 40  # px: an area box with a side shorter than this on screen isn't shown (its line sizes it then)
 RING_POINTS = 72  # (a round area's line: pieces)
@@ -69,7 +69,16 @@ class DrawerDeform:
         if not self.deform_targets():
             return messagebox.showinfo(tr("drawer.spiderweb"),
                                        tr("deform.all_locked" if self.strokes else "deform.nothing"), parent=self)
+        # (the drawer's keyboard goes to the board first, which ignores keys while it's open: the Deform… button
+        # kept it, so Ctrl+Z / Delete / flips reached the drawing behind the preview, hunt 2026-11-16)
+        self.canvas.focus_set()
         self.deform_win = DeformWindow(self)
+
+    def deform_key(self, e):
+        """A key pressed in the drawer while Deform… is open: Esc cancels it, the rest wait."""
+        if e.keysym == "Escape" and self.deform_win:
+            self.deform_win.cancel()
+        return "break"
 
     def deforming(self):
         return self.deform_win is not None
@@ -111,7 +120,14 @@ class DeformWindow(tk.Toplevel):
         self._curves = None  # (settings, {stroke: bent curve}): rested() works them out, Apply reuses them
         self._touched = None  # (points stuck on other bent strokes: deform.touches, once)
         self.applied = False
+        # the window's own Ctrl+Z / Ctrl+Y (hunt 2026-11-16, user took it): each slider / box / area / board change
+        # a step, one drag = one step; Apply stays ONE drawer step
+        self.steps = None
+        self._restoring = False
+        self._gesture = None  # (a board drag: its changes are one step)
+        self._shapes = {}  # (area dropdown place -> the library drawing it lent, for undo)
         self._build()
+        self.steps = LocalUndo(self, self.state_text, self.put_state)
         self.block(True)
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.bind("<Escape>", lambda e: self.cancel())
@@ -202,10 +218,11 @@ class DeformWindow(tk.Toplevel):
         scale.grid(row=row, column=1, padx=(int(6 * self.s), int(6 * self.s)), pady=1)
         # (user 2026-11-16: a double-click reset fired while clicking quickly to step by 1: middle-click instead,
         # like Stir's knobs; the knob held = a drag, sticking at 0)
-        scale.bind("<ButtonPress-2>", lambda e, k=key: (self.put(k, SLIDERS[k][5]), "break")[1])
+        scale.bind("<ButtonPress-2>", lambda e, k=key: (self.put(k, SLIDERS[k][5]), self.step_done(k), "break")[2])
         scale.bind("<ButtonPress-1>", lambda e, k=key, sc=scale: setattr(
             self, "holding", k if "slider" in str(sc.identify(e.x, e.y)) else None), add="+")
-        scale.bind("<ButtonRelease-1>", lambda e: setattr(self, "holding", None), add="+")
+        scale.bind("<ButtonRelease-1>", lambda e, k=key: (setattr(self, "holding", None), self.step_done(k)),
+                   add="+")
         self.scales[key] = (scale, var)
         box = self.number_box(parent, key, grid=(row, 2), label=lab)
         return box
@@ -253,7 +270,7 @@ class DeformWindow(tk.Toplevel):
         good(e)
         if key in self.scales:
             self.scales[key][1].set(v)
-        self.changed()
+        self.changed(key)
 
     def slid(self, key, v):
         if self.holding == key and key in STICKY:  # (dragged near 0: stays at 0, like a centre detent)
@@ -292,6 +309,8 @@ class DeformWindow(tk.Toplevel):
                 self.area_line.config(text=tr("deform.no_inside", name=name))
                 self.area.current(0)
             self.shape = shape
+            if shape:
+                self._shapes[k] = shape
         self.show_area_parts()
         self.changed()
 
@@ -316,8 +335,40 @@ class DeformWindow(tk.Toplevel):
 
     # ------------------------------------------------------------ the board
 
-    def changed(self):
-        """Shown on the board once things settle (a held slider sends many moves)."""
+    # ---- the window's own undo (LocalUndo): the settings as a text, put back
+
+    def state_text(self):
+        return json.dumps({"v": {k: self.boxes[k].value for k in self.boxes}, "kind": self.kind.current(),
+                           "area": self.area.current(), "hard": self.hard.get(), "centre": self.centre,
+                           "middle": self.area_middle})
+
+    def put_state(self, text):
+        s = json.loads(text)
+        self._restoring = True
+        try:
+            for k, v in s["v"].items():
+                self.put(k, v)
+            self.kind.current(s["kind"])
+            self.area.current(s["area"])  # (the dropdown's own place: the divider row counts)
+            self.shape = self._shapes.get(name_index(self.area))
+            self.area_line.config(text="")
+            self.hard.set(s["hard"])
+            self.centre, self.area_middle = list(s["centre"]), list(s["middle"])
+            self.show_area_parts()
+        finally:
+            self._restoring = False
+        self.changed()
+
+    def step_done(self, key):
+        """A gesture ended (a slider let go, a board drag): its changes are one step, the next is new."""
+        if self.steps and not self._restoring:
+            self.steps.mark(key, end=True)
+
+    def changed(self, key=None):
+        """Shown on the board once things settle (a held slider sends many moves). key: what changed (changes of
+        the same thing in a row = one undo step; a board drag = one)."""
+        if self.steps and not self._restoring:
+            self.steps.mark(self._gesture or key)
         if self._job is None:
             self._job = self.after_idle(self.show)
 
@@ -418,7 +469,7 @@ class DeformWindow(tk.Toplevel):
             for seq in BLOCKED:
                 c.bind_class(BLOCK, seq, lambda e: "break")
             # (the board's own left / right clicks wait; the Centre mark and the area take them: stage D)
-            for seq, fn in (("<ButtonPress-1>", self.board_press), ("<B1-Motion>", self.board_drag),
+            for seq, fn in (("<Key>", dr.deform_key), ("<ButtonPress-1>", self.board_press), ("<B1-Motion>", self.board_drag),
                             ("<ButtonRelease-1>", self.board_release), ("<Motion>", self.board_hover),
                             ("<ButtonPress-3>", self.board_right)):
                 c.bind_class(BLOCK, seq, lambda e, fn=fn: (fn(e), "break")[1])
@@ -560,6 +611,7 @@ class DeformWindow(tk.Toplevel):
         self.grab = None
         if h is None:
             return
+        self._gesture = "board"  # (the whole drag = one step of the window's own undo)
         a = self.area_now()
         at = self.dr.from_screen(e.x, e.y)
         if h[0] == "centre":
@@ -649,6 +701,9 @@ class DeformWindow(tk.Toplevel):
 
     def board_release(self, e):
         self.grab = None
+        if self._gesture:
+            self.step_done(self._gesture)
+            self._gesture = None
 
     def board_right(self, e):
         """A right-click on the Centre mark: back to where it started (the strokes' middle)."""

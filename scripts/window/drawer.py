@@ -274,7 +274,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
         grab_while_panning(c)
         c.bind("<MouseWheel>", self.on_wheel)
         self.bind("<Key>", self.on_key)
-        self.bind("<KeyRelease>", lambda e: e.keysym.lower() in MOD_KEYS and self.mod_changed(e, False))
+        self.bind("<KeyRelease>", lambda e: e.keysym.lower() in MOD_KEYS and not self.deform_win
+                  and self.mod_changed(e, False))
         self.bind("<F1>", lambda e: self.open_help())
         for keys, fn in ((UNDO_KEYS, self.undo), (REDO_KEYS, self.redo)):
             for k in keys:
@@ -295,6 +296,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
     def hotkey(self, fn):
         """A drawer shortcut that leaves text boxes alone (the name box, a layer being renamed)."""
         def handler(e):
+            if self.deform_win:  # (Deform… open: undo / copy / paste / flips wait, hunt 2026-11-16)
+                return "break"
             if isinstance(e.widget, (tk.Entry, ttk.Entry)):
                 return None
             if (self.knife or self.erasing()) and fn not in (self.undo, self.redo):  # (flip / turn / copy / paste
@@ -577,6 +580,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
 
     def on_key(self, e):
         k = e.keysym.lower()
+        if self.deform_win:  # (Deform… open: the drawer's keys wait, Esc cancels it; hunt 2026-11-16)
+            return self.deform_key(e)
         if isinstance(e.widget, (tk.Entry, ttk.Entry)):
             return
         if k in MOD_KEYS:
