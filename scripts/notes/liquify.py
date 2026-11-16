@@ -12,7 +12,8 @@ of strokes (user: like the editors; mistakes are fixed with Restore / undo).
 Saved as {"grid": [across, up], "map": text (zlib + base64 of int16 pairs, 1 / SCALE of the box each), "frozen":
 text (zlib + base64 of uint8 per grid point, 255 = fully frozen), "strength": % (only != 100), "on": False (only when
 hidden), "edge": STIR_EDGES (only != "escape"), "moves": "shape" (only when it bends the shape itself, Deform
-shapes stage G; + "bend_colours": False when Colours bend too is off), "span": [x0, y0, x1, y1] (only when the map
+shapes stage G; + "bend_colours": False when Colours bend too is off; + "forward": True = its map says where each
+point GOES, dab_fwd), "span":[x0, y0, x1, y1] (only when the map
 grew past the colour box: where it lies in the box's units, span_of; its pushes stay in the box's units)}. "map" / "frozen" only when something is pushed / frozen; neither = no
 Liquify (clean_liquify: None).
 
@@ -173,6 +174,14 @@ def clean_liquify(d):
         out["moves"] = "shape"
         if d.get("bend_colours") is False:
             out["bend_colours"] = False
+        # (a Shape map is a "where each point goes" one, "forward": True (PLAN.md Liquify Shape rebuild); one made
+        # before it ("where it comes from", never released) opens unbent: its map dropped, user 2026-11-17)
+        if d.get("forward") is True and "map" in out:
+            out["forward"] = True
+        else:
+            out.pop("map", None)
+            if "frozen" not in out:  # (nothing pushed or frozen)
+                return None
     span = _clean_span(d.get("span"))
     if span:  # (the map grown past the box: span_of)
         out["span"] = span
@@ -208,7 +217,8 @@ def _clean_span(v):
     """A saved "span" -> 4 numbers (x0 < 0 .. 1 < x1 grown at most MOST_SPAN), or None (the box: not saved)."""
     if not (isinstance(v, list) and len(v) == 4 and all(number(x) for x in v)):
         return None
-    x0, y0, x1, y1 = (round(float(x), 9) for x in v)
+    x0, y0, x1, y1 = (float(x) for x in v)  # (never rounded: a map grown again keeps its grid points exactly where
+    # they were; 9 places moved them a hair and a row end sitting on a half tick flipped)
     x0, y0 = max(min(x0, 0.0), -MOST_SPAN), max(min(y0, 0.0), -MOST_SPAN)
     x1, y1 = min(max(x1, 1.0), 1 + MOST_SPAN), min(max(y1, 1.0), 1 + MOST_SPAN)
     return None if (x0, y0, x1, y1) == SPAN else [x0, y0, x1, y1]
@@ -238,7 +248,7 @@ def regrid(a, m, old, new):
     """The map a (and freeze mask m or None) laid on the span new (grown_span's: old plus whole steps) instead of old:
     every old grid point kept as it was, the new ones past the old span = its edge's (the map was read so past its
     edge already), so every spot bends exactly as before. Pushes stay in the colour box's units (the same saved
-    numbers)."""
+    numbers). Shape maps (sample_fwd) too."""
     gy, gx = a.shape[:2]
     sx, sy = (old[2] - old[0]) / (gx - 1), (old[3] - old[1]) / (gy - 1)
     lo_x, lo_y = int(round((old[0] - new[0]) / sx)), int(round((old[1] - new[1]) / sy))
@@ -1170,6 +1180,118 @@ def dab(a, tool, c, r, J, pressure=50.0, density=50.0, vec=(0.0, 0.0), turn=1, f
     d = sample(a, qx, qy)  # (the old map at the moved spot: a isn't changed until below)
     a[rs, cs, 0] = qx + d[..., 0] - px
     a[rs, cs, 1] = qy + d[..., 1] - py
+    return a
+
+
+# ---- the Shape brush: a "where each point goes" map (PLAN.md Liquify Shape rebuild, user 2026-11-17: "what liquify
+# does in common image editors reliably"). Grid point p shows at p + s x F(p) (s = Strength); a dab moves the points
+# that are UNDER the brush now (where they show), like an image editor's mesh. Nothing is searched for: the outline's
+# points just look up where they go (sample_fwd), so the same strokes always give the same shape, and a dab never
+# moves a point outside its circle. Between grid points: blended (a cell's inside follows its 4 corners).
+
+FOLD_SAFE = 0.5  # (a Push dab is cut into steps moving a point at most this much of the brush's slope: never a fold)
+MOST_SUBSTEPS = 32
+
+
+def sample_fwd(a, x, y):
+    """A "where each point goes" map at spots (x, y) of its span (0..1), blended between grid points; past its span
+    as its edge (the outline may sit a little past the notes' box: spam ends short of the line). The edge itself
+    never moves: a stroke reaching it grows the map first (roll_liquify.liquify_grow), so past it nothing moves."""
+    return np.asarray(sample(a, np.asarray(x, np.float64), np.asarray(y, np.float64)), np.float64)
+
+
+def _fwd_window(a, c, r, J, P):
+    """(rows, cols) slices of the grid points that may be under a brush of radius r px at c now (where they show:
+    each at most P (map units, each way) from where it was drawn), or None."""
+    gy, gx = a.shape[:2]
+    ex = r * float(np.hypot(J[0][0], J[0][1])) + P[0]
+    ey = r * float(np.hypot(J[1][0], J[1][1])) + P[1]
+    i0, i1 = int(np.floor((c[0] - ex) * (gx - 1))), int(np.ceil((c[0] + ex) * (gx - 1)))
+    j0, j1 = int(np.floor((c[1] - ey) * (gy - 1))), int(np.ceil((c[1] + ey) * (gy - 1)))
+    i0, j0, i1, j1 = max(i0, 0), max(j0, 0), min(i1, gx - 1), min(j1, gy - 1)
+    if i0 > i1 or j0 > j1:
+        return None
+    return slice(j0, j1 + 1), slice(i0, i1 + 1)
+
+
+def dab_fwd(a, tool, c, r, J, pressure=50.0, density=50.0, vec=(0.0, 0.0), turn=1, frozen=None, strength=100.0,
+            scale=None, copy=True):
+    """A Shape map a ("where each point goes") after one brush dab. The same brushes as dab (same arguments;
+    strength = the Liquify's Strength %: the points move where they SHOW), forwards: Push carries the points under
+    the brush along the mouse's move, Twirl turns them round the middle (+1 = anticlockwise on screen, as dab turns
+    the colours), Pinch / Bulge draws them in / out, Restore takes them back toward where they were drawn, Smooth
+    evens the moves out; frozen points move less. c, J in the map's own units; a's moves in the colour box's units,
+    scale = how many of those one map unit is (map_scale; None = the same). Only the points under the brush are
+    written (the rest keep their very numbers). copy False: a itself changed (the brush's own copy: no whole-map
+    copy each dab on a big grid) and returned."""
+    a = np.array(a, np.float64) if copy else a
+    S = np.ones(2) if scale is None else np.asarray(scale, np.float64)
+    J = np.asarray(J, np.float64)
+    try:
+        Ji = np.linalg.inv(J)
+    except np.linalg.LinAlgError:
+        return a
+    s = strength / 100.0 if strength > 1e-6 else 1.0  # (0 %: shows nothing; the brush works as at 100 %)
+    if tool not in ("push", "restore", "smooth", "twirl", "pinch", "bulge"):
+        return a
+    p = pressure / 100.0
+    n = 1
+    if tool == "push":  # (a long move cut into steps, each re-measuring who is under the brush: a steep brush edge
+        # never folds the shape over itself)
+        hard = min(max(density / 100.0, 0.0), 1.0)
+        if hard < 1.0:
+            slope = 1.5 / ((1.0 - hard) * max(r, 1e-9))
+            n = int(min(MOST_SUBSTEPS, max(1, math.ceil(math.hypot(*vec) * min(p, 1.0) * slope / FOLD_SAFE))))
+        vec = (vec[0] / n, vec[1] / n)
+    # (how far any point shows from where it was drawn, map units: once a dab, + what a Push step may add)
+    P = np.abs(a).reshape(-1, 2).max(0) / S * s if a.size else np.zeros(2)
+    step = np.abs(J @ np.asarray(vec, np.float64)) if tool == "push" else np.zeros(2)
+    for i in range(n):
+        got = _fwd_window(a, c, r, J, P + i * step)
+        if got is None:
+            return a
+        rs, cs = got
+        gy, gx = a.shape[:2]
+        jj, ii = np.mgrid[rs, cs]
+        px, py = ii / (gx - 1), jj / (gy - 1)
+        old = a[rs, cs].copy()
+        X, Y = px + s * old[..., 0] / S[0], py + s * old[..., 1] / S[1]  # (where they show now, map units)
+        ux, uy = X - c[0], Y - c[1]
+        sx, sy = Ji[0, 0] * ux + Ji[0, 1] * uy, Ji[1, 0] * ux + Ji[1, 1] * uy
+        w = weight(np.hypot(sx, sy) / max(r, 1e-9), density)
+        if frozen is not None:
+            w = w * (1.0 - np.clip(frozen[rs, cs], 0.0, 1.0))
+        if not w.any():
+            return a
+        if tool == "restore":
+            a[rs, cs] = old * (1.0 - (w * min(0.25 * p, 1.0))[..., None])
+            continue
+        if tool == "smooth":  # (only the window and a point round it padded: no whole-map copy)
+            j0, j1, i0, i1 = rs.start, rs.stop, cs.start, cs.stop
+            sub = a[max(j0 - 1, 0):min(j1 + 1, gy), max(i0 - 1, 0):min(i1 + 1, gx)]
+            pad = np.pad(sub, ((int(j0 == 0), int(j1 == gy)), (int(i0 == 0), int(i1 == gx)), (0, 0)), mode="edge")
+            h, wd = j1 - j0, i1 - i0
+            blur = sum(pad[dj:dj + h, di:di + wd] for dj in (0, 1, 2) for di in (0, 1, 2)) / 9
+            a[rs, cs] = old + (blur - old) * (w * min(0.5 * p, 1.0))[..., None]
+            continue
+        if tool == "push":
+            vx = J[0, 0] * vec[0] + J[0, 1] * vec[1]
+            vy = J[1, 0] * vec[0] + J[1, 1] * vec[1]
+            k = w * min(p, 1.0)
+            NX, NY = X + k * vx, Y + k * vy
+        elif tool == "twirl":  # (dab turns where the colours come FROM by +ang: they show turned by -ang)
+            ang = -turn * w * 0.12 * p
+            ca, sa = np.cos(ang), np.sin(ang)
+            rx, ry = sx * ca - sy * sa, sx * sa + sy * ca  # (turned on screen, so it stays round)
+            NX = c[0] + J[0, 0] * rx + J[0, 1] * ry
+            NY = c[1] + J[1, 0] * rx + J[1, 1] * ry
+        else:  # (dab's Pinch looks (1 + f) further out: the points come in by 1 / (1 + f); Bulge the other way)
+            f = w * 0.06 * p
+            g = 1.0 / (1.0 + f) if tool == "pinch" else 1.0 / np.maximum(1.0 - f, 0.05)
+            NX, NY = c[0] + ux * g, c[1] + uy * g
+        on = w > 0  # (only the points under the brush rewritten: the rest keep their very numbers, no round-off)
+        a[rs, cs, 0] = np.where(on, (NX - px) / s * S[0], old[..., 0])
+        a[rs, cs, 1] = np.where(on, (NY - py) / s * S[1], old[..., 1])
     return a
 
 

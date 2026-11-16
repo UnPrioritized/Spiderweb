@@ -212,18 +212,32 @@ class LiquifyWindow(tk.Toplevel):
         i = self.moves_box.current()
         if i < 0:
             return
-        self.moves = ("colours", "shape")[i]
-        put("moves", self.moves)
-        kind = self.moves
+        kind = ("colours", "shape")[i]
 
         from notes.shape_bend import can_bend
+
+        # (a Colours map says where colours come FROM, a Shape one where points GO: one can't be read as the other.
+        # Bends of the other kind = asked first, then cleared (user 2026-11-17, PLAN.md Liquify Shape rebuild))
+        def bent(sh):
+            g = (clean_recolour(sh.get("recolour")) or {}).get("liquify")
+            return bool(g and g.get("map") and can_bend(sh) and (g.get("moves") or "colours") != kind)
+        if any(bent(sh) for sh in self.targets()):
+            from tkinter import messagebox
+            if not messagebox.askyesno(tr("liquify.title"), tr("liquify.moves_ask"), parent=self):
+                self.sync()  # (the box back to what the shapes have)
+                return
+        self.moves = kind
+        put("moves", self.moves)
 
         def change(old, sh):
             got = (old or {}).get("liquify")
             if not got or not can_bend(sh):  # (a picture keeps its colour Liquify: hunt 2026-11-17)
                 return old
-            new = {k: v for k, v in got.items() if k not in ("moves", "bend_colours")}
-            return dict(old, liquify=dict(new, moves="shape") if kind == "shape" else new)
+            if (got.get("moves") or "colours") == kind:
+                return old
+            new = {k: v for k, v in got.items() if k not in ("moves", "bend_colours", "map", "forward")}
+            new = dict(new, moves="shape", forward=True) if kind == "shape" else new
+            return dict(old, liquify=new)
         self.app.change_recolour(change, tr("liquify.undo_moves"))
         self.sync()
 

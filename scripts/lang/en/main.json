@@ -1691,6 +1691,7 @@
  "liquify.moves_tip": "Colours: the brush pushes the colours the notes have around. The notes stay where they are.\nShape: the brush bends the shape itself, and its notes are made again from the bent shape while you brush. Notes may go past the shape's box. Shape bends always run first (Stir tabs set to Shape, then the Warp, then the Liquify), before every colour step.\nShapes without a Liquify yet take this with their first stroke.",
  "liquify.bend_colours_tip": "Ticked: each note of the bent shape takes the colour of the note it came from, so a Colours pattern or coloured areas bend along with the shape.\nUnticked: the colours are laid out again on the bent shape, as if it had been drawn that way.\nOnly while Moves is Shape.",
  "liquify.undo_moves": "Liquify moves",
+ "liquify.moves_ask": "Switching takes the Liquify's bends away (the freeze mask stays). Go on?\n\nCtrl+Z brings them back.",
  "liquify.undo_bend_colours": "Liquify colours bend too",
  "liquify.hint_shape": "Drag over the selected shape on the piano roll to bend the shape itself: its notes are made again from the bent shape as you brush. Hold Alt for the opposite: Twirl turns the other way, Pinch swells out (Bulge), Freeze takes the mask away (Thaw). Straight strokes: Shift+click the start, then Shift+click the end.",
  "liquify.shape_same": "The brush hasn't changed this shape's outline: only its inside was pushed, and that is all filled anyway. Brush across the outline.",

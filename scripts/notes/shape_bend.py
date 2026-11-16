@@ -507,11 +507,13 @@ class WarpBend(StirBend):
 
 
 class LiquifyBend(StirBend):
-    """The Liquify set to Shape (stage G). Its map looks BACKWARDS (a spot shows what is at spot + Strength x map), so
-    look() is the map itself and forwards is turned round: each point solves p + Strength x map(p) = where it was,
-    Newton's steps from where the map at that spot points back (the Warp's own steps: the map is a grid of offsets
-    blended like the Warp's Straight cells, compiled warp_newton). A point that doesn't settle (the brush folded the
-    shape over itself) = Folded: the notes are pulled from where each spot looks, like the colours (pulled())."""
+    """The Liquify set to Shape (stage G; rebuilt so, PLAN.md "Liquify Shape rebuild", user 2026-11-17: "what liquify
+    does in common image editors reliably"). Its map says where each point GOES (liquify.dab_fwd: the brush moves the
+    grid's points like an image editor's mesh): forwards = p + Strength x map(p), looked up, nothing searched for, so
+    the outline is exact, the same strokes give the same shape, and nothing outside a stroke's circle moves. It never
+    folds by itself (a crossing outline is just lines crossing). Backwards (look: Colours bend too, holes between
+    bent notes, a fold of an earlier Shape step's pulled way) = Newton's steps on the map (the Warp's, compiled), from
+    where the map there points back: near enough for colours."""
 
     def __init__(self, lq, r, box, own, ppq):
         from notes import liquify as L
@@ -525,7 +527,7 @@ class LiquifyBend(StirBend):
         # works in those, so a map that never grew gives the very same numbers)
         self.span = L.span_of(lq)
         self.S = np.array([self.span[2] - self.span[0], self.span[3] - self.span[1]])
-        # (pushes in the colour box's units; in the map's own units for the sums here: the same while not grown)
+        # (moves in the colour box's units; in the map's own units for the sums here: the same while not grown)
         A = L.map_of(L.full(lq)) * (L.full(lq)["strength"] / 100.0)
         self.A = np.ascontiguousarray(A if self.span == L.SPAN else A / self.S, np.float64)
         self.worst = 0.0
@@ -545,125 +547,145 @@ class LiquifyBend(StirBend):
     def _back(self, mx, my):
         return self.span[0] + mx * self.S[0], self.span[1] + my * self.S[1]
 
-    def _look_map(self, mx, my):
-        """look() in the map's own units: a spot shows what is at spot + Strength x map."""
-        from notes.liquify import sample
-        mx, my = np.array(mx, np.float64, ndmin=1), np.array(my, np.float64, ndmin=1)
-        shape = mx.shape
-        mx, my = mx.ravel(), my.ravel()
-        d = sample(self.A, mx, my) if len(mx) else np.zeros((0, 2))
-        return (mx + d[:, 0]).reshape(shape), (my + d[:, 1]).reshape(shape)
+    def _map_units(self, f, x, y):
+        """f (map units -> map units) on colour box spots."""
+        x, y = np.array(x, np.float64, ndmin=1), np.array(y, np.float64, ndmin=1)
+        shape = x.shape
+        x, y = x.ravel(), y.ravel()
+        if not len(x):
+            return x.reshape(shape), y.reshape(shape)
+        if self.span == (0.0, 0.0, 1.0, 1.0):
+            ox, oy = f(x, y)
+        else:
+            ox, oy = self._back(*f(*self._to(x, y)))
+        return ox.reshape(shape), oy.reshape(shape)
+
+    def _go(self, mx, my):
+        from notes.liquify import sample_fwd
+        d = sample_fwd(self.A, mx, my)
+        return mx + d[:, 0], my + d[:, 1]
+
+    def _from(self, mx, my):
+        """Where each spot's point came from (map units): p + A(p) = spot, Newton's steps from spot - A(spot); past the
+        span (nothing moves there) or not settled: that first guess."""
+        from notes.liquify import sample_fwd
+        from notes.warp import _newton
+        d = sample_fwd(self.A, mx, my)
+        gx, gy = mx - d[:, 0], my - d[:, 1]
+        x, y, err = _newton(self.A, mx, my, False, gx, gy)
+        lx, ly = self._go(x, y)  # (the steps read the map's edge past its span; checked with nothing moving there)
+        ok = np.isfinite(x) & np.isfinite(y) & (np.hypot(lx - mx, ly - my) <= FOLD)
+        bad = np.flatnonzero(~ok)
+        if len(bad):  # (a strong twirl: the first guess too far off: the cells covering the spot)
+            sx, sy, good = self._seeded(mx[bad], my[bad], gx[bad], gy[bad])
+            k = bad[good]
+            x[k], y[k], ok[k] = sx[good], sy[good], True
+        return np.where(ok, x, gx), np.where(ok, y, gy)
+
+    def _seeded(self, mx, my, gx0, gy0):
+        """Spots' homes (map units) the sure way: the moved grid cells whose shown corners' box covers the spot (sorted
+        once into buckets of one grid step by where they show), each cell's blend turned round exactly (_in_cell).
+        Two homes (a crease of a very strong twirl): the one nearest the first guess (gx0, gy0). -> (x, y, found)."""
+        gy, gx = self.A.shape[:2]
+        if getattr(self, "_cells", None) is None:
+            self._cells = None
+            moved = (self.A != 0).any(2)
+            cm = moved[:-1, :-1] | moved[1:, :-1] | moved[:-1, 1:] | moved[1:, 1:]
+            cj, ci = np.nonzero(cm)
+            hx, hy = 1.0 / (gx - 1), 1.0 / (gy - 1)
+            xs = [(ci + di) * hx + self.A[cj + dj, ci + di, 0] for dj in (0, 1) for di in (0, 1)]
+            ys = [(cj + dj) * hy + self.A[cj + dj, ci + di, 1] for dj in (0, 1) for di in (0, 1)]
+            if len(cj):
+                b = min(hx, hy)
+                X0, X1 = np.min(xs, 0), np.max(xs, 0)
+                Y0, Y1 = np.min(ys, 0), np.max(ys, 0)
+                x0, y0 = float(X0.min()), float(Y0.min())
+                bx0, bx1 = np.floor((X0 - x0) / b).astype(np.int64), np.floor((X1 - x0) / b).astype(np.int64)
+                by0, by1 = np.floor((Y0 - y0) / b).astype(np.int64), np.floor((Y1 - y0) / b).astype(np.int64)
+                W = int(bx1.max()) + 2
+                nx, ny = bx1 - bx0 + 1, by1 - by0 + 1
+                cnt = nx * ny
+                if cnt.sum() <= CELLS_MOST:
+                    idx = np.repeat(np.arange(len(cj)), cnt)
+                    k = np.arange(len(idx)) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+                    key = (by0[idx] + k // nx[idx]) * W + bx0[idx] + k % nx[idx]
+                    o = np.argsort(key, kind="stable")
+                    self._cells = cj[idx[o]], ci[idx[o]], key[o], b, x0, y0, W
+        n = len(mx)
+        ox, oy, found = mx.copy(), my.copy(), np.zeros(n, bool)
+        if self._cells is None:
+            return ox, oy, found
+        CJ, CI, keys, b, x0, y0, W = self._cells
+        bx = np.floor((mx - x0) / b).astype(np.int64)
+        by = np.floor((my - y0) / b).astype(np.int64)
+        inb = (bx >= 0) & (bx < W) & (by >= 0)
+        k = np.where(inb, by * W + bx, -1)
+        lo, hi = np.searchsorted(keys, k, "left"), np.searchsorted(keys, k, "right")
+        c = np.where(inb, hi - lo, 0)
+        if not c.any():
+            return ox, oy, found
+        qi = np.repeat(np.arange(n), c)
+        gi = np.arange(c.sum()) - np.repeat(np.cumsum(c) - c - lo, c)
+        sx, sy, ok = self._in_cell(CJ[gi], CI[gi], mx[qi], my[qi])
+        o = np.flatnonzero(ok)
+        far = (sx[o] - gx0[qi[o]]) ** 2 + (sy[o] - gy0[qi[o]]) ** 2
+        o = o[np.lexsort((far, qi[o]))]
+        first = o[np.r_[True, qi[o][1:] != qi[o][:-1]]] if len(o) else o
+        w = qi[first]
+        ox[w], oy[w], found[w] = sx[first], sy[first], True
+        return ox, oy, found
+
+    def _in_cell(self, cj, ci, qx, qy):
+        """Grid cells (row cj, column ci) turned round exactly: the spot (u, v) inside each whose blended corners show
+        at (qx, qy). -> (x, y in map units, inside)."""
+        A = self.A
+        gy, gx = A.shape[:2]
+        hx, hy = 1.0 / (gx - 1), 1.0 / (gy - 1)
+
+        def at(j, i):
+            return i * hx + A[j, i, 0], j * hy + A[j, i, 1]
+        ax, ay = at(cj, ci)
+        bx, by = at(cj, ci + 1)
+        cx, cy = at(cj + 1, ci + 1)
+        dx, dy = at(cj + 1, ci)
+        ex, ey = bx - ax, by - ay
+        fx, fy = dx - ax, dy - ay
+        gx_, gy_ = ax - bx + cx - dx, ay - by + cy - dy
+        px, py = qx - ax, qy - ay
+        k2 = gx_ * fy - gy_ * fx
+        k1 = ex * fy - ey * fx + px * gy_ - py * gx_
+        k0 = px * ey - py * ex
+        best_u, best_v = np.full(len(qx), np.nan), np.full(len(qx), np.nan)
+        lin = np.abs(k2) < 1e-14
+        disc = np.sqrt(np.maximum(k1 * k1 - 4 * k0 * k2, 0.0))
+        safe2 = np.where(lin, 1.0, 2 * k2)
+        safe1 = np.where(np.abs(k1) > 1e-300, k1, 1e-300)
+        roots = [np.where(lin, -k0 / safe1, (-k1 - disc) / safe2), np.where(lin, -k0 / safe1, (-k1 + disc) / safe2)]
+        tol = 1e-9
+        for v in roots:
+            den_x, den_y = ex + gx_ * v, ey + gy_ * v
+            use_x = np.abs(den_x) >= np.abs(den_y)
+            den = np.where(use_x, den_x, den_y)
+            u = np.where(use_x, px - fx * v, py - fy * v) / np.where(np.abs(den) > 1e-300, den, 1e-300)
+            rx = ax + ex * u + fx * v + gx_ * u * v - qx
+            ry = ay + ey * u + fy * v + gy_ * u * v - qy
+            ok = ((u >= -tol) & (u <= 1 + tol) & (v >= -tol) & (v <= 1 + tol) & (np.hypot(rx, ry) <= FOLD)
+                  & np.isnan(best_u))
+            best_u, best_v = np.where(ok, u, best_u), np.where(ok, v, best_v)
+        inside = ~np.isnan(best_u)
+        u, v = np.where(inside, best_u, 0.0), np.where(inside, best_v, 0.0)
+        return (ci + u) * hx, (cj + v) * hy, inside
+
+    def forward_unit(self, qx, qy):
+        return self._map_units(self._go, qx, qy)
 
     def look(self, x, y, st=None):
-        if self.span == (0.0, 0.0, 1.0, 1.0):
-            return self._look_map(x, y)
-        mx, my = self._to(np.asarray(x, np.float64), np.asarray(y, np.float64))
-        return self._back(*self._look_map(mx, my))
+        return self._map_units(self._from, x, y)
 
     def look_tk(self, t, k):
         x, y = self.to_unit(t, k)
         x, y = self.look(x, y)
         return self.from_unit(x, y)
-
-    def forward_unit(self, qx, qy):
-        from notes.liquify import sample
-        from notes.warp import _newton
-        qx, qy = np.array(qx, np.float64, ndmin=1), np.array(qy, np.float64, ndmin=1)
-        if not len(qx):
-            return qx, qy
-        plain = self.span == (0.0, 0.0, 1.0, 1.0)
-        if not plain:
-            qx, qy = self._to(qx, qy)
-        d = sample(self.A, qx, qy)
-        x, y, err = _newton(self.A, qx, qy, False, qx - d[:, 0], qy - d[:, 1])
-        bad = np.flatnonzero(err > 1e-9)
-        if len(bad) > CLOSE_MOST:  # (a sharp twirl's middle: the first guess too far off; Stir's way, a fine
-            # search's seed; few points go straight to the close search below, faster and finer)
-            if getattr(self, "_seed", None) is None:
-                self._seed = searcher(self._look_map)
-            bx, by = solve(self._look_map, qx[bad], qy[bad], x[bad], y[bad], self._seed)
-            lx, ly = self._look_map(bx, by)
-            e = np.hypot(lx - qx[bad], ly - qy[bad])
-            ok = e < err[bad]
-            k = bad[ok]
-            x[k], y[k], err[k] = bx[ok], by[ok], e[ok]
-        bad = bad[err[bad] > CLOSE_FROM]  # (nearly there: close enough for a line (Newton's last steps stalled))
-        if 0 < len(bad) <= CLOSE_MOST:  # (hunt 2026-11-17: the fine search is too coarse for a sharp push /
-            # twirl; one point given up sent the WHOLE shape to the pulled way: look closely first)
-            # (two homes: the one nearest the line's previous point when that one settled, else nearest the point)
-            pi = np.maximum(bad - 1, 0)
-            use = (bad > 0) & (err[pi] <= FOLD)
-            ax, ay = np.where(use, x[pi], qx[bad]), np.where(use, y[pi], qy[bad])
-            cx, cy, ce = self._close(qx[bad], qy[bad], ax, ay)
-            better = ce < err[bad]
-            k = bad[better]
-            x[k], y[k], err[k] = cx[better], cy[better], ce[better]
-        if len(err):
-            self.worst = max(self.worst, float(np.max(err)))
-            if self.worst > FOLD:
-                raise Folded
-        return (x, y) if plain else self._back(x, y)
-
-    def _close(self, qx, qy, ax, ay):
-        """Points' homes (map units) by a close search: a Liquify moves a spot at most its largest push, so each home
-        lies within that of its point; a fine grid (half a map cell apart: a whole cell missed some) over the map +
-        that reach, looked at ONCE and sorted into buckets by where each spot LOOKS; a point's starts = the grid
-        spots looking into its bucket and the ones round it (more rings while none settles), its CLOSE_TRIES
-        nearest; Newton's steps (compiled, all points at once). Two homes (a real crease) = the one nearest (ax, ay).
-        (x, y, err): err inf where none was found."""
-        from notes.warp import _newton
-        B = len(qx)
-        if getattr(self, "_grid", None) is None:
-            P = np.abs(self.A).reshape(-1, 2).max(0) + 1e-6
-            h = 1.0 / max(min(self.A.shape[:2]) - 1, 1) / 2
-            n = np.minimum(np.ceil((1 + 4 * P) / h).astype(int) + 1, CLOSE_GRID * 4)
-            GX, GY = (a.ravel() for a in np.meshgrid(np.linspace(-2 * P[0], 1 + 2 * P[0], n[0]),
-                                                     np.linspace(-2 * P[1], 1 + 2 * P[1], n[1])))
-            LX, LY = self._look_map(GX, GY)
-            b = 2 * max((1 + 4 * P[0]) / (n[0] - 1), (1 + 4 * P[1]) / (n[1] - 1))  # (a bucket: two grid steps)
-            x0, y0 = float(LX.min()), float(LY.min())
-            W = int((LX.max() - x0) / b) + 3
-            key = (np.floor((LY - y0) / b).astype(np.int64) + 1) * W + np.floor((LX - x0) / b).astype(np.int64) + 1
-            o = np.argsort(key, kind="stable")
-            self._grid = GX[o], GY[o], LX[o], LY[o], key[o], b, x0, y0, W
-        GX, GY, LX, LY, keys, b, x0, y0, W = self._grid
-        cx = np.floor((qx - x0) / b).astype(np.int64) + 1
-        cy = np.floor((qy - y0) / b).astype(np.int64) + 1
-        out_x, out_y, out_e = qx.copy(), qy.copy(), np.full(B, np.inf)
-        left = np.arange(B)
-        for ring in (1, 3, 8):  # (buckets round the point's own; wider only for points still without a home)
-            if not len(left):
-                break
-            qi, gi = [], []
-            for dy in range(-ring, ring + 1):
-                for dx in range(-ring, ring + 1):
-                    k =(cy[left] + dy) * W + cx[left] + dx
-                    lo, hi = np.searchsorted(keys, k, "left"), np.searchsorted(keys, k, "right")
-                    c = hi - lo
-                    if not c.any():
-                        continue
-                    qi.append(np.repeat(left, c))
-                    gi.append(np.arange(c.sum()) - np.repeat(np.cumsum(c) - c - lo, c))
-            if not qi:
-                continue
-            qi, gi = np.concatenate(qi), np.concatenate(gi)
-            d2 = (LX[gi] - qx[qi]) ** 2 + (LY[gi] - qy[qi]) ** 2
-            o = np.lexsort((d2, qi))
-            qi, gi = qi[o], gi[o]
-            first = np.r_[True, qi[1:] != qi[:-1]]
-            start = np.maximum.accumulate(np.where(first, np.arange(len(qi)), 0))
-            keep = np.arange(len(qi)) - start < CLOSE_TRIES
-            qi, gi = qi[keep], gi[keep]
-            sx, sy, e = _newton(self.A, qx[qi], qy[qi], False, GX[gi], GY[gi])
-            far = np.hypot(sx - ax[qi], sy - ay[qi])
-            far[~(e <= FOLD)] = np.inf
-            o = np.lexsort((far, qi))
-            first = o[np.r_[True, qi[o][1:] != qi[o][:-1]]]
-            got = np.isfinite(far[first])
-            w = qi[first][got]
-            out_x[w], out_y[w], out_e[w] = sx[first][got], sy[first][got], e[first][got]
-            left = left[~np.isfinite(out_e[left])]
-        return out_x, out_y, out_e
 
     def within(self, t, k):
         x, y = self.to_unit(t, k)
@@ -933,8 +955,18 @@ def _boxes_rows(notes, tracks, src, X, Y):
 
 def _pieces_made(notes, tracks, src, b, rr, t0, t1):
     """The cut pieces (box b, row rr, ticks t0 .. t1) as notes of their own note (src[b]), as cut (not sorted:
-    note_boxes_bent sorts once)."""
+    note_boxes_bent sorts once). Pieces of one note that land on one row touching each other = one piece again: a
+    cut only where the note really goes to another row (Liquify Shape rebuild: halving left cuts where nothing bent,
+    user 2026-11-17 "i expected it to get chopped at that area")."""
     srcs = src[b]
+    if len(srcs) > 1:
+        o = np.lexsort((t0, rr, srcs))
+        srcs, rr, t0, t1 = srcs[o], rr[o], t0[o], t1[o]
+        new = np.r_[True, (srcs[1:] != srcs[:-1]) | (rr[1:] != rr[:-1]) | (t0[1:] != t1[:-1])]
+        if not new.all():
+            at = np.flatnonzero(new)
+            t1 = np.maximum.reduceat(t1, at)
+            srcs, rr, t0 = srcs[at], rr[at], t0[at]
     out = notes[srcs].copy()
     out[:, 0], out[:, 1], out[:, 2] = t0, t1, rr
     return out, (np.asarray(tracks)[srcs] if tracks is not None else None)
@@ -1150,11 +1182,8 @@ def solve(look, qx, qy, x, y, seed=None):
 
 SEARCH = 241  # (the fine search's spots each way, over SEARCH_SPAN of the box)
 SEARCH_SPAN = (-1.0, 2.0)
-CLOSE_GRID = 401  # (LiquifyBend._close: its grid over the map, half a map cell apart, at most 4x this each way)
-CLOSE_TRIES = 96  # (its nearest looks Newton starts from)
-CLOSE_FROM = 1e-7  # (LiquifyBend: points farther from home than this get the close search)
-CLOSE_MOST = 2048  # (more points lost than this in one go: the pulled way (speed only: a Liquify map always
-# gives every point a home, user 2026-11-17: strong pushes went the pulled way, slow + chopped))
+CELLS_MOST = 8_000_000  # (LiquifyBend._seeded: bucket entries of the moved cells at most (memory); past it the
+# first guess)
 
 
 def searcher(look):

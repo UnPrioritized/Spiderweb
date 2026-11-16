@@ -210,8 +210,11 @@ class LiquifyBrush:
                 a, m = ka, km
             # (Shape: the stroke may reach past the shape's box and grow the map there; hunt 2026-11-17, user)
             shape = w is not None and w.kind_of(sh) == "shape"
+            # (Shape: its map says where each point goes, brushed by liquify.dab_fwd where the points SHOW: Strength
+            # taken in; PLAN.md Liquify Shape rebuild)
             jobs.append({"sh": sh, "made": made, "a": a, "m": m, "tb": tb, "span": span, "shape": shape,
-                         "reach": self.liquify_reach(sh, made, span) if shape else None})
+                         "reach": self.liquify_reach(sh, made, span) if shape else None,
+                         "strength": float(lq.full(got)["strength"]) if got else 100.0})
         if finer:  # (a map made finer: given to its shape first, the notes as made from it (the very same colours,
             self.liquify_apply(now=True, jobs=jobs)  # bar a rounding), so the live colours start from what's shown)
             self.redraw()
@@ -445,6 +448,12 @@ class LiquifyBrush:
                     m = job["m"] if job["m"] is not None else np.zeros(job["a"].shape[:2])
                     job["m"] = lq.mask_dab(m, c, rj, J, pressure, density, freeze=tool == "freeze")
                     st["masked"] = True
+                elif job.get("shape"):  # (Shape: "where each point goes", in place, in the map's own units: only
+                    # the points under the brush written, so a grown map's others keep their very numbers)
+                    job["a"] = lq.dab_fwd(job["a"], tool, c, rj, J, pressure, density, vec=vec, turn=turn,
+                                          frozen=job["m"], strength=job.get("strength", 100.0),
+                                          scale=lq.map_scale(job["span"]), copy=False)
+                    st["changed"] = True
                 elif span == lq.SPAN and job.get("span", lq.SPAN) == lq.SPAN:
                     job["a"] = lq.dab(job["a"], tool, c, rj, J, pressure, density, vec=vec, turn=turn,
                                       frozen=job["m"])
@@ -541,6 +550,8 @@ class LiquifyBrush:
             settings = {k: v for k, v in settings.items() if k != "span"}
             if job.get("span", lq.SPAN) != lq.SPAN:  # (the map grown past the box by this stroke: hunt 2026-11-17)
                 settings["span"] = list(job["span"])
+            if settings.get("moves") == "shape":  # (a "where each point goes" map: PLAN.md Liquify Shape rebuild)
+                settings["forward"] = True
             got = lq.with_arrays(settings, job["a"], job["m"])
             if got:
                 base["liquify"] = got

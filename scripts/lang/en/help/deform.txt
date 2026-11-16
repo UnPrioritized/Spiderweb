@@ -16,13 +16,13 @@ Shape steps always run first, before any colour step, in this order: the Stir ta
 
 ## Pasted notes are cut into pieces
 
-Pasted notes and plain notes bend too. Each note bends like a tiny box: where the bend curves a long note it is cut into pieces, so a long note under a twist turns into a slanted run of short notes, while notes the bend leaves straight stay whole. Notes that touched still touch, and each piece keeps its note's velocity, colour and track. Pieces shorter than one tick are dropped. Notes bent past the top or bottom key or before beat 0 follow "Keep notes made there" like any others ([page:offrange|Notes past the keys]).
+Pasted notes and plain notes bend too. Each note bends like a tiny box: where the bend moves part of a long note to another key it is cut into pieces, so a long note under a twist turns into a slanted run of short notes, while notes that stay on their key stay whole (only stretched or squeezed). Notes that touched still touch, and each piece keeps its note's velocity, colour and track. Pieces shorter than one tick are dropped. Notes bent past the top or bottom key or before beat 0 follow "Keep notes made there" like any others ([page:offrange|Notes past the keys]).
 
 Note tool pages, Glue and Sustain work on the bent notes, since the bend comes first.
 
 ## Holes and folds
 
-A strong bend can make a line cross another one. Where the shape then overlaps itself, "Overlaps cancel out" leaves a hole there, as with any shape drawn that way. Some bends fold the shape over itself (Straight to round, Kaleidoscope, a very strong twist or twirl); then each spot takes the note found where the bend brings it from, the way the colours do.
+A strong bend can make a line cross another one. Where the shape then overlaps itself, "Overlaps cancel out" leaves a hole there, as with any shape drawn that way. Some Stir bends fold the shape over itself (Straight to round, Kaleidoscope, a very strong twist); then each spot takes the note found where the bend brings it from, the way the colours do. Liquify never folds: its brush just moves the outline.
 
 Where a push or twirl squeezes notes together they bunch up, and where it pulls them apart they spread out: they follow the bend exactly, like a rubber sheet.
 

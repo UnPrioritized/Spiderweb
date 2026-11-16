@@ -231,13 +231,20 @@ def _line_pieces(p, d, tol):
         P1 = np.where((t1 == 1)[:, None], b[seg], a[seg] + ab * t1[:, None])
         B0 = np.where((t0 == 0)[:, None], end_bent[seg], _bend2(P0, d))
         B1 = np.where((t1 == 1)[:, None], end_bent[seg + 1], _bend2(P1, d))
-        k = _checks(float(np.hypot(*(P1 - P0).T).max()), d)
-        ts = np.arange(1, k + 1) / (k + 1)
-        S = _bend2((P0[:, None, :] + (P1 - P0)[:, None, :] * ts[None, :, None]).reshape(-1, 2), d).reshape(-1, k, 2)
+        # (each piece checked at spots by its OWN length: a bend far away never changes how a piece is cut;
+        # Liquify Shape rebuild, a twirl at the bottom moved the far side by a tick)
+        ks = np.array([_checks(v, d) for v in np.hypot(*(P1 - P0).T).tolist()], np.int64)
         e = B1 - B0
         ee = np.maximum((e * e).sum(1), 1e-300)
-        s = np.clip(((S - B0[:, None, :]) * e[:, None, :]).sum(2) / ee[:, None], 0, 1)
-        off = np.hypot(*(B0[:, None, :] + s[..., None] * e[:, None, :] - S).transpose(2, 0, 1)).max(1)
+        off = np.empty(len(seg))
+        for k in np.unique(ks).tolist():
+            g = ks == k
+            ts = np.arange(1, k + 1) / (k + 1)
+            S = _bend2((P0[g][:, None, :] + (P1 - P0)[g][:, None, :] * ts[None, :, None]).reshape(-1, 2),
+                       d).reshape(-1, k, 2)
+            b0, eg = B0[g], e[g]
+            s = np.clip(((S - b0[:, None, :]) * eg[:, None, :]).sum(2) / ee[g][:, None], 0, 1)
+            off[g] = np.hypot(*(b0[:, None, :] + s[..., None] * eg[:, None, :] - S).transpose(2, 0, 1)).max(1)
         ok = (off <= tol) | (depth == MOST_DEPTH)
         done.append((seg[ok], t0[ok], t1[ok]))
         bad = ~ok
