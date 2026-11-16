@@ -577,7 +577,8 @@ class LiquifyBend(StirBend):
         d = sample(self.A, qx, qy)
         x, y, err = _newton(self.A, qx, qy, False, qx - d[:, 0], qy - d[:, 1])
         bad = np.flatnonzero(err > 1e-9)
-        if len(bad):  # (a sharp twirl's middle: the first guess too far off; Stir's way, a fine search's seed)
+        if len(bad) > CLOSE_MOST:  # (a sharp twirl's middle: the first guess too far off; Stir's way, a fine
+            # search's seed; few points go straight to the close search below, faster and finer)
             if getattr(self, "_seed", None) is None:
                 self._seed = searcher(self._look_map)
             bx, by = solve(self._look_map, qx[bad], qy[bad], x[bad], y[bad], self._seed)
@@ -586,11 +587,60 @@ class LiquifyBend(StirBend):
             ok = e < err[bad]
             k = bad[ok]
             x[k], y[k], err[k] = bx[ok], by[ok], e[ok]
+        bad = bad[err[bad] > CLOSE_FROM]  # (nearly there: close enough for a line (Newton's last steps stalled))
+        if 0 < len(bad) <= CLOSE_MOST:  # (hunt 2026-11-17: the fine search is too coarse for a sharp push /
+            # twirl; one point given up sent the WHOLE shape to the pulled way: look closely first)
+            # (two homes: the one nearest the line's previous point when that one settled, else nearest the point)
+            pi = np.maximum(bad - 1, 0)
+            use = (bad > 0) & (err[pi] <= FOLD)
+            ax, ay = np.where(use, x[pi], qx[bad]), np.where(use, y[pi], qy[bad])
+            cx, cy, ce = self._close(qx[bad], qy[bad], ax, ay)
+            better = ce < err[bad]
+            k = bad[better]
+            x[k], y[k], err[k] = cx[better], cy[better], ce[better]
         if len(err):
             self.worst = max(self.worst, float(np.max(err)))
             if self.worst > FOLD:
                 raise Folded
         return (x, y) if plain else self._back(x, y)
+
+    def _close(self, qx, qy, ax, ay):
+        """Points' homes (map units) by a close search: a Liquify moves a spot at most its largest push, so each home
+        lies within that of its point; a fine grid (half a map cell apart: a whole cell missed some), looked at ONCE
+        over the map + that reach, each point's window of it cut out; Newton's steps (compiled, all points at once)
+        from its CLOSE_TRIES nearest looks. Two homes (a real crease) = the one nearest (ax, ay). (x, y, err): err
+        inf where none was found."""
+        from notes.warp import _newton
+        B = len(qx)
+        P = np.abs(self.A).reshape(-1, 2).max(0) + 1e-6
+        if getattr(self, "_grid", None) is None:
+            cell = 1.0 / max(min(self.A.shape[:2]) - 1, 1) / 2
+            n = np.minimum(np.ceil((1 + 4 * P) / cell).astype(int) + 1, CLOSE_GRID * 4)
+            gx = np.linspace(-2 * P[0], 1 + 2 * P[0], n[0])
+            gy = np.linspace(-2 * P[1], 1 + 2 * P[1], n[1])
+            GX, GY = np.meshgrid(gx, gy)
+            LX, LY = self._look_map(GX, GY)
+            self._grid = gx, gy, GX, GY, LX, LY
+        gx, gy, GX, GY, LX, LY = self._grid
+        T = CLOSE_TRIES
+        SX, SY = np.repeat(qx[:, None], T, 1), np.repeat(qy[:, None], T, 1)
+        for i in range(B):  # (each point's window: index slices of the grid, no new looks)
+            c0, c1 = np.searchsorted(gx, [qx[i] - P[0], qx[i] + P[0]])
+            r0, r1 = np.searchsorted(gy, [qy[i] - P[1], qy[i] + P[1]])
+            wx, wy = GX[r0:r1 + 1, c0:c1 + 1].ravel(), GY[r0:r1 + 1, c0:c1 + 1].ravel()
+            if not len(wx):
+                continue
+            d2 = (LX[r0:r1 + 1, c0:c1 + 1].ravel() - qx[i]) ** 2 + (LY[r0:r1 + 1, c0:c1 + 1].ravel() - qy[i]) ** 2
+            near = np.argpartition(d2, T - 1)[:T] if len(d2) > T else np.resize(np.arange(len(d2)), T)
+            SX[i], SY[i] = wx[near], wy[near]
+        sx, sy, e = _newton(self.A, np.repeat(qx, T), np.repeat(qy, T), False, SX.ravel(), SY.ravel())
+        sx, sy, e = sx.reshape(B, T), sy.reshape(B, T), e.reshape(B, T)
+        far = np.hypot(sx - ax[:, None], sy - ay[:, None])
+        far[~(e <= FOLD)] = np.inf
+        j = far.argmin(1)
+        r = np.arange(B)
+        found = np.isfinite(far[r, j])
+        return sx[r, j], sy[r, j], np.where(found, e[r, j], np.inf)
 
     def within(self, t, k):
         x, y = self.to_unit(t, k)
@@ -1077,6 +1127,10 @@ def solve(look, qx, qy, x, y, seed=None):
 
 SEARCH = 241  # (the fine search's spots each way, over SEARCH_SPAN of the box)
 SEARCH_SPAN = (-1.0, 2.0)
+CLOSE_GRID = 401  # (LiquifyBend._close: its grid over the map, half a map cell apart, at most 4x this each way)
+CLOSE_TRIES = 96  # (its nearest looks Newton starts from)
+CLOSE_FROM = 1e-7  # (LiquifyBend: points farther from home than this get the close search)
+CLOSE_MOST = 64  # (more points lost than this in one go: a real fold, the pulled way)
 
 
 def searcher(look):

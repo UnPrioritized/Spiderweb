@@ -1491,6 +1491,11 @@ def shape_tabs_done(sh, ppq, keys, get):
     got = AS_NOTES if as_notes else bent_shape(out, tabs, rule, box, own, ppq, wp, lq)
     if got is None:
         return out
+    # (COLOURS BEND TOO, user 2026-11-17, a tick per tab, on by default: each note of the bent shape takes the
+    # colour of the note found where the bend brings it from in the shape before, so a Colours cycle / drawn areas
+    # keep their look instead of being laid again on the new outline. Off = made on the bent shape)
+    bend = (any(st["bend_colours"] for st in tabs) or (wp is not None and wp.get("bend_colours", True))
+            or (lq is not None and lq.get("bend_colours", True)))
     if got in (AS_NOTES, PULL):
         # (pasted / plain notes, stage D, and kinds whose lines can't be bent (funnel, Glissando, joined curves, a
         # polyline with Last note per dot): each note a tiny box bent forwards, chopped where the bend curves it.
@@ -1507,13 +1512,18 @@ def shape_tabs_done(sh, ppq, keys, get):
                 raise Folded
             made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
         except Folded:
-            made, tracks = pulled(made, tracks, look, box, ppq, joined=got == PULL, within=within)
+            if got == PULL and not bend and tracks is not None and len(made):
+                # (hunt 2026-11-17: a drawn shape that folds with Colours bend too OFF: a row's touching pieces
+                # joined whatever their colour, then the colours laid by where the notes are now (the drawn
+                # shape's nearest note), not stairs of the rows they came from)
+                from notes.recolour import nearest
+                was, was_tr = made, np.asarray(tracks)
+                made, _ = pulled(made, None, look, box, ppq, joined=True, within=within)
+                tracks = was_tr[nearest(was[:, :4], (made[:, 0] + made[:, 1]) / 2,
+                                        made[:, 2].astype(np.float64), own=False)] if len(made) else was_tr[:0]
+            else:
+                made, tracks = pulled(made, tracks, look, box, ppq, joined=got == PULL, within=within)
         return dict(out, _bent=bent_token(*_on_keys(made, tracks, keys)))
-    # (COLOURS BEND TOO, user 2026-11-17, a tick per tab, on by default: each note of the bent shape takes the
-    # colour of the note found where the bend brings it from in the shape before, so a Colours cycle / drawn areas
-    # keep their look instead of being laid again on the new outline. Off = made on the bent shape)
-    bend = (any(st["bend_colours"] for st in tabs) or (wp is not None and wp.get("bend_colours", True))
-            or (lq is not None and lq.get("bend_colours", True)))
     if not bend or before is None or not len(before):
         return got
     from notes.recolour import nearest

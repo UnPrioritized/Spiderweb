@@ -66,8 +66,11 @@ class AppTransform:
         free (rings cut off at the piano roll's edges move the notes' middle: flipping twice drifted)."""
         if any(grows_free(sh) for sh in shapes):
             return mid2
+        # (a Recolour only colours, but its Shape steps (Stir / Warp / Liquify set to Shape) bend the notes: left out,
+        # their bend is mirrored in the shape's own box, so the middle is the unbent notes'; hunt 2026-11-17: a bent
+        # Spam shape crept sideways at each flip)
         got = [self.whole_notes({k: v for k, v in sh.items()
-                                 if k not in ("fx", "_m", "sustain", "range", "subtract", "extend")})
+                                 if k not in ("fx", "_m", "sustain", "range", "subtract", "extend", "recolour")})
                for sh in shapes if not sh.get("hz") and "picture" not in sh]
         got = [n for n in got if len(n)]
         if not got:
