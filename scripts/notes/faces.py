@@ -175,6 +175,13 @@ class Faces:
             size = max(np.ptp(seg[:, [0, 2]]), np.ptp(seg[:, [1, 3]]))
         size = max(size, 1e-12)
         eps = self.eps = size * 1e-9
+        fast = speed.loops()
+        got = fast.face_build(self.x0, self.y0, self.x1, self.y1, self.levels, np.ascontiguousarray(hy),
+                              np.ascontiguousarray(hx0), np.ascontiguousarray(hx1), float(eps)) if fast else None
+        if got is not None:  # (the same, as a compiled loop: files/fastloops.py)
+            self.levels, e, sl, self.lab, self.depth = got
+            self._lines(e, sl)
+            return
         pairs = self._pairs()
         for _ in range(500):  # lines crossing inside a slab: a level there too, until none do
             e, sl, xb, xt = pairs
@@ -196,15 +203,8 @@ class Faces:
         e, sl, xb, xt = pairs
         lv = self.levels
         nl = len(lv)
-        self.edge, self.slab = e, sl  # (slab by slab, left to right)
-        # (each of those lines as x = ex + es * (y - ey): area_at's halving reads these in that order)
-        self.ex, self.ey = self.x0[e], self.y0[e]
-        self.es = (self.x1[e] - self.ex) / (self.y1[e] - self.ey)
-        count = np.bincount(sl, minlength=nl - 1)
-        self.start = np.concatenate([[0], np.cumsum(count)])  # (each slab's lines: edge[start[s]:start[s + 1]])
-        off = np.concatenate([[0], np.cumsum(count + 1)])  # (each slab's pieces: off[s] .. off[s] + count[s])
-        self.off = off
-        out = self.out = int(off[-1])  # (the area around the drawing)
+        count = self._lines(e, sl)
+        off, out = self.off, self.out
         n = out + 1
         rank = np.arange(len(e)) - self.start[sl]
         ends = np.concatenate([off[:-1], off[:-1] + count])  # (each slab's leftmost and rightmost piece: outside)
@@ -250,6 +250,18 @@ class Faces:
             depth = new
         depth[depth > n * 4] = 0  # (cut off from everything: shouldn't happen)
         self.lab, self.depth = lab, depth
+
+    def _lines(self, e, sl):
+        """Keep each slab's lines (e, slab: slab by slab, left to right) and their pieces' numbers -> lines a slab."""
+        self.edge, self.slab = e, sl
+        # (each of those lines as x = ex + es * (y - ey): area_at's halving reads these in that order)
+        self.ex, self.ey = self.x0[e], self.y0[e]
+        self.es = (self.x1[e] - self.ex) / (self.y1[e] - self.ey)
+        count = np.bincount(sl, minlength=len(self.levels) - 1)
+        self.start = np.concatenate([[0], np.cumsum(count)])  # (each slab's lines: edge[start[s]:start[s + 1]])
+        self.off = np.concatenate([[0], np.cumsum(count + 1)])  # (each slab's pieces: off[s] .. off[s] + count[s])
+        self.out = int(self.off[-1])  # (the area around the drawing)
+        return count
 
     def _pairs(self):
         """Every line with every slab it runs through, slab by slab from left to right: (line, slab, x at the

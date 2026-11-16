@@ -45,6 +45,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   nearest        picture._dist2(...).argmin(1) (Image to notes): each colour's nearest palette colour
   spread_line    picture._spread: the error spreading, one slanted line at a time (its OKLab left to NumPy)
   area_spots     faces.Faces.area_at: the area each spot is in (custom shapes' Fill / Spam, area colours)
+  face_build     faces.Faces' build: the drawing cut into slabs at every crossing, the areas joined, their depth
   blend_heat     notes/blend_rows.heat_at: Nested Blend's heat at spots (finding each ring edge)
   band_rows      shrink.near_rows (Even band, Outline gate): each outline edge's band on each line, joined line by line
   field_dist     shrink.field's distances to the outline on a grid (Nested's centre, Blend, the Outline gate preview)
@@ -4084,6 +4085,231 @@ def area_spots(x, y, levels, start, off, lab, outside, edge, ex, ey, es, x0, y0,
     return out
 
 
+@njit(nogil=True)
+def _face_x(x0, y0, x1, y1, e, y):
+    return x0[e] + (x1[e] - x0[e]) * (y - y0[e]) / (y1[e] - y0[e])
+
+
+@njit(nogil=True)
+def _face_pairs(lv, x0, y0, x1, y1):
+    """faces.Faces._pairs: every line with every slab it runs through, slab by slab, left to right (by the middle
+    of its piece, then line number) -> line, slab, x at the slab's bottom, x at its top."""
+    a, b = np.searchsorted(lv, y0), np.searchsorted(lv, y1)
+    n = 0
+    for i in range(len(a)):
+        n += b[i] - a[i]
+    e, sl = np.empty(n, np.int64), np.empty(n, np.int64)
+    xb, xt, mid = np.empty(n), np.empty(n), np.empty(n)
+    j = 0
+    for i in range(len(a)):  # (line by line, as _runs: ties keep line order)
+        for s in range(a[i], b[i]):
+            e[j], sl[j] = i, s
+            xb[j] = _face_x(x0, y0, x1, y1, i, lv[s])
+            xt[j] = _face_x(x0, y0, x1, y1, i, lv[s + 1])
+            mid[j] = (xb[j] + xt[j]) / 2
+            j += 1
+    o = np.argsort(mid, kind="mergesort")
+    o = o[np.argsort(sl[o], kind="mergesort")]
+    return e[o], sl[o], xb[o], xt[o]
+
+
+@njit(nogil=True)
+def _face_root(head, i):
+    while head[i] != i:
+        head[i] = head[head[i]]
+        i = head[i]
+    return i
+
+
+@njit(nogil=True)
+def face_build(x0, y0, x1, y1, levels, hy, hx0, hx1, eps):
+    """faces.Faces' whole build: sloped lines (0 = the lower end), the first levels (every end's height), level
+    lines (height, left, right), eps -> (levels, line + slab of every piece of line slab by slab, each piece's
+    area (its group's smallest), each one's depth). The same as the NumPy code: the crossing rounds alike to the
+    last digit; the joins don't depend on order (which spots are left of a gap, groups, fewest lines crossed)."""
+    lv = levels
+    e, sl, xb, xt = _face_pairs(lv, x0, y0, x1, y1)
+    ns = len(lv) - 1
+    start = np.zeros(ns + 1, np.int64)
+    for i in range(len(sl)):
+        start[sl[i] + 1] += 1
+    for s in range(ns):
+        start[s + 1] += start[s]
+    for _ in range(500):  # lines crossing inside a slab: a level there too, until none do
+        ys = np.empty(len(e), np.float64)
+        m = 0
+        bad = False
+        for i in range(len(e) - 1):
+            if sl[i] != sl[i + 1]:
+                continue
+            db, dt = xb[i] - xb[i + 1], xt[i] - xt[i + 1]
+            if db > eps or dt > eps:
+                bad = True
+                if db - dt != 0.0:  # (parallel: no crossing; NumPy's inf / nan left out the same)
+                    t = db / (db - dt)
+                    if 0.0 < t < 1.0:
+                        s = sl[i]
+                        ys[m] = lv[s] + t * (lv[s + 1] - lv[s])
+                        m += 1
+        if not bad:
+            break
+        new = np.unique(np.concatenate((lv, ys[:m])))
+        if len(new) == len(lv):
+            break
+        # (faces.Faces._split: only the slabs that got cut worked out anew, each new slab by its pieces' middles,
+        # ties by line number; the rest keep their lines)
+        a, b = np.searchsorted(new, lv[:-1]), np.searchsorted(new, lv[1:])
+        total = 0
+        for s in range(ns):
+            total += (start[s + 1] - start[s]) * (b[s] - a[s])
+        ne, nsl, nb, nt = np.empty(total, np.int64), np.empty(total, np.int64), np.empty(total), np.empty(total)
+        j = 0
+        for s in range(ns):
+            c0, c1 = start[s], start[s + 1]
+            if b[s] - a[s] == 1:
+                for q in range(c0, c1):
+                    ne[j], nsl[j], nb[j], nt[j] = e[q], a[s], xb[q], xt[q]
+                    j += 1
+                continue
+            seg = e[c0:c1].copy()
+            seg = seg[np.argsort(seg, kind="mergesort")]
+            pb, pt, mid = np.empty(len(seg)), np.empty(len(seg)), np.empty(len(seg))
+            for k in range(a[s], b[s]):
+                for q in range(len(seg)):
+                    pb[q] = _face_x(x0, y0, x1, y1, seg[q], new[k])
+                    pt[q] = _face_x(x0, y0, x1, y1, seg[q], new[k + 1])
+                    mid[q] = (pb[q] + pt[q]) / 2
+                o = np.argsort(mid, kind="mergesort")
+                for q in range(len(seg)):
+                    ne[j], nsl[j], nb[j], nt[j] = seg[o[q]], k, pb[o[q]], pt[o[q]]
+                    j += 1
+        lv, e, sl, xb, xt = new, ne, nsl, nb, nt
+        ns = len(lv) - 1
+        start = np.zeros(ns + 1, np.int64)
+        for i in range(len(sl)):
+            start[sl[i] + 1] += 1
+        for s in range(ns):
+            start[s + 1] += start[s]
+    nl = len(lv)
+    count = np.empty(ns, np.int64)
+    off = np.zeros(ns + 1, np.int64)
+    for s in range(ns):
+        count[s] = start[s + 1] - start[s]
+        off[s + 1] = off[s] + count[s] + 1
+    out = off[ns]
+    n = out + 1
+    head = np.arange(n)
+    # depth steps: pieces side by side (one line apart) + across a level line (as many lines as cover there)
+    da = np.empty(len(e) + 2 * len(e) + len(hy) * 2 + 2 * nl, np.int64)
+    db_ = np.empty(len(da), np.int64)
+    dw = np.empty(len(da), np.int64)
+    nd = 0
+    for s in range(ns):  # (each slab's leftmost and rightmost piece: outside)
+        for p in (off[s], off[s] + count[s]):
+            ra, rb = _face_root(head, p), _face_root(head, out)
+            if ra != rb:
+                head[max(ra, rb)] = min(ra, rb)
+        for r in range(count[s]):
+            da[nd], db_[nd], dw[nd] = off[s] + r, off[s] + r + 1, 1
+            nd += 1
+    # where the slabs meet: each level's spots (tops of the slab below, bottoms of the slab above, level lines' ends)
+    hk = np.searchsorted(lv, hy)
+    ho = np.argsort(hk, kind="mergesort")
+    hfirst = np.searchsorted(hk[ho], np.arange(nl + 1))
+    for k in range(nl):
+        nb = count[k - 1] if k > 0 else 0
+        na = count[k] if k < ns else 0
+        nh = hfirst[k + 1] - hfirst[k]
+        tot = nb + na + 2 * nh
+        if tot < 2:
+            continue
+        xs = np.empty(tot)
+        kind = np.empty(tot, np.int64)
+        j = 0
+        if k > 0:
+            for q in range(start[k - 1], start[k]):
+                xs[j], kind[j] = xt[q], 0
+                j += 1
+        if k < ns:
+            for q in range(start[k], start[k + 1]):
+                xs[j], kind[j] = xb[q], 1
+                j += 1
+        for q in range(hfirst[k], hfirst[k + 1]):
+            xs[j], kind[j] = hx0[ho[q]], 2
+            xs[j + 1], kind[j + 1] = hx1[ho[q]], 3
+            j += 2
+        o = np.argsort(xs, kind="mergesort")
+        below = above = cover = 0
+        for i in range(tot - 1):
+            c = kind[o[i]]
+            if c == 0:
+                below += 1
+            elif c == 1:
+                above += 1
+            elif c == 2:
+                cover += 1
+            else:
+                cover -= 1
+            if xs[o[i + 1]] - xs[o[i]] > eps:
+                pb = off[k - 1] + below if k > 0 else out
+                pa = off[k] + above if k < ns else out
+                if cover == 0:
+                    ra, rb = _face_root(head, pb), _face_root(head, pa)
+                    if ra != rb:
+                        head[max(ra, rb)] = min(ra, rb)
+                elif cover > 0:
+                    if nd == len(da):  # (more room)
+                        da = np.concatenate((da, np.empty(len(da), np.int64)))
+                        db_ = np.concatenate((db_, np.empty(len(db_), np.int64)))
+                        dw = np.concatenate((dw, np.empty(len(dw), np.int64)))
+                    da[nd], db_[nd], dw[nd] = pb, pa, cover
+                    nd += 1
+    lab = np.empty(n, np.int64)
+    for i in range(n):
+        lab[i] = _face_root(head, i)
+    # fewest lines to cross from outside: shortest paths over the depth steps (between groups)
+    deg = np.zeros(n + 1, np.int64)
+    for i in range(nd):
+        a, b = lab[da[i]], lab[db_[i]]
+        if a != b:
+            deg[a + 1] += 1
+            deg[b + 1] += 1
+    for i in range(n):
+        deg[i + 1] += deg[i]
+    to, wt, fill = np.empty(deg[n], np.int64), np.empty(deg[n], np.int64), deg[:n].copy()
+    for i in range(nd):
+        a, b = lab[da[i]], lab[db_[i]]
+        if a != b:
+            to[fill[a]], wt[fill[a]] = b, dw[i]
+            fill[a] += 1
+            to[fill[b]], wt[fill[b]] = a, dw[i]
+            fill[b] += 1
+    depth = np.full(n, 2305843009213693951, np.int64)  # (np.iinfo(np.int64).max // 4, as faces.py)
+    depth[lab[out]] = 0
+    queue = np.empty(n, np.int64)  # (a ring of groups to look at again: each in it at most once at a time)
+    inq = np.zeros(n, np.bool_)
+    qh, qn = 0, 1
+    queue[0] = lab[out]
+    inq[lab[out]] = True
+    while qn:
+        a = queue[qh]
+        qh = qh + 1 if qh + 1 < n else 0
+        qn -= 1
+        inq[a] = False
+        for j in range(deg[a], deg[a + 1]):
+            b = to[j]
+            if depth[a] + wt[j] < depth[b]:
+                depth[b] = depth[a] + wt[j]
+                if not inq[b]:
+                    queue[(qh + qn) % n] = b
+                    qn += 1
+                    inq[b] = True
+    for i in range(n):
+        if depth[i] > n * 4:  # (cut off from everything: shouldn't happen)
+            depth[i] = 0
+    return lv, e, sl, lab, depth
+
+
 # (Load MIDI: midi_scan's own functions, under the names the library's loops have)
 midi_walk = njit(nogil=True)(midi_scan.walk)
 midi_rewrite = njit(nogil=True)(midi_scan.rewrite)
@@ -4321,6 +4547,8 @@ def warm():
               np.ones(1), f1, f1, np.ones(1), np.full(1, 9, np.int64), np.ones(1), np.ones(1), np.ones(1), 0.01)
     hz_order(np.arange(300, dtype=np.int64))
     area_spots(f1, f1, np.zeros(2), i2, i2, i2, 0, i1, f1, f1, f1, f1, f1, f1, f1, f)
+    c2, f0e = np.array([0.0, 1.0]), np.zeros(0)
+    face_build(c2, np.zeros(2), c2[::-1].copy(), np.ones(2), c2, f0e, f0e, f0e, 1e-9)
     z1 = np.zeros(1, np.int64)
     blend_heat(np.zeros(2), np.ones(1), np.ones(1), np.zeros(1), np.zeros(1), z1, z1 + 1, z1, 1, z1, z1,
                np.zeros(1), 0, np.zeros(1), 0.0, np.zeros(1))

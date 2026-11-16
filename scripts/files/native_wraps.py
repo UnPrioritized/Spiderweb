@@ -43,6 +43,7 @@ NEEDS = {
 }
 NOT_IN_ORDER = -10  # (note_stretches: the notes aren't in key / start order; Numba's -1)
 BIG_GAPS = 4096  # (gap_ticks: anchors past this = written into arrays made in Python)
+FACES_MANY = 2048  # (face_build: lines from which its slabs are shared out on half the cores)
 
 
 def rows_of(out, m):
@@ -321,6 +322,13 @@ class Wraps:
         if got < 0 and self._again("area_spots", got, args) < 0:
             return self.base.area_spots(*args[:-1])
         return out
+
+    def face_build(self, x0, y0, x1, y1, levels, hy, hx0, hx1, eps):
+        """None = not run: faces.py's NumPy build (far quicker than the plain twin; so not in NEEDS, which would put
+        the plain twin here when the library hasn't got it)."""
+        if not hasattr(self.x, "face_build"):
+            return None
+        return self._tuple("face_build", (x0, y0, x1, y1, levels, hy, hx0, hx1, eps, len(x0) >= FACES_MANY))
 
     def band_rows(self, ax, ay, bx, by, length, ys, first, n, r, row_out, lo_out, hi_out):
         args = (ax, ay, bx, by, length, ys, first, n, r, row_out, lo_out, hi_out)
