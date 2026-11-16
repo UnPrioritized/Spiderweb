@@ -2051,6 +2051,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         if not self.drag:
             over = not self.draft and self.hit_handle(e.x, e.y, self.app.tool.get() == "select") is not None
+            # (a Stir / Clumps Centre point dot or Stir area spot: any tool grabs it, centre_press; user 11-17)
+            over = over or (not self.draft and self.centre_hit(e) is not None)
             # (the arrow of a shape put away above the top key can be grabbed: the move pointer shows it, user)
             over = over or (not self.draft and self.app.tool.get() == "select"
                             and self.above_mark_at(e.x, e.y) is not None)
