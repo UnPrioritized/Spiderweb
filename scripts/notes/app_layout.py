@@ -41,9 +41,27 @@ def recolour_alone(sh):
         return sh
     if pasted_notes(sh):
         return with_most(sh, False)
-    from notes.shape_bend import shape_only  # (Stir tabs bending the shape itself: in every mode)
+    from notes.shape_bend import shape_only, shape_places  # (Stir tabs bending the shape itself: in every mode)
+    from notes.steps import COLOURS
     keep = shape_only(sh["recolour"])
-    return dict(without_recolour(sh), recolour=keep) if keep else without_recolour(sh)
+    out = without_recolour(sh)
+    if keep:
+        out["recolour"] = keep
+    if sh.get("off"):  # (Properties' off switches follow: a Shape tab's renumbered among the Shape tabs kept, the
+        # other colour steps' gone with them, hunt 2026-11-17)
+        places = shape_places(sh["recolour"]) if keep else []
+        off = []
+        for e in sh["off"]:
+            if isinstance(e, list) and len(e) == 2 and e[0] in COLOURS:
+                if e[0] == "stir" and e[1] in places:
+                    off.append(["stir", places.index(e[1])])
+            else:
+                off.append(e)
+        if off:
+            out["off"] = off
+        else:
+            out.pop("off", None)
+    return out
 
 
 def colours_apart(sh, mode):

@@ -10,6 +10,7 @@ import json
 import math
 import re
 import threading
+from collections import OrderedDict
 from contextlib import contextmanager
 
 import numpy as np
@@ -1307,6 +1308,10 @@ def heard_kind(sh, ppq, keys):
     """heard_notes(sh, *kind_notes_tracks(...)). A pasted shape only moved: its own overlaps fixed ONCE where it was
     pasted and kept, then shifted (fixing commutes with moving every note by the same ticks and keys: the same
     notes, test overlap_lean)."""
+    bent = _BENT.get(sh.get("_bent")) if sh.get("_bent") else None
+    if bent is not None:  # (notes a Shape tab made: shape_tabs_done)
+        _BENT.move_to_end(sh["_bent"])
+        return bent[0].copy(), (bent[1].copy() if bent[1] is not None else None)
     way = sh.get("_heard")
     got = paste_moved(sh, ppq, keys) if way else None
     if got is None:
@@ -1424,14 +1429,34 @@ def shape_tabs_done(sh, ppq, keys, get):
             out.pop("off", None)
     if not tabs or not can_recolour(sh):
         return out
-    plain = without_recolour(sh)
-    notes, _ = get(plain)
+    if sh.get("cut") and not sh["cut"].get("mould"):
+        # (A SLICED PIECE of a bent shape, hunt 2026-11-17, user took A: the WHOLE bent, then cut by the knife where it
+        # was drawn over the bent notes; the piece keeps its Shape tab, its pages / colour steps run on its part)
+        from notes.sliced import moved_by, source
+        got = source(sh)
+        halves = (got[1] if sh["kind"] == "custom" else sh["cut"].get("knife")) if got else None
+        if got is not None and halves:
+            src = dict(got[0])
+            if isinstance(src.get("recolour"), dict):  # (the whole measures in its own box: the piece's colour
+                # bookkeeping (its box inside the whole's, the flip at the cut) is the piece's, not the whole's)
+                src["recolour"] = {k: v for k, v in src["recolour"].items() if k not in ("whole", "cut_frame")}
+            whole = shape_tabs_done(src, ppq, keys, get)
+            made, tracks = get(_steps_off(without_recolour(whole)))
+            made = np.asarray(made, np.int64)
+            if len(made):
+                made, tracks = knife_cut(made[:, :4], None if tracks is None else np.asarray(tracks, np.int64),
+                                         halves, moved_by(sh), ppq)
+            return dict(out, _bent=bent_token(made, tracks))
+    # (SHAPE TABS RUN FIRST, hunt 2026-11-17: the notes the bend sees are the plain ones, before Glue, pages,
+    # Sustain, Gate extend / subtract, Gate aware flip; those then run on the bent notes as usual)
+    base = _steps_off(without_recolour(sh))
+    notes, before = get(base)
     if not len(notes):
         return out
     rule = rule_of(r) or {}
     rule["ppq"] = ppq
     from notes.recolour import colour_box
-    box, own = colour_box(notes, rule, free_box(plain, notes, get, keys))
+    box, own = colour_box(notes, rule, free_box(base, notes, get, keys))
     benders = [StirBend(st, rule, box, own, ppq) for st in tabs]
 
     def look(t, k):  # (the last tab first: tab 2 bent what tab 1 left)
@@ -1444,11 +1469,16 @@ def shape_tabs_done(sh, ppq, keys, get):
         for b in benders[1:]:
             ok = ok | b.within(t, k)
         return ok
-    if "notes" in plain and "picture" not in plain and "picture_notes" not in plain:
-        # (pasted / plain notes, stage D: each note a tiny box bent forwards, chopped where the bend curves it;
-        # folding bends pull them like a drawn shape's, each note's pieces kept apart)
-        from notes.shape_bend import Folded, note_boxes_bent
-        notes, tracks = get(dict(plain, _free=True) if "pts" in plain else plain)
+    from notes.shape_bend import AS_NOTES, Folded, note_boxes_bent
+    as_notes = "notes" in base and "picture" not in base and "picture_notes" not in base
+    got = AS_NOTES if as_notes else bent_shape(out, tabs, rule, box, own, ppq)
+    if got is None:
+        return out
+    if got in (AS_NOTES, PULL):
+        # (pasted / plain notes, stage D, and kinds whose lines can't be bent (funnel, Glissando, joined curves, a
+        # polyline with Last note per dot): each note a tiny box bent forwards, chopped where the bend curves it.
+        # Folding bends: pulled (a drawn shape's touching pieces joined, notes' pieces kept apart))
+        made, tracks = get(dict(base, _free=True) if "pts" in base else base)  # (past the edges too: cut after)
 
         def bend_tk(t, k):
             p = np.column_stack((t, k))
@@ -1456,39 +1486,51 @@ def shape_tabs_done(sh, ppq, keys, get):
                 p = b.bend2(p)
             return p[:, 0], p[:, 1]
         try:
-            if any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
+            if got == PULL or any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
                 raise Folded
-            notes, tracks = note_boxes_bent(notes, tracks, bend_tk, ppq, look)
+            made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
         except Folded:
-            notes, tracks = pulled(notes, tracks, look, box, ppq, joined=False, within=within)
-        return _rest_coloured(sh, out, rest, *_on_keys(notes, tracks, keys), ppq)
-    got = bent_shape(out, tabs, rule, box, own, ppq)
-    if got is None:
-        return out
-    if got != PULL:
-        # (COLOURS BEND TOO, user 2026-11-17, a tick per tab, on by default: each note of the bent shape takes the
-        # colour of the note found where the bend brings it from in the shape before, so a Colours cycle / drawn
-        # areas keep their look instead of being laid again on the new outline. Off = made on the bent shape)
-        if not any(st["bend_colours"] for st in tabs):
-            return got
-        before = get(plain)[1]
-        if before is None or not len(before):  # (one colour: nothing to carry)
-            return got
-        from notes.recolour import nearest
-        from notes.steps import COLOURS
-        bare = without_recolour(got)
-        if bare.get("off"):  # (the colour steps' switches go with them)
-            bare["off"] = [o for o in bare["off"] if o[0] not in COLOURS] or None
-            if bare["off"] is None:
-                del bare["off"]
-        notes, tracks = get(bare)
-        if len(notes):
-            t, k = look((notes[:, 0] + notes[:, 1]) / 2, notes[:, 2].astype(np.float64))
-            tracks = np.asarray(before)[nearest(get(plain)[0], t, k, own=False)]
-        return _rest_coloured(sh, out, rest, notes, tracks, ppq)
-    notes, tracks = get(dict(plain, _free=True) if "pts" in plain else plain)  # (past the edges too: cut after)
-    notes, tracks = pulled(notes, tracks, look, box, ppq, joined=True, within=within)
-    return _rest_coloured(sh, out, rest, *_on_keys(notes, tracks, keys), ppq)
+            made, tracks = pulled(made, tracks, look, box, ppq, joined=got == PULL, within=within)
+        return dict(out, _bent=bent_token(*_on_keys(made, tracks, keys)))
+    # (COLOURS BEND TOO, user 2026-11-17, a tick per tab, on by default: each note of the bent shape takes the
+    # colour of the note found where the bend brings it from in the shape before, so a Colours cycle / drawn areas
+    # keep their look instead of being laid again on the new outline. Off = made on the bent shape)
+    if not any(st["bend_colours"] for st in tabs) or before is None or not len(before):
+        return got
+    from notes.recolour import nearest
+    made, _ = get(_steps_off(without_recolour(got)))
+    tracks = None
+    if len(made):
+        t, k = look((made[:, 0] + made[:, 1]) / 2, made[:, 2].astype(np.float64))
+        tracks = np.asarray(before)[nearest(notes, t, k, own=False)]
+    return dict(got, _bent=bent_token(made, tracks))
+
+
+STEP_KEYS = ("fx", "_m", "glue", "sustain", "extend", "subtract", "gate_flip", "order", "off", "_upto")
+
+
+def _steps_off(sh):
+    """sh's notes as made before any of its steps (no pages, Glue, Sustain, Gate extend / subtract / aware flip)."""
+    return {k: v for k, v in sh.items() if k not in STEP_KEYS}
+
+
+_BENT = OrderedDict()  # (bent_token -> (notes, tracks): notes a Shape tab made, handed to heard_kind by sh "_bent")
+BENT_KEPT = 6
+
+
+def bent_token(notes, tracks):
+    """A name for notes (and tracks) a Shape tab made, kept a while: sh["_bent"] = it makes heard_kind give them as
+    the shape's own notes (every step after runs on them). Named by their content (the notes caches see it)."""
+    import hashlib
+    notes = np.ascontiguousarray(notes, np.int64)
+    h = hashlib.blake2b(notes.tobytes(), digest_size=12)
+    h.update(b"|" if tracks is None else np.ascontiguousarray(tracks, np.int64).tobytes())
+    token = h.hexdigest()
+    _BENT[token] = (notes, None if tracks is None else np.asarray(tracks, np.int64))
+    _BENT.move_to_end(token)
+    while len(_BENT) > BENT_KEPT:
+        _BENT.popitem(last=False)
+    return token
 
 
 def _on_keys(notes, tracks, keys):
@@ -1501,16 +1543,6 @@ def _on_keys(notes, tracks, keys):
     return notes, tracks
 
 
-def _rest_coloured(sh, out, rest, notes, tracks, ppq):
-    """shape_tabs_done's notes made there (pulled / colours carried) after the colour steps left (rest)."""
-    if rest and is_recoloured(out):
-        held_ = sustain_on(sh) or sh.get("held") is True or keeps_laps(sh) or sh.get("_sus") is True
-        gate = is_pasted_flipped(sh) or is_gate_flipped(sh) or sh.get("_gate") is True
-        rule2 = rule_of(rest)
-        if rule2.get("stir"):
-            rule2["ppq"] = ppq
-        notes, tracks = recoloured(notes, tracks, rule2, held_, gate, None)
-    return notes, tracks
 
 
 DEEP = 50  # steps: more, and fx_notes makes the notes before each one first (see there)

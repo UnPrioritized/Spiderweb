@@ -134,6 +134,19 @@ def shape_only(r):
     for k in ("frame", "ppq"):
         if k in r:
             out[k] = r[k]
+    u = r.get("_upto")  # (a Shape tab being edited: the same tab marked among the Shape tabs kept (hunt 2026-11-17);
+    # a colour step being edited hides no Shape tab: they all run first)
+    if isinstance(u, int) and not isinstance(u, bool):
+        n, m = -1, -1
+        for j, k in enumerate(rc.order_of(rc.clean_recolour(r) or {})):
+            if k == "stir":
+                n += 1
+                items = s if isinstance(s, list) else [s]
+                if n < len(items) and is_shape(items[n]):
+                    m += 1
+                    if j == u:
+                        out["_upto"] = m
+                        break
     return out
 
 
@@ -141,21 +154,26 @@ def grown_reach(sh, r):
     """A shape's drawn reach r (first beat, lowest key, highest key, last beat) grown to where its Shape tabs may take
     notes (engine.past_edges: notes bent past an edge are kept / wrapped like any): every bend stays inside the
     circle round its Centre point through the box's farthest corner (StirBend.within), a ripple's height wider.
-    Measured on the drawn box (the notes' box is about it); Round as seen / turned looks: twice as far, to be safe."""
+    Measured on the drawn box (the notes' box is about it). Turned round as seen (spin): the circle as seen
+    (recolour.area_scales' sides: the box's width in beats, its height in keys x beats per key), reaching the same far
+    both ways (a turned frame swaps the sides; hunt 2026-11-17: a flat box turned 90 lost notes past the edge)."""
     if r is None or not isinstance(sh.get("recolour"), dict):
         return r
     tabs = shape_tabs(sh["recolour"], sh.get("off"))
     if not tabs:
         return r
+    w, h = max(r[3] - r[0], 1e-9), max(r[2] - r[1], 1e-9)
     x0, x1, y0, y1 = 0.0, 1.0, 0.0, 1.0
     for st in tabs:
         cx, cy = (v / 100 for v in st["centre"])
-        far = max(math.hypot(X - cx, Y - cy) for X in (0, 1) for Y in (0, 1))
-        if st["spin"] or st["round"]:
-            far *= 2
-        far += abs(st["ripple"]) / 100 * (2 if st["spin"] else 1)
+        rx = ry = 1.0
+        if st["spin"] and st["seen"]:
+            lx, ly = w, h * st["seen"]
+            big = max(lx, ly)
+            rx, ry = max(lx / big, 1e-9), max(ly / big, 1e-9)
+        far = max(math.hypot((X - cx) * rx, (Y - cy) * ry) for X in (0, 1) for Y in (0, 1))
+        far = (far + abs(st["ripple"]) / 100 * max(rx, ry)) / min(rx, ry)
         x0, x1, y0, y1 = min(x0, cx - far), max(x1, cx + far), min(y0, cy - far), max(y1, cy + far)
-    w, h = max(r[3] - r[0], 1e-9), max(r[2] - r[1], 1e-9)
     return (min(r[0], r[0] + x0 * w), min(r[1], r[1] + y0 * h), max(r[2], r[1] + y1 * h), max(r[3], r[0] + x1 * w))
 
 
@@ -336,12 +354,15 @@ class Board(dict):
         return self.from_tk(q)
 
 
-LINE_DROP = ("k", "smooth", "shape", "pattern", "tumour", "tumours", "sharp", "end_dot")  # (a bent line = its drawn
-# path as points: what made the path from its points (arc, perfect freehand, formulas, tumours) is in them already)
+LINE_DROP = ("k", "smooth", "shape", "pattern", "tumour", "tumours", "sharp")  # (a bent line = its drawn path as
+# points: what made the path from its points (arc, perfect freehand, formulas, tumours) is in them already; its Last
+# note setting stays, hunt 2026-11-17)
 TEXT_DROP = ("text", "polygon")
 
 
 PULL = "pull"  # (bent_shape: the lines can't show this bend (a fold), pull the notes instead)
+AS_NOTES = "notes"  # (bent_shape: lines this way can't be bent (funnel, Glissando, joined curves, a polyline with
+# Last note per dot): its notes bent like pasted notes, hunt 2026-11-17)
 
 
 def bent_shape(sh, tabs, r, box, own, ppq):
@@ -393,11 +414,16 @@ def _bent_shape(sh, tabs, r, box, own, ppq):
             got = board.bend2(a)
             out["areas"] = [[float(u), float(v), p[2]] for (u, v), p in zip(got, sh["areas"])]
         return out
+    if kind in ("funnel", "gliss"):
+        return AS_NOTES
     if kind in ("line", "poly", "free", "curve", "arc") and not sh.get("cut") and not sh.get("join"):
         from notes.engine import shape_path
         from notes.joined import is_joined
         if is_joined(sh):
-            return None
+            return AS_NOTES
+        if kind == "poly" and sh.get("end_dot") and not sh.get("by_snap") and len(sh.get("pts") or ()) > 2 \
+                and not (sh.get("shape") or sh.get("pattern")):  # (Last note per dot: each piece its own notes)
+            return AS_NOTES
         path = np.asarray(shape_path(sh), np.float64).reshape(-1, 2)
         if len(path) < 2:
             return None
