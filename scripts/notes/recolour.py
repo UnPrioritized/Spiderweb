@@ -104,7 +104,10 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
                  "bulge": 0.0, "area_bulge": True,
                  "polar": 0.0, "ripple": 0.0, "ripple_len": 10.0, "ripple_kind": "side", "kaleido": 0,
                  "kaleido_turn": 0.0, "wring": 0.0, "wring_angle": 0.0, "round_edge": "cut", "area_polar": True,
-                 "area_ripple": True, "area_kaleido": True, "area_wring": True, "moves": "colours"}
+                 "area_ripple": True, "area_kaleido": True, "area_wring": True, "moves": "colours",
+                 "bulge_out": None}
+# ("bulge_out" = Bulge reaches past the box (bulge_q): None = the tab's default, on for Shape tabs, off for Colours
+# (user 2026-11-17); saved only when it differs from that)
 # ("moves" = what the tab bends: "colours" (every stir before 2026-11-17) / "shape" = the shape itself, its notes made
 # from the bent lines (notes/shape_bend.py, PLAN.md "Deform shapes"; user 2026-11-16: one choice per tab))
 STIR_MOVES = ("colours", "shape")
@@ -121,7 +124,7 @@ ROUND_EDGES = ("cut", "fade")
 MOST_SLICES = 32
 MOST_RIPPLE, MOST_RIPPLE_LEN, LEAST_RIPPLE_LEN = 100.0, 200.0, 0.5
 MOST_WRING = 50.0
-SETTINGS_ONLY = {"smooth", "bend_smooth", "ripple_len", "ripple_kind", "kaleido_turn", "wring_angle"}  # (alone: no
+SETTINGS_ONLY = {"smooth", "bend_smooth", "ripple_len", "ripple_kind", "kaleido_turn", "wring_angle", "bulge_out"}  # (alone: no
 # stir; "moves" alone IS kept: a tab just set to Shape keeps that choice, it bends nothing yet)
 # ("bulge" = Bulge %, BMC tester 11-07 (their "local expansion / collapse", op art's bulging grid): + = the colours
 # swell out from the middle like a lens, packed tight at the edge; - = pinched in. Never adds or loses a colour inside
@@ -795,6 +798,9 @@ def one_stir(s):
         out["ripple_kind"] = s["ripple_kind"]
     if s.get("moves") in STIR_MOVES[1:]:
         out["moves"] = s["moves"]
+    v = s.get("bulge_out")
+    if isinstance(v, bool) and v != (out.get("moves") == "shape"):  # (kept only when not the tab's default)
+        out["bulge_out"] = v
     c = s.get("centre")
     if isinstance(c, list) and len(c) == 2 and all(number(x) and SPOT_LEAST <= x <= SPOT_MOST for x in c) and \
             [round(x, 3) for x in c] != [50, 50]:
@@ -911,7 +917,10 @@ def clean_area_shape(d):
 def full_stir(s):
     """One stir with every setting filled in (Add between blends one end's into the other's)."""
     s = one_stir(s) or {}
-    return {k: s.get(k, STIR_DEFAULTS[k]) for k in STIR_DEFAULTS}
+    out = {k: s.get(k, STIR_DEFAULTS[k]) for k in STIR_DEFAULTS}
+    if out["bulge_out"] is None:
+        out["bulge_out"] = out["moves"] == "shape"
+    return out
 
 
 # WHOLE (rc "whole", a sliced drawn piece: carried): [first start, last end, lowest key, highest key] of the shape it
@@ -1871,7 +1880,7 @@ def stir_from(at, rc, box, own, spots=None, colours=None):
     reach = st["reach"]
     (kx, ky), (rx, ry) = area_scales(st, lambda u, v: from_unit(u / 100, v / 100, rc, box, own), rc.get("ppq"))
     fast = loops()
-    if fast and len(x) and not (reach and st["area"] == DRAWN):  # (the compiled walk: the very same numbers,
+    if fast and len(x) and not (reach and st["area"] == DRAWN) and not bulge_out_on(st):  # (the compiled walk: the very same numbers,
         # files/fastloops.stir_spots; user 11-07: 3 M notes)
         fp, ip = stir_numbers(st, (cx, cy), (kx, ky), (rx, ry))
         x, y = np.ascontiguousarray(x, np.float64), np.ascontiguousarray(y, np.float64)
@@ -1992,18 +2001,31 @@ def bulged(x, y, st, c, k):
     ball; the box's edge squared the look with creases; never a colour from past the box; the corners stay)."""
     x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
     m = bulge_size(st["bulge"])
-    if st["reach"] and st["area_bulge"]:
-        mx, my = (v / 100 for v in (st["spot"] or st["centre"]))
-        q = area_spot_q(x, y, st, k)
-    else:
-        mx, my = c
-        dx, dy = x - mx, y - my
-        q = np.hypot(np.where(dx > 0, dx / max(1 - mx, 1e-12), -dx / max(mx, 1e-12)),
-                     np.where(dy > 0, dy / max(1 - my, 1e-12), -dy / max(my, 1e-12)))
+    mx, my, q = bulge_q(x, y, st, c, k)
     ok = (q < 1) & (q > 1e-12)
     g = np.ones_like(q)
     g[ok] = 1 / (m - (m - 1) * q[ok])  # (the new distance / the old)
     return mx + (x - mx) * g, my + (y - my) * g
+
+
+def bulge_q(x, y, st, c, k):
+    """Bulge's middle (mx, my) + how far out each spot is (q: 1 = the lens's edge): the Area's own (ticked
+    "area_bulge"), else the oval touching the box's sides round the Centre point c, or with "bulge_out" (Bulge
+    reaches past the box; DEFAULT ON for Shape tabs, user 2026-11-17: a square's / circle's outline sat on or outside
+    that oval = Bulge moved nothing) the same oval grown to pass through the box's four corners (q / sqrt 2)."""
+    if st["reach"] and st["area_bulge"]:
+        mx, my = (v / 100 for v in (st["spot"] or st["centre"]))
+        return mx, my, area_spot_q(x, y, st, k)
+    mx, my = c
+    dx, dy = x - mx, y - my
+    q = np.hypot(np.where(dx > 0, dx / max(1 - mx, 1e-12), -dx / max(mx, 1e-12)),
+                 np.where(dy > 0, dy / max(1 - my, 1e-12), -dy / max(my, 1e-12)))
+    return mx, my, (q / math.sqrt(2) if st.get("bulge_out") else q)
+
+
+def bulge_out_on(st):
+    """Whether stir st (filled in) uses Bulge reaches past the box (the compiled walk knows only the oval)."""
+    return bool(st["bulge"] and st.get("bulge_out") and not (st["reach"] and st["area_bulge"]))
 
 
 def bends(st):

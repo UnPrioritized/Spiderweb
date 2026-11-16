@@ -18,7 +18,8 @@ from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_ST
                             ROUND_EDGES, STIR_MOVES, bends, flip_of_matters, order_of,
                             MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, one_stir,
-                            size_scale, stir_removed, stir_stack, stirs_of)
+                            size_scale, stir_removed, stir_stack, stirs_of, without_recolour)
+from notes.shape_bend import colour_part, shape_tabs
 from roll.roll_live import STROKE_TOOLS
 from window import look
 from window import stir_presets as sp
@@ -33,6 +34,7 @@ TWIST_KNOB = 5.0  # turns at the Twist knob's ends (the box goes up to MOST_TIGH
 BULGE_KNOB = 200.0  # % at the Bulge knob's ends (the box goes up to MOST_BULGE, user 11-07)
 AREA_KEPT = ("hard", "reverse", "area_turn", "area_twist", "area_squeeze", "area_bulge", "area_polar", "area_ripple",
              "area_kaleido", "area_wring", "round_edge", "flip_in", "mirror", "size_of")  # (brought back with an area)
+OUTLINE_KEPT_MOST = 200_000  # notes: larger shapes aren't checked for "this bend doesn't change the outline"
 BEND_BOXES = ("polar", "ripple", "ripple_len", "kaleido", "kaleido_turn", "wring", "wring_angle")
 
 
@@ -420,6 +422,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                                             command=self.on_squeeze)
         Tooltip(self.squeeze_tick, tr("stir.squeeze_tip"))
         self._put(None, (1, self.squeeze_tick, 4), pady=6)
+        # (Bulge reaches past the box, user 2026-11-17: on for Shape tabs by default (a square's / circle's outline
+        # sat outside Bulge's oval = nothing moved), off for Colours; live only with a Bulge over the whole shape)
+        self.bulge_out = tk.BooleanVar(value=False)
+        self.bulge_out_tick = ttk.Checkbutton(form, text=tr("stir.bulge_out"), variable=self.bulge_out,
+                                              command=lambda: self.set_stir("bulge_out", bool(self.bulge_out.get())))
+        Tooltip(self.bulge_out_tick, tr("stir.bulge_out_tip"))
+        self._put(None, (1, self.bulge_out_tick, 4), pady=2)
         # (Colour sets: only while a shape has 2+ sets, sync)
         word = ttk.Label(form, text=tr("stir.sets"))
         self.sets_row = [word, self._pick(form, "sets", STIR_SETS, word)]
@@ -1156,6 +1165,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             b["shown"] = text
             live = key not in second or any(s[second[key]] for s in sts)
             b["entry"].config(state="normal" if on and live else "disabled")
+        outs = {s["bulge_out"] for s in sts}
+        self.bulge_out.set(outs == {True})
+        live = any(s["bulge"] and not (s["reach"] is not None and s["area_bulge"]) for s in sts)
+        self.bulge_out_tick.state(["alternate" if len(outs) > 1 else "!alternate",
+                                   "!disabled" if on and live else "disabled"])
         squeezes = {s["squeeze"] for s in sts}
         self.squeeze.set(squeezes != {False})
         self.squeeze_tick.state(["alternate" if len(squeezes) > 1 else "!alternate",
@@ -1195,7 +1209,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         lonely, single = app.recolour_trouble(tgts, [clean_recolour(t.get("recolour")) or {"mode": KEEP}
                                                      for t in tgts])
         # (a Shape tab bends the shape in every mode, with any colours: nothing to warn about)
-        text = "" if shape else tr("stir.needs") if lonely else tr("stir.one") if single else ""
+        if shape:  # (user 2026-11-17: a circle round the Centre point stayed itself under Turn / Twist, unexpected)
+            text = tr("stir.shape_same") if self.outline_kept(tgts, sts) else ""
+        else:
+            text = tr("stir.needs") if lonely else tr("stir.one") if single else ""
         if text != self.warn.cget("text"):
             self.warn.config(text=text)
             if text:
@@ -1203,6 +1220,32 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             else:
                 self.warn.pack_forget()
         app.roll.request_redraw()  # (the Centre point dots: roll_centre.py)
+
+    def outline_kept(self, tgts, sts):
+        """Whether the shown Shape tabs bend something (Turn / Twist / Bulge / a more bend) yet every selected shape's
+        notes come out as without its Shape tabs (to 1/32 beat) (a circle round the Centre point under Turn / Twist). Shapes
+        past OUTLINE_KEPT_MOST notes aren't checked (a second making of them)."""
+        if not any(s["turn"] or s["twist"] or s["bulge"] or bends(s) for s in sts):
+            return False
+        app, seen = self.app, False
+        for t in tgts:
+            r = t.get("recolour")
+            if not isinstance(r, dict) or not shape_tabs(r, t.get("off")):
+                continue
+            notes = app.notes_of(t)
+            if len(notes) > OUTLINE_KEPT_MOST:
+                return False
+            rest = colour_part(r)
+            plain = app.notes_of(dict(t, recolour=rest) if rest else without_recolour(t))
+            if len(plain) != len(notes):
+                return False
+            a, b = np.asarray(notes)[:, :3], np.asarray(plain)[:, :3]
+            a, b = a[np.lexsort((a[:, 0], a[:, 2]))], b[np.lexsort((b[:, 0], b[:, 2]))]  # (by key, then start)
+            # (same rows, each end within 1/32 beat: a bent curve is fitted again, a few ticks off)
+            if (a[:, 2] != b[:, 2]).any() or np.abs(a[:, :2] - b[:, :2]).max(initial=0) > max(app.ppq // 32, 1):
+                return False
+            seen = True
+        return seen
 
     # ---- changes
 
@@ -1249,6 +1292,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                     st["spot"] = None
                 elif not st["spot"]:
                     st["spot"] = list(st["centre"])
+            elif key == "moves":  # (Bulge reaches past the box follows the new kind's default: on for Shape)
+                st["moves"], st["bulge_out"] = value, None
             elif key == "kaleido":  # (whole slices; 1 = off like 0)
                 st["kaleido"] = int(round(value)) if round(value) >= 2 else 0
             elif key == "skew":  # (the box shows % of the area's height)

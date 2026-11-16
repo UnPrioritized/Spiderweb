@@ -245,14 +245,7 @@ class StirBend:
             x, y = cx + X / rx, cy + Y / ry
         if st["bulge"]:  # (the lens backwards: a spot q of the way out came from m q / (1 + (m - 1) q))
             m = rc.bulge_size(st["bulge"])
-            if reach and st["area_bulge"]:
-                mx, my = (v / 100 for v in (st["spot"] or st["centre"]))
-                q = rc.area_spot_q(x, y, st, k)
-            else:
-                mx, my = cx, cy
-                ex, ey = x - mx, y - my
-                q = np.hypot(np.where(ex > 0, ex / max(1 - mx, 1e-12), -ex / max(mx, 1e-12)),
-                             np.where(ey > 0, ey / max(1 - my, 1e-12), -ey / max(my, 1e-12)))
+            mx, my, q = rc.bulge_q(x, y, st, (cx, cy), k)  # (Bulge reaches past the box too)
             ok = (q < 1) & (q > 1e-12)
             g = np.ones_like(q)
             g[ok] = m / (1 + (m - 1) * q[ok])
