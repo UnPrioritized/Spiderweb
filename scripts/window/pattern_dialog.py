@@ -16,7 +16,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from files.lang import tr
-from files.mathexpr import calc, fmt, formula
+from files.mathexpr import calc, fmt, formula, split_pair
 from files import saved_lists
 from files.about import USER
 from files.safefile import write_text
@@ -666,6 +666,14 @@ class FormulaDialog(tk.Toplevel):
         if self._loading:
             return
         texts = {key: var.get() for key, var in self.texts.items()}
+        if self.layer == "shape" and not self.polar:  # a pasted point "(x(t), y(t))" (graphing sites): both boxes
+            pair = split_pair(texts["x"]) or split_pair(texts["y"])
+            if pair:
+                texts["x"], texts["y"] = pair
+                self._loading = True
+                self.texts["x"].set(pair[0])
+                self.texts["y"].set(pair[1])
+                self._loading = False
         if self.polar:  # (x / y written from the polar line)
             texts["x"], texts["y"] = polar_xy(texts["polar"], t_span(self.pat))
         try:

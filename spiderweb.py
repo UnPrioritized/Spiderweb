@@ -244,6 +244,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     loop_marks.py    the marks fastloops' loops carry (plain Python: they compile nothing)
     numba_loops.py   no own library here (Mac, older Linux) but Numba installed: fastloops compiled by Numba instead
     mathexpr.py      math in number boxes (960*4 etc.)
+    mathpaste.py     formulas as written elsewhere (LaTeX, 3t, sin^2(t), |t|) in mathexpr's words
     snap.py          the snap choices (bar, note lengths, custom ones) and their length in beats
 """
 

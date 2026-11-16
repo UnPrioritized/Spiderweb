@@ -4,9 +4,10 @@ import ast
 import functools
 import math
 import operator
-import re
 
+from files import mathpaste
 from files.lang import tr
+from files.mathpaste import without_lead, split_pair  # noqa: F401 (used through here)
 
 _OPS = {
     ast.Add: operator.add, ast.Sub: operator.sub, ast.Mult: operator.mul,
@@ -61,49 +62,17 @@ FORMULA_FUNCS = {
     "sinh": math.sinh, "cosh": math.cosh, "tanh": math.tanh, "sqrt": math.sqrt, "exp": math.exp,
     "log": math.log, "ln": math.log, "log10": math.log10, "log2": math.log2, "abs": abs, "min": min, "max": max,
     "floor": math.floor, "ceil": math.ceil, "round": round, "pow": _power,
+    # (as other places write them: pasted formulas, user 2026-11-16)
+    "arcsin": math.asin, "arccos": math.acos, "arctan": math.atan, "asinh": math.asinh, "acosh": math.acosh,
+    "atanh": math.atanh, "arsinh": math.asinh, "arcosh": math.acosh, "artanh": math.atanh,
+    "sec": lambda a: 1 / math.cos(a), "csc": lambda a: 1 / math.sin(a), "cot": lambda a: 1 / math.tan(a),
 }
 
 
-# Formulas as written on websites (user 2026-11-16: "copy pasting from site should work in here expectedly"):
-# symbols typed as signs, the program words for them.
-PASTED_SIGNS = {"π": "pi", "×": "*", "·": "*", "⋅": "*", "∙": "*", "÷": "/", "−": "-", "–": "-", "—": "-",
-                "²": "^2", "³": "^3"}
-_LEAD = re.compile(r"\s*[^\W\d]\w*\s*(\([^()=]*\))?\s*=(?!=)")  # a leading "x =", "y(t) =", "r(θ) ="
-_PREFIX = re.compile(r"\b(?:numpy|np|math)\.")  # np.sin -> sin
-_TOKEN = re.compile(r"(?P<num>(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)|(?P<name>[^\W\d]\w*)|(?P<sp>\s+)|(?P<other>.)")
-_ROOT = re.compile(r"√\s*((?:\d+\.?\d*|\.\d+)|[^\W\d]\w*)")  # √2, √t (√( ... ) is just sqrt( ... ))
-
-
-def without_lead(text):
-    """The formula without a leading "x =", "y(t) =", "r(θ) =" (pasted lines often have one)."""
-    return _LEAD.sub("", text, count=1).lstrip() if _LEAD.match(text) else text
-
-
 def as_written(text, var="x"):
-    """A formula as people write it (3t, 2pi, (t + 1)(t - 1), π, ×, ², √t, x = ..., np.sin, θ) in the words
-    formula reads: the multiplying written out, signs as words, a leading "x =" dropped. θ = the position (var)
-    in a shape's formula (var "t")."""
-    text = without_lead(text)
-    text = _PREFIX.sub("", text)
-    for sign, word in PASTED_SIGNS.items():
-        text = text.replace(sign, word)
-    if var == "t":
-        text = text.replace("θ", "t")
-    text = _ROOT.sub(r"sqrt(\1)", text).replace("√", "sqrt")
-    out, last = [], None  # (last: the kind of the last token that wasn't a space)
-    for m in _TOKEN.finditer(text):
-        kind, tok = m.lastgroup, m.group()
-        if kind == "sp":
-            out.append(tok)
-            continue
-        here = "open" if tok == "(" else "close" if tok == ")" else kind
-        # a number or ")" right before a number, a name or "(" = times (2pi, 3t, 2(t), )(, )t); never a name before
-        # "(" (sin(t) is a function) and never two numbers apart (a typing slip stays a slip)
-        if last in ("num", "close") and here in ("name", "open") or last == "close" and here == "num":
-            out.append("*")
-        out.append(tok)
-        last = here
-    return "".join(out)
+    """A formula as people write it elsewhere (LaTeX, 3t, sin^2(t), |t|, π, x = ..., np.sin, θ: files/mathpaste.py)
+    in the words formula reads (user 2026-11-16: "copy pasting from site should work in here expectedly")."""
+    return mathpaste.as_written(text, var, FORMULA_FUNCS, FORMULA_NAMES)
 
 
 def formula(text, named=False, var="x"):
@@ -193,7 +162,10 @@ def _np_funcs():
             "sinh": np.sinh, "cosh": np.cosh, "tanh": np.tanh, "sqrt": np.sqrt, "exp": np.exp, "log": np.log,
             "ln": np.log, "log10": np.log10, "log2": np.log2, "abs": np.abs, "min": many(np.minimum),
             "max": many(np.maximum), "floor": np.floor, "ceil": np.ceil,
-            "round": lambda a, n=0: np.round(a, int(n)), "pow": _np_power}
+            "round": lambda a, n=0: np.round(a, int(n)), "pow": _np_power,
+            "arcsin": np.arcsin, "arccos": np.arccos, "arctan": np.arctan, "asinh": np.arcsinh, "acosh": np.arccosh,
+            "atanh": np.arctanh, "arsinh": np.arcsinh, "arcosh": np.arccosh, "artanh": np.arctanh,
+            "sec": lambda a: 1 / np.cos(a), "csc": lambda a: 1 / np.sin(a), "cot": lambda a: 1 / np.tan(a)}
 
 
 def _arrays(tree, var, x, values, keep_bad=False):
