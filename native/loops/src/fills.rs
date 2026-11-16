@@ -1287,3 +1287,67 @@ pub fn short_pieces(bs: &[i64], be: &[i64], bk: &[i64], rs: &[i64], re: &[i64], 
     let [a, b, c, d] = out;
     Ok(vec![Out::I64(a, 0), Out::I64(b, 0), Out::I64(c, 0), Out::I64(d, 0)])
 }
+
+/// fastloops.box_rows (notes/shape_bend._boxes_rows, Stir Shape tabs on notes): bent note boxes (corners xs, ys:
+/// 4 a box, round it, flat) cut by key rows lo[i] .. lo[i] + cnt[i] - 1 (y = r; an edge counts from its low end up
+/// to, not at, its high end). Each row's crossings sorted (NaN last); pair 0-1 -> out[.., 0..], pair 2-3 -> out[..,
+/// half..] (half = out's width / 2), each (box, row, rint start, rint end) with end - start >= 1, in box / row
+/// order. -> first pairs' count << 32 | second pairs' count.
+pub fn box_rows(xs: &[f64], ys: &[f64], lo: &[i64], cnt: &[i64], out: NdMut<i64, 2>) -> i64 {
+    let n = lo.len();
+    let w = out.sh[1];
+    let half = w / 2;
+    if xs.len() != 4 * n || ys.len() != 4 * n || cnt.len() != n || out.sh[0] != 4 || out.d.len() < 4 * w {
+        return FAILED;
+    }
+    let total: i64 = cnt.iter().map(|&c| c.max(0)).sum();
+    if total as usize > half {
+        return FAILED;
+    }
+    let (o0, rest) = out.d.split_at_mut(w);
+    let (o1, rest) = rest.split_at_mut(w);
+    let (o2, o3) = rest.split_at_mut(w);
+    let (mut na, mut nb) = (0usize, half);
+    for i in 0..n {
+        let (x, y) = (&xs[4 * i..4 * i + 4], &ys[4 * i..4 * i + 4]);
+        for j in 0..cnt[i].max(0) {
+            let rr = lo[i] + j;
+            let r = rr as f64;
+            let mut v = [f64::NAN; 4];
+            let mut m = 0usize;
+            for a in 0..4 {
+                let b = (a + 1) % 4;
+                let (y0, y1, x0, x1) = (y[a], y[b], x[a], x[b]);
+                if (y0 <= r && r < y1) || (y1 <= r && r < y0) {
+                    v[m] = x0 + (r - y0) * (x1 - x0) / (y1 - y0);
+                    m += 1;
+                }
+            }
+            // (sorted, NaN last, as np.sort)
+            for a in 1..m {
+                let mut b = a;
+                while b > 0 && (v[b - 1].is_nan() || (!v[b].is_nan() && v[b] < v[b - 1])) {
+                    v.swap(b, b - 1);
+                    b -= 1;
+                }
+            }
+            for (p, slot) in [(0usize, 0usize), (2, 1)] {
+                let (a, b) = (v[p], v[p + 1]);
+                if !(a.is_finite() && b.is_finite()) {
+                    continue;
+                }
+                let (t0, t1) = (crate::maths::f2i(crate::maths::rint(a)), crate::maths::f2i(crate::maths::rint(b)));
+                if t1 - t0 < 1 {
+                    continue;
+                }
+                let k = if slot == 0 { &mut na } else { &mut nb };
+                o0[*k] = i as i64;
+                o1[*k] = rr;
+                o2[*k] = t0;
+                o3[*k] = t1;
+                *k += 1;
+            }
+        }
+    }
+    ((na as i64) << 32) | (nb - half) as i64
+}

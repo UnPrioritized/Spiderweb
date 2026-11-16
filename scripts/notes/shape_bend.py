@@ -15,6 +15,7 @@ import math
 
 import numpy as np
 
+from files.speed import compiled
 from notes import recolour as rc
 
 EPS = 1e-10  # (unit box: a point counts as found when look() brings it back this near)
@@ -436,7 +437,7 @@ def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None):
     boxes chopped at different places leave a sliver between their bent sides)."""
     out, tr = _note_boxes_bent(notes, tracks, bend_tk, ppq)
     if look_back is None or len(out) < 2:
-        return out, tr
+        return _by_start(out, tr)
     return _holes_filled(np.asarray(notes, np.int64), tracks, out, tr, look_back)
 
 
@@ -511,9 +512,21 @@ def _boxes_rows(notes, tracks, src, X, Y):
     Each crossing pair = one note piece."""
     lo = np.ceil(Y.min(1))
     hi = np.ceil(Y.max(1))
-    cnt = np.maximum(hi - lo, 0).astype(np.int64)
+    fine = np.isfinite(lo) & np.isfinite(hi) & np.isfinite(X).all(1)
+    lo = np.where(fine, lo, 0.0)
+    cnt = np.where(fine, np.maximum(hi - lo, 0), 0).astype(np.int64)
     if not cnt.sum():
         return notes[:0], (np.asarray(tracks)[:0] if tracks is not None else None)
+    fast = compiled("box_rows")
+    if fast is not None:  # (the compiled cut, files/fastloops.box_rows: the very same pieces)
+        total = int(cnt.sum())
+        got = np.empty((4, 2 * total), np.int64)
+        m = fast.box_rows(np.ascontiguousarray(X, np.float64).ravel(), np.ascontiguousarray(Y, np.float64).ravel(),
+                          lo.astype(np.int64), cnt, got)
+        if m >= 0:
+            na, nb = m >> 32, m & 0xFFFFFFFF
+            got = np.concatenate((got[:, :na], got[:, total:total + nb]), 1)
+            return _pieces_made(notes, tracks, src, got[0], got[1], got[2], got[3])
     box = np.repeat(np.arange(len(src)), cnt)
     first = np.repeat(np.cumsum(cnt) - cnt, cnt)
     r = lo[box] + (np.arange(len(box)) - first)
@@ -538,14 +551,16 @@ def _boxes_rows(notes, tracks, src, X, Y):
     t0 = np.concatenate([p[2] for p in pieces])
     t1 = np.concatenate([p[3] for p in pieces])
     good = t1 - t0 >= 1  # (pieces under 1 tick dropped)
-    b, rr, t0, t1 = b[good], rr[good], t0[good], t1[good]
+    return _pieces_made(notes, tracks, src, b[good], rr[good], t0[good], t1[good])
+
+
+def _pieces_made(notes, tracks, src, b, rr, t0, t1):
+    """The cut pieces (box b, row rr, ticks t0 .. t1) as notes of their own note (src[b]), as cut (not sorted:
+    note_boxes_bent sorts once)."""
     srcs = src[b]
     out = notes[srcs].copy()
     out[:, 0], out[:, 1], out[:, 2] = t0, t1, rr
-    o = np.lexsort((out[:, 2], out[:, 0]))
-    out = out[o]
-    tr = np.asarray(tracks)[srcs][o] if tracks is not None else None
-    return out, tr
+    return out, (np.asarray(tracks)[srcs] if tracks is not None else None)
 
 
 # PULLED NOTES (folding bends: Straight to round, Kaleidoscope, a strong Twist along a line / Ripple...): every key

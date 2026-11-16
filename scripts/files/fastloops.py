@@ -49,6 +49,7 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   blend_heat     notes/blend_rows.heat_at: Nested Blend's heat at spots (finding each ring edge)
   rows_fill      custom.rows_spans: closed loops' inside on key rows, in ticks (each Nested / Ripples copy)
   cut_rows       custom.cut_out: stretches with what others cover on their key taken out
+  box_rows       shape_bend._boxes_rows (Stir Shape tabs on notes): bent note boxes cut by key rows
   short_pieces   nested.shortest_pieces (Nested's Shortest piece box): pieces on top, short ones merged, a heap
   band_all       nested.band_steps (Nested Even band): every step at once, key by key, a heap of the edges near
                  what each line still keeps
@@ -3676,6 +3677,50 @@ def cut_rows(s, e, k, ok, os_, oe, out):
 
 
 @njit(nogil=True)
+def box_rows(xs, ys, lo, cnt, out):
+    """shape_bend._boxes_rows: bent note boxes (corners xs, ys: 4 a box, round it, flat) cut by key rows lo[i] ..
+    lo[i] + cnt[i] - 1 (y = r; an edge counts from its low end up to, not at, its high end). Each row's crossings
+    sorted (NaN last); pair 0-1 -> out[:, 0..], pair 2-3 -> out[:, half..] (half = out's width // 2): (box, row,
+    rint start, rint end) with end - start >= 1, in box / row order. -> first pairs' count << 32 | second's."""
+    n = len(lo)
+    half = out.shape[1] // 2
+    na, nb = 0, half
+    v = np.empty(4, np.float64)
+    for i in range(n):
+        for j in range(max(cnt[i], 0)):
+            rr = lo[i] + j
+            r = float(rr)
+            m = 0
+            for a in range(4):
+                v[a] = np.nan
+            for a in range(4):
+                b = (a + 1) % 4
+                y0, y1, x0, x1 = ys[4 * i + a], ys[4 * i + b], xs[4 * i + a], xs[4 * i + b]
+                if (y0 <= r and r < y1) or (y1 <= r and r < y0):
+                    v[m] = x0 + (r - y0) * (x1 - x0) / (y1 - y0)
+                    m += 1
+            for a in range(1, m):  # (sorted, NaN last, as np.sort)
+                b = a
+                while b > 0 and (np.isnan(v[b - 1]) or (not np.isnan(v[b]) and v[b] < v[b - 1])):
+                    v[b], v[b - 1] = v[b - 1], v[b]
+                    b -= 1
+            for p in (0, 2):
+                xa, xb = v[p], v[p + 1]
+                if not (np.isfinite(xa) and np.isfinite(xb)):
+                    continue
+                t0, t1 = int(np.rint(xa)), int(np.rint(xb))
+                if t1 - t0 < 1:
+                    continue
+                if p == 0:
+                    out[0, na], out[1, na], out[2, na], out[3, na] = i, rr, t0, t1
+                    na += 1
+                else:
+                    out[0, nb], out[1, nb], out[2, nb], out[3, nb] = i, rr, t0, t1
+                    nb += 1
+    return (na << 32) | (nb - half)
+
+
+@njit(nogil=True)
 def _short_emit(out, no, last, a, b, k, t):
     """Row (a, b, k, t) onto out[:, :no] (grown when full), joined to step t's last row when it touches it ->
     (out, the new count)."""
@@ -5199,6 +5244,7 @@ def warm():
     band_rows(f1, f1, f1 + 1, f1 + 1, f1 + 1, np.full(1, 0.5), i1 * 0, i1, 1.0, i1.copy(), f1.copy(), f1.copy())
     short_pieces(z1, z1 + 9, z1, z1 + 1, z1 + 3, z1, z1 + 1, 5)
     cut_rows(z1, z1 + 9, z1, z1, z1 + 2, z1 + 4, np.zeros((3, 2), np.int64))
+    box_rows(np.array([0.0, 9.0, 9.0, 0.0]), np.array([-0.5, -0.5, 0.5, 0.5]), z1, z1 + 1, np.zeros((4, 4), np.int64))
     sq = np.array([0.0, 1.0])
     rows_fill(sq, np.array([0.0, 3.0]), sq, np.array([3.0, 0.0]), 0, 3, 960, False)
     rows_fill(sq, np.array([0.0, 3.0]), sq, np.array([3.0, 0.0]), 0, 3, 960, True)
