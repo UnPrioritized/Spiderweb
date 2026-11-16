@@ -25,6 +25,7 @@ import numpy as np
 
 from files.lang import tr
 from notes.bezier import segments
+from notes.faces import bunches as _bunches
 from notes.fonts import DEFAULT_FONT, get_font
 
 UNITS = ("font", "rows")  # "font" = size is the font size (em) in keys, "rows" = capital letters are that many keys
@@ -944,34 +945,6 @@ def _merge_joined(sh, cons, groups, box):
             out.append(g)
     sh["strokes"] = strokes
     return out
-
-
-def _bunches(box):
-    """The outlines (their boxes: x0, y0, x1, y1) bunched where boxes touch or overlap, a chain of them one bunch:
-    lists of their numbers, each in order, bunches in order of their first one. Sorted along x, each box only
-    against those still reaching it (a line of letters: a few each)."""
-    n = len(box)
-    head = list(range(n))
-
-    def find(i):
-        while head[i] != i:
-            head[i] = head[head[i]]
-            i = head[i]
-        return i
-
-    order = sorted(range(n), key=lambda i: box[i][0])
-    live = []  # (boxes still reaching the sweep's x: only those can touch the next one)
-    for i in order:
-        x0, y0, x1, y1 = box[i]
-        live = [j for j in live if box[j][2] >= x0]
-        for j in live:
-            if box[j][1] <= y1 and y0 <= box[j][3]:
-                head[find(j)] = find(i)
-        live.append(i)
-    bunches = {}
-    for i in range(n):
-        bunches.setdefault(find(i), []).append(i)
-    return list(bunches.values())
 
 
 CROSS_ROWS = 64  # pieces of an outline checked at a time by parts_overlap

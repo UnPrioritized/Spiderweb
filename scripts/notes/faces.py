@@ -23,11 +23,107 @@ def faces(paths):
     key = hashlib.sha1(b"|".join(p.tobytes() for p in parts)).digest()
     got = _cache.get(key)
     if got is None:
-        got = Faces(parts)
+        got = _apart(parts)
         if len(_cache) > 50:
             _cache.clear()
         _cache[key] = got
     return got
+
+
+def bunches(box):
+    """The outlines (their boxes: x0, y0, x1, y1) bunched where boxes touch or overlap, a chain of them one bunch:
+    lists of their numbers, each in order, bunches in order of their first one. Sorted along x, each box only
+    against those still reaching it (a line of letters: a few each)."""
+    n = len(box)
+    head = list(range(n))
+
+    def find(i):
+        while head[i] != i:
+            head[i] = head[head[i]]
+            i = head[i]
+        return i
+
+    order = sorted(range(n), key=lambda i: box[i][0])
+    live = []  # (boxes still reaching the sweep's x: only those can touch the next one)
+    for i in order:
+        x0, y0, x1, y1 = box[i]
+        live = [j for j in live if box[j][2] >= x0]
+        for j in live:
+            if box[j][1] <= y1 and y0 <= box[j][3]:
+                head[find(j)] = find(i)
+        live.append(i)
+    out = {}
+    for i in range(n):
+        out.setdefault(find(i), []).append(i)
+    return list(out.values())
+
+
+def _apart(parts):
+    """Faces of these lines, each bunch of lines whose boxes touch worked out on its own (the slabs of one part
+    don't cut the lines of a part beside it: 4 copies side by side took 12 x one, not 4 x)."""
+    parts = [p for p in parts if len(p) > 1]
+    if len(parts) < 2:
+        return Faces(parts)
+    box = [(*p.min(0).tolist(), *p.max(0).tolist()) for p in parts]
+    groups = bunches(box)
+    if len(groups) < 2:
+        return Faces(parts)
+    allp = np.concatenate(parts)
+    size = max(float(np.ptp(allp[:, 0])), float(np.ptp(allp[:, 1])))
+    return Apart([Faces([parts[i] for i in g], size) for g in groups],
+                 [(min(box[i][0] for i in g), min(box[i][1] for i in g), max(box[i][2] for i in g),
+                   max(box[i][3] for i in g)) for g in groups])
+
+
+class Apart:
+    """Faces of bunches of lines whose boxes don't touch, as one (the same calls as Faces): area 0 = the outside
+    of them all, each bunch's areas numbered after the ones before."""
+
+    def __init__(self, parts, boxes):
+        self.parts, self.boxes = parts, boxes
+        self.maps, base = [], 1
+        depth = [np.zeros(1, np.int64)]
+        for f in parts:
+            n = len(f.lab)
+            m = np.arange(base, base + n)
+            m[f.lab[f.out]] = 0
+            self.maps.append(m)
+            depth.append(np.zeros(n, np.int64) if f.depth is None else f.depth)
+            base += n
+        self.depth = np.concatenate(depth)
+        self.lab, self.out = np.arange(base), 0
+
+    def _inside(self, i, x, y):
+        x0, y0, x1, y1 = self.boxes[i]
+        return (x >= x0) & (x <= x1) & (y >= y0) & (y <= y1)
+
+    def area_at(self, x, y):
+        x, y = np.asarray(x, float).ravel(), np.asarray(y, float).ravel()
+        out = np.zeros(len(x), np.int64)
+        for i, f in enumerate(self.parts):
+            k = np.flatnonzero(self._inside(i, x, y))
+            if len(k):
+                out[k] = self.maps[i][f.area_at(x[k], y[k])]
+        return out
+
+    def depth_at(self, x, y):
+        return self.depth[self.area_at(x, y)]
+
+    def area_grid(self, x, y):
+        x, y = np.asarray(x, float).ravel(), np.asarray(y, float).ravel()
+        out = np.zeros((len(y), len(x)), np.int64)
+        for i, f in enumerate(self.parts):
+            x0, y0, x1, y1 = self.boxes[i]
+            c = np.flatnonzero((x >= x0) & (x <= x1))
+            r = np.flatnonzero((y >= y0) & (y <= y1))
+            if len(c) and len(r):
+                out[np.ix_(r, c)] = self.maps[i][f.area_grid(x[c], y[r])]
+        return out
+
+    def pieces(self):
+        got = [f.pieces() for f in self.parts]
+        return (np.concatenate([g[0] for g in got]), np.concatenate([g[1] for g in got]),
+                np.concatenate([g[2] for g in got]), np.concatenate([m[g[3]] for m, g in zip(self.maps, got)]))
 
 
 def _segments(paths):
@@ -62,7 +158,8 @@ def _join(n, a, b):
 
 
 class Faces:
-    def __init__(self, paths):
+    def __init__(self, paths, size=None):
+        """size: the whole drawing's (its line-closeness margin), when these lines are one part of it (Apart)."""
         seg = _segments(paths)
         level = seg[:, 1] == seg[:, 3]
         h, s = seg[level], seg[~level]
@@ -74,7 +171,9 @@ class Faces:
         if len(self.levels) < 2:
             self.depth, self.lab, self.out = None, np.zeros(1, np.int64), 0
             return
-        size = max(np.ptp(seg[:, [0, 2]]), np.ptp(seg[:, [1, 3]]), 1e-12)
+        if size is None:
+            size = max(np.ptp(seg[:, [0, 2]]), np.ptp(seg[:, [1, 3]]))
+        size = max(size, 1e-12)
         eps = self.eps = size * 1e-9
         pairs = self._pairs()
         for _ in range(500):  # lines crossing inside a slab: a level there too, until none do
