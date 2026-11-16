@@ -274,11 +274,12 @@ def band_steps(sh, ppq, base, view):
     loops, walled = edge_loops(sh)
     deepest = deepest_field(sh, view)[1]
     steps = [base]
+    memo = {}  # (shrink.inner_rows' work shared by the steps: each line's inside, what the step before kept)
     for size, _ in step_sizes(sh["nested"])[1:]:
         r = (1 - size) * deepest
         before = steps[-1]  # (a deeper step lies inside the one before: only its key rows are worked out)
         keys = sorted(set(before[:, 2].tolist())) if len(before) else []
-        steps.append(inner_rows(loops, walled, keys, r, ppq, view) if r > 0 and keys else
+        steps.append(inner_rows(loops, walled, keys, r, ppq, view, memo) if r > 0 and keys else
                      before if r <= 0 else np.zeros((0, 3), np.int64))
     return steps
 

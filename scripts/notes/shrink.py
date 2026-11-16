@@ -129,7 +129,6 @@ def near_rows(seg, ys, r):
     s_lo, s_hi = np.minimum(seg[:, 1], seg[:, 3]) - r, np.maximum(seg[:, 1], seg[:, 3]) + r
     first = np.searchsorted(ys, s_lo, "right")  # (lines strictly inside lo .. hi)
     n = np.maximum(np.searchsorted(ys, s_hi, "left") - first, 0)
-    e = np.repeat(np.arange(len(seg)), n)
     fast = compiled("band_rows")
     if fast is not None and n.sum():  # (the same, as a compiled loop: files/fastloops.py)
         total = int(n.sum())
@@ -138,6 +137,7 @@ def near_rows(seg, ys, r):
         m = fast.band_rows(ax, ay, bx, by, np.hypot(bx - ax, by - ay), np.ascontiguousarray(ys),
                            first.astype(np.int64), n.astype(np.int64), float(r), rows, los, his)
         return _by_line(out, rows[:m], los[:m], his[:m])
+    e = np.repeat(np.arange(len(seg)), n)  # (only here: the compiled loop above doesn't need it, 60 ms a big band)
     row = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
     if not len(e):
         return out
@@ -218,23 +218,64 @@ def minus(spans, cuts):
     return out
 
 
-def inner_rows(polys, walled, keys, r, ppq, view=None):
+def both(spans, keep):
+    """Where spans and keep (both sorted, not overlapping) overlap: [(a, b)], each end one of theirs."""
+    out, k = [], 0
+    for a, b in spans:
+        while k < len(keep) and keep[k][1] <= a:
+            k += 1
+        j = k
+        while j < len(keep) and keep[j][0] < b:
+            lo, hi = max(a, keep[j][0]), min(b, keep[j][1])
+            if hi > lo:
+                out.append((lo, hi))
+            j += 1
+    return out
+
+
+def inner_rows(polys, walled, keys, r, ppq, view=None, memo=None):
     """The shrunk inside on each of these key rows as (start, end, key) ticks; r in beats. walled: see inside_at.
-    view: the one the shape was drawn in (custom.drawn_view; None: as wide as it's tall, proportion)."""
+    view: the one the shape was drawn in (custom.drawn_view; None: as wide as it's tall, proportion).
+    memo: a dict shared by the steps of one shape shrunk deeper and deeper (Nested Even band): each line's inside
+    is worked out once, and a step at least as deep as the one before keeps only what that one kept, so lines it
+    left empty are skipped and edges that can't reach what it kept are left out (the same numbers: a band only
+    grows with r, also as rounded; 28 steps on a patterned polygon redid everything 28 times, heavy sweep 11-16)."""
     va, vc = view = view or (0.0, proportion(polys))
-    seg = warp(segments(polys), view)
+    memo = {} if memo is None else memo
+    seg = memo.get("seg")
+    if seg is None:
+        seg = memo["seg"] = warp(segments(polys), view)
     keys = list(keys)
     ys = [(q - 0.5 + (j + 0.5) / SAMPLES) * vc for q in keys for j in range(SAMPLES)]
-    near = near_rows(seg, ys, r)
-    cross = crossings_all(seg, ys)
+    prev = memo.get("kept") if memo.get("r", np.inf) <= r else None  # (y -> what the step before kept there)
+    live = [y for y in ys if prev.get(y)] if prev is not None else ys  # (a line prev lacks was empty before it)
+    inside = memo.setdefault("inside", {})
+    new = [y for y in live if y not in inside]
+    for y, x in zip(new, crossings_all(seg, new)):
+        inside[y] = inside_at(seg, y, walled, view, x)
+    near_seg = seg
+    if prev is not None and live and len(seg):
+        xa = min(prev[y][0][0] for y in live)
+        xb = max(prev[y][-1][1] for y in live)
+        reach = r * (1 + 1e-9) + 1e-9  # (an edge's band reaches at most r past its ends, plus rounding)
+        lo_x, hi_x = np.minimum(seg[:, 0], seg[:, 2]), np.maximum(seg[:, 0], seg[:, 2])
+        lo_y, hi_y = np.minimum(seg[:, 1], seg[:, 3]), np.maximum(seg[:, 1], seg[:, 3])
+        near_seg = seg[(lo_x - reach <= xb) & (hi_x + reach >= xa) & (lo_y - reach <= live[-1])
+                       & (hi_y + reach >= live[0])]
+    near = near_rows(near_seg, live, r)
+    kept = {}
+    for k, y in enumerate(live):
+        got = minus(inside[y], near[k])
+        kept[y] = got if prev is None else both(got, prev[y])  # (got lies inside prev[y] already: kept as is,
+        # only the stretches the left-out edges would have cut away outside it are dropped)
+    memo["kept"], memo["r"] = kept, r
     out = []
     for n, q in enumerate(keys):
         got = []
         for j in range(SAMPLES):
             y = ys[n * SAMPLES + j]
             shift = va * y / vc  # (the view's line back in beats)
-            got += [(s - shift, e - shift)
-                    for s, e in minus(inside_at(seg, y, walled, view, cross[n * SAMPLES + j]), near[n * SAMPLES + j])]
+            got += [(s - shift, e - shift) for s, e in kept.get(y, ())]
         for a, b in merge(got):
             s = math.floor(a * ppq + 0.5)
             e = math.floor(b * ppq + 0.5)
