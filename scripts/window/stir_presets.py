@@ -86,36 +86,56 @@ def preset_label(p):
     return tr("stir.preset_tabs", name=p["name"], n=n) if n > 1 else p["name"]
 
 
+def fitted_label(p, fits):
+    """preset_label cut to what fits (fits(text) -> True when it fits): only the NAME shortened with "…", the
+    "(n tabs)" kept (hunt 11-17: a long name hid the count)."""
+    full = preset_label(p)
+    if fits(full):
+        return full
+    name = p["name"]
+    lo, hi = 0, len(name)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if fits(preset_label(dict(p, name=name[:mid].rstrip() + "…"))):
+            lo = mid
+        else:
+            hi = mid - 1
+    return preset_label(dict(p, name=name[:lo].rstrip() + "…"))
+
+
 def preset_tabs(rc, i, n):
     """Tabs i .. i + n - 1 of Recolour rc, filled in (missing ones: plain stirs), to tell whether a preset is there."""
     stack = stirs_of(rc)
     return [stack[k] if k < len(stack) else full_stir(None) for k in range(i, i + n)]
 
 
-def tab_count_after(rc, i, n):
-    """How many Stir tabs rc has once a preset of n tabs is put in place of tab i."""
-    return max(len(stirs_of(rc)), i + 1) - 1 + n
+def tab_count_after(rc, i, n, count=1):
+    """How many Stir tabs rc has once a preset of n tabs is put in place of tabs i .. i + count - 1."""
+    return max(len(stirs_of(rc)), i + count) - count + n
 
 
-def with_preset(old, i, stirs, stirred_rc):
-    """old's Recolour (clean or None) with its Stir tab i replaced by the preset's stirs (the stack padded with plain
-    stirs up to tab i); the order of the colour steps written out in full: the preset's tabs take tab i's place
-    (padded tabs and a tab not there yet go at the end, like "+")."""
+def with_preset(old, i, stirs, stirred_rc, count=1):
+    """old's Recolour (clean or None) with its Stir tabs i .. i + count - 1 replaced by the preset's stirs (count > 1:
+    the preset the list named there, hunt 11-17: trying presets one after another swaps them, no tabs piling up; the
+    stack padded with plain stirs up to them); the order of the colour steps written out in full: the preset's tabs
+    take tab i's place, the other replaced tabs' places go (padded tabs and tabs not there yet go at the end, like
+    "+")."""
     stack = stirs_of(old)
     had = len(stack)
-    stack += [full_stir(None)] * (i + 1 - len(stack))
+    stack += [full_stir(None)] * (i + count - len(stack))
     put = [full_stir(s) for s in stirs]
-    new_stack = stack[:i] + put + stack[i + 1:]
+    new_stack = stack[:i] + put + stack[i + count:]
     o = order_of(old) if old else []
-    if i < had:  # (tab i's own "stir" entry becomes n of them)
-        seen = -1
-        for j, k in enumerate(o):
-            if k == "stir":
-                seen += 1
-                if seen == i:
-                    o = o[:j] + ["stir"] * len(put) + o[j + 1:]
-                    break
-    else:
-        o = o + ["stir"] * (len(new_stack) - had)
+    out, seen = [], -1
+    for k in o:  # (tab i's own "stir" entry becomes n of them, tabs i + 1 .. i + count - 1's go)
+        if k == "stir":
+            seen += 1
+            if seen == i:
+                out += ["stir"] * len(put)
+                continue
+            if i < seen < i + count:
+                continue
+        out.append(k)
+    o = out + ["stir"] * (len(new_stack) - out.count("stir"))  # (tabs not in the order yet: at the end)
     rc = stirred_rc(old, new_stack, held=len(new_stack) if had else 0)  # (as with_stir: plain tabs on a shape with
     return with_order(rc, o) if rc else None  # no stir before = no stir)

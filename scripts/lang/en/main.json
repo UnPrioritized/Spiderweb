@@ -1873,7 +1873,7 @@
  "stir.preset_save": "Save…",
  "stir.preset_save_tip": "Keep the shown tab's stir as a preset under a name. With Save all tabs ticked, every tab goes into it.",
  "stir.preset_delete": "Delete",
- "stir.preset_delete_tip": "Take the preset shown out of the list. The stirs on your shapes stay.",
+ "stir.preset_delete_tip": "Take the preset shown out of the list. When none is shown, pick which one. The stirs on your shapes stay.",
  "stir.preset_all": "Save all tabs",
  "stir.preset_all_tip": "Save… keeps every Stir tab in the preset, not only the shown one. Picking such a preset later puts all its tabs in place of the shown tab.",
  "stir.preset_save_title": "Save Stir preset",

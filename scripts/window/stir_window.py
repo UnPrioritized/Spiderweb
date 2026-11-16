@@ -7,7 +7,7 @@ piano roll while this window is open (roll_centre.py)."""
 
 import math
 import tkinter as tk
-from tkinter import messagebox, simpledialog, ttk
+from tkinter import font as tkfont, messagebox, simpledialog, ttk
 
 import numpy as np
 
@@ -159,7 +159,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                                                  postcommand=self.fill_presets))
         self.preset_box.pack(side="left", padx=(6, 0))
         self.preset_box.bind("<<ComboboxSelected>>", lambda e: self.on_preset())
-        Tooltip(self.preset_box, tr("stir.preset_tip"))
+        self.preset_tip = Tooltip(self.preset_box, tr("stir.preset_tip"))
+        self.preset_box.bind("<Configure>", lambda e: self.show_preset_name(), add="+")
         self.preset_save = ttk.Button(row, text=tr("stir.preset_save"), command=self.save_preset)
         self.preset_save.pack(side="left", padx=(6, 0))
         Tooltip(self.preset_save, tr("stir.preset_save_tip"))
@@ -196,12 +197,27 @@ class StirWindow(HeldKnobs, tk.Toplevel):
     def sync_presets(self, tgts):
         on = bool(tgts) and not self.drawing
         p = self.preset_shown = self.found_preset(tgts) if on else None
-        self.preset_box.set(sp.preset_label(p) if p else tr("stir.preset_none") if self.presets else
-                            tr("stir.preset_empty"))
+        self.show_preset_name()
         self.preset_box.config(state="readonly" if on and self.presets else "disabled")
         self.preset_save.state(["!disabled" if on else "disabled"])
         self.preset_tick.state(["!disabled" if on else "disabled"])
-        self.preset_del.state(["!disabled" if on and p else "disabled"])
+        self.preset_del.state(["!disabled" if self.presets and not self.drawing else "disabled"])
+
+    def show_preset_name(self):
+        """The box's text: the preset named (a long name cut with "…", "(n tabs)" kept, the whole name in the tip)."""
+        p, box = self.preset_shown, self.preset_box
+        if not p:
+            text = tr("stir.preset_none") if self.presets else tr("stir.preset_empty")
+            full = None
+        else:
+            font = tkfont.Font(font=box.cget("font") or "TkTextFont")
+            room = (box.winfo_width() if box.winfo_width() > 1 else box.winfo_reqwidth()) - box.winfo_height() - 8
+            full = sp.preset_label(p)
+            text = sp.fitted_label(p, lambda t: font.measure(t) <= room)
+        if box.get() != text:
+            box.set(text)
+        self.preset_tip.set_text(tr("stir.preset_tip") if not full or text == full else
+                                 full + "\n\n" + tr("stir.preset_tip"))
 
     def on_preset(self):
         """A preset picked: its stirs in place of the shown tab on every selected shape (one undo step)."""
@@ -213,7 +229,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         p = names[k]
         tgts = self.targets()
         i, n = self.tab, len(p["stirs"])
-        if any(sp.tab_count_after(clean_recolour(t.get("recolour")), i, n) > MOST_STIRS for t in tgts):
+        # (the list named a preset here: all its tabs swapped for the new one, hunt 11-17: tabs piled up)
+        named = self.found_preset(tgts)  # (looked up now: the shapes may have changed since the box was shown)
+        count = len(named["stirs"]) if named else 1
+        if any(sp.tab_count_after(clean_recolour(t.get("recolour")), i, n, count) > MOST_STIRS for t in tgts):
             messagebox.showinfo(tr("stir.preset"), tr("stir.preset_too_many", name=p["name"], n=n, most=MOST_STIRS),
                                 parent=self)
             return self.sync()
@@ -223,8 +242,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 b["var"].set(b["shown"])
                 good(b["entry"])
         # (the tabs after it move along; the shown tab's remembered area forgotten: the preset brings its own)
-        self.area_mem = {t + (n - 1 if t > i else 0): m for t, m in self.area_mem.items() if t != i}
-        self.app.change_recolour(lambda old, sh: sp.with_preset(old, i, p["stirs"], stirred_rc),
+        self.area_mem = {t + (n - count if t >= i + count else 0): m for t, m in self.area_mem.items()
+                         if not i <= t < i + count}
+        self.app.change_recolour(lambda old, sh: sp.with_preset(old, i, p["stirs"], stirred_rc, count),
                                  tr("stir.undo_preset", name=p["name"]), own_order=True)
         self.fresh = False
         self.sync()
@@ -265,9 +285,22 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.sync()
 
     def delete_preset(self):
-        """The preset the box names deleted from the list (asked first; the stirs on the shapes stay)."""
-        p = self.preset_shown
-        if not p or not messagebox.askyesno(tr("stir.preset_delete_title"), tr("stir.preset_delete_ask",
+        """The preset the box names deleted from the list; when it names none, a menu of them to pick from (hunt
+        11-17: a preset had to be put on a shape to delete it)."""
+        if self.preset_shown:
+            return self.delete_named(self.preset_shown)
+        self.presets = sp.load_presets()
+        if not self.presets:
+            return self.sync()
+        m = tk.Menu(self, tearoff=0)
+        for p in reversed(self.presets):
+            m.add_command(label=sp.preset_label(p), command=lambda p=p: self.delete_named(p))
+        b = self.preset_del
+        m.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
+
+    def delete_named(self, p):
+        """Preset p deleted from the list (asked first; the stirs on the shapes stay)."""
+        if not self.winfo_exists() or not messagebox.askyesno(tr("stir.preset_delete_title"), tr("stir.preset_delete_ask",
                                                                               name=p["name"]), parent=self):
             return
         if sp.change_presets(p["name"], None, self):
