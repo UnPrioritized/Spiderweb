@@ -279,6 +279,26 @@ def shorter(out, m):
     return out[:m] if m * 10 >= len(out) * 9 else out[:m].copy()
 
 
+def key_span(*arrays):
+    """(lowest, highest) key over the rows of arrays (key = column 2); (0, 255) when every key is on the keyboard."""
+    lo, hi = 0, ALL_KEYS - 1
+    for a in arrays:
+        if len(a):
+            lo, hi = min(lo, int(a[:, 2].min())), max(hi, int(a[:, 2].max()))
+    return lo, hi
+
+
+def slot_key(notes, span=None):
+    """One number per slot + key of each row (column 4 = slot, 2 = key): slot * 256 + key while every key is on the
+    keyboard (0-255); a shape made whole past the keys (edge_made: keys up to ~760 / below 0) counts by its whole key
+    span instead, so a key past 255 never shares a number with another slot's key (sample3 11-16: a stirred shape
+    past the top key lost ~18 k notes, settled cut them as overlaps). span: key_span's (lowest, highest) to use."""
+    lo, hi = key_span(notes) if span is None else span
+    if lo == 0 and hi == ALL_KEYS - 1:
+        return notes[:, 4] * ALL_KEYS + notes[:, 2]
+    return notes[:, 4] * (hi - lo + 1) + (notes[:, 2] - lo)
+
+
 def running_max(values, groups):
     """The largest value so far, starting over in every group (groups: sorted numbers, each group together)."""
     if not len(values):
@@ -300,15 +320,17 @@ def resolve_overlaps(notes):
     if not len(notes):
         return notes
     fast = loops()
+    span = key_span(notes)
     if fast:  # (the compiled loops: the same notes)
         notes = np.ascontiguousarray(notes, np.int64)
-        group, order = fast.overlap_order(notes)
+        on_keys = span == (0, ALL_KEYS - 1)  # (the compiled grouping counts slot * 256 + key: keys 0-255 only)
+        group, order = fast.overlap_order(notes) if on_keys else (None, ())
         if not len(order):
-            group = first_seen(notes[:, 4] * 256 + notes[:, 2])
+            group = first_seen(slot_key(notes, span))
             order = np.ascontiguousarray(overlap_order(notes, group), np.int64)
         out, m = fast.overlap_sweep(notes, order, group)
         return shorter(out, m)
-    group = first_seen(notes[:, 4] * 256 + notes[:, 2])  # groups numbered in the order they first show up
+    group = first_seen(slot_key(notes, span))  # groups numbered in the order they first show up
     order = overlap_order(notes, group)
     a, group = np.take(notes, order, axis=0), group[order]  # (take: quicker than notes[order])
     s, e = a[:, 0], a[:, 1]
@@ -336,8 +358,7 @@ def fixed_already(notes):
     n = len(notes)
     if n < 2:
         return True
-    g = notes[:, 4] * 256
-    g += notes[:, 2]
+    g = slot_key(notes)
     same = g[1:] == g[:-1]
     heads = g[np.flatnonzero(~same) + 1]
     first = int(g[0])
@@ -366,7 +387,7 @@ def split_overlaps(notes, stretch=False):
     if not len(notes):
         return notes
     notes = np.asarray(notes, np.int64)
-    group = first_seen(notes[:, 4] * 256 + notes[:, 2])
+    group = first_seen(slot_key(notes))
     order = overlap_order(notes, group)  # (by group, start; the same start: the loudest last, the longest first)
     a, g = notes[order], group[order]
     lead = np.ones(len(a), bool)  # (the first of each group + start: the one row the same start becomes)
@@ -516,12 +537,13 @@ def regrouped(notes, like=None):
     notes before the fix; default notes), then by start."""
     if not len(notes):
         return notes
-    code = notes[:, 4] * 256 + notes[:, 2]
+    span = key_span(notes) if like is None else key_span(notes, like)
+    code = slot_key(notes, span)
     g = None
     if like is None:
         g = first_seen(code)
     else:
-        had = like[:, 4] * 256 + like[:, 2]
+        had = slot_key(like, span)
         top = max(int(had.max()), int(code.max())) + 1
         if top <= 4 * len(had) + 65536:  # (a table, no sort: first_seen's way over like's ids)
             rank = seen_ranks(had, top)
