@@ -4,6 +4,7 @@ import ast
 import functools
 import math
 import operator
+import re
 
 from files.lang import tr
 
@@ -63,12 +64,54 @@ FORMULA_FUNCS = {
 }
 
 
+# Formulas as written on websites (user 2026-11-16: "copy pasting from site should work in here expectedly"):
+# symbols typed as signs, the program words for them.
+PASTED_SIGNS = {"π": "pi", "×": "*", "·": "*", "⋅": "*", "∙": "*", "÷": "/", "−": "-", "–": "-", "—": "-",
+                "²": "^2", "³": "^3"}
+_LEAD = re.compile(r"\s*[^\W\d]\w*\s*(\([^()=]*\))?\s*=(?!=)")  # a leading "x =", "y(t) =", "r(θ) ="
+_PREFIX = re.compile(r"\b(?:numpy|np|math)\.")  # np.sin -> sin
+_TOKEN = re.compile(r"(?P<num>(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?)|(?P<name>[^\W\d]\w*)|(?P<sp>\s+)|(?P<other>.)")
+_ROOT = re.compile(r"√\s*((?:\d+\.?\d*|\.\d+)|[^\W\d]\w*)")  # √2, √t (√( ... ) is just sqrt( ... ))
+
+
+def without_lead(text):
+    """The formula without a leading "x =", "y(t) =", "r(θ) =" (pasted lines often have one)."""
+    return _LEAD.sub("", text, count=1).lstrip() if _LEAD.match(text) else text
+
+
+def as_written(text, var="x"):
+    """A formula as people write it (3t, 2pi, (t + 1)(t - 1), π, ×, ², √t, x = ..., np.sin, θ) in the words
+    formula reads: the multiplying written out, signs as words, a leading "x =" dropped. θ = the position (var)
+    in a shape's formula (var "t")."""
+    text = without_lead(text)
+    text = _PREFIX.sub("", text)
+    for sign, word in PASTED_SIGNS.items():
+        text = text.replace(sign, word)
+    if var == "t":
+        text = text.replace("θ", "t")
+    text = _ROOT.sub(r"sqrt(\1)", text).replace("√", "sqrt")
+    out, last = [], None  # (last: the kind of the last token that wasn't a space)
+    for m in _TOKEN.finditer(text):
+        kind, tok = m.lastgroup, m.group()
+        if kind == "sp":
+            out.append(tok)
+            continue
+        here = "open" if tok == "(" else "close" if tok == ")" else kind
+        # a number or ")" right before a number, a name or "(" = times (2pi, 3t, 2(t), )(, )t); never a name before
+        # "(" (sin(t) is a function) and never two numbers apart (a typing slip stays a slip)
+        if last in ("num", "close") and here in ("name", "open") or last == "close" and here == "num":
+            out.append("*")
+        out.append(tok)
+        last = here
+    return "".join(out)
+
+
 def formula(text, named=False, var="x"):
     """A formula of x (like x^2 or sin(x*pi/2)) -> a function of x. Raises ValueError if it can't be read.
-    Numbers, x, pi, e, + - * / % ^ ( ) and FORMULA_FUNCS. named: other names (like height) are numbers given
-    when it's worked out, fn(x, {"height": 6}); fn.names = them in the order they first appear. var: the name of
-    the position (t for shapes drawn by x(t) and y(t))."""
-    text = text.strip().replace("×", "*").replace("^", "**")
+    Numbers, x, pi, e, + - * / % ^ ( ) and FORMULA_FUNCS, also written as on websites (as_written). named: other
+    names (like height) are numbers given when it's worked out, fn(x, {"height": 6}); fn.names = them in the order
+    they first appear. var: the name of the position (t for shapes drawn by x(t) and y(t))."""
+    text = as_written(text.strip(), var).strip().replace("^", "**")
     names = []
     if not text:
         raise ValueError(tr("mathexpr.type_a_formula"))

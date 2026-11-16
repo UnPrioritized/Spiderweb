@@ -57,6 +57,8 @@ The grid shows the numbers (x from 0 to 1 along one loop; y in keys); the mouse 
 
 Your own formula: tick Edit formula. A pattern is y of x for one loop (x goes from 0 to 1, y = how far to the side); a shape is x(t) and y(t), t going from 0 to 1 while it's drawn. Any other name in it (like height) gets its own number box. A closed shape can also be typed as one line: Type as → Polar r(t), where r is how far from the middle the shape is as it goes once round (1 = a circle; Flower can be switched to it). Its x(t) and y(t) are made from it, so it's one or the other: change x(t) or y(t) by hand and the polar line is gone. A pattern's "along =" box can move the line forward or back along the curve, in loops; going back makes it run over itself, like Curls.
 
+Formulas copied from websites work as they're written: 3t and 2pi multiply, a leading "x =" or "r(θ) =" is left out, π × ÷ − ² ³ √ are understood, ** is a power, and np. or math. before sin or cos is dropped. In a shape, θ is t. Websites often run t from 0 to 2pi: type that in "t from … to …" (a shape's own, usually 0 to 1) and paste the formula as it is; Polar r(t) goes once round over it. Symbols… (after Edit formula) opens a small window of math symbols you may not have on your keyboard: click one to copy it, and with Edit formula ticked it's typed into the formula too. Greek letters like δ are names like any word, each with its own number box.
+
 Works: numbers, + - * / ^ % ( ), pi, e, sin cos tan asin acos atan sinh cosh tanh sqrt exp ln log log10 log2 abs min max floor ceil round pow. log is the same as ln (the natural log); use log10 for base 10.
 
 ## Other places

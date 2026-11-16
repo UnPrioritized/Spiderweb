@@ -18,12 +18,11 @@ Sideways = to the left of the way the curve goes, so on a curve going forward in
 
 import functools
 import math
-import re
 
 import numpy as np
 
 from files.lang import tr
-from files.mathexpr import formula
+from files.mathexpr import formula, without_lead
 
 LOOP_SAMPLES = 256  # points per loop (a multiple of 4, so a zigzag's tips are exact)
 MAX_POINTS = 400000  # the most points a pattern makes (so a huge loop count can't hang the program)
@@ -328,13 +327,41 @@ SHAPE_SAMPLES = 1024  # points along a shape
 CLOSED_SHARE = 1e-3
 
 
-# A shape may be typed as ONE polar line r(t) (p["polar"], the distance from the middle, once round as t goes 0 -> 1):
+# A shape may be typed as ONE polar line r(t) (p["polar"], the distance from the middle, once round as t goes over
+# its span, usually 0 -> 1):
 # its x / y are always written from it (polar_xy), so everything else only ever reads x / y. Typing x / y by hand
 # drops it (the two ways can't both be there). Every preset starts as x / y (user 2026-11-16); Flower's are written
 # with polar_xy, so picking Polar finds its r line (polar_of).
-def polar_xy(r):
-    """The x(t), y(t) texts of the polar line r(t)."""
-    return f"({r}) * cos(t * 2 * pi)", f"({r}) * sin(t * 2 * pi)"
+def polar_xy(r, span=None):
+    """The x(t), y(t) texts of the polar line r(t): once round while t goes over its span (t_span's texts [from, to];
+    None = 0 -> 1, the usual way)."""
+    r = without_lead(r)  # (a pasted "r = ..." would end up inside the brackets)
+    if span is None:
+        turn = "t * 2 * pi"
+    elif span[0].strip() == "0":
+        turn = f"t / ({span[1]}) * 2 * pi"
+    else:
+        turn = f"(t - ({span[0]})) / (({span[1]}) - ({span[0]})) * 2 * pi"
+    return f"({r}) * cos({turn})", f"({r}) * sin({turn})"
+
+
+# t's span (user 2026-11-16: formulas from websites often run t from 0 to 2 pi): p["t_span"] = [from, to] as typed
+# (like "2pi"), missing = 0 -> 1. Presets never have one (picking a preset drops it).
+def span_numbers(span):
+    """[from, to] texts -> (from, to) numbers; ValueError if one can't be read or they're the same."""
+    try:
+        lo, hi = (float(formula(str(s), var="\0")(0.0)) for s in span)
+    except (TypeError, ValueError, ArithmeticError):
+        raise ValueError(tr("pattern.t_span_bad"))
+    if not (math.isfinite(lo) and math.isfinite(hi)) or lo == hi:
+        raise ValueError(tr("pattern.t_span_bad"))
+    return lo, hi
+
+
+def t_span(p):
+    """A shape's span texts [from, to], or None (0 -> 1)."""
+    s = p.get("t_span")
+    return [str(s[0]), str(s[1])] if isinstance(s, (list, tuple)) and len(s) == 2 else None
 
 
 def polar_ok(r):
@@ -348,10 +375,13 @@ def polar_ok(r):
         return False
 
 
-def polar_of(x, y):
-    """The polar line x(t), y(t) were written from (polar_xy), or None."""
-    m = re.fullmatch(r"\((.*)\) \* cos\(t \* 2 \* pi\)", x)
-    return m.group(1) if m and polar_xy(m.group(1)) == (x, y) and polar_ok(m.group(1)) else None
+def polar_of(x, y, span=None):
+    """The polar line x(t), y(t) were written from (polar_xy, with that span), or None."""
+    tail = polar_xy("", span)[0][2:]  # (" * cos(...)" after the r line's brackets)
+    if not (x.startswith("(") and x.endswith(tail)):
+        return None
+    r = x[1:len(x) - len(tail) - 1]
+    return r if polar_xy(r, span) == (x, y) and polar_ok(r) else None
 
 
 # Flower: sharpness 0 = the plain cos wave (1 - 2 * (1 - cos) / 2 = cos), plus = pointed tips (1 = straight-sided
@@ -399,15 +429,21 @@ def clean_shape_formula(p):
         values = {str(a): float(b) for a, b in dict(p.get("vars", {})).items()}
         try:
             tx, ty = str(p.get("x", "")), str(p.get("y", ""))
+            span = t_span(p)
+            if span:
+                try:
+                    span_numbers(span)
+                except ValueError:
+                    span = None  # (a broken span: the usual 0 -> 1)
             if isinstance(p.get("polar"), str):  # (its x / y always come from the polar line)
                 if not polar_ok(p["polar"]):
                     raise ValueError
-                tx, ty = polar_xy(p["polar"])
+                tx, ty = polar_xy(p["polar"], span)
             names = shape_names(tx, ty)
         except ValueError:
             if not loop:
                 return None
-            tx, ty, names = "", "", []
+            tx, ty, names, span = "", "", [], None
         out = {"preset": str(p.get("preset", "")), "x": tx, "y": ty, "vars": {n: values.get(n, 1.0) for n in names},
                "k": float(p.get("k", 1.0)), "mirror": bool(p.get("mirror"))}
     except (KeyError, TypeError, ValueError):
@@ -418,6 +454,8 @@ def clean_shape_formula(p):
         out["name"] = str(p["name"])
     if isinstance(p.get("polar"), str) and tx:
         out["polar"] = p["polar"]
+    if span:
+        out["t_span"] = span
     if loop:
         out["loop"] = loop
     return keep_sym(out, p)
@@ -431,11 +469,11 @@ def shape_name(p):
 
 
 @functools.lru_cache(maxsize=256)
-def _shape(text_x, text_y, values, sym):
+def _shape(text_x, text_y, values, sym, lo=0.0, hi=1.0):
     fx, fy = formula(text_x, named=True, var="t"), formula(text_y, named=True, var="t")
     vals = dict(values)
     pts = []
-    for t in np.linspace(0.0, 1.0, SHAPE_SAMPLES + 1).tolist():
+    for t in np.linspace(lo, hi, SHAPE_SAMPLES + 1).tolist():
         try:
             x, y = fx(t, vals), fy(t, vals)
         except (ValueError, ArithmeticError, TypeError, KeyError):
@@ -499,7 +537,10 @@ def fitted_shape(a):
 
 def formula_shape(p):
     """The shape's formulas fitted (see fitted_shape), not mirrored. ValueError if it can't be worked out."""
-    return _shape(p["x"], p["y"], tuple(sorted(p["vars"].items())), p.get("sym") if p.get("sym") in SYMS else None)
+    span = t_span(p)
+    lo, hi = span_numbers(span) if span else (0.0, 1.0)
+    return _shape(p["x"], p["y"], tuple(sorted(p["vars"].items())), p.get("sym") if p.get("sym") in SYMS else None,
+                  lo, hi)
 
 
 def shape_points(p):
