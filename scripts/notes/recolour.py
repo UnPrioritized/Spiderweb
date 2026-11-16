@@ -777,7 +777,7 @@ def one_stir(s):
     b = s.get("bulge")
     if number(b) and abs(b) <= MOST_BULGE and round(b, 3):
         out["bulge"] = round(float(b), 3)
-    for k, lo, hi, plain in (("polar", 0.0, 100.0, 0.0), ("ripple", 0.0, MOST_RIPPLE, 0.0),
+    for k, lo, hi, plain in (("polar", 0.0, 100.0, 0.0), ("ripple", -MOST_RIPPLE, MOST_RIPPLE, 0.0),
                              ("ripple_len", LEAST_RIPPLE_LEN, MOST_RIPPLE_LEN, 10.0),
                              ("kaleido_turn", -360.0, 360.0, 0.0), ("wring", -MOST_WRING, MOST_WRING, 0.0),
                              ("wring_angle", -360.0, 360.0, 0.0)):

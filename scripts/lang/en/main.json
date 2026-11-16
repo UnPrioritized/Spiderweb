@@ -1794,7 +1794,7 @@
  "stir.polar": "Straight to round:",
  "stir.polar_tip": "Wraps the colours round the Centre point: going round becomes going across, and going out from the middle becomes going up. Straight upright stripes become rays; with Turn at 90° they become rings. In between, the colours are part way there.\nInside an Area (its tick under \"The area limits\"): round the area's middle, the rings take the area's shape (a Square area gives square rings).",
  "stir.ripple": "Ripple:",
- "stir.ripple_tip": "Moves the colours along a wave, so straight stripes go wavy. Height = how far they move, in % of the shape's box.",
+ "stir.ripple_tip": "Moves the colours along a wave, so straight stripes go wavy. Height = how far they move, in % of the shape's box; below 0, the wave starts the other way.",
  "stir.ripple_height": "height",
  "stir.ripple_len": "length",
  "stir.ripple_len_tip": "How long one wave is, in % of the shape's box.",

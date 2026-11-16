@@ -185,12 +185,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
     def found_preset(self, tgts):
         """The newest preset the shown tab (and the ones after it, for a preset of several) of EVERY selected shape
         is, or None."""
-        rcs = [clean_recolour(t.get("recolour")) for t in tgts]
-        if not rcs or self.fresh:
+        if not tgts or self.fresh or not self.presets:
             return None
+        seen = [sp.seen_tabs(clean_recolour(t.get("recolour"))) for t in tgts]  # (as they look: flips undone)
         for p in reversed(self.presets):
             want = [full_stir(s) for s in p["stirs"]]
-            if all(sp.preset_tabs(rc, self.tab, len(want)) == want for rc in rcs):
+            if all(sp.preset_tabs(s, self.tab, len(want)) == want for s in seen):
                 return p
         return None
 
@@ -255,11 +255,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         if not tgts or self.drawing:
             return
         self.take_typing()
-        rcs = [clean_recolour(t.get("recolour")) for t in tgts]
+        # (kept as they LOOK: a flipped / turned shape's stir numbers count where it was before, hunt 11-17)
+        seen = [sp.seen_tabs(clean_recolour(t.get("recolour"))) for t in tgts]
         if self.all_tabs.get():
-            stacks = [stirs_of(rc) or [full_stir(None)] for rc in rcs]
+            stacks = [s or [full_stir(None)] for s in seen]
         else:
-            stacks = [[stir_at(rc, self.tab)] for rc in rcs]
+            stacks = [sp.preset_tabs(s, self.tab, 1) for s in seen]
         if any(s != stacks[0] for s in stacks):
             messagebox.showinfo(tr("stir.preset_save_title"), tr("stir.preset_differ"), parent=self)
             return
@@ -430,7 +431,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         word = ttk.Label(form, text=tr("stir.ripple"))
         Tooltip(word, tr("stir.ripple_tip"))
         self._put("bends", (1, word),
-                  (2, self._cell(form, "ripple", 0, MOST_RIPPLE, "stir.ripple_height", "stir.ripple_tip", "%")),
+                  (2, self._cell(form, "ripple", -MOST_RIPPLE, MOST_RIPPLE, "stir.ripple_height", "stir.ripple_tip", "%")),
                   (3, self._cell(form, "ripple_len", LEAST_RIPPLE_LEN, MOST_RIPPLE_LEN, "stir.ripple_len",
                                  "stir.ripple_len_tip", "%")),
                   (4, self._pick(form, "ripple_kind", RIPPLE_KINDS, None)))

@@ -5,8 +5,11 @@ PLACE OF the shown tab only (1 tab -> n), the other tabs untouched. Centre / Are
 they carry over to any shape."""
 
 import json
+import math
 import os
 from tkinter import messagebox
+
+import numpy as np
 
 from files.about import USER
 from files.lang import tr
@@ -80,6 +83,124 @@ def change_presets(name, stirs, parent):
     return True
 
 
+# FLIPPED SHAPES (hunt 11-17): a stir's numbers count where the shape was when its Recolour was set (rc "frame",
+# recolour.py FRAME); a Flip / Turn 90 since shows them mirrored / turned. A preset keeps the stir AS SEEN (to_seen),
+# and goes onto a flipped shape turned back into its frame (from_seen), so it looks the same everywhere. Every frame
+# is made of three moves on the colour box: "x" (mirror sideways), "y" (upside down), "swap" (time <-> keys).
+
+MOVES = {"x": ((-1.0, 0.0), (0.0, 1.0)), "y": ((1.0, 0.0), (0.0, -1.0)), "swap": ((0.0, 1.0), (1.0, 0.0))}
+
+
+def _line_angle(a, move):
+    """A direction (degrees, counted from "across" toward "up") after move, kept within -180..180."""
+    a = 180.0 - a if move == "x" else -a if move == "y" else 90.0 - a
+    return (a + 180.0) % 360.0 - 180.0 if abs(a) > 180 else a
+
+
+def _area_moved(st, move):
+    """The area's Angle / slant / Stretch after move: recolour.area_local's matrix (Stretch, slant, Angle undone)
+    mirrored, then taken apart again into the same three (a swap turns a slant across into one up / down: the three
+    worked out anew)."""
+    a = math.radians(st["tilt"])
+    w, h, s = st["stretch"] / 100, st["stretch_up"] / 100, st["skew"]
+    rot = np.array([[math.cos(a), math.sin(a)], [-math.sin(a), math.cos(a)]])
+    m = np.array([[1 / w, -s / w], [0.0, 1 / h]]) @ rot
+    p = np.array(MOVES[move])
+    m = p @ m @ p
+    # (RQ: m = [[1/w, -s/w], [0, 1/h]] @ rot(t), rot's second row from m's second row)
+    h2 = 1 / math.hypot(*m[1])
+    q2 = m[1] * h2
+    u12 = float(m[0] @ q2)
+    r1 = m[0] - u12 * q2
+    w2 = 1 / math.hypot(*r1)
+    t2 = math.degrees(math.atan2(-q2[0], q2[1]))
+    st["stretch"], st["stretch_up"] = round(w2 * 100, 6), round(h2 * 100, 6)
+    st["skew"] = -u12 * w2
+    st["tilt"] = t2 if abs(t2) > 1e-9 else 0.0
+
+
+def _moved(st, move):
+    """One stir (filled in) with move done to its look (every number counted on the colour box: see MOVES)."""
+    st = dict(st)
+    if move == "swap":
+        for k in ("centre", "spot"):
+            if st[k]:
+                st[k] = [st[k][1], st[k][0]]
+        if st["ripple_kind"] in ("side", "up"):
+            st["ripple_kind"] = "up" if st["ripple_kind"] == "side" else "side"
+        if st["seen"]:  # (beats per key: across and up change places)
+            st["seen"] = 1 / st["seen"]
+    else:
+        i = 0 if move == "x" else 1
+        for k in ("centre", "spot"):
+            if st[k]:
+                c = list(st[k])
+                c[i] = 100.0 - c[i]
+                st[k] = c
+        if st["ripple_kind"] in ("side", "up"):  # (one mirror: the wave starts the other way)
+            st["ripple"] = -st["ripple"]
+    for k in ("turn", "twist", "wring"):  # (each move is a mirror: every turn goes the other way)
+        st[k] = -st[k] if st[k] else st[k]
+    if st["wring"]:
+        st["wring_angle"] = _line_angle(st["wring_angle"], move)
+    if st["kaleido"] >= 2:  # (the slice's edges mirrored; the slice kept is the half before them)
+        t = _line_angle(st["kaleido_turn"], move) - 180.0 / st["kaleido"]
+        st["kaleido_turn"] = (t + 180.0) % 360.0 - 180.0
+    if st["reach"] is not None and (st["tilt"] or st["skew"] or move == "swap"):
+        _area_moved(st, move)
+    if st["shape"]:
+        if move == "swap" and st["reach"] is not None:  # (Size = the drawing's width: its height before)
+            st["reach"] = st["reach"] / st["shape"]["aspect"]
+        st["shape"] = _shape_moved(st["shape"], move)
+    return st
+
+
+def _shape_moved(shape, move):
+    """A drawn area's own copy (loops in its 0..1 box, aspect = its width / height) with move done to it."""
+    def pt(p):
+        x, y = p
+        return [y, x] if move == "swap" else [1.0 - x, y] if move == "x" else [x, 1.0 - y]
+    out = dict(shape, loops=[[pt(p) for p in loop] for loop in shape["loops"]])
+    if move == "swap" and shape.get("aspect"):
+        out["aspect"] = 1 / shape["aspect"]
+    return out
+
+
+def frame_moves(f):
+    """A frame (a, b, c, d) as moves done in order: place q = (a x + b y, c x + d y) round the box's middle."""
+    a, b, c, d = f
+    if not b:
+        return (["x"] if a < 0 else []) + (["y"] if d < 0 else [])
+    return ["swap"] + (["x"] if b < 0 else []) + (["y"] if c < 0 else [])
+
+
+def _apply(stirs, moves):
+    out = []
+    for s in stirs:
+        st = full_stir(s)
+        for m in moves:
+            st = _moved(st, m)
+        out.append(one_stir(st) or {})
+    return out
+
+
+def to_seen(stirs, frame):
+    """Stirs as a shape with this frame holds them -> as they look (the frame undone)."""
+    from notes.recolour import SAME
+    if not frame or tuple(frame) == SAME:
+        return [one_stir(s) or {} for s in stirs]
+    a, b, c, d = frame  # (the way back: the inverse of a frame is its transpose)
+    return _apply(stirs, frame_moves((a, c, b, d)))
+
+
+def from_seen(stirs, frame):
+    """to_seen's way back: stirs as they look -> as a shape with this frame holds them."""
+    from notes.recolour import SAME
+    if not frame or tuple(frame) == SAME:
+        return [one_stir(s) or {} for s in stirs]
+    return _apply(stirs, frame_moves(frame))
+
+
 def preset_label(p):
     """The name shown in the list: "Name (n tabs)" for a preset of several tabs."""
     n = len(p["stirs"])
@@ -103,10 +224,17 @@ def fitted_label(p, fits):
     return preset_label(dict(p, name=name[:lo].rstrip() + "…"))
 
 
-def preset_tabs(rc, i, n):
-    """Tabs i .. i + n - 1 of Recolour rc, filled in (missing ones: plain stirs), to tell whether a preset is there."""
-    stack = stirs_of(rc)
-    return [stack[k] if k < len(stack) else full_stir(None) for k in range(i, i + n)]
+def seen_tabs(rc):
+    """Recolour rc's Stir tabs as they look (to_seen: a flipped / turned shape's undone), filled in."""
+    frame = (rc or {}).get("frame")
+    if not frame:  # (not flipped: as they are, no work per tab)
+        return stirs_of(rc)
+    return [full_stir(s) for s in to_seen(stirs_of(rc), frame)]
+
+
+def preset_tabs(seen, i, n):
+    """Tabs i .. i + n - 1 of seen_tabs' list (missing ones: plain stirs), to tell whether a preset is there."""
+    return [seen[k] if k < len(seen) else full_stir(None) for k in range(i, i + n)]
 
 
 def tab_count_after(rc, i, n, count=1):
@@ -123,7 +251,7 @@ def with_preset(old, i, stirs, stirred_rc, count=1):
     stack = stirs_of(old)
     had = len(stack)
     stack += [full_stir(None)] * (i + count - len(stack))
-    put = [full_stir(s) for s in stirs]
+    put = [full_stir(s) for s in from_seen(stirs, (old or {}).get("frame"))]  # (as seen on a flipped shape too)
     new_stack = stack[:i] + put + stack[i + count:]
     o = order_of(old) if old else []
     out, seen = [], -1

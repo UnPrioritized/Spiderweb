@@ -36,7 +36,7 @@ Straight to round wraps the colours round the Centre point: going round becomes 
 
 Rainbow stripes with Straight to round 100 %, then with Turn 90° too (rings), then inside a Square area with Hard edge (a square tunnel).
 
-Ripple moves the colours along a wave, so straight stripes go wavy. Height is how far they move and length is how long one wave is, both in % of the shape's box. "Sideways" moves the colours sideways, "Up and down" moves them up and down, and "Rings" moves them out from the Centre point and back, like rings from a water drop.
+Ripple moves the colours along a wave, so straight stripes go wavy. Height is how far they move and length is how long one wave is, both in % of the shape's box (a height below 0 starts the wave the other way). "Sideways" moves the colours sideways, "Up and down" moves them up and down, and "Rings" moves them out from the Centre point and back, like rings from a water drop.
 [clip:stir-ripple]
 
 Ripple Sideways (height 3 %, length 12 %) and Rings (height 2 %, length 8 %).
@@ -121,7 +121,7 @@ Stir 1 turns the stripes 90°; Stir 2 adds a small swirl in one spot.
 
 ## Presets
 
-The Preset row above the tabs keeps stirs you like, so you can use them again in any project. Save… keeps the shown tab's stir under a name you type (the same name again replaces it). With "Save all tabs" ticked, every tab goes into the preset, and the list shows how many it holds, e.g. "Swirl (3 tabs)". Picking a preset puts it in place of the shown tab only; a preset of several tabs puts all of them there, and the other tabs stay as they are. It is one undo step. The Centre point and the area are counted in % of the shape, so a preset fits any shape. The list names the preset the shown tab is. Delete takes that preset out of the list; the stirs on your shapes stay.
+The Preset row above the tabs keeps stirs you like, so you can use them again in any project. Save… keeps the shown tab's stir under a name you type (the same name again replaces it). With "Save all tabs" ticked, every tab goes into the preset, and the list shows how many it holds, e.g. "Swirl (3 tabs)". Picking a preset puts it in place of the shown tab only; a preset of several tabs puts all of them there, and the other tabs stay as they are. It is one undo step. The Centre point and the area are counted in % of the shape, so a preset fits any shape. A preset keeps the stir as it looks, also on a shape you flipped or turned since stirring it, and looks the same on a flipped shape (only Straight to round can't be mirrored: it stays as it was). The list names the preset the shown tab is. Delete takes that preset out of the list; the stirs on your shapes stay.
 
 Reset puts the shown stir back to nothing; the tab keeps its place in the order of the steps ([page:properties|Properties…]) until you take it away with ×. An area picked after Reset starts plain (Size 50 %, no stretch, angle or slant). The button reads "Stir… (on)" while a selected shape has one. Picking Off in the Recolour dropdown keeps the stir; with Off, only the shape's own colours are stirred (Shuffle's settings such as Per chord or Colours wait until you pick Shuffle again).
 
