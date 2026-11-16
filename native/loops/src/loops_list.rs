@@ -83,6 +83,8 @@ py_loops! {
     area_spots(x: &[f64], y: &[f64], levels: &[f64], start: &[i64], off: &[i64], lab: &[i64], outside: i64,
                edge: &[i64], ex: &[f64], ey: &[f64], es: &[f64], x0: &[f64], y0: &[f64], x1: &[f64], y1: &[f64],
                eps: f64, out: &mut [i64]) => crate::misc::area_spots;
+    face_build(x0: &[f64], y0: &[f64], x1: &[f64], y1: &[f64], levels: &[f64], hy: &[f64], hx0: &[f64], hx1: &[f64],
+               eps: f64, many: bool) -> arrays => crate::faces::face_build;
     // ---- Inside fills' distances to the outline (fills.rs)
     band_rows(ax: &[f64], ay: &[f64], bx: &[f64], by: &[f64], length: &[f64], ys: &[f64], first: &[i64], n: &[i64],
               r: f64, row_out: &mut [i64], lo_out: &mut [f64], hi_out: &mut [f64]) => crate::fills::band_rows;
