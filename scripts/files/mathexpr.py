@@ -69,10 +69,17 @@ FORMULA_FUNCS = {
 }
 
 
+@functools.lru_cache(maxsize=1024)  # (the same text is read several times per shape: project loading, hunt)
 def as_written(text, var="x"):
     """A formula as people write it elsewhere (LaTeX, 3t, sin^2(t), |t|, π, x = ..., np.sin, θ: files/mathpaste.py)
-    in the words formula reads (user 2026-11-16: "copy pasting from site should work in here expectedly")."""
-    return mathpaste.as_written(text, var, FORMULA_FUNCS, FORMULA_NAMES)
+    in the words formula reads (user 2026-11-16: "copy pasting from site should work in here expectedly").
+    ValueError (a message) when it can't be read."""
+    try:
+        return mathpaste.as_written(text, var, FORMULA_FUNCS, FORMULA_NAMES)
+    except mathpaste.UnknownWord as e:
+        raise ValueError(tr("mathexpr.unknown_latex", word=e.word))
+    except RecursionError:  # (thousands of brackets inside each other: hunt)
+        raise ValueError(tr("mathexpr.can_t_read_it_check_the"))
 
 
 def formula(text, named=False, var="x"):
@@ -86,7 +93,7 @@ def formula(text, named=False, var="x"):
         raise ValueError(tr("mathexpr.type_a_formula"))
     try:
         tree = ast.parse(text, mode="eval")
-    except SyntaxError:
+    except (SyntaxError, RecursionError, MemoryError):
         raise ValueError(tr("mathexpr.can_t_read_it_check_the"))
 
     def check(node):

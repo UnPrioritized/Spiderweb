@@ -2385,6 +2385,7 @@
  "mathexpr.can_t_read_it_check_the": "can't read it (check the brackets and signs)",
  "mathexpr.unknown_name_use_x_for_the": "unknown name \"{id}\" (use x for the position)",
  "mathexpr.unknown_function": "unknown function \"{id}\"",
+ "mathexpr.unknown_latex": "can't read \"\\{word}\"",
  "mathexpr.only_numbers_x_and_functions_like": "only numbers, x, + - * / ^ and functions like sin( ) work",
  "mathexpr.not_a_real_number": "not a real number",
  "mathexpr.whole_number_needed": "whole number needed",

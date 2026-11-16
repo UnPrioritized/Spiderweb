@@ -16,7 +16,7 @@ import tkinter as tk
 from tkinter import ttk, messagebox
 
 from files.lang import tr
-from files.mathexpr import calc, fmt, formula, split_pair
+from files.mathexpr import as_written, calc, fmt, formula, split_pair
 from files import saved_lists
 from files.about import USER
 from files.safefile import write_text
@@ -643,7 +643,11 @@ class FormulaDialog(tk.Toplevel):
             s = s[:-2] if s.endswith(".0") else s
             return f"({s})" if v < 0 else s
 
-        def filled(text):  # (names as the formula reader takes them: any letter first, like élan or 深さ)
+        var = "t" if self.layer == "shape" else "x"
+
+        def filled(text):  # (names as the formula reader takes them: any letter first, like élan or 深さ; in the
+            # form it's READ in, hunt: "2a cos(t)", "\alpha", "x = ..." copied as typed didn't read back)
+            text = re.sub(r"\s+", " ", as_written(text, var))
             return re.sub(r"\b[^\W\d]\w*\b", lambda m: exact(values[m.group()]) if m.group() in values else m.group(),
                           text)
         lines = [f"{self.labels[key]} {filled(self.texts[key].get())}" for key in self.shown_keys()
@@ -666,14 +670,18 @@ class FormulaDialog(tk.Toplevel):
         if self._loading:
             return
         texts = {key: var.get() for key, var in self.texts.items()}
+        was, self.box_was = getattr(self, "box_was", {}), dict(texts)
         if self.layer == "shape" and not self.polar:  # a pasted point "(x(t), y(t))" (graphing sites): both boxes
-            pair = split_pair(texts["x"]) or split_pair(texts["y"])
+            # (only when it came in at once, 2+ signs more: backspacing "max(t, 1)" passes "(t, 1)" = wiped y, hunt)
+            grew = [k for k in ("x", "y") if len(texts[k]) >= len(was.get(k, texts[k])) + 2]
+            pair = next((p for p in (split_pair(texts[k]) for k in grew) if p), None)
             if pair:
                 texts["x"], texts["y"] = pair
                 self._loading = True
                 self.texts["x"].set(pair[0])
                 self.texts["y"].set(pair[1])
                 self._loading = False
+                self.box_was = dict(texts)
         if self.polar:  # (x / y written from the polar line)
             texts["x"], texts["y"] = polar_xy(texts["polar"], t_span(self.pat))
         try:
@@ -771,6 +779,7 @@ class FormulaDialog(tk.Toplevel):
             e.config(style="TEntry")
         self.sym.set(sym_label(self.pat.get("sym")))
         self.show_type()
+        self.box_was = {key: var.get() for key, var in self.texts.items()}  # (what a paste is measured against)
         span = t_span(self.pat) or ["0", "1"]
         for (var, e), text in zip(self.span_vars.values(), span):
             var.set(text)
