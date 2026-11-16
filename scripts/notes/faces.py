@@ -76,8 +76,9 @@ class Faces:
             return
         size = max(np.ptp(seg[:, [0, 2]]), np.ptp(seg[:, [1, 3]]), 1e-12)
         eps = self.eps = size * 1e-9
+        pairs = self._pairs()
         for _ in range(500):  # lines crossing inside a slab: a level there too, until none do
-            e, sl, xb, xt = self._pairs()
+            e, sl, xb, xt = pairs
             same = sl[1:] == sl[:-1]
             db, dt = xb[:-1] - xb[1:], xt[:-1] - xt[1:]
             bad = same & ((db > eps) | (dt > eps))
@@ -92,7 +93,8 @@ class Faces:
             if len(new) == len(lv):
                 break
             self.levels = new
-        e, sl, xb, xt = self._pairs()
+            pairs = self._split(pairs, lv)
+        e, sl, xb, xt = pairs
         lv = self.levels
         nl = len(lv)
         self.edge, self.slab = e, sl  # (slab by slab, left to right)
@@ -159,6 +161,23 @@ class Faces:
         xb, xt = self._x(e, lv[sl]), self._x(e, lv[sl + 1])
         o = np.lexsort(((xb + xt) / 2, sl))
         return e[o], sl[o], xb[o], xt[o]
+
+    def _split(self, pairs, old):
+        """_pairs again after new levels went in between the old ones: only the slabs that got cut are worked out
+        anew, the rest keep their lines as they were (the same as _pairs, ties too: by line number)."""
+        e, sl, xb, xt = pairs
+        lv = self.levels
+        a, b = np.searchsorted(lv, old[:-1]), np.searchsorted(lv, old[1:])  # (each old slab's new slabs: a .. b - 1)
+        cut = (b - a > 1)[sl]
+        i, s = _runs(a[sl[cut]], (b - a)[sl[cut]])
+        ne = e[cut][i]
+        nb, nt = self._x(ne, lv[s]), self._x(ne, lv[s + 1])
+        o = np.lexsort((ne, (nb + nt) / 2, s))
+        keep = ~cut
+        sl = np.concatenate([a[sl[keep]], s[o]])
+        o2 = np.argsort(sl, kind="stable")  # (the two lots never share a slab, each in order already)
+        return (np.concatenate([e[keep], ne[o]])[o2], sl[o2], np.concatenate([xb[keep], nb[o]])[o2],
+                np.concatenate([xt[keep], nt[o]])[o2])
 
     def _x(self, e, y):
         x0, y0 = self.x0[e], self.y0[e]
