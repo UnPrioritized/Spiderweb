@@ -95,7 +95,7 @@ class MaskPanel:
         picked shape is a mask (my pick, like Colours' rows)."""
         tgts = self.mask_targets()
         shown = bool(tgts)
-        pack_shown(self.mask_box, shown, fill="x", pady=(4, 0), after=self.recolour_box)  # (under Recolour)
+        pack_shown(self.mask_box, shown, fill="x", pady=(4, 0), after=self.deform_box)  # (under Recolour + Deform)
         if not shown:
             return
         masks = [t["mask"] for t in tgts if t.get("mask")]

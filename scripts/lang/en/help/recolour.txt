@@ -52,7 +52,7 @@ Push bunches the areas toward one side, a step per click; the dot in the middle 
 
 ## Stir
 
-[page:stir|Stir…] (beside the Recolour dropdown) bends the colours the notes have now with Turn and Twist round a Centre point, on the whole shape or only inside an area, without adding or taking away any colour. It has a page of its own: Help → Stir.
+[page:stir|Stir…] (on the Deform row under Recolour) bends the colours the notes have now with Turn and Twist round a Centre point, on the whole shape or only inside an area, without adding or taking away any colour. It has a page of its own: Help → Stir.
 
 ## The order of the colour effects
 

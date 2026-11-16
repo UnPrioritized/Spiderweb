@@ -59,7 +59,7 @@ class ScrollingSide:
         self.side_width = width = self.side_fixed or max(self.side_usual, self.side_need)
         self._need_wait = None
         # (rows that move parts onto a line of their own when there's no room beside: (narrow, fit again) pairs;
-        # the double-click measures them narrow, panel_recolour.fit_stir)
+        # the double-click measures them narrow)
         self.side_narrows = []
         box = self.side_box = ttk.Frame(self, width=width)
         box.pack(side="right", fill="y")

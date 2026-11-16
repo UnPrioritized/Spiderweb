@@ -217,16 +217,19 @@ class RecolourPanel:
         self.recolour_tip = Tooltip(self.recolour_mode, tr("recolour.tip"))
         self.recolour_again = ttk.Button(c, text=tr("recolour.again"), command=lambda: self.on_recolour("seed"))
         Tooltip(self.recolour_again, tr("recolour.again_tip"))
-        # (Stir… goes on a line of its own under the dropdown when the row has no room: "Stir… (on)" beside New
-        # shuffle was cut, user 2026-11-03; fit_stir)
-        # (Liquify… beside it, user 2026-11-07: the two move together, recolour_tools)
-        self.recolour_line, self.recolour_stir_line = c, ttk.Frame(box)
-        self.recolour_tools = ttk.Frame(box)
-        self.recolour_tools.pack(in_=c, side="left", padx=(4, 0))
+        self.recolour_line = c
+        # "Deform: Stir… Warp… Liquify…" = a row of its own under Recolour (user 2026-11-16: they bend the shape too
+        # now, not only colours; Warp… between them: the order they run in, user 2026-11-09)
+        d = self.deform_box = ttk.Frame(self.settings)
+        d.pack(fill="x", pady=(4, 0), after=box)
+        self.deform_word = ttk.Label(d, text=tr("recolour.deform_row"))  # (one column: app._build_shape_settings)
+        self.deform_word.pack(side="left")
+        Tooltip(self.deform_word, tr("recolour.deform_row_tip"))
+        self.recolour_tools = ttk.Frame(d)
+        self.recolour_tools.pack(side="left", padx=(5, 0))
         self.recolour_stir = ttk.Button(self.recolour_tools, text=tr("stir.button"), command=self.open_stir)
         self.recolour_stir.pack(side="left")
         Tooltip(self.recolour_stir, tr("stir.button_tip"))
-        # (Warp… between them: the order they bend the colours in, user 2026-11-09)
         self.recolour_warp = ttk.Button(self.recolour_tools, text=tr("warp.button"), command=self.open_warp)
         self.recolour_warp.pack(side="left", padx=(4, 0))
         Tooltip(self.recolour_warp, tr("warp.button_tip"))
@@ -235,13 +238,6 @@ class RecolourPanel:
         Tooltip(self.recolour_liquify, tr("liquify.button_tip"))
         # (Properties… (was Effect order…) is NOT here: it read like one more effect, user 2026-11-11; it sits beside Preview all in the
         # Stir / Warp / Liquify / Shares windows (edit_line.EditLine) + the shape's right-click menu)
-        box.bind("<Configure>", lambda e: self.fit_stir(), add="+")
-        self.stir_narrow = False  # (held on their own line while the side panel measures: side_narrows)
-
-        def narrow(on):
-            self.stir_narrow = on
-            self.fit_stir()
-        self.side_narrows.append((lambda: narrow(True), lambda: narrow(False)))
         rows = self.recolour_row = ttk.Frame(box)  # (only shown while Recolour is on)
         row = ttk.Frame(rows)
         row.pack(anchor="w")
@@ -272,29 +268,6 @@ class RecolourPanel:
                                                  command=lambda: self.on_recolour("mix"))
         self.recolour_mix_tip = Tooltip(self.recolour_mix_tick, tr("recolour.mix_tip", most=SET))
         # (Liquify's show tick + Strength live in the Liquify window, like Warp's: user 2026-11-09)
-
-    def fit_stir(self):
-        """Stir… + Liquify… beside the dropdown (and New shuffle) when the row has room for them, else on their own
-        line under the dropdown. stir_narrow = on their own line anyway (the side panel's double-click measures the
-        smallest width with nothing cut)."""
-        narrow = self.stir_narrow
-        box, c, line, b = self.recolour_box, self.recolour_line, self.recolour_stir_line, self.recolour_tools
-        room = box.winfo_width()
-        if room <= 1 and not narrow:
-            return
-        def wide(w):
-            pad = w.pack_info().get("padx", 0)
-            return w.winfo_reqwidth() + sum(pad) if isinstance(pad, tuple) else w.winfo_reqwidth() + 2 * int(pad)
-        others = sum(wide(w) for w in c.pack_slaves() if w is not b)
-        fits = not narrow and others + b.winfo_reqwidth() + 4 <= room
-        if fits == (b.winfo_manager() == "pack" and b.pack_info().get("in") == c):
-            return
-        if fits:
-            b.pack(in_=c, side="left", padx=(4, 0))
-            line.pack_forget()
-        else:
-            line.pack(anchor="w", after=c, pady=(2, 0), padx=(wide(self.recolour_word) + 5, 0))
-            b.pack(in_=line, side="left", padx=(0, 0))
 
     def open_shares(self):
         from window.shares_window import open_shares
@@ -397,7 +370,6 @@ class RecolourPanel:
         shown = bool(live)
         pack_shown(self.recolour_row, shown, anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0))
         pack_shown(self.recolour_again, shown, side="left", after=self.recolour_mode)
-        self.recolour_box.after_idle(self.fit_stir)  # (New shuffle / "(on)" changed the room the row needs)
         if late:
             return
         sets = shown and any(len(o) > 1 for o in owns)  # (more than one colour set: Mix across sets)
