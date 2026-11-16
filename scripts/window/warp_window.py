@@ -273,13 +273,26 @@ class WarpWindow(tk.Toplevel):
 
     def hint_text(self):
         """The hint: bending the shape (every selected Warp, or the window's pick, set to Shape) or its colours."""
-        ws = self.warps() if self.targets() else []
-        kinds = {(w.get("moves") if w else self.moves) or "colours" for w in ws} or {self.moves}
+        kinds = set(self.kinds()) or {self.moves}
         return tr("warp.hint_shape" if kinds == {"shape"} else "warp.hint")
 
-    def kind_picks(self):
-        """What a shape's first drag takes from the window: Moves (+ Colours bend too off), as saved in a Warp."""
-        if self.moves != "shape":
+    def kind_of(self, sh):
+        """What shape sh's Warp bends ("colours" / "shape"): its own; none yet = the window's pick; a picture can't
+        bend = always Colours (hunt 2026-11-17)."""
+        from notes.shape_bend import can_bend
+        if not can_bend(sh):
+            return "colours"
+        w = self.cleaned(sh)[1]
+        return (w.get("moves") if w else self.moves) or "colours"
+
+    def kinds(self):
+        return [self.kind_of(t) for t in self.targets()]
+
+    def kind_picks(self, sh=None):
+        """What a shape's first drag takes from the window: Moves (+ Colours bend too off), as saved in a Warp (a
+        picture: nothing, it stays Colours)."""
+        from notes.shape_bend import can_bend
+        if self.moves != "shape" or (sh is not None and not can_bend(sh)):
             return {}
         return {"moves": "shape", **({} if self.bend_colours_pick else {"bend_colours": False})}
 
@@ -292,7 +305,11 @@ class WarpWindow(tk.Toplevel):
         self.moves = ("colours", "shape")[i]
         put("moves", self.moves)
 
+        from notes.shape_bend import can_bend
+
         def set_to(w, sh):
+            if not can_bend(sh):  # (a picture in the selection keeps its colour Warp: hunt 2026-11-17)
+                return w
             out = {k: v for k, v in w.items() if k not in wp_.KIND_KEYS}
             return dict(out, moves="shape") if self.moves == "shape" else out
         self._change(set_to, tr("warp.undo_moves"), keep_kind=False)
@@ -432,9 +449,11 @@ class WarpWindow(tk.Toplevel):
         def change(old, sh):
             got = (old or {}).get("warp")
             base = wp_.full(got) if got else dict(wp_.empty(self.cols, self.rows), smooth=self.smooth,
-                                                     edge=self.edge, edges=self.edges, folds=self.folds)
+                                                     edge=self.edge, edges=self.edges, folds=self.folds,
+                                                     **self.kind_picks(sh))  # (a first Warp: Moves, like a drag)
             own = self.preset_of(got) or [name, self.preset_bend, self.preset_way]
             new = pr.make(base, name, own[1] if bend is None else bend, own[2] if way is None else way)
+            new = wp_.kind_kept(new, base)
             out = dict(old) if old else {"mode": KEEP, "seed": new_seed()}
             if new:
                 new.pop("on", None)  # (a preset laid = the bend shown again, like a drag; hunt 2026-11-10)
@@ -597,14 +616,15 @@ class WarpWindow(tk.Toplevel):
         rcs = [self.cleaned(t)[0] for t in tgts]
         ws = self.warps()
         # (Moves: each shape's own, a shape without a Warp = the window's pick; Shape greys the colour-only rows)
-        kinds = {(w.get("moves") if w else self.moves) or "colours" for w in ws} or {self.moves}
+        each = self.kinds()
+        kinds = set(each) or {self.moves}
         shape = kinds == {"shape"}
         if len(kinds) > 1:
             self.moves_box.set("")
         else:
             self.moves_box.current(("colours", "shape").index(next(iter(kinds))))
         bends_ = {w.get("bend_colours", True) if w else self.bend_colours_pick
-                  for w in ws if (w.get("moves") if w else self.moves) == "shape"} or {self.bend_colours_pick}
+                  for w, k in zip(ws, each) if k == "shape"} or {self.bend_colours_pick}
         self.bend_colours.set(bends_ == {True})
         self.bend_colours_tick.state(["alternate" if len(bends_) > 1 else "!alternate",
                                       "!disabled" if "shape" in kinds else "disabled"])

@@ -1288,6 +1288,9 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 elif not st["spot"]:
                     st["spot"] = list(st["centre"])
             elif key == "moves":  # (Bulge reaches past the box follows the new kind's default: on for Shape)
+                from notes.shape_bend import can_bend
+                if value == "shape" and sh is not None and not can_bend(sh):  # (a picture keeps its colour stir:
+                    return st                                                  # hunt 2026-11-17)
                 st["moves"], st["bulge_out"] = value, None
             elif key == "kaleido":  # (whole slices; 1 = off like 0)
                 st["kaleido"] = int(round(value)) if round(value) >= 2 else 0

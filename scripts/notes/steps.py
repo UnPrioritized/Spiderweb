@@ -210,8 +210,13 @@ def before_view(sh, tag):
 
 def hidden_after(sh, tag):
     """The steps of sh after step tag (kind, n) that run now (switched-off ones left out): what editing tag hides;
-    [] = none (tag is the last, or sh doesn't have it)."""
+    [] = none (tag is the last, or sh doesn't have it). Shape steps (Stir tabs / Warp / Liquify set to Shape) count
+    first, as they run (hunt 2026-11-17): a colour step never hides one, editing one hides every other step."""
+    from notes.shape_bend import shape_step_tags
     tags = order_of(sh)
+    shape = [t for t in shape_step_tags(sh.get("recolour")) if t in tags]
+    if shape:
+        tags = shape + [t for t in tags if t not in shape]
     tag = tuple(tag)
     if tag not in tags:
         return []

@@ -1421,6 +1421,16 @@ def shape_tabs_done(sh, ppq, keys, get):
     from notes.shape_bend import (PULL, benders_of, bent_shape, colour_part, is_shape_liquify, is_shape_warp,
                                   liquify_shape, off_without, pulled, shape_places, shape_tabs, warp_shape)
     r = sh["recolour"]
+    from notes.shape_bend import shape_step_tags
+    upto = sh.get("_upto")
+    if isinstance(upto, (list, tuple)) and len(upto) == 2 and tuple(upto) in shape_step_tags(r):
+        # (a Shape step being edited by the step runner (pages / Sustain after it): it and the Shape steps before it
+        # run, EVERY other step after it skipped (they all come after the Shape steps; hunt 2026-11-17)
+        from notes.recolour import clean_recolour, step_place
+        j = step_place(clean_recolour(r) or {}, upto[0], upto[1])
+        if j is not None:
+            r = dict(r, _upto=j)
+            sh = dict(_steps_off(sh), recolour=r, **({"off": sh["off"]} if sh.get("off") else {}))
     tabs = shape_tabs(r, sh.get("off"))  # (a tab switched off in Properties bends nothing)
     wp = warp_shape(r, sh.get("off"))  # (the Warp set to Shape, stage F: after the Stir tabs)
     lq = liquify_shape(r, sh.get("off"))  # (the Liquify set to Shape, stage G: last)

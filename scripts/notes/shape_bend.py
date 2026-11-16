@@ -78,6 +78,12 @@ def is_shape_warp(r):
     return isinstance(r, dict) and isinstance(r.get("warp"), dict) and r["warp"].get("moves") == "shape"
 
 
+def can_bend(sh):
+    """Whether a shape's outline / notes can be bent by a Shape step: not a picture (user: Shape greyed for them;
+    hunt 2026-11-17: a window's Shape pick made a picture's first Warp / Liquify bend nothing)."""
+    return not ("picture" in sh or "picture_notes" in sh or sh.get("hz"))
+
+
 def is_shape_liquify(r):
     """Whether a saved Recolour's Liquify bends the shape (Liquify set to Shape, stage G)."""
     return isinstance(r, dict) and isinstance(r.get("liquify"), dict) and r["liquify"].get("moves") == "shape"
@@ -89,6 +95,19 @@ def has_shape(r):
 
 
 SHAPE_KINDS = ("stir", "warp", "liquify")  # (the order Shape steps run in: every Stir tab, the Warp, the Liquify)
+
+
+def shape_step_tags(r):
+    """A saved Recolour's Shape steps as step tags (kind, n) in the order they run (Stir tabs, Warp, Liquify): they
+    run before every other step, whatever order they were added in (Properties lists them so)."""
+    if not isinstance(r, dict):
+        return []
+    out = [("stir", i) for i in shape_places(r)]
+    if is_shape_warp(r):
+        out.append(("warp", 0))
+    if is_shape_liquify(r):
+        out.append(("liquify", 0))
+    return out
 
 
 def _skipped(r, kind):

@@ -468,7 +468,7 @@ class LiquifyBrush:
             base = dict(old) if old else {"mode": KEEP, "seed": new_seed()}
             w = self.app.liquify_window
             # (a shape's first Liquify: At the edges as the window shows it)
-            settings = base.get("liquify") or ({"edge": w.edge, **w.kind_picks()} if w else {})
+            settings = base.get("liquify") or ({"edge": w.edge, **w.kind_picks(sh)} if w else {})
             got = lq.with_arrays(settings, job["a"], job["m"])
             if got:
                 base["liquify"] = got
@@ -499,7 +499,7 @@ class LiquifyBrush:
         # PLAN.md "Deform shapes" stage G. A shape without a Liquify yet: the window's pick)
         got = (sh.get("recolour") or {}).get("liquify") if isinstance(sh.get("recolour"), dict) else None
         w = app.liquify_window
-        if (got.get("moves") if isinstance(got, dict) else (w.moves if w else None)) == "shape":
+        if (got.get("moves") if isinstance(got, dict) else (w.kind_of(sh) if w else None)) == "shape":
             return None
         from notes.engine import is_gate_flipped, is_pasted_flipped, keeps_laps, made_from, past_edges
         from notes.mask import is_mask
@@ -977,7 +977,7 @@ class LiquifyBrush:
             else:
                 m = 1.0 - (zeros if m is None else m)
             w = app.liquify_window
-            new = lq.with_arrays(got or ({"edge": w.edge, **w.kind_picks()} if w else {}), a, m)
+            new = lq.with_arrays(got or ({"edge": w.edge, **w.kind_picks(sh)} if w else {}), a, m)
             base = dict(old) if old else {"mode": KEEP, "seed": new_seed()}
             if new:
                 base["liquify"] = new

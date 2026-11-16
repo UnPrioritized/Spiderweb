@@ -148,7 +148,9 @@ class RecolourPanel:
             return None
         rc = clean_recolour(sh["recolour"])
         j = step_place(rc, *t)
-        return j if j is not None and j < len(order_of(rc)) - 1 else None
+        # (edit_tag found steps hidden after it, Shape steps counted first: a Shape Warp added last still hides the
+        # colour steps, hunt 2026-11-17)
+        return j
 
     def edit_view(self, sh, i=None):
         """sh as its notes are shown: without the steps after the one being edited (colour effects only after it: rc

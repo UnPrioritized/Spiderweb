@@ -74,7 +74,12 @@ class CentreDots:
         plain = without_recolour(sh)
         rc = clean_recolour(sh.get("recolour"))
         w = app.stir_window
-        got = colour_input(sh, ("mode" if kind == "clumps" else kind, w.tab if kind == "stir" and w else 0))
+        tag = ("mode" if kind == "clumps" else kind, w.tab if kind == "stir" and w else 0)
+        # (a COLOUR step on a shape bent by Shape steps works on the bent notes: its dot / area line / grid / brush
+        # sit on them; a Shape step's own stay on the notes before the bend (the box stays put); hunt 2026-11-17)
+        from notes.shape_bend import shape_only, shape_step_tags
+        bent = shape_only(sh.get("recolour")) if tag not in shape_step_tags(sh.get("recolour")) else None
+        got = colour_input(sh, tag)
         if got is not None:  # (made its own way (an order of its own, steps off): the notes its colour group gets,
             plain = without_recolour(got)  # Sustain / pages before it... included; PLAN.md "Properties" stage C)
         elif rc and PAGE in (rc.get("order") or ()):  # (a step before a note tool page works on the notes before it:
@@ -85,6 +90,8 @@ class CentreDots:
                              w.tab if kind == "stir" and w else 0)
             if j < n_pages:
                 plain = pages_coloured(plain, {}, j)
+        if bent:
+            plain = dict(plain, recolour=bent)
         notes, _ = app.notes_tracks(plain)
         if not len(notes):
             return None

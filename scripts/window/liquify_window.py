@@ -186,19 +186,25 @@ class LiquifyWindow(tk.Toplevel):
     def targets(self):
         return self.app.recolour_targets()
 
-    def kind_picks(self):
-        """What a shape's first stroke takes from the window: Moves (+ Colours bend too off), as saved."""
-        if self.moves != "shape":
+    def kind_picks(self, sh=None):
+        """What a shape's first stroke takes from the window: Moves (+ Colours bend too off), as saved (a picture:
+        nothing, it stays Colours; hunt 2026-11-17)."""
+        from notes.shape_bend import can_bend
+        if self.moves != "shape" or (sh is not None and not can_bend(sh)):
             return {}
         return {"moves": "shape", **({} if self.bend_colours_pick else {"bend_colours": False})}
 
+    def kind_of(self, sh):
+        """What shape sh's Liquify bends ("colours" / "shape"; none yet = the window's pick; a picture = Colours)."""
+        from notes.shape_bend import can_bend
+        if not can_bend(sh):
+            return "colours"
+        g = (clean_recolour(sh.get("recolour")) or {}).get("liquify")
+        return (g.get("moves") if g else self.moves) or "colours"
+
     def kinds(self):
-        """What each selected shape's Liquify bends ("colours" / "shape"; none yet = the window's pick)."""
-        out = []
-        for t in self.targets():
-            g = (clean_recolour(t.get("recolour")) or {}).get("liquify")
-            out.append((g.get("moves") if g else self.moves) or "colours")
-        return out
+        """What each selected shape's Liquify bends."""
+        return [self.kind_of(t) for t in self.targets()]
 
     def on_moves(self):
         """Moves: Colours / Shape: the selected shapes' Liquifies bend that (one undo step); the window's pick for
@@ -210,9 +216,11 @@ class LiquifyWindow(tk.Toplevel):
         put("moves", self.moves)
         kind = self.moves
 
+        from notes.shape_bend import can_bend
+
         def change(old, sh):
             got = (old or {}).get("liquify")
-            if not got:
+            if not got or not can_bend(sh):  # (a picture keeps its colour Liquify: hunt 2026-11-17)
                 return old
             new = {k: v for k, v in got.items() if k not in ("moves", "bend_colours")}
             return dict(old, liquify=dict(new, moves="shape") if kind == "shape" else new)
