@@ -2356,19 +2356,25 @@ def turn_sample(flat, skey, send, g, lo_k, hi_k, n, many):
     kmax = np.int64(k_all) - 1
     t1 = t_all + 1.0
     one_e = 1.0 - e
+    uu, vv = step * vp / det, -up * step / det  # (u, v change by these a step: turn_jump)
+    jump = (hi_k - lo_k + 1) * n > JUMP_SPARSE * m  # (many more spots than notes: jumping pays; else every spot)
     for row in range(lo_k, hi_k + 1):
         dk = float(row) - p0
         hint = 0
         prev = np.int64(-1)
         frm = 0
-        for j in range(n + 1):
+        j = 0
+        retry = 0
+        while j <= n:
             a = np.int64(-1)
             if j < n:
                 bb = t0 + (j + 0.5) * step
                 db = bb - b0
                 u = (db * vp - dk * vb) / det
                 v = (dk * ub - up * db) / det
-                if u >= -e and u < one_e and v >= -e and v < one_e:
+                inside = u >= -e and u < one_e and v >= -e and v < one_e
+                key = np.int64(0)
+                if inside:
                     key = min(max(np.int64(v * k_all), 0), kmax)
                     tick = u * t_all
                     hint = _upper(flat, key * t1 + tick, hint)
@@ -2378,8 +2384,18 @@ def turn_sample(flat, skey, send, g, lo_k, hi_k, n, many):
                             a = at
             if j == 0:
                 prev = a
+                j += 1
                 continue
             if j < n and a == prev:
+                # (stayed on one note / gap a few steps: on to just before the next place anything could change;
+                # the same pieces, far fewer spots on a big box at a high PPQ, heavy sweep 2026-11-16)
+                if jump and j - frm >= JUMP_AFTER and j >= retry:
+                    to = turn_jump(flat, skey, send, g, u, v, uu, vv, inside, a, key, hint, j, n)
+                    if to > j + 1:
+                        j = min(to, n)
+                        continue
+                    retry = to + 2 * int(JUMP_ROOM) + 1  # (the change is near: no new try until past it)
+                j += 1
                 continue
             if prev >= 0:
                 start = np.int64(np.rint((t0 + frm * step) * ppq))
@@ -2397,7 +2413,64 @@ def turn_sample(flat, skey, send, g, lo_k, hi_k, n, many):
                     c += 1
             prev = a
             frm = j
+            j += 1
     return out[0, :c].copy(), out[1, :c].copy(), out[2, :c].copy(), out[3, :c].copy()
+
+
+JUMP_AFTER = 8  # (turn_sample: a spot tries a jump once it has found the same for this many steps)
+JUMP_SPARSE = 512  # (turn_sample: spots per note above which a call jumps; below, jumping was mixed: up to 1.3x)
+JUMP_ROOM = 4.0  # (turn_jump: steps kept short of a worked-out change: rounding in u, v and the keys' numbers)
+
+
+@njit(nogil=True)
+def _cross(level, val, slope, best):
+    """turn_jump: steps from val to a level it moves towards (slope a step), or best when that's nearer. A level
+    just behind (within JUMP_ROOM: a spot right on a key edge, rounded either way) counts as here = no jump."""
+    if slope != 0.0:
+        d = (level - val) / slope
+        if d >= -JUMP_ROOM:
+            d = max(d, 0.0)
+            if d < best:
+                return d
+    return best
+
+
+@njit(nogil=True)
+def _note_ends(flat, send, i, kt, t_all, u, uu, best):
+    """turn_jump: note i's start and end (as u; kt = its key x (t_all + 1)) -> best."""
+    best = _cross((flat[i] - kt) / t_all, u, uu, best)
+    return _cross(send[i] / t_all, u, uu, best)
+
+
+@njit(nogil=True)
+def turn_jump(flat, skey, send, g, u, v, uu, vv, inside, a, key, up, j, n):
+    """turn_sample: the next step to look at from step j (its spot u, v found note a or -1 on key, _upper = up):
+    every step before it finds the same (JUMP_ROOM steps short of the nearest box edge, key edge or note start /
+    end the spot moves towards), n when nothing more changes."""
+    e, k_all, t_all = g[12], g[10], g[9]
+    one_e = 1.0 - e
+    best = np.inf
+    best = _cross(-e, u, uu, best)
+    best = _cross(one_e, u, uu, best)
+    best = _cross(-e, v, vv, best)
+    best = _cross(one_e, v, vv, best)
+    if inside:
+        kv = np.floor(v * k_all)
+        best = _cross(kv / k_all, v, vv, best)
+        best = _cross((kv + 1.0) / k_all, v, vv, best)
+        if t_all > 0.0:
+            kt = key * (t_all + 1.0)
+            if a >= 0:
+                best = _note_ends(flat, send, a, kt, t_all, u, uu, best)
+            else:
+                last = flat.shape[0] - 1
+                if up >= 1 and skey[min(up - 1, last)] == key:
+                    best = _note_ends(flat, send, min(up - 1, last), kt, t_all, u, uu, best)
+                if up <= last and skey[up] == key:
+                    best = _note_ends(flat, send, up, kt, t_all, u, uu, best)
+    if best > n:
+        return n
+    return j + int(np.floor(best) - JUMP_ROOM)  # (j + 1 or less = too near to jump: the caller waits past it)
 
 
 @njit(nogil=True)
