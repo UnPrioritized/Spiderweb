@@ -164,6 +164,7 @@ class LiquifyBrush:
         if not self.liquify_on():
             return False
         app = self.app
+        self.lq_mouse = (e.x, e.y)
         app.liquify_window.take_typed()  # (a size typed without Enter: from this first dab on)
         got = self.liquify_target(e.x, e.y, e.state)
         if got is None:
@@ -311,7 +312,8 @@ class LiquifyBrush:
         st = getattr(self, "lq", None)
         if not st:
             return
-        st["mouse"] = (e.x, e.y)
+        st["mouse"] = self.lq_mouse = (e.x, e.y)  # (the circle after the let go is drawn here: it jumped back to
+        # where the press was and stayed there until the mouse moved, user 2026-11-17)
         st["moved"] = time.perf_counter()
         st["alt"] = bool(e.state & ALT)
         if st.get("line"):  # (a straight stroke stays on its line while held)
@@ -331,6 +333,8 @@ class LiquifyBrush:
     def liquify_release(self, e):
         st = getattr(self, "lq", None)
         self.drag = None
+        if e is not None:
+            self.lq_mouse = (e.x, e.y)
         if not st:
             return
         for k in ("hold", "mask_job"):
