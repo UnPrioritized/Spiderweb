@@ -6,6 +6,7 @@ puts everything back. Opens at the defaults every time (user). While it's open t
 (the board's mouse and keys only look: the view still scrolls and zooms)."""
 
 import json
+import math
 import tkinter as tk
 from tkinter import messagebox, ttk
 
@@ -39,8 +40,12 @@ STICK_PX = 6  # (that near, in pixels along the slider)
 AREAS = ("whole", "circle", "square", "diamond")
 REST_MS = 300  # (the sliders resting this long: area colours worked out again)
 BLOCK = "DrawerDeformBlock"  # (the board's bind tag while the window is open: its own clicks / keys wait)
-BLOCKED = ("<ButtonPress-1>", "<B1-Motion>", "<ButtonRelease-1>", "<Double-Button-1>", "<ButtonPress-3>",
-           "<ButtonRelease-3>", "<Double-Button-3>", "<Motion>", "<Key>", "<KeyRelease>")
+BLOCKED = ("<Double-Button-1>", "<ButtonRelease-3>", "<Double-Button-3>", "<Key>", "<KeyRelease>")
+GRAB = 8  # px: how near the Centre mark / the area's line the mouse must be to grab it
+BOX_LEAST = 40  # px: an area box with a side shorter than this on screen isn't shown (its line sizes it then)
+RING_POINTS = 72  # (a round area's line: pieces)
+TURN_STEP = 15  # degrees: the area box turned in steps of this (Shift = free), like a shape's box
+CORNERS = ((0, 0), (1, 0), (1, 1), (0, 1))  # (the box's corners going round, in its own (across, up))
 
 
 class DrawerDeform:
@@ -96,7 +101,9 @@ class DeformWindow(tk.Toplevel):
         self.mirror_ways = mirror_fns(dr.mirror_mode())
         pts = np.asarray([p for i in self.idx for p in stroke_points(self.base_strokes[i])], float).reshape(-1, 2)
         mid = ((pts.min(0) + pts.max(0)) / 2).tolist() if len(pts) else [0.5, 0.5]
+        self.mid = list(mid)  # (where the Centre mark starts: right-click puts it back)
         self.centre, self.area_middle = list(mid), list(mid)
+        self.grab = None  # (what the mouse holds on the board: the Centre mark / the area / a box handle)
         self.shape = None  # (a library drawing picked as the area: recolour's area shape)
         self.vars, self.scales, self.boxes = {}, {}, {}
         self.holding = None  # (the slider whose knob the mouse holds)
@@ -172,6 +179,8 @@ class DeformWindow(tk.Toplevel):
         self.show_area_parts()
 
         self.what.pack(fill="x", pady=(int(8 * s), 0))
+        ttk.Label(top, text=tr("deform.board_hint"), foreground=look.HINT, justify="left",
+                  wraplength=wrap).pack(fill="x", pady=(int(4 * s), 0))
         self.heavy = ttk.Label(top, text="", foreground=look.WARN_DARK, justify="left", wraplength=wrap)
         self.heavy.pack(fill="x")
         btns = ttk.Frame(top)
@@ -406,12 +415,244 @@ class DeformWindow(tk.Toplevel):
         if on:
             for seq in BLOCKED:
                 c.bind_class(BLOCK, seq, lambda e: "break")
+            # (the board's own left / right clicks wait; the Centre mark and the area take them: stage D)
+            for seq, fn in (("<ButtonPress-1>", self.board_press), ("<B1-Motion>", self.board_drag),
+                            ("<ButtonRelease-1>", self.board_release), ("<Motion>", self.board_hover),
+                            ("<ButtonPress-3>", self.board_right)):
+                c.bind_class(BLOCK, seq, lambda e, fn=fn: (fn(e), "break")[1])
             # (middle drag still moves the view: "<Motion>" above would catch it; a middle click without a drag
             # adds no curve point while bending)
             c.bind_class(BLOCK, "<B2-Motion>", lambda e: None)
             c.bind_class(BLOCK, "<ButtonRelease-2>", lambda e: (setattr(dr, "_pan", None), "break")[1])
             tags.insert(0, BLOCK)
         c.bindtags(tuple(tags))
+
+    # ------------------------------------------------------------ Centre mark + area on the board (stage D)
+
+    def area_now(self):
+        """The area as set now (cleaned), or None (Whole drawing)."""
+        return self.settings()["area"]
+
+    def area_rings(self, a):
+        """The area's outline(s) on the board, each an (n, 2) array of (u, v), closed (a drawn area: one per loop)."""
+        st = deform.as_stir(a)
+        out = []
+        for dx, dy in rc.area_outlines(st, RING_POINTS):
+            gx, gy = rc.area_global(dx, dy, st, deform.ONE)
+            out.append(np.column_stack((a["middle"][0] + gx, a["middle"][1] + gy)))
+        return out
+
+    def area_corners(self, a):
+        """The area's box: its four corners (u, v) going round from its own (-, -)."""
+        dx, dy = rc.area_corners(deform.as_stir(a), deform.ONE)
+        m = a["middle"]
+        return [(m[0] + float(dx[i]), m[1] + float(dy[i])) for i in range(4)]
+
+    def screen_box(self, a):
+        """The area box's corners on screen, or None when a side is too short there (BOX_LEAST)."""
+        c = [self.dr.to_screen(*p) for p in self.area_corners(a)]
+        if min(math.dist(c[0], c[1]), math.dist(c[0], c[3])) < BOX_LEAST * self.s:
+            return None
+        return c
+
+    def draw_marks(self, board):
+        """Drawn by the drawer's redraw (through its board): the area's dashed line + its box (green, like the
+        piano roll's Stir area box), then the Centre mark (a green ring with a dot, like Stir's Centre point)."""
+        dr, s = self.dr, self.s
+        line = max(1, round(2 * s))
+        band = line + 2 * max(1, round(s))
+        a = self.area_now()
+        if a is not None:
+            for ring in self.area_rings(a):
+                coords = dr.screen_points(ring.tolist())
+                board.create_line(*coords, fill=look.ROLL_BG, width=band)
+                board.create_line(*coords, fill=look.STIR_RING, width=line, dash=(6, 4))
+            c = self.screen_box(a)
+            if c:
+                coords = [v for p in c + c[:1] for v in p]
+                board.create_line(*coords, fill=look.STIR_BOX_BAND, width=band)
+                board.create_line(*coords, fill=look.STIR_BOX, width=line)
+                for (hx, hy), hr in [(p, 6 * s) for p in c] + [(p, 5 * s) for p in self.side_middles(c)]:
+                    board.create_oval(hx - hr, hy - hr, hx + hr, hy + hr, outline=look.STIR_BOX_BAND,
+                                      fill=look.STIR_BOX_FILL, width=line + 1)
+        x, y = dr.to_screen(*self.centre)
+        r, q = 6 * s, 2.4 * s
+        board.create_oval(x - r, y - r, x + r, y + r, outline=look.PATH_LINE, fill=look.ROLL_BG, width=line)
+        board.create_oval(x - q, y - q, x + q, y + q, outline="", fill=look.PATH_LINE)
+
+    @staticmethod
+    def side_middles(c):
+        return [((c[i][0] + c[(i + 1) % 4][0]) / 2, (c[i][1] + c[(i + 1) % 4][1]) / 2) for i in range(4)]
+
+    def hit(self, e):
+        """What the mouse is over: ("centre",) / ("corner", k) / ("side", k) / ("turn", k) / ("skew", k) (just
+        outside a corner / a side's middle, like a shape's box) / ("size",) (the line of an area too small for a
+        box) / ("move",) (inside the area or on its line) / None."""
+        dr, s = self.dr, self.s
+        x, y = dr.to_screen(*self.centre)
+        near_centre = math.hypot(x - e.x, y - e.y)
+        a = self.area_now()
+        if a is None:
+            return ("centre",) if near_centre <= GRAB * s else None
+        c = self.screen_box(a)
+        line = min(self.line_near(dr.screen_points(r.tolist()), e.x, e.y) for r in self.area_rings(a))
+        if near_centre <= GRAB * s and near_centre <= line:  # (a small area's line by the mark: the nearer wins)
+            return ("centre",)
+        if c:
+            dist = lambda p: math.hypot(p[0] - e.x, p[1] - e.y)
+            mids = self.side_middles(c)
+            k = min(range(4), key=lambda i: dist(c[i]))
+            m = min(range(4), key=lambda i: dist(mids[i]))
+            if dist(c[k]) <= 9 * s:
+                return ("corner", k)
+            if dist(mids[m]) <= 8 * s:
+                return ("side", m)
+            if not self.inside(c, e.x, e.y):
+                if dist(mids[m]) <= 20 * s and dist(mids[m]) < dist(c[k]):
+                    return ("skew", m)
+                if dist(c[k]) <= 22 * s:
+                    return ("turn", k)
+        elif line <= GRAB * s:
+            return ("size",)
+        if near_centre <= GRAB * s:
+            return ("centre",)
+        u, v = dr.from_screen(e.x, e.y)
+        if line <= GRAB * s or any(self.inside(r, u, v) for r in self.area_rings(a)):
+            return ("move",)
+        return None
+
+    @staticmethod
+    def line_near(coords, x, y):
+        """How near (px) the point x, y is to the polyline coords [x0, y0, x1, y1, ...]."""
+        p = np.asarray(coords, np.float64).reshape(-1, 2)
+        if len(p) < 2:
+            return math.inf
+        a, d = p[:-1], p[1:] - p[:-1]
+        t = np.clip(((x - a[:, 0]) * d[:, 0] + (y - a[:, 1]) * d[:, 1]) / np.maximum((d * d).sum(1), 1e-12), 0, 1)
+        return float(np.hypot(a[:, 0] + t * d[:, 0] - x, a[:, 1] + t * d[:, 1] - y).min())
+
+    @staticmethod
+    def inside(poly, x, y):
+        """Whether x, y is inside the closed line poly (odd crossings)."""
+        p = np.asarray(poly, np.float64).reshape(-1, 2)
+        a, b = p, np.roll(p, -1, axis=0)
+        cross = (a[:, 1] > y) != (b[:, 1] > y)
+        if not cross.any():
+            return False
+        a, b = a[cross], b[cross]
+        xs = a[:, 0] + (y - a[:, 1]) * (b[:, 0] - a[:, 0]) / (b[:, 1] - a[:, 1])
+        return bool((xs > x).sum() % 2)
+
+    def board_hover(self, e):
+        h = self.hit(e)
+        cursor = "crosshair"
+        if h and h[0] in ("side", "skew"):
+            cursor = "sb_h_double_arrow" if (h[1] % 2) == (h[0] == "side") else "sb_v_double_arrow"
+        elif h:
+            cursor = {"centre": "fleur", "move": "fleur", "turn": "exchange"}.get(h[0], "sizing")
+        if str(self.dr.canvas.cget("cursor")) != cursor:
+            self.dr.canvas.config(cursor=cursor)
+
+    def board_press(self, e):
+        h = self.hit(e)
+        self.grab = None
+        if h is None:
+            return
+        a = self.area_now()
+        at = self.dr.from_screen(e.x, e.y)
+        if h[0] == "centre":
+            self.grab = (h, (at[0] - self.centre[0], at[1] - self.centre[1]))
+        elif h[0] == "move":
+            self.grab = (h, (at[0] - self.area_middle[0], at[1] - self.area_middle[1]))
+        else:
+            self.grab = (h, at, a, self.area_corners(a))
+
+    def board_drag(self, e):
+        if not self.grab:
+            return
+        h = self.grab[0]
+        u, v = self.dr.from_screen(e.x, e.y)
+        if h[0] in ("centre", "move"):
+            off = self.grab[1]
+            spot = [round(u - off[0], 5), round(v - off[1], 5)]
+            if h[0] == "centre":
+                self.centre = spot
+            else:
+                self.area_middle = spot
+            return self.changed()
+        at, a, c = self.grab[1:]
+        m = a["middle"]
+        if h[0] == "size":  # (the line of a small area: Size grows with the mouse's distance from its middle)
+            d0 = math.hypot(at[0] - m[0], at[1] - m[1])
+            if d0 > 1e-9:
+                self.put("size", round(a["size"] * math.hypot(u - m[0], v - m[1]) / d0, 3))
+            return
+        if h[0] == "turn":
+            turn = math.degrees(math.atan2(v - m[1], u - m[0]) - math.atan2(at[1] - m[1], at[0] - m[0]))
+            if not e.state & 0x0001:  # (Shift = free, else in steps)
+                turn = round(turn / TURN_STEP) * TURN_STEP
+            return self.put("tilt", self.angle(a["tilt"] + turn))
+        p0, pu, pv = (np.asarray(p, np.float64) for p in (c[0], c[1], c[3]))
+        if h[0] == "skew":  # (the side's two corners slide along it with the mouse)
+            k = h[1]
+            j = (k + 1) % 4
+            along = np.asarray(c[j], np.float64) - np.asarray(c[k], np.float64)
+            along /= max(float(np.hypot(*along)), 1e-12)
+            shift = along * float(np.dot((u - at[0], v - at[1]), along))
+            new = [np.asarray(p, np.float64) + (shift if i in (k, j) else 0) for i, p in enumerate(c)]
+            return self.box_to_area(a, new[0], new[1], new[3], "size")
+        # a corner / a side: the opposite one stays, the held one follows the mouse (in the box's own across / up)
+        A = np.column_stack((pu - p0, pv - p0))
+        try:
+            fa, fb = np.linalg.solve(A, np.array([u, v]) - p0)
+        except np.linalg.LinAlgError:
+            return
+        k = h[1]
+        if h[0] == "corner":
+            cu, cv = CORNERS[k]
+        else:  # (side k runs from corner k to k + 1: it moves one way only)
+            cu, cv = ((None, 0), (1, None), (None, 1), (0, None))[k]
+        ctrl = h[0] == "corner" and e.state & 0x0004
+        if ctrl:  # (Ctrl on a corner: both ways by the same share = proportions kept, Size changes)
+            f = ((fa - (1 - cu)) / (2 * cu - 1) + (fb - (1 - cv)) / (2 * cv - 1)) / 2
+            fa, fb = (1 - cu) + f * (2 * cu - 1), (1 - cv) + f * (2 * cv - 1)
+        lo = 0.02  # (never flat or inside out)
+        ua = (0.0, 1.0) if cu is None else ((0.0, max(fa, lo)) if cu else (min(fa, 1 - lo), 1.0))
+        va = (0.0, 1.0) if cv is None else ((0.0, max(fb, lo)) if cv else (min(fb, 1 - lo), 1.0))
+        P = lambda s, t: p0 + s * (pu - p0) + t * (pv - p0)
+        self.box_to_area(a, P(ua[0], va[0]), P(ua[1], va[0]), P(ua[0], va[1]), "stretch" if ctrl else "size")
+
+    def box_to_area(self, a, p0, pu, pv, keep):
+        """A box dragged on the board (its corners (-, -), (+, -), (-, +)) -> the area's middle, Size, Stretch,
+        Angle and Slant (Stir's area_from_box); a box past a limit stays as it was last."""
+        st = deform.as_stir(a)
+        got = rc.area_from_box(st, *(np.asarray(p) * 100 for p in (p0, pu, pv)), deform.ONE, keep=keep)
+        if got is None:
+            return
+        ok = (rc.LEAST_REACH <= got["reach"] <= rc.MOST_REACH and abs(got["skew"]) <= rc.MOST_SKEW
+              and all(rc.LEAST_STRETCH <= got[k] <= rc.MOST_STRETCH for k in ("stretch", "stretch_up")))
+        if not ok:
+            return
+        self.area_middle = [round(v / 100, 5) for v in got["middle"]]
+        if keep == "stretch":
+            self.put("size", round(got["reach"], 3))
+        for key, v in (("stretch", got["stretch"]), ("stretch_up", got["stretch_up"]),
+                       ("tilt", self.angle(got["tilt"])), ("slant", 100 * got["skew"])):
+            self.put(key, round(v, 3))
+
+    @staticmethod
+    def angle(v):
+        """An angle kept within -180..180."""
+        return (v + 180) % 360 - 180
+
+    def board_release(self, e):
+        self.grab = None
+
+    def board_right(self, e):
+        """A right-click on the Centre mark: back to where it started (the strokes' middle)."""
+        if self.hit(e) == ("centre",):
+            self.centre = list(self.mid)
+            self.changed()
 
     # ------------------------------------------------------------ done
 
@@ -452,6 +693,7 @@ class DeformWindow(tk.Toplevel):
         dr.areas_wait = False
         if dr.winfo_exists():
             self.block(False)
+            dr.canvas.config(cursor="crosshair")
             dr.canvas.focus_set()
         dr.deform_win = None
         self.destroy()

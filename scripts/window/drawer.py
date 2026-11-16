@@ -1556,6 +1556,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
                 c.create_line(x - q, y + q, x + q, y - q, fill=STICK_COLOR, width=lw)
             else:
                 c.create_polygon(x, y - q, x + q, y, x, y + q, x - q, y, fill="", outline=STICK_COLOR, width=lw)
+        if self.deform_win:  # (Deform…: its Centre mark + area line / box, on top)
+            self.deform_win.draw_marks(c)
         c.finish()
         self.draw_lasso()  # (the Lasso tool's loop: drawer_lasso; its own items, on top)
         hidden = len(self.strokes) - len(shown_idx)
