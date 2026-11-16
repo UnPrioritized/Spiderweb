@@ -5,7 +5,7 @@ use crate::maths::{pmax, pmin};
 use rayon::prelude::*;
 
 use crate::pyext::{Out, Outs};
-use crate::{filled, grow, need, room, zeros, NdMut, FAILED};
+use crate::{copied, filled, grow, need, room, zeros, NdMut, FAILED};
 
 /// fastloops._band_at: one edge's round-ended band on the line at y -> (lo, hi), lo >= hi = none.
 #[inline(always)]
@@ -723,6 +723,343 @@ pub fn band_all(ax: &[f64], ay: &[f64], bx: &[f64], by: &[f64], length: &[f64], 
     }
     let [a, b, c, k] = out;
     Ok(vec![Out::I64(a, 0), Out::I64(b, 0), Out::I64(c, 0), Out::I64(k, 0)])
+}
+
+/// NumPy's sort order for floats: -0.0 and 0.0 alike, NaN last.
+#[inline(always)]
+fn np_cmp(x: f64, y: f64) -> std::cmp::Ordering {
+    use std::cmp::Ordering::*;
+    if x < y {
+        Less
+    } else if x > y {
+        Greater
+    } else if x == y || (x.is_nan() && y.is_nan()) {
+        Equal
+    } else if x.is_nan() {
+        Greater
+    } else {
+        Less
+    }
+}
+
+/// fastloops._first_row.
+#[inline(always)]
+fn first_row(v: f64, below: bool) -> f64 {
+    let mut q = (v + 0.5).floor();
+    if below {
+        if v < q - 0.5 {
+            q -= 1.0;
+        }
+        return if v < q + 0.5 { q } else { q + 1.0 };
+    }
+    if v > q + 0.5 {
+        q += 1.0;
+    }
+    if v > q - 0.5 { q } else { q - 1.0 }
+}
+
+/// fastloops._lower: how many of lv (sorted) are below v.
+#[inline(always)]
+fn lower(lv: &[f64], v: f64) -> usize {
+    let (mut a, mut b) = (0usize, lv.len());
+    while a < b {
+        let mid = (a + b) / 2;
+        if lv[mid] < v {
+            a = mid + 1;
+        } else {
+            b = mid;
+        }
+    }
+    a
+}
+
+/// fastloops.rows_fill (custom.rows_spans: closed loops' inside on key rows q0..q1 in ticks) -> (row, start, end).
+pub fn rows_fill(xa: &[f64], ya: &[f64], xb: &[f64], yb: &[f64], q0: i64, q1: i64, ppq: i64, wind: bool) -> Outs {
+    let ne = xa.len();
+    if ya.len() != ne || xb.len() != ne || yb.len() != ne {
+        return Err(FAILED);
+    }
+    let empty = || -> Outs { Ok(vec![Out::I64(Vec::new(), 0), Out::I64(Vec::new(), 0), Out::I64(Vec::new(), 0)]) };
+    if q1 < q0 || ne == 0 {
+        return empty();
+    }
+    let nr = (q1 - q0 + 1) as usize;
+    let (q0f, q1f) = (q0 as f64, q1 as f64);
+    let (mut r0, mut r1): (Vec<i64>, Vec<i64>) = (zeros(ne)?, zeros(ne)?);
+    let mut roff: Vec<usize> = zeros(nr + 1)?;
+    for e in 0..ne {
+        let (mn, mx) = (pmin(ya[e], yb[e]), pmax(ya[e], yb[e]));
+        let a = pmax(first_row(mn, true), q0f);
+        let b = pmin(first_row(mx, false), q1f);
+        if !(a.is_finite() && b.is_finite()) {
+            return Err(FAILED);
+        }
+        r0[e] = a as i64;
+        r1[e] = b as i64;
+        for q in r0[e]..=r1[e] {
+            roff[(q - q0) as usize + 1] += 1;
+        }
+    }
+    for i in 0..nr {
+        roff[i + 1] += roff[i];
+    }
+    if roff[nr] == 0 {
+        return empty();
+    }
+    let mut at: Vec<usize> = copied(&roff[..nr])?;
+    let mut rows_e: Vec<usize> = zeros(roff[nr])?;
+    for e in 0..ne {
+        for q in r0[e]..=r1[e] {
+            let i = (q - q0) as usize;
+            rows_e[at[i]] = e;
+            at[i] += 1;
+        }
+    }
+    // each row's levels: its bottom and top and every corner strictly between
+    let row_of = |v: f64| -> Option<usize> {
+        let vq = (v + 0.5).floor();
+        for d in [-1.0, 0.0, 1.0] {
+            let q = vq + d;
+            if v > q - 0.5 && v < q + 0.5 && q >= q0f && q <= q1f {
+                return Some((q - q0f) as usize);
+            }
+        }
+        None
+    };
+    let mut loff: Vec<usize> = zeros(nr + 1)?;
+    for i in 0..nr {
+        loff[i + 1] = 2;
+    }
+    for &v in ya.iter().chain(yb.iter()) {
+        if let Some(i) = row_of(v) {
+            loff[i + 1] += 1;
+        }
+    }
+    for i in 0..nr {
+        loff[i + 1] += loff[i];
+    }
+    let mut lv: Vec<f64> = zeros(loff[nr])?;
+    let mut at: Vec<usize> = copied(&loff[..nr])?;
+    for i in 0..nr {
+        lv[at[i]] = (q0 + i as i64) as f64 - 0.5;
+        lv[at[i] + 1] = (q0 + i as i64) as f64 + 0.5;
+        at[i] += 2;
+    }
+    for &v in ya.iter().chain(yb.iter()) {
+        if let Some(i) = row_of(v) {
+            lv[at[i]] = v;
+            at[i] += 1;
+        }
+    }
+    let mut lcnt: Vec<usize> = zeros(nr)?;
+    for i in 0..nr {
+        let seg = &mut lv[loff[i]..loff[i + 1]];
+        seg.sort_unstable_by(|p, q| np_cmp(*p, *q));
+        let mut w = 0usize;
+        for x in 0..seg.len() {
+            if x == 0 || seg[x] != seg[w - 1] {
+                seg[w] = seg[x];
+                w += 1;
+            }
+        }
+        lcnt[i] = w;
+    }
+    let mut gstart: Vec<usize> = zeros(nr + 1)?;
+    for i in 0..nr {
+        gstart[i + 1] = gstart[i] + lcnt[i].saturating_sub(1);
+    }
+    let ng = gstart[nr];
+    let mut gn: Vec<usize> = zeros(ng + 1)?;
+    let span_of = |i: usize, e: usize, lv: &[f64]| -> (usize, usize) {
+        let (lo, hi) = ((q0 + i as i64) as f64 - 0.5, (q0 + i as i64) as f64 + 0.5);
+        let levels = &lv[loff[i]..loff[i] + lcnt[i]];
+        let (mn, mx) = (pmin(ya[e], yb[e]), pmax(ya[e], yb[e]));
+        (lower(levels, pmax(mn, lo)), lower(levels, pmin(mx, hi)))
+    };
+    let mut total = 0usize;
+    for i in 0..nr {
+        for x in roff[i]..roff[i + 1] {
+            let (f, l) = span_of(i, rows_e[x], &lv);
+            for g in f..l {
+                gn[gstart[i] + g + 1] += 1;
+                total += 1;
+            }
+        }
+    }
+    if total == 0 {
+        return empty();
+    }
+    for g in 0..ng {
+        gn[g + 1] += gn[g];
+    }
+    let mut at: Vec<usize> = copied(&gn[..ng])?;
+    // (edge, y0, y1, row, x in the middle, place): each edge with each gap it runs through, gap by gap
+    let mut pairs: Vec<(usize, f64, f64, i64, f64, usize)> = filled(total, (0, 0.0, 0.0, 0, 0.0, 0))?;
+    for i in 0..nr {
+        let s = loff[i];
+        for x in roff[i]..roff[i + 1] {
+            let e = rows_e[x];
+            let (f, l) = span_of(i, e, &lv);
+            for g in f..l {
+                let p = at[gstart[i] + g];
+                let (y0, y1) = (lv[s + g], lv[s + g + 1]);
+                let mid = (y0 + y1) / 2.0;
+                let xm = xa[e] + (xb[e] - xa[e]) * (mid - ya[e]) / (yb[e] - ya[e]);
+                pairs[p] = (e, y0, y1, q0 + i as i64, xm, p);
+                at[gstart[i] + g] += 1;
+            }
+        }
+    }
+    for g in 0..ng {
+        // (in each gap from left to right; the same spot: in the edges' order)
+        pairs[gn[g]..gn[g + 1]].sort_unstable_by(|p, q| np_cmp(p.4, q.4).then(p.5.cmp(&q.5)));
+    }
+    let (mut left, mut right): (Vec<f64>, Vec<f64>) = (zeros(total)?, zeros(total)?);
+    for (p, &(e, y0, y1, _, _, _)) in pairs.iter().enumerate() {
+        let u0 = xa[e] + (xb[e] - xa[e]) * (y0 - ya[e]) / (yb[e] - ya[e]);
+        let u1 = xa[e] + (xb[e] - xa[e]) * (y1 - ya[e]) / (yb[e] - ya[e]);
+        left[p] = pmin(u0, u1);
+        right[p] = pmax(u0, u1);
+    }
+    // (a, b, row, place) pieces
+    let mut pieces: Vec<(f64, f64, i64, usize)> = room(total)?;
+    let mut even = true;
+    if wind {
+        let (mut ins, mut outs): (Vec<usize>, Vec<usize>) = (room(total)?, room(total)?);
+        for g in 0..ng {
+            let mut run = 0i64;
+            for p in gn[g]..gn[g + 1] {
+                let e = pairs[p].0;
+                let was = run;
+                run += if yb[e] > ya[e] { 1 } else { -1 };
+                if was == 0 && run != 0 {
+                    ins.push(p);
+                } else if was != 0 && run == 0 {
+                    outs.push(p);
+                }
+            }
+        }
+        if ins.len() == outs.len() {
+            if ins.is_empty() {
+                return empty();
+            }
+            for (x, (&i, &o)) in ins.iter().zip(outs.iter()).enumerate() {
+                pieces.push((left[i], right[o], pairs[i].3, x));
+            }
+            even = false;
+        }
+    }
+    if even {
+        for g in 0..ng {
+            let mut p = gn[g];
+            while p + 1 < gn[g + 1] {
+                let x = pieces.len();
+                pieces.push((left[p], right[p + 1], pairs[p].3, x));
+                p += 2;
+            }
+        }
+        if pieces.is_empty() {
+            return empty();
+        }
+    }
+    let m = pieces.len();
+    let (mut oq, mut os, mut ot): (Vec<i64>, Vec<i64>, Vec<i64>) = (zeros(m)?, zeros(m)?, zeros(m)?);
+    let ppq = ppq as f64;
+    let (mut no, mut s) = (0usize, 0usize);
+    while s < m {
+        // merge_spans row by row
+        let mut t = s;
+        while t < m && pieces[t].2 == pieces[s].2 {
+            t += 1;
+        }
+        pieces[s..t].sort_unstable_by(|p, q| np_cmp(p.0, q.0).then(np_cmp(p.1, q.1)).then(p.3.cmp(&q.3)));
+        let first = no;
+        let mut some = false;
+        let mut x = s;
+        while x < t {
+            let (ca, mut cb) = (pieces[x].0, pieces[x].1);
+            x += 1;
+            while x < t && !(pieces[x].0 > cb) {
+                cb = pmax(cb, pieces[x].1);
+                x += 1;
+            }
+            let a = (ca * ppq + 0.5).floor() as i64;
+            let b = (cb * ppq + 0.5).floor() as i64;
+            oq[no] = pieces[s].2;
+            os[no] = a;
+            ot[no] = b;
+            some = some || b > a;
+            no += 1;
+        }
+        let mut w = first; // (a bit under a tick only if the row has nothing else)
+        for x in first..no {
+            if ot[x] > os[x] || !some {
+                oq[w] = oq[x];
+                os[w] = os[x];
+                ot[w] = ot[x].max(os[x] + 1);
+                w += 1;
+            }
+        }
+        no = w;
+        s = t;
+    }
+    oq.truncate(no);
+    os.truncate(no);
+    ot.truncate(no);
+    Ok(vec![Out::I64(oq, 0), Out::I64(os, 0), Out::I64(ot, 0)])
+}
+
+/// fastloops.cut_rows (custom.cut_out after its merged_by_key) -> how many pieces in out (room: len(s) + len(ok)).
+pub fn cut_rows(s: &[i64], e: &[i64], k: &[i64], ok: &[i64], os: &[i64], oe: &[i64], out: NdMut<i64, 2>)
+                -> i64 {
+    let (n, m, w) = (s.len(), ok.len(), out.sh[1]);
+    if e.len() != n || k.len() != n || os.len() != m || oe.len() != m || out.sh[0] != 3 || w < n + m
+        || out.d.len() < 3 * w {
+        return FAILED;
+    }
+    let (r0, rest) = out.d.split_at_mut(w);
+    let (r1, r2) = rest.split_at_mut(w);
+    let mut no = 0usize;
+    for i in 0..n {
+        let (mut a, b, key) = (s[i], e[i], k[i]);
+        let lo = ok.partition_point(|&x| x < key);
+        let f = lo + ok[lo..].partition_point(|&x| x <= key);
+        let (mut first, mut hi) = (lo, f); // (the first other on the key ending past a: bisect_right's own steps,
+        while first < hi {                 // so even backwards others land where the old way did)
+            let mid = (first + hi) / 2;
+            if a < oe[mid] {
+                hi = mid;
+            } else {
+                first = mid + 1;
+            }
+        }
+        for j in first..f {
+            let (c, d) = (os[j], oe[j]);
+            if c >= b {
+                break;
+            }
+            if d <= a {
+                continue;
+            }
+            if c > a {
+                r0[no] = a;
+                r1[no] = c;
+                r2[no] = key;
+                no += 1;
+            }
+            a = a.max(d);
+            if a >= b {
+                break;
+            }
+        }
+        if a < b {
+            r0[no] = a;
+            r1[no] = b;
+            r2[no] = key;
+            no += 1;
+        }
+    }
+    no as i64
 }
 
 /// fastloops._short_emit: row (a, b, k, t) onto out, joined to step t's last row when it touches it.

@@ -10,7 +10,7 @@ import zlib
 import numpy as np
 
 from files.lang import tr
-from files.speed import key_rows
+from files.speed import compiled, key_rows
 from files.unzip import unzip
 from notes.arc import arc_k, arc_points, ellipse_bezier
 from notes.areas import ALL_COLOURS, COLOURS, area_maps, area_map, inside_loops  # (areas coloured by hand)
@@ -1237,10 +1237,16 @@ def rows_spans(edges, q0, q1, ppq, wind=False):
     """[(pitch, start tick, end tick)] of rows q0..q1: row_spans for every row at once (the same sums, so exactly
     the same notes; row by row was most of a Nested fill's time), in ticks like find_spans. wind: filled where the
     loops wind round at all (nonzero), not even-odd."""
-    xa, ya, xb, yb = edges
+    xa, ya, xb, yb = edges[:4]
     none = []
     if q1 < q0 or not len(xa):
         return none
+    fast = compiled("rows_fill")
+    if fast is not None:  # (the same, as a compiled loop: each of 480 Nested / Ripples copies spent ~2 ms here)
+        c = np.ascontiguousarray
+        q, s, t = fast.rows_fill(c(xa, float), c(ya, float), c(xb, float), c(yb, float), int(q0), int(q1), int(ppq),
+                                 bool(wind))
+        return list(zip(q.tolist(), s.tolist(), t.tolist()))
     mn, mx = np.minimum(ya, yb), np.maximum(ya, yb)
 
     def first_row(v, below):  # the first row q with v < q + 0.5 (below) / the last with v > q - 0.5
@@ -3005,6 +3011,13 @@ def cut_out(spans, others):
     """(start, end, key) stretches with the time the others cover on the same key taken out."""
     import bisect
     ks, ss, es = merged_by_key(others)
+    fast = compiled("cut_rows") if isinstance(spans, np.ndarray) and spans.dtype == np.int64 else None
+    if fast is not None and spans.ndim == 2 and spans.shape[1] == 3:  # (the same, as a compiled loop: 480 steps
+        out = np.empty((3, len(spans) + len(ks)), np.int64)  # of Ripples / Nested spent seconds here, 11-16)
+        c = np.ascontiguousarray
+        m = fast.cut_rows(c(spans[:, 0]), c(spans[:, 1]), c(spans[:, 2]), c(ks, np.int64), c(ss, np.int64),
+                          c(es, np.int64), out)
+        return out[:, :m].T.copy()
     by_key, ends_of = {}, {}
     for k, s, e in zip(ks.tolist(), ss.tolist(), es.tolist()):
         by_key.setdefault(k, []).append((s, e))

@@ -47,6 +47,8 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   area_spots     faces.Faces.area_at: the area each spot is in (custom shapes' Fill / Spam, area colours)
   face_build     faces.Faces' build: the drawing cut into slabs at every crossing, the areas joined, their depth
   blend_heat     notes/blend_rows.heat_at: Nested Blend's heat at spots (finding each ring edge)
+  rows_fill      custom.rows_spans: closed loops' inside on key rows, in ticks (each Nested / Ripples copy)
+  cut_rows       custom.cut_out: stretches with what others cover on their key taken out
   short_pieces   nested.shortest_pieces (Nested's Shortest piece box): pieces on top, short ones merged, a heap
   band_all       nested.band_steps (Nested Even band): every step at once, key by key, a heap of the edges near
                  what each line still keeps
@@ -3405,6 +3407,275 @@ def _band_at(ax, ay, bx, by, length, y, r):
 
 
 @njit(nogil=True)
+def _first_row(v, below):
+    """custom.rows_spans' first_row: the first row q with v < q + 0.5 (below) / the last with v > q - 0.5."""
+    q = math.floor(v + 0.5)
+    if below:
+        if v < q - 0.5:
+            q -= 1
+        return q if v < q + 0.5 else q + 1
+    if v > q + 0.5:
+        q += 1
+    return q if v > q - 0.5 else q - 1
+
+
+@njit(nogil=True)
+def _lower(lv, s, t, v):
+    """How many of lv[s:t] (sorted) are below v (np.searchsorted, side left)."""
+    a, b = s, t
+    while a < b:
+        mid = (a + b) // 2
+        if lv[mid] < v:
+            a = mid + 1
+        else:
+            b = mid
+    return a - s
+
+
+@njit(nogil=True)
+def rows_fill(xa, ya, xb, yb, q0, q1, ppq, wind):
+    """custom.rows_spans (the inside of closed loops' edges, none level, on key rows q0..q1 in ticks; wind = nonzero,
+    else even-odd): the same sums in the same order. -> (row, start, end) arrays."""
+    ne = len(xa)
+    nr = q1 - q0 + 1
+    z = np.zeros(0, np.int64)
+    if nr <= 0 or ne == 0:
+        return z, z.copy(), z.copy()
+    r0 = np.empty(ne, np.int64)
+    r1 = np.empty(ne, np.int64)
+    roff = np.zeros(nr + 1, np.int64)
+    for e in range(ne):
+        mn, mx = min(ya[e], yb[e]), max(ya[e], yb[e])
+        a = int(max(_first_row(mn, True), q0))
+        b = int(min(_first_row(mx, False), q1))
+        r0[e], r1[e] = a, b
+        for q in range(a, b + 1):
+            roff[q - q0 + 1] += 1
+    for i in range(nr):
+        roff[i + 1] += roff[i]
+    if roff[nr] == 0:
+        return z, z.copy(), z.copy()
+    at = roff[:nr].copy()
+    rows_e = np.empty(roff[nr], np.int64)  # (each row's edges, in the edges' order)
+    for e in range(ne):
+        for q in range(r0[e], r1[e] + 1):
+            rows_e[at[q - q0]] = e
+            at[q - q0] += 1
+    loff = np.zeros(nr + 1, np.int64)  # (each row's levels: its bottom and top and every corner between)
+    for i in range(nr):
+        loff[i + 1] = 2
+    for side in range(2):
+        for e in range(ne):
+            v = ya[e] if side == 0 else yb[e]
+            vq = math.floor(v + 0.5)
+            for d in range(-1, 2):
+                q = vq + d
+                if v > q - 0.5 and v < q + 0.5 and q >= q0 and q <= q1:
+                    loff[int(q) - q0 + 1] += 1
+    for i in range(nr):
+        loff[i + 1] += loff[i]
+    lv = np.empty(loff[nr])
+    at = loff[:nr].copy()
+    for i in range(nr):
+        lv[at[i]], lv[at[i] + 1] = (q0 + i) - 0.5, (q0 + i) + 0.5
+        at[i] += 2
+    for side in range(2):
+        for e in range(ne):
+            v = ya[e] if side == 0 else yb[e]
+            vq = math.floor(v + 0.5)
+            for d in range(-1, 2):
+                q = vq + d
+                if v > q - 0.5 and v < q + 0.5 and q >= q0 and q <= q1:
+                    i = int(q) - q0
+                    lv[at[i]] = v
+                    at[i] += 1
+    lcnt = np.empty(nr, np.int64)
+    for i in range(nr):  # (sorted, each value once)
+        s, t = loff[i], loff[i + 1]
+        lv[s:t] = np.sort(lv[s:t])
+        w = s
+        for x in range(s, t):
+            if x == s or lv[x] != lv[w - 1]:
+                lv[w] = lv[x]
+                w += 1
+        lcnt[i] = w - s
+    gstart = np.zeros(nr + 1, np.int64)  # (each row's gaps, numbered all through)
+    for i in range(nr):
+        gstart[i + 1] = gstart[i] + max(lcnt[i] - 1, 0)
+    gn = np.zeros(gstart[nr] + 1, np.int64)
+    total = 0
+    for i in range(nr):
+        lo, hi = (q0 + i) - 0.5, (q0 + i) + 0.5
+        s = loff[i]
+        for x in range(roff[i], roff[i + 1]):
+            e = rows_e[x]
+            mn, mx = min(ya[e], yb[e]), max(ya[e], yb[e])
+            f = _lower(lv, s, s + lcnt[i], max(mn, lo))
+            l = _lower(lv, s, s + lcnt[i], min(mx, hi))
+            for g in range(f, l):
+                gn[gstart[i] + g + 1] += 1
+                total += 1
+    if total == 0:
+        return z, z.copy(), z.copy()
+    ng = gstart[nr]
+    for g in range(ng):
+        gn[g + 1] += gn[g]
+    at = gn[:ng].copy()
+    pe = np.empty(total, np.int64)
+    py0 = np.empty(total)
+    py1 = np.empty(total)
+    prow = np.empty(total, np.int64)
+    for i in range(nr):
+        lo, hi = (q0 + i) - 0.5, (q0 + i) + 0.5
+        s = loff[i]
+        for x in range(roff[i], roff[i + 1]):
+            e = rows_e[x]
+            mn, mx = min(ya[e], yb[e]), max(ya[e], yb[e])
+            f = _lower(lv, s, s + lcnt[i], max(mn, lo))
+            l = _lower(lv, s, s + lcnt[i], min(mx, hi))
+            for g in range(f, l):
+                p = at[gstart[i] + g]
+                pe[p], py0[p], py1[p], prow[p] = e, lv[s + g], lv[s + g + 1], q0 + i
+                at[gstart[i] + g] += 1
+    left = np.empty(total)
+    right = np.empty(total)
+    sgn = np.empty(total, np.int64)
+    xm = np.empty(total)
+    for p in range(total):
+        e = pe[p]
+        y0, y1 = py0[p], py1[p]
+        mid = (y0 + y1) / 2
+        xm[p] = xa[e] + (xb[e] - xa[e]) * (mid - ya[e]) / (yb[e] - ya[e])
+    for g in range(ng):  # (in each gap from left to right; the same spot: in the edges' order)
+        s, t = gn[g], gn[g + 1]
+        if t - s > 1:
+            o = np.argsort(xm[s:t], kind="mergesort")
+            pe[s:t], py0[s:t], py1[s:t], prow[s:t] = pe[s:t][o], py0[s:t][o], py1[s:t][o], prow[s:t][o]
+    for p in range(total):
+        e = pe[p]
+        y0, y1 = py0[p], py1[p]
+        u0 = xa[e] + (xb[e] - xa[e]) * (y0 - ya[e]) / (yb[e] - ya[e])
+        u1 = xa[e] + (xb[e] - xa[e]) * (y1 - ya[e]) / (yb[e] - ya[e])
+        left[p], right[p] = min(u0, u1), max(u0, u1)
+        sgn[p] = 1 if yb[e] > ya[e] else -1
+    pa = np.empty(total)
+    pb = np.empty(total)
+    pq = np.empty(total, np.int64)
+    m = 0
+    if wind:  # (in where the count leaves 0, out where it's back at 0; the n-th in with the n-th out)
+        ins = np.empty(total, np.int64)
+        outs = np.empty(total, np.int64)
+        ni = no_ = 0
+        for g in range(ng):
+            run = 0
+            for p in range(gn[g], gn[g + 1]):
+                was = run
+                run += sgn[p]
+                if was == 0 and run != 0:
+                    ins[ni] = p
+                    ni += 1
+                elif was != 0 and run == 0:
+                    outs[no_] = p
+                    no_ += 1
+        wind = ni == no_
+        if wind:
+            if ni == 0:
+                return z, z.copy(), z.copy()
+            for x in range(ni):
+                pa[m], pb[m], pq[m] = left[ins[x]], right[outs[x]], prow[ins[x]]
+                m += 1
+    if not wind:
+        for g in range(ng):
+            for p in range(gn[g], gn[g + 1] - 1, 2):
+                pa[m], pb[m], pq[m] = left[p], right[p + 1], prow[p]
+                m += 1
+        if m == 0:
+            return z, z.copy(), z.copy()
+    oq = np.empty(m, np.int64)
+    os_ = np.empty(m, np.int64)
+    ot = np.empty(m, np.int64)
+    no = 0
+    s = 0
+    while s < m:  # (merge_spans row by row)
+        t = s
+        while t < m and pq[t] == pq[s]:
+            t += 1
+        o = np.argsort(pb[s:t], kind="mergesort")
+        o = o[np.argsort(pa[s:t][o], kind="mergesort")]
+        first = no
+        some = False
+        x = 0
+        while x < t - s:
+            ca, cb = pa[s + o[x]], pb[s + o[x]]
+            x += 1
+            while x < t - s and not pa[s + o[x]] > cb:
+                cb = max(cb, pb[s + o[x]])
+                x += 1
+            a = math.floor(ca * ppq + 0.5)
+            b = math.floor(cb * ppq + 0.5)
+            oq[no], os_[no], ot[no] = pq[s], a, b
+            some = some or b > a
+            no += 1
+        w = first  # (a bit under a tick only if the row has nothing else)
+        for x in range(first, no):
+            if ot[x] > os_[x] or not some:
+                oq[w], os_[w], ot[w] = oq[x], os_[x], max(ot[x], os_[x] + 1)
+                w += 1
+        no = w
+        s = t
+    return oq[:no].copy(), os_[:no].copy(), ot[:no].copy()
+
+
+@njit(nogil=True)
+def cut_rows(s, e, k, ok, os_, oe, out):
+    """custom.cut_out after its merged_by_key: each (s, e, k) stretch, in order, with the others (ok, os_, oe:
+    sorted by key, then start, apart) on its key taken out -> how many pieces in out[0..2] (room: len(s) +
+    len(ok))."""
+    n, m = len(s), len(ok)
+    no = 0
+    for i in range(n):
+        a, b, key = s[i], e[i], k[i]
+        lo, hi = 0, m  # (the others on this key: lo .. f)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if ok[mid] < key:
+                lo = mid + 1
+            else:
+                hi = mid
+        f = lo
+        hi = m
+        while f < hi:
+            mid = (f + hi) // 2
+            if ok[mid] <= key:
+                f = mid + 1
+            else:
+                hi = mid
+        hi = f  # (the first other on the key ending past a)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if oe[mid] <= a:
+                lo = mid + 1
+            else:
+                hi = mid
+        for j in range(lo, f):
+            c, d = os_[j], oe[j]
+            if c >= b:
+                break
+            if d <= a:
+                continue
+            if c > a:
+                out[0, no], out[1, no], out[2, no] = a, c, key
+                no += 1
+            a = max(a, d)
+            if a >= b:
+                break
+        if a < b:
+            out[0, no], out[1, no], out[2, no] = a, b, key
+            no += 1
+    return no
+
+
+@njit(nogil=True)
 def _short_emit(out, no, last, a, b, k, t):
     """Row (a, b, k, t) onto out[:, :no] (grown when full), joined to step t's last row when it touches it ->
     (out, the new count)."""
@@ -4927,6 +5198,10 @@ def warm():
                np.zeros(1), 0, np.zeros(1), 0.0, np.zeros(1))
     band_rows(f1, f1, f1 + 1, f1 + 1, f1 + 1, np.full(1, 0.5), i1 * 0, i1, 1.0, i1.copy(), f1.copy(), f1.copy())
     short_pieces(z1, z1 + 9, z1, z1 + 1, z1 + 3, z1, z1 + 1, 5)
+    cut_rows(z1, z1 + 9, z1, z1, z1 + 2, z1 + 4, np.zeros((3, 2), np.int64))
+    sq = np.array([0.0, 1.0])
+    rows_fill(sq, np.array([0.0, 3.0]), sq, np.array([3.0, 0.0]), 0, 3, 960, False)
+    rows_fill(sq, np.array([0.0, 3.0]), sq, np.array([3.0, 0.0]), 0, 3, 960, True)
     band_all(f1, f1, f1 + 1, f1 + 1, f1 + 1, np.full(1, 0.5), np.zeros(1), z1, np.array([0, 1], np.int64),
              np.zeros(1), np.ones(1), np.full(1, 0.25), 960, 1)
     field_dist(f1, f1, f1 + 1, f1 + 1, f1, f1, 1.0, 24, np.zeros((1, 1)))
