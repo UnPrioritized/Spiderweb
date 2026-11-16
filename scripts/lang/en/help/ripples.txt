@@ -13,7 +13,7 @@ Where the rings of two sources meet, the smaller ring wins, so each source takes
 
 Notes: Fill makes one long note per key in each ring. Spam chops the whole inside into notes of the spam gate, and each note takes the colour of the ring its middle is in. The Normal / Outline dropdown works like Fill's and Spam's.
 
-Steps: how many rings, counting the ones inside the drawn sources.
+Steps: how many rings (up to 480), counting the ones inside the drawn sources.
 
 Colours: how many channels the rings take turns over. The ring just inside each drawn source is always the first colour.
 

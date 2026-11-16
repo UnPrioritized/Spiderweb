@@ -33,7 +33,7 @@ from notes.paths import pitch_of, top_key
 INSIDES = ("rings", "empty", "plain")
 RIPPLES_DEFAULTS = {"steps": 60, "grow": 5.0, "auto": True, "edge": True, "turn": 0.0, "spacing": 0, "colours": 4,
                     "skip": False, "inside": "rings", "trim": True}
-MOST_STEPS = 120
+MOST_STEPS = 480  # (user 2026-11-16: was 120, the same top as Nested)
 MOST_COLOURS = 16  # (16 with "Use channel 10": the panel allows areas.most_colours)
 MOST_GROW = 50.0  # (5000 %)
 RAYS = 720  # directions a source's reach is measured in (Auto)

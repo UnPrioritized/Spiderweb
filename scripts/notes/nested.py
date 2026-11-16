@@ -37,7 +37,7 @@ from notes.shrink import band_all_rows, field, inner_rows, proportion
 WAYS = ("scale", "band", "blend")
 NESTED_DEFAULTS = {"way": "scale", "steps": 8, "last": 0.0, "spacing": 0, "turn": 0.0, "colours": 4, "skip": False,
                    "mix": 1.0, "angle": 0.0, "morph": False, "shortest": 0}
-MOST_STEPS = 60
+MOST_STEPS = 480  # (user 2026-11-16: was 60; more than 480 = too much)
 MOST_SHORTEST = 10 ** 9  # (ticks)
 MORPH_POINTS = 200  # points spread round every piece of an outline while morphing (at least)
 MOST_POINTS = 2000  # (more than that: spread evenly, corners may round off a little)

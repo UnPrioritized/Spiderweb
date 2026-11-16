@@ -8,7 +8,7 @@ The Normal / Outline dropdown next to them works like Fill's and Spam's: with Ou
 
 ## Nested
 
-The inside is filled with copies of the shape, each one inside the one before. Steps is how many copies, the shape itself counts as the first one. The last copy is drawn on top.
+The inside is filled with copies of the shape, each one inside the one before. Steps is how many copies (up to 480), the shape itself counts as the first one. The last copy is drawn on top.
 [clip:nested-scaling]
 
 Shrink by picks how the copies are made:
