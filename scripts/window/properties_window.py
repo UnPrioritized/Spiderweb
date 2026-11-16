@@ -27,7 +27,7 @@ from notes.fx import is_page, pages
 from notes.recolour import (KEEP, MODES, PAGE, clean_recolour, edited_step, new_seed, ordered, order_of as rc_order,
                             page_removed, shape_order, shape_step_removed, stirs_of, tags_of as rc_tags, turned_map)
 from window import look
-from window.edit_line import names_line, tag_name
+from window.edit_line import is_shape_tag, names_line, tag_name
 from window.props_text import (LIKE_KEYS, MADE_BY, channel_text, clumps_hidden, colour_removed, colours_text, fill_text,
                               glue_part_removed, is_custom, kind_text, made_like, made_text, number_of, place_in,
                               removed, settle_steps, step_keys, with_number)  # (moved)
@@ -585,6 +585,9 @@ class PropertiesWindow(tk.Toplevel):
                     order.insert(order.index(prev) + 1 if prev is not None else 0, k)
                     where[k] = [(i, sh, t)]
                 prev = k
+        # (Stir tabs set to Shape run before every step: listed at the top, PLAN.md "Deform shapes" stage C)
+        self.shape_keys = {k for k in order if is_shape_tag(where[k][0][1], where[k][0][2])}
+        order = [k for k in order if k in self.shape_keys] + [k for k in order if k not in self.shape_keys]
         return [(k, where[k]) for k in order]
 
     def sync_steps(self, picks):
@@ -912,11 +915,18 @@ class PropertiesWindow(tk.Toplevel):
         keys = [x["key"] for x in self.rows]
         key = keys.pop(a)
         keys.insert(b, key)
+        shapes = getattr(self, "shape_keys", set())
+        if key in shapes:  # (a Shape tab always runs first: it stays at the top)
+            return self.say(tr("props.shape_first"))
         targets, left = self.same_list(r)
         own = self.keys_of[targets[0][0]]
         mine = set(own)
         ra = own.index(key)
-        rb = [k for k in keys if k in mine].index(key)
+        # (where it lands among the steps that aren't Shape tabs, as listed; then that place in the real order)
+        p = [k for k in keys if k in mine and k not in shapes].index(key)
+        rest = [k for k in own if k != key]
+        plain = [k for k in rest if k not in shapes]
+        rb = rest.index(plain[p]) if p < len(plain) else len(rest)
         if ra == rb:
             return self.say(tr("props.move_nothing") if left else "")
         news = []

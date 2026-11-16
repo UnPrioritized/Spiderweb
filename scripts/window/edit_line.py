@@ -36,6 +36,15 @@ def step_name(rc, kind, n=0, sh=None):
     return tr(kind + ".title")
 
 
+def is_shape_tag(sh, tag):
+    """Whether shape sh's step tag (kind, n) is a Stir tab set to Shape (it runs before every step)."""
+    if tag[0] != "stir":
+        return False
+    from notes.recolour import clean_recolour, stirs_of
+    tabs = stirs_of(clean_recolour(sh.get("recolour")) or {})
+    return tag[1] < len(tabs) and tabs[tag[1]]["moves"] == "shape"
+
+
 def tag_name(sh, tag):
     """The name of shape sh's step tag (kind, n) (notes/steps.py) as the user sees it: a colour effect (step_name),
     a note tool page ("Claw 2"), a flip / turn / velocities / glue after a page, Glue, Gate aware flip, Sustain,

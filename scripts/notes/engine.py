@@ -1430,15 +1430,37 @@ def shape_tabs_done(sh, ppq, keys, get):
     from notes.recolour import colour_box
     box, own = colour_box(notes, rule, free_box(plain, notes, get, keys))
     got = bent_shape(out, tabs, rule, box, own, ppq)
-    if got != PULL:
-        return got if got is not None else out
-    notes, tracks = get(dict(plain, _free=True) if "pts" in plain else plain)  # (past the edges too: cut after)
+    if got is None:
+        return out
     benders = [StirBend(st, rule, box, own, ppq) for st in tabs]
 
     def look(t, k):  # (the last tab first: tab 2 bent what tab 1 left)
         for b in reversed(benders):
             t, k = b.look_tk(t, k)
         return t, k
+    if got != PULL:
+        # (COLOURS BEND TOO, user 2026-11-17, a tick per tab, on by default: each note of the bent shape takes the
+        # colour of the note found where the bend brings it from in the shape before, so a Colours cycle / drawn
+        # areas keep their look instead of being laid again on the new outline. Off = made on the bent shape)
+        if not any(st["bend_colours"] for st in tabs):
+            return got
+        before = get(plain)[1]
+        if before is None or not len(before):  # (one colour: nothing to carry)
+            return got
+        from notes.recolour import nearest
+        from notes.steps import COLOURS
+        bare = without_recolour(got)
+        if bare.get("off"):  # (the colour steps' switches go with them)
+            bare["off"] = [o for o in bare["off"] if o[0] not in COLOURS] or None
+            if bare["off"] is None:
+                del bare["off"]
+        notes, tracks = get(bare)
+        if len(notes):
+            t, k = look((notes[:, 0] + notes[:, 1]) / 2, notes[:, 2].astype(np.float64))
+            tracks = np.asarray(before)[nearest(get(plain)[0], t, k, own=False)]
+        return _rest_coloured(sh, out, rest, notes, tracks, ppq)
+    notes, tracks = get(dict(plain, _free=True) if "pts" in plain else plain)  # (past the edges too: cut after)
+
     def within(t, k):
         ok = benders[0].within(t, k)
         for b in benders[1:]:
@@ -1450,6 +1472,11 @@ def shape_tabs_done(sh, ppq, keys, get):
         notes = notes[keep]
         notes[:, 0] = np.maximum(notes[:, 0], 0)
         tracks = tracks[keep] if tracks is not None else None
+    return _rest_coloured(sh, out, rest, notes, tracks, ppq)
+
+
+def _rest_coloured(sh, out, rest, notes, tracks, ppq):
+    """shape_tabs_done's notes made there (pulled / colours carried) after the colour steps left (rest)."""
     if rest and is_recoloured(out):
         held_ = sustain_on(sh) or sh.get("held") is True or keeps_laps(sh) or sh.get("_sus") is True
         gate = is_pasted_flipped(sh) or is_gate_flipped(sh) or sh.get("_gate") is True

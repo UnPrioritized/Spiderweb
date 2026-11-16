@@ -365,7 +365,14 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         """Moves: Colours / Shape at the top (PLAN.md "Deform shapes", user 2026-11-16: one choice per tab, no
         window of its own; Shape = the tab bends the shape itself, notes/shape_bend.py)."""
         word = ttk.Label(form, text=tr("stir.moves"))
-        self._put(None, (1, word), (2, self._pick(form, "moves", STIR_MOVES, word), 2), pady=0)
+        # (Colours bend too, user 2026-11-17: a tick in Stir / Warp / Liquify, on by default; live on Shape tabs)
+        self.bend_colours = tk.BooleanVar(value=True)
+        self.bend_colours_tick = ttk.Checkbutton(
+            form, text=tr("stir.bend_colours"), variable=self.bend_colours,
+            command=lambda: self.set_stir("bend_colours", bool(self.bend_colours.get())))
+        Tooltip(self.bend_colours_tick, tr("stir.bend_colours_tip"))
+        self._put(None, (1, word), (2, self._pick(form, "moves", STIR_MOVES, word)), (3, self.bend_colours_tick, 2),
+                  pady=0)
 
     def _build_knobs(self, form):
         """Turn / Twist / Bulge knobs with their boxes, and At the edges + Bend's Smooth corners beside them."""
@@ -1165,6 +1172,10 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             b["shown"] = text
             live = key not in second or any(s[second[key]] for s in sts)
             b["entry"].config(state="normal" if on and live else "disabled")
+        bends_ = {s["bend_colours"] for s in sts if s["moves"] == "shape"} or {True}
+        self.bend_colours.set(bends_ == {True})
+        self.bend_colours_tick.state(["alternate" if len(bends_) > 1 else "!alternate",
+                                      "!disabled" if on and any(s["moves"] == "shape" for s in sts) else "disabled"])
         outs = {s["bulge_out"] for s in sts}
         self.bulge_out.set(outs == {True})
         live = any(s["bulge"] and not (s["reach"] is not None and s["area_bulge"]) for s in sts)
