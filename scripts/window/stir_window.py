@@ -7,7 +7,7 @@ piano roll while this window is open (roll_centre.py)."""
 
 import math
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, simpledialog, ttk
 
 import numpy as np
 
@@ -17,10 +17,11 @@ from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_ST
                             MOST_RIPPLE, MOST_RIPPLE_LEN, MOST_SKEW, MOST_SLICES, MOST_STIRS, MOST_WRING, RIPPLE_KINDS,
                             ROUND_EDGES, bends, flip_of_matters, order_of,
                             MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
-                            centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, size_scale,
-                            stir_removed, stir_stack, stirs_of)
+                            centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, one_stir,
+                            size_scale, stir_removed, stir_stack, stirs_of)
 from roll.roll_live import STROKE_TOOLS
 from window import look
+from window import stir_presets as sp
 from window.drawer import library_lists, shape_path
 from window.edit_line import EditLine
 from window.shares_window import AngleKnob, HeldKnobs
@@ -123,6 +124,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         # (cut with "…" + the whole name in a tip: a long name never makes the window wider, hunt 11-05 7)
         self.what = ShortLabel(box, text="", foreground=look.HINT)
         self.what.pack(anchor="w", fill="x")
+        self._build_presets(box)
         self._build_tabs(box)
         self._build_draw_bar(box)
         # (PLAN A, user 2026-11-05: ONE grid, so labels, boxes and buttons line up with the rows above and below;
@@ -147,6 +149,125 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         app.centre_first = "stir"  # (its dots win over Clumps' on one spot: roll_centre.centre_boxes)
         self.bind("<FocusIn>", lambda e: setattr(app, "centre_first", "stir"), add="+")
         self.deiconify()
+
+    def _build_presets(self, box):
+        """The presets row above the tabs (user 2026-11-16): the list, Save…, Delete, "Save all tabs"."""
+        row = ttk.Frame(box)
+        row.pack(anchor="w", fill="x", pady=(6, 0))
+        ttk.Label(row, text=tr("stir.preset")).pack(side="left")
+        self.preset_box = name_list(ttk.Combobox(row, state="readonly", width=22,
+                                                 postcommand=self.fill_presets))
+        self.preset_box.pack(side="left", padx=(6, 0))
+        self.preset_box.bind("<<ComboboxSelected>>", lambda e: self.on_preset())
+        Tooltip(self.preset_box, tr("stir.preset_tip"))
+        self.preset_save = ttk.Button(row, text=tr("stir.preset_save"), command=self.save_preset)
+        self.preset_save.pack(side="left", padx=(6, 0))
+        Tooltip(self.preset_save, tr("stir.preset_save_tip"))
+        self.preset_del = ttk.Button(row, text=tr("stir.preset_delete"), command=self.delete_preset)
+        self.preset_del.pack(side="left", padx=(4, 0))
+        Tooltip(self.preset_del, tr("stir.preset_delete_tip"))
+        # (default off, user; remembered while Spiderweb runs)
+        self.all_tabs = tk.BooleanVar(value=getattr(self.app, "stir_preset_all", False))
+        tick = ttk.Checkbutton(row, text=tr("stir.preset_all"), variable=self.all_tabs,
+                               command=lambda: setattr(self.app, "stir_preset_all", self.all_tabs.get()))
+        tick.pack(side="left", padx=(8, 0))
+        Tooltip(tick, tr("stir.preset_all_tip"))
+        self.preset_tick = tick
+        self.presets = sp.load_presets()
+        self.preset_shown = None  # (the preset the box names: the shown tab(s) are it)
+
+    def fill_presets(self):
+        """The list as the file has it now, newest first."""
+        self.presets = sp.load_presets()
+        set_names(self.preset_box, [], [sp.preset_label(p) for p in reversed(self.presets)])
+
+    def found_preset(self, tgts):
+        """The newest preset the shown tab (and the ones after it, for a preset of several) of EVERY selected shape
+        is, or None."""
+        rcs = [clean_recolour(t.get("recolour")) for t in tgts]
+        if not rcs or self.fresh:
+            return None
+        for p in reversed(self.presets):
+            want = [full_stir(s) for s in p["stirs"]]
+            if all(sp.preset_tabs(rc, self.tab, len(want)) == want for rc in rcs):
+                return p
+        return None
+
+    def sync_presets(self, tgts):
+        on = bool(tgts) and not self.drawing
+        p = self.preset_shown = self.found_preset(tgts) if on else None
+        self.preset_box.set(sp.preset_label(p) if p else tr("stir.preset_none") if self.presets else
+                            tr("stir.preset_empty"))
+        self.preset_box.config(state="readonly" if on and self.presets else "disabled")
+        self.preset_save.state(["!disabled" if on else "disabled"])
+        self.preset_tick.state(["!disabled" if on else "disabled"])
+        self.preset_del.state(["!disabled" if on and p else "disabled"])
+
+    def on_preset(self):
+        """A preset picked: its stirs in place of the shown tab on every selected shape (one undo step)."""
+        unhighlight(self.preset_box)
+        k = name_index(self.preset_box)
+        names = list(reversed(self.presets))
+        if self.drawing or not 0 <= k < len(names):
+            return self.sync()
+        p = names[k]
+        tgts = self.targets()
+        i, n = self.tab, len(p["stirs"])
+        if any(sp.tab_count_after(clean_recolour(t.get("recolour")), i, n) > MOST_STIRS for t in tgts):
+            messagebox.showinfo(tr("stir.preset"), tr("stir.preset_too_many", name=p["name"], n=n, most=MOST_STIRS),
+                                parent=self)
+            return self.sync()
+        self.wheel = None
+        for b in self.boxes.values():  # (half-typed numbers thrown away, like Reset)
+            if b["var"].get() != b["shown"]:
+                b["var"].set(b["shown"])
+                good(b["entry"])
+        # (the tabs after it move along; the shown tab's remembered area forgotten: the preset brings its own)
+        self.area_mem = {t + (n - 1 if t > i else 0): m for t, m in self.area_mem.items() if t != i}
+        self.app.change_recolour(lambda old, sh: sp.with_preset(old, i, p["stirs"], stirred_rc),
+                                 tr("stir.undo_preset", name=p["name"]), own_order=True)
+        self.fresh = False
+        self.sync()
+
+    def save_preset(self):
+        """The shown tab's stir (every tab with "Save all tabs") kept as a preset under a name (asked)."""
+        tgts = self.targets()
+        if not tgts or self.drawing:
+            return
+        self.take_typing()
+        rcs = [clean_recolour(t.get("recolour")) for t in tgts]
+        if self.all_tabs.get():
+            stacks = [stirs_of(rc) or [full_stir(None)] for rc in rcs]
+        else:
+            stacks = [[stir_at(rc, self.tab)] for rc in rcs]
+        if any(s != stacks[0] for s in stacks):
+            messagebox.showinfo(tr("stir.preset_save_title"), tr("stir.preset_differ"), parent=self)
+            return
+        stirs = [one_stir(s) or {} for s in stacks[0]]
+        name = self.preset_shown["name"] if self.preset_shown else ""
+        while True:
+            name = simpledialog.askstring(tr("stir.preset_save_title"), tr("stir.preset_save_prompt"), parent=self,
+                                          initialvalue=name)
+            if not name or not name.strip():
+                return
+            name = name.strip()
+            self.presets = sp.load_presets()
+            if not any(sp.same_name(p, name) for p in self.presets) or messagebox.askyesno(
+                    tr("stir.preset_save_title"), tr("stir.preset_replace", name=name), parent=self):
+                break
+        if sp.change_presets(name, stirs, self):
+            self.presets = sp.load_presets()
+        self.sync()
+
+    def delete_preset(self):
+        """The preset the box names deleted from the list (asked first; the stirs on the shapes stay)."""
+        p = self.preset_shown
+        if not p or not messagebox.askyesno(tr("stir.preset_delete_title"), tr("stir.preset_delete_ask",
+                                                                              name=p["name"]), parent=self):
+            return
+        if sp.change_presets(p["name"], None, self):
+            self.presets = sp.load_presets()
+        self.sync()
 
     def _build_tabs(self, box):
         """The Stir n tabs row with its "+" (and a × per tab, sync)."""
@@ -836,6 +957,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         held = self.held_knob()
         tgts = self.targets()
         self.sync_tabs(tgts)
+        self.sync_presets(tgts)
         sts = self.stirs()
         self.what.config(text=tr("stir.nothing") if not tgts else
                          tr("stir.shape", name=app.shape_label(tgts[0])) if len(tgts) == 1 else

@@ -478,15 +478,17 @@ class RecolourPanel:
                 what == "mode" and mode is not None:
             self.tips.show("recolour", wait=True)  # (the first time: what it does)
 
-    def change_recolour(self, changed, name, push=True):
+    def change_recolour(self, changed, name, push=True, own_order=False):
         """Each selected shape's Recolour = changed(its old one, clean; the shape); one undo step named name (push
-        False: part of the step taken before). False when nothing changed."""
+        False: part of the step taken before; own_order: changed wrote the order of the steps itself, e.g. a Stir
+        preset's tabs in the shown tab's place). False when nothing changed."""
         tgts = self.recolour_targets()
         olds = [clean_recolour(t.get("recolour")) for t in tgts]
         new = []
         for o, t in zip(olds, tgts):
             c = changed(o, t)
-            new.append(ordered(o, clean_recolour(c)) if c else None)  # (new colour steps at the end of the order)
+            c = clean_recolour(c) if c else None
+            new.append(c if own_order or not c else ordered(o, c))  # (new colour steps at the end of the order)
         if all(o == n for o, n in zip(olds, new)):
             self.sync_recolour()
             return False
