@@ -29,8 +29,8 @@ DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a do
 
 SHIFT, CTRL = 0x1, 0x4
 MOD_KEYS = ("shift_l", "shift_r", "control_l", "control_r")
-STICK_RANK = {"point": 5, "cross": 4, "two": 3, "on": 2, "rest": 1, "line": 0}  # (moving a stroke: on / two / rest
-# = its line)
+STICK_RANK = {"point": 5, "cross": 4, "two": 3, "on": 2, "rest": 1, "grid": 0.5, "line": 0}  # (moving a stroke:
+# on / two / rest = its line; grid = where a line crosses a grid line)
 GUIDE_REACH = 6 * REACH  # pixels: a circle this near to sticking shows where it would touch (dotted)
 DRAW_TOOLS = ("line", "poly", "curve", "arc", "square", "circle", "slice")  # (the ones whose points stick)
 

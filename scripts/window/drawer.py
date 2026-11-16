@@ -409,7 +409,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
             extra_pts = draft["pts"][:1]
         extra_lines = extra_lines + self.mirror_lines()
         return self.stick_targets(frozenset(skip), frozenset(skip_pts)).find(
-            x, y, self.stick_view(), REACH * self.scale, extra_pts, extra_lines)
+            x, y, self.stick_view(), REACH * self.scale, extra_pts, extra_lines, grid=int(self.grid_n.get()))
 
     def circle_targets(self):
         """stick_targets for the Circle tool: the mirror lines count too (it rests on them, touching its copy)."""
@@ -499,7 +499,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, ScrollingSide,
                 only = targets.near((u + du, v + dv), reach) if len(keys) > 8 else None  # (many: only what's near,
                 if only is not None and not (only[0] or only[1]):  # speed)
                     continue
-                got = targets.find(ox + (u + du) * k, oy - (v + dv) * k, view, REACH * self.scale, only=only)
+                got = targets.find(ox + (u + du) * k, oy - (v + dv) * k, view, REACH * self.scale, only=only,
+                                   grid=int(self.grid_n.get()))
                 if got and got[0] == "line" and st["kind"] == "ellipse":
                     continue  # (its left / right / top / bottom on a slanted line = crossing it: its line rests)
                 rank = got and (STICK_RANK[got[0]], -got[2])  # (a point first, then a crossing, then a line; nearest)

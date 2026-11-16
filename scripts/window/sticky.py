@@ -1,6 +1,6 @@
 """Sticky lines in the drawer: a point being drawn or dragged sticks to another stroke's point, to where two strokes
-cross, or anywhere along a stroke's line (in that order, the nearest within REACH pixels). Always on; Shift = free
-(Drawer.event_pt). Sticking, not glue: moving that line later leaves the point where it is.
+cross, where a stroke's line crosses a grid line, or anywhere along a stroke's line (in that order, the nearest
+within REACH pixels). Always on; Shift = free (Drawer.event_pt). Sticking, not glue: moving that line later leaves the point where it is.
 
 The lines are the strokes' short straight pieces Fill / Spam see (custom.stroke_points), not the perfect curve, and
 stuck points aren't rounded: a point stuck to a line is ON it exactly, so it counts as touching (no red dot, no
@@ -124,10 +124,12 @@ class Targets:
                     ss |= got[1]
         return sorted(ps), sorted(ss)
 
-    def find(self, x, y, view, reach, extra_pts=(), extra_lines=(), only=None):
-        """Where screen spot (x, y) sticks: (kind "point" / "cross" / "line", (u, v), pixels away) or None.
+    def find(self, x, y, view, reach, extra_pts=(), extra_lines=(), only=None, grid=None):
+        """Where screen spot (x, y) sticks: (kind "point" / "cross" / "grid" / "line", (u, v), pixels away) or None.
         view = (k, ox, oy): on screen x = ox + u * k, y = oy - v * k. extra_pts / extra_lines: the stroke being
-        drawn's own (polylines as point lists). only: (point numbers, line numbers) to look at (near())."""
+        drawn's own (polylines as point lists). only: (point numbers, line numbers) to look at (near()). grid =
+        the board's squares across (n): before sliding anywhere along a line, a spot where that line crosses a
+        grid line (user 2026-11-16: near a line the grid was never used)."""
         k, ox, oy = view
         mp, ms = (slice(None), slice(None)) if only is None else only
         pts = np.concatenate([self.pts[mp], np.asarray(extra_pts, float).reshape(-1, 2)])
@@ -158,6 +160,10 @@ class Targets:
         got = self.crossing(seg[near], owner[near], index[near], x, y, view, reach)
         if got:
             return got
+        if grid:
+            got = self.on_grid(seg[near], x, y, view, reach, grid)
+            if got:
+                return got
         i = near[0]
         a, b = seg[i, :2], seg[i, 2:]
         u, v = a + t[i] * (b - a)  # (the same share along as on screen: the board's scale is the same both ways)
@@ -478,6 +484,34 @@ class Targets:
         if far > reach or (len(cur) == 2 and np.hypot(touch[0][0] - touch[1][0], touch[0][1] - touch[1][1]) * k < 3):
             return None
         return (float(D[0]), float(D[1])), far, touch, where, [int(self.owner[idx[c]]) for c in cur]
+
+    @staticmethod
+    def on_grid(seg, x, y, view, reach, n):
+        """The nearest spot within reach where one of these pieces crosses a grid line (n squares across the
+        board), on the piece the way a "line" spot is; a line through a grid point lands on it (both crossings
+        are there)."""
+        k, ox, oy = view
+        mu, mv, r = (x - ox) / k, (oy - y) / k, reach / k
+        best = None
+        for c, m in ((0, mu), (1, mv)):  # (lines across: u = i / n, then up: v = j / n)
+            vals = np.arange(np.ceil((m - r) * n), np.floor((m + r) * n) + 1) / n
+            if not len(vals):
+                continue
+            a, b = seg[:, c], seg[:, c + 2]
+            d = b - a
+            safe = np.where(d == 0, 1, d)
+            t = (vals[None, :] - a[:, None]) / safe[:, None]
+            ok = (d[:, None] != 0) & (t >= 0) & (t <= 1)
+            if not ok.any():
+                continue
+            s, j = np.nonzero(ok)
+            t = t[s, j]
+            p = seg[s, :2] + t[:, None] * (seg[s, 2:] - seg[s, :2])  # (made like a "line" spot: ON the piece)
+            dist = np.hypot(ox + p[:, 0] * k - x, oy - p[:, 1] * k - y)
+            i = int(np.argmin(dist))
+            if dist[i] <= reach and (best is None or dist[i] < best[2]):
+                best = "grid", (float(p[i, 0]), float(p[i, 1])), float(dist[i])
+        return best
 
     @staticmethod
     def crossing(seg, owner, index, x, y, view, reach):

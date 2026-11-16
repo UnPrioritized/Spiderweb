@@ -2,7 +2,7 @@ The drawer ([page:custom|Custom shape] → Drawer…) is where you draw shapes f
 
 Grid (top bar) sets how many grid squares the board has across (4 to 64). Clear removes everything drawn (Ctrl+Z brings it back). Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes. Help (F1) opens these pages.
 
-Points stick to other strokes when the mouse is near them: to their points first, then to where two lines cross, then anywhere along a line (a purple mark shows where). A point stuck to a line is exactly on it, so the outline counts as closed there. Away from lines, points snap to the grid. Shift draws freely.
+Points stick to other strokes when the mouse is near them: to their points first, then to where two lines cross, then to where a line crosses the grid (a line through a grid point lands on it), then anywhere along a line (a purple mark shows where). A point stuck to a line is exactly on it, so the outline counts as closed there. Away from lines, points snap to the grid. Shift draws freely.
 
 Mirror (next to Grid): every new stroke gets a mirrored copy across the middle of the board, shown while you draw. Horizontal mirrors left ↔ right, Vertical top ↔ bottom, Both into all four corners. The board's grey side is where the copies go, and a blue-green line marks the middle. Points stick to that line (on the grid along it), and halves whose ends meet on it join up into one outline (a half heart becomes a whole closed heart).
 
