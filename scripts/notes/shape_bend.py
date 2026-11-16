@@ -19,6 +19,7 @@ from notes import recolour as rc
 
 EPS = 1e-10  # (unit box: a point counts as found when look() brings it back this near)
 STEPS = 40  # (Newton steps at most)
+FAST_LEAST = 2048  # (points: fewer = the NumPy look, no compiled call set-up)
 FOLD = 1e-5  # (a point that stays farther from home than this: the bend folds there, two places look at one spot or
 # none does; the lines can't show that, so the notes are pulled() instead)
 
@@ -135,6 +136,28 @@ def shape_only(r):
     return out
 
 
+def grown_reach(sh, r):
+    """A shape's drawn reach r (first beat, lowest key, highest key, last beat) grown to where its Shape tabs may take
+    notes (engine.past_edges: notes bent past an edge are kept / wrapped like any): every bend stays inside the
+    circle round its Centre point through the box's farthest corner (StirBend.within), a ripple's height wider.
+    Measured on the drawn box (the notes' box is about it); Round as seen / turned looks: twice as far, to be safe."""
+    if r is None or not isinstance(sh.get("recolour"), dict):
+        return r
+    tabs = shape_tabs(sh["recolour"], sh.get("off"))
+    if not tabs:
+        return r
+    x0, x1, y0, y1 = 0.0, 1.0, 0.0, 1.0
+    for st in tabs:
+        cx, cy = (v / 100 for v in st["centre"])
+        far = max(math.hypot(X - cx, Y - cy) for X in (0, 1) for Y in (0, 1))
+        if st["spin"] or st["round"]:
+            far *= 2
+        far += abs(st["ripple"]) / 100 * (2 if st["spin"] else 1)
+        x0, x1, y0, y1 = min(x0, cx - far), max(x1, cx + far), min(y0, cy - far), max(y1, cy + far)
+    w, h = max(r[3] - r[0], 1e-9), max(r[2] - r[1], 1e-9)
+    return (min(r[0], r[0] + x0 * w), min(r[1], r[1] + y0 * h), max(r[2], r[1] + y1 * h), max(r[3], r[0] + x1 * w))
+
+
 class StirBend:
     """One Shape tab, forwards: points (tick, key) -> where the bend puts them (floats).
     st: the tab (filled in); r: the Recolour (its frame / ppq); box, own: recolour.colour_box's, of the notes before
@@ -154,6 +177,7 @@ class StirBend:
         self.plain = dict(st, kaleido=0)  # (the Kaleidoscope's slices are repeated afterwards: kaleido_strokes)
         self._seed = None
         self.worst = 0.0
+        self._numbers = {}  # (id(stir) -> (it, stir_numbers) for the compiled look)
 
     # -- the colour box both ways (a flipped shape's colours count mirrored back: recolour.places_of)
     def to_unit(self, t, k):
@@ -183,6 +207,21 @@ class StirBend:
     # -- Stir's own maths, backwards (stir_from without At the edges / Squeeze)
     def look(self, x, y, st=None):
         st, (cx, cy), k, (rx, ry) = st or self.plain, self.c, self.k, self.rr
+        fast = rc.loops() if np.size(x) >= FAST_LEAST else None
+        if fast and not (st["reach"] and st["area"] == rc.DRAWN) and not rc.bulge_out_on(st):
+            # (Stir's own compiled walk, files/fastloops.stir_spots: the very same numbers; "wrap" = neither
+            # tiled nor clipped, no squeeze = this look)
+            got = self._numbers.get(id(st))
+            if got is None or got[0] is not st:
+                got = self._numbers[id(st)] = (st, rc.stir_numbers(dict(st, edge="wrap", squeeze=False), self.c, k,
+                                                                    self.rr))
+            fp, ip = got[1]
+            shape = np.shape(x)
+            x = np.ascontiguousarray(np.ravel(x), np.float64)
+            y = np.ascontiguousarray(np.ravel(y), np.float64)
+            ox, oy = np.empty_like(x), np.empty_like(y)
+            fast.stir_spots(x, y, fp, ip, ox, oy)
+            return ox.reshape(shape), oy.reshape(shape)
         reach = st["reach"]
         if st["bulge"]:
             x, y = rc.bulged(x, y, st, (cx, cy), k)
@@ -379,6 +418,136 @@ def _bent_shape(sh, tabs, r, box, own, ppq):
     return None
 
 
+# BENT NOTES (stage D: pasted / plain notes; planned-features "EACH NOTE A TINY BOX", user 2026-11-16): each note is a
+# box [start, end] x [key - 1/2, key + 1/2]. Its middle line is chopped where the bend curves it (a piece's bent
+# middle off the straight between its bent ends by more than CHOP_KEYS of a key or CHOP_PART of a beat = cut in
+# two, each half checked again; a note the bend doesn't curve stays whole). Each piece's 4 corners are bent; every
+# key row's middle line crossing the bent box = that note's new piece on that row (own velocity / colour / track).
+# Touching notes share corners = bend the same = no new gaps or overlaps. Pieces under 1 tick dropped.
+CHOP_KEYS = 0.25  # (my pick: a quarter key off the straight)
+CHOP_PART = 32  # (or 1/32 beat sideways)
+CHOP_DEPTH = 24  # (halvings at most: 2^24 pieces of a note; pieces under 1 tick stop sooner)
+
+
+def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None):
+    """notes (n, 4+: start, end, key, velocity, ...) + tracks (or None) bent forwards by bend_tk(t, k) -> (t, k)
+    (floats; Folded when it can't): the new notes (sorted by start, key) and their tracks. look_back(t, k): the bend
+    backwards; a hole inside a key row whose middle comes from inside a note is filled from that note (two rows'
+    boxes chopped at different places leave a sliver between their bent sides)."""
+    out, tr = _note_boxes_bent(notes, tracks, bend_tk, ppq)
+    if look_back is None or len(out) < 2:
+        return out, tr
+    return _holes_filled(np.asarray(notes, np.int64), tracks, out, tr, look_back)
+
+
+def _holes_filled(notes, tracks, out, tr, look_back):
+    o = np.lexsort((out[:, 0], out[:, 2]))
+    out = out[o]
+    tr = np.asarray(tr)[o] if tr is not None else None
+    run = _running_max(out[:, 1], out[:, 2])
+    hole = np.nonzero((out[1:, 2] == out[:-1, 2]) & (out[1:, 0] > run[:-1]))[0]
+    if not len(hole):
+        return _by_start(out, tr)
+    a, b = run[hole], out[hole + 1, 0]
+    t, k = look_back((a + b) / 2, out[hole, 2].astype(np.float64))
+    src = _finder(notes)(t, k)
+    fill = src >= 0
+    if not fill.any():
+        return _by_start(out, tr)
+    j = src[fill]
+    add = notes[j].copy()
+    add[:, 0], add[:, 1], add[:, 2] = a[fill], b[fill], out[hole[fill], 2]
+    out = np.concatenate((out, add))
+    if tr is not None:
+        tr = np.concatenate((tr, np.asarray(tracks)[j]))
+    return _by_start(out, tr)
+
+
+def _by_start(out, tr):
+    o = np.lexsort((out[:, 2], out[:, 0]))
+    return out[o], (tr[o] if tr is not None else None)
+
+
+def _note_boxes_bent(notes, tracks, bend_tk, ppq):
+    notes = np.asarray(notes, np.int64)
+    if not len(notes):
+        return notes, tracks
+    src = np.arange(len(notes))
+    s = notes[:, 0].astype(np.float64)
+    e = notes[:, 1].astype(np.float64)
+    tol_t = max(ppq / CHOP_PART, 1.0)
+    done = []
+    for depth in range(CHOP_DEPTH + 1):
+        if not len(src):
+            break
+        k = notes[src, 2].astype(np.float64)
+        m = (s + e) / 2
+        n = len(src)
+        bt, bk = bend_tk(np.concatenate((s, m, e)), np.concatenate((k, k, k)))
+        dt = bt[n:2 * n] - (bt[:n] + bt[2 * n:]) / 2
+        dk = bk[n:2 * n] - (bk[:n] + bk[2 * n:]) / 2
+        cut = ((np.abs(dk) > CHOP_KEYS) | (np.abs(dt) > tol_t)) & (e - s >= 2) & (depth < CHOP_DEPTH)
+        keep = ~cut
+        done.append((src[keep], s[keep], e[keep]))
+        src = np.concatenate((src[cut], src[cut]))
+        s, e = np.concatenate((s[cut], m[cut])), np.concatenate((m[cut], e[cut]))
+    src = np.concatenate([d[0] for d in done])
+    s = np.concatenate([d[1] for d in done])
+    e = np.concatenate([d[2] for d in done])
+    k = notes[src, 2].astype(np.float64)
+    n = len(src)
+    # (the 4 corners, in order round the box: start-low, end-low, end-high, start-high)
+    ct = np.concatenate((s, e, e, s))
+    ck = np.concatenate((k - 0.5, k - 0.5, k + 0.5, k + 0.5))
+    bt, bk = bend_tk(ct, ck)
+    X = bt.reshape(4, n).T
+    Y = bk.reshape(4, n).T
+    return _boxes_rows(notes, tracks, src, X, Y)
+
+
+def _boxes_rows(notes, tracks, src, X, Y):
+    """The bent boxes (corners X, Y: (n, 4) in order round each) cut by every key row's middle line (key r at y = r;
+    a row counts for an edge from its low end up to, not at, its high end: shared edges give one piece, never two).
+    Each crossing pair = one note piece."""
+    lo = np.ceil(Y.min(1))
+    hi = np.ceil(Y.max(1))
+    cnt = np.maximum(hi - lo, 0).astype(np.int64)
+    if not cnt.sum():
+        return notes[:0], (np.asarray(tracks)[:0] if tracks is not None else None)
+    box = np.repeat(np.arange(len(src)), cnt)
+    first = np.repeat(np.cumsum(cnt) - cnt, cnt)
+    r = lo[box] + (np.arange(len(box)) - first)
+    xs = np.full((len(box), 4), np.nan)
+    for i in range(4):
+        j = (i + 1) % 4
+        y0, y1 = Y[box, i], Y[box, j]
+        x0, x1 = X[box, i], X[box, j]
+        hit = ((y0 <= r) & (r < y1)) | ((y1 <= r) & (r < y0))
+        with np.errstate(invalid="ignore", divide="ignore"):
+            x = x0 + (r - y0) * (x1 - x0) / (y1 - y0)
+        xs[:, i] = np.where(hit, x, np.nan)
+    xs.sort(1)  # (NaN last: 0, 2 or 4 crossings)
+    pieces = []
+    for a in (0, 2):
+        ok = np.isfinite(xs[:, a]) & np.isfinite(xs[:, a + 1])
+        t0 = np.rint(xs[ok, a]).astype(np.int64)
+        t1 = np.rint(xs[ok, a + 1]).astype(np.int64)
+        pieces.append((box[ok], r[ok].astype(np.int64), t0, t1))
+    b = np.concatenate([p[0] for p in pieces])
+    rr = np.concatenate([p[1] for p in pieces])
+    t0 = np.concatenate([p[2] for p in pieces])
+    t1 = np.concatenate([p[3] for p in pieces])
+    good = t1 - t0 >= 1  # (pieces under 1 tick dropped)
+    b, rr, t0, t1 = b[good], rr[good], t0[good], t1[good]
+    srcs = src[b]
+    out = notes[srcs].copy()
+    out[:, 0], out[:, 1], out[:, 2] = t0, t1, rr
+    o = np.lexsort((out[:, 2], out[:, 0]))
+    out = out[o]
+    tr = np.asarray(tracks)[srcs][o] if tracks is not None else None
+    return out, tr
+
+
 # PULLED NOTES (folding bends: Straight to round, Kaleidoscope, a strong Twist along a line / Ripple...): every key
 # row of the piano roll looks back, spot by spot, at where the bend brings it from (Stir's own way, like the colours)
 # and takes the note there. A run of spots coming from one note = one new note on that row with its velocity and
@@ -524,7 +693,7 @@ def _row_gaps(notes):
     """The empty stretches between notes on each key row (ticks), > 0 only."""
     o = np.lexsort((notes[:, 0], notes[:, 2]))
     s, e, k = notes[o, 0], notes[o, 1], notes[o, 2]
-    g = s[1:] - np.maximum.accumulate(e)[:-1]
+    g = s[1:] - _running_max(e, k)[:-1]  # (each row's own ends: an earlier row's never counts)
     g = g[(k[1:] == k[:-1]) & (g > 0)]
     return g
 

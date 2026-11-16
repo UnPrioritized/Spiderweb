@@ -133,6 +133,8 @@ The settings that only change colours (At the edges, Squeeze, Colour sets, the f
 
 "Colours bend too" (beside Moves, ticked at first) keeps the shape's colours on the notes they were on: a Colours pattern or coloured areas bend and swirl along with the shape. Unticked, the colours are laid out again on the bent shape as if it had been drawn that way (a Colours pattern by key stays in flat stripes). A Fill row is one long note, so it takes one colour; Spam shows the bent pattern best. In Properties a Shape tab is listed at the top, since it runs before every other step.
 
+Pasted notes and plain notes bend too. Each note bends like a tiny box: a long note is cut into pieces where the bend curves it, so a long note under a twist becomes a slanted run of short notes, while notes the bend leaves straight stay whole. Notes that touched still touch, and each piece keeps its note's velocity and colour. Notes bent past the top or bottom key or before beat 0 follow "Keep notes made there" like any others.
+
 Turn and Twist go round the Centre point, so a circle around it stays the same circle: the window says so in orange. Move the Centre point, or use Bulge, Ripple or a smaller Area to change its outline. "Bulge reaches past the box" (ticked by itself on a Shape tab) lets Bulge reach the corners of the shape's box, so a square or a circle swells out past its box (or pinches in). Unticked, Bulge stays inside the round area touching the box's sides, as on a Colours tab, where it's unticked unless you tick it.
 
 ## With the rest of Spiderweb

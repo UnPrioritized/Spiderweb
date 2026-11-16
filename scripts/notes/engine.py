@@ -951,6 +951,9 @@ def past_edges(sh, keys, ppq=960, over_top=None):
                 r = (min(r[0], w[0]), min(r[1], w[1]), max(r[2], w[2]), max(r[3], w[3]))
     except Exception:  # (a shape too broken to measure: made as always)
         return None
+    if isinstance(sh.get("recolour"), dict) and _has_shape_tab(sh["recolour"]):  # (bent past an edge: kept too)
+        from notes.shape_bend import grown_reach
+        r = grown_reach(sh, r)
     if r is None or r[0] >= 0 and r[1] >= -0.5 and (r[2] <= keys - 0.5 or not over_top):
         return None
     up = max(0, math.ceil(-0.5 - float(r[1]) - 1e-9))
@@ -1429,15 +1432,39 @@ def shape_tabs_done(sh, ppq, keys, get):
     rule["ppq"] = ppq
     from notes.recolour import colour_box
     box, own = colour_box(notes, rule, free_box(plain, notes, get, keys))
-    got = bent_shape(out, tabs, rule, box, own, ppq)
-    if got is None:
-        return out
     benders = [StirBend(st, rule, box, own, ppq) for st in tabs]
 
     def look(t, k):  # (the last tab first: tab 2 bent what tab 1 left)
         for b in reversed(benders):
             t, k = b.look_tk(t, k)
         return t, k
+
+    def within(t, k):
+        ok = benders[0].within(t, k)
+        for b in benders[1:]:
+            ok = ok | b.within(t, k)
+        return ok
+    if "notes" in plain and "picture" not in plain and "picture_notes" not in plain:
+        # (pasted / plain notes, stage D: each note a tiny box bent forwards, chopped where the bend curves it;
+        # folding bends pull them like a drawn shape's, each note's pieces kept apart)
+        from notes.shape_bend import Folded, note_boxes_bent
+        notes, tracks = get(dict(plain, _free=True) if "pts" in plain else plain)
+
+        def bend_tk(t, k):
+            p = np.column_stack((t, k))
+            for b in benders:
+                p = b.bend2(p)
+            return p[:, 0], p[:, 1]
+        try:
+            if any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
+                raise Folded
+            notes, tracks = note_boxes_bent(notes, tracks, bend_tk, ppq, look)
+        except Folded:
+            notes, tracks = pulled(notes, tracks, look, box, ppq, joined=False, within=within)
+        return _rest_coloured(sh, out, rest, *_on_keys(notes, tracks, keys), ppq)
+    got = bent_shape(out, tabs, rule, box, own, ppq)
+    if got is None:
+        return out
     if got != PULL:
         # (COLOURS BEND TOO, user 2026-11-17, a tick per tab, on by default: each note of the bent shape takes the
         # colour of the note found where the bend brings it from in the shape before, so a Colours cycle / drawn
@@ -1460,19 +1487,18 @@ def shape_tabs_done(sh, ppq, keys, get):
             tracks = np.asarray(before)[nearest(get(plain)[0], t, k, own=False)]
         return _rest_coloured(sh, out, rest, notes, tracks, ppq)
     notes, tracks = get(dict(plain, _free=True) if "pts" in plain else plain)  # (past the edges too: cut after)
+    notes, tracks = pulled(notes, tracks, look, box, ppq, joined=True, within=within)
+    return _rest_coloured(sh, out, rest, *_on_keys(notes, tracks, keys), ppq)
 
-    def within(t, k):
-        ok = benders[0].within(t, k)
-        for b in benders[1:]:
-            ok = ok | b.within(t, k)
-        return ok
-    notes, tracks = pulled(notes, tracks, look, box, ppq, joined="notes" not in sh, within=within)
+
+def _on_keys(notes, tracks, keys):
+    """Bent notes cut to the piano roll: keys 0 .. keys - 1, from tick 0 (past it: kept / wrapped by the caller)."""
     if len(notes):
         keep = (notes[:, 2] >= 0) & (notes[:, 2] < keys) & (notes[:, 1] > 0)
         notes = notes[keep]
         notes[:, 0] = np.maximum(notes[:, 0], 0)
         tracks = tracks[keep] if tracks is not None else None
-    return _rest_coloured(sh, out, rest, notes, tracks, ppq)
+    return notes, tracks
 
 
 def _rest_coloured(sh, out, rest, notes, tracks, ppq):

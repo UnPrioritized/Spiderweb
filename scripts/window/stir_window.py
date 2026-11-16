@@ -1205,6 +1205,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 tick.state(["disabled"])
             for key in ("reverse", "area_squeeze"):
                 self.area_ticks[key][1].state(["disabled"])
+        if tgts and all("picture" in t or "picture_notes" in t for t in tgts):  # (pictures: Shape greyed, user)
+            self.picks["moves"]["box"].config(state="disabled")
         hint = tr("stir.hint_shape" if shape else "stir.hint")
         if self.hint.cget("text") != hint:
             self.hint.config(text=hint)
