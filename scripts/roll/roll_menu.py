@@ -452,16 +452,8 @@ class ShapeMenu:
         """Properties… (window/properties_window.py), the LAST item (PLAN.md "Properties", user 2026-11-11: like
         many programs' right-click menus; it replaced Effect order…), after a line."""
         from window.properties_window import open_properties
-        app = self.app
-        m.add_separator()
-        # Deform ▸ Stir… / Warp… / Liquify… right above it (PLAN.md "Deform shapes" stage E, user 2026-11-16: the
-        # side panel's Deform row stays too); greyed while no selected shape takes them
-        sub = tk.Menu(m, tearoff=0)
-        for key, go in (("stir.button", app.open_stir), ("warp.button", app.open_warp),
-                        ("liquify.button", app.open_liquify)):
-            sub.add_command(label=tr(key), command=go)
-        m.add_cascade(label=tr("recolour.deform_menu"), menu=sub,
-                      state="normal" if app.recolour_targets() else "disabled")
+        m.add_separator()  # (a Deform ▸ menu above it was dropped, user 2026-11-17: the side panel's Deform row is
+        # enough; only Properties… lives here)
         m.add_command(label=tr("props.menu"), accelerator=tr("props.key"), command=lambda: open_properties(self.app))
 
     def glue_items(self, item):

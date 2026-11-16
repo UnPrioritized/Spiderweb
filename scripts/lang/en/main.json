@@ -1602,7 +1602,6 @@
  "recolour.recolour": "Recolour",
  "recolour.deform_row": "Deform",
  "recolour.deform_row_tip": "Stir, Warp and Liquify bend the selected shapes: their colours, or the shape itself (Stir: a tab's Moves choice).\nShape bends run first, then every colour effect, in the order Properties… shows.",
- "recolour.deform_menu": "Deform",
  "recolour.off": "Off",
  "recolour.shuffle": "Shuffle",
  "recolour.scatter": "Split: Scattered",

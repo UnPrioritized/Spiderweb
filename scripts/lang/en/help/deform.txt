@@ -1,4 +1,4 @@
-The Deform row in the side panel (under Recolour) holds [page:stir|Stir…], [page:warp|Warp…] and [page:liquify|Liquify…]; the shape's right-click menu has them too, under Deform ▸. Each of them can bend either the colours inside a shape or the shape itself. This page says how the two ways fit together; each tool's own page says how to use it.
+The Deform row in the side panel (under Recolour) holds [page:stir|Stir…], [page:warp|Warp…] and [page:liquify|Liquify…]. Each of them can bend either the colours inside a shape or the shape itself. This page says how the two ways fit together; each tool's own page says how to use it.
 
 ## Colours or Shape
 
