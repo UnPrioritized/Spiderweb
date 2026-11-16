@@ -18,6 +18,7 @@ Sideways = to the left of the way the curve goes, so on a curve going forward in
 
 import functools
 import math
+import re
 
 import numpy as np
 
@@ -321,12 +322,37 @@ def _lay(pts, lengths, s, v):
 # curve bends it. A pattern then runs along the shape.
 
 SHAPE_SAMPLES = 1024  # points along a shape
+# ends nearer than this share of its size = a closed shape. A root of sin's leftover 1e-16 at t = 1 (Flower's
+# sharpness 3: 1e-4) made one "open", stretched 10,000 times between A and B (froze); ends that near are never meant
+# to be stretched apart (1,000 times or more).
+CLOSED_SHARE = 1e-3
+
+
+# A shape may be typed as ONE polar line r(t) (p["polar"], the distance from the middle, once round as t goes 0 -> 1):
+# its x / y are always written from it (polar_xy), so everything else only ever reads x / y. Typing x / y by hand
+# drops it (the two ways can't both be there). Every preset starts as x / y (user 2026-11-16); Flower's are written
+# with polar_xy, so picking Polar finds its r line (polar_of).
+def polar_xy(r):
+    """The x(t), y(t) texts of the polar line r(t)."""
+    return f"({r}) * cos(t * 2 * pi)", f"({r}) * sin(t * 2 * pi)"
+
+
+def polar_of(x, y):
+    """The polar line x(t), y(t) were written from (polar_xy), or None."""
+    m = re.fullmatch(r"\((.*)\) \* cos\(t \* 2 \* pi\)", x)
+    return m.group(1) if m and polar_xy(m.group(1)) == (x, y) else None
+
+
+# Flower: sharpness 0 = the plain cos wave (1 - 2 * (1 - cos) / 2 = cos), plus = pointed tips (1 = straight-sided
+# star: (1 - cos) / 2 = sin^2, ^(1/2) = abs(sin)), on to thin spikes; minus = fatter, rounder petals (user
+# 2026-11-16: one box both ways). Written with cos, not abs(sin): sin(5 pi) leaves 1e-16, a root of it (sharpness
+# 3+) opened the shape's ends; cos at its top is exactly 1.
+FLOWER_R = "1 + depth * (1 - 2 * ((1 - cos(petals * t * 2 * pi)) / 2)^(2^(-sharpness)))"
 # (id, name, x(t), y(t), its numbers)
 SHAPE_PRESETS = [
     ("circle", tr("pattern.circle"), "cos(t * 2 * pi)", "sin(t * 2 * pi)", {}),
     ("spiral", tr("pattern.spiral"), "t * cos(t * turns * 2 * pi)", "t * sin(t * turns * 2 * pi)", {"turns": 3.0}),
-    ("flower", tr("pattern.flower"), "(1 + depth * cos(petals * t * 2 * pi)) * cos(t * 2 * pi)",
-     "(1 + depth * cos(petals * t * 2 * pi)) * sin(t * 2 * pi)", {"petals": 5.0, "depth": 0.3}),
+    ("flower", tr("pattern.flower"), *polar_xy(FLOWER_R), {"petals": 5.0, "depth": 0.3, "sharpness": 0.0}),
     ("heart", tr("pattern.heart"), "16 * sin(t * 2 * pi)^3",
      "13 * cos(t * 2 * pi) - 5 * cos(4 * pi * t) - 2 * cos(6 * pi * t) - cos(8 * pi * t)", {}),
     ("figure8", tr("pattern.figure8"), "sin(t * 2 * pi)", "sin(t * 2 * pi) * cos(t * 2 * pi)", {}),
@@ -362,6 +388,8 @@ def clean_shape_formula(p):
         values = {str(a): float(b) for a, b in dict(p.get("vars", {})).items()}
         try:
             tx, ty = str(p.get("x", "")), str(p.get("y", ""))
+            if isinstance(p.get("polar"), str):  # (its x / y always come from the polar line)
+                tx, ty = polar_xy(p["polar"])
             names = shape_names(tx, ty)
         except ValueError:
             if not loop:
@@ -375,6 +403,8 @@ def clean_shape_formula(p):
         return None
     if p.get("name"):
         out["name"] = str(p["name"])
+    if isinstance(p.get("polar"), str) and tx:
+        out["polar"] = p["polar"]
     if loop:
         out["loop"] = loop
     return keep_sym(out, p)
@@ -411,7 +441,7 @@ def symmetric_shape(a, sym):
     across the up-and-down line through its middle point, or turned round that point, and fitted again."""
     half = SHAPE_SAMPLES // 2
     size = math.hypot(*(a.max(axis=0) - a.min(axis=0)))
-    if size > 1e-12 and math.dist(a[0], a[-1]) < 1e-6 * size:
+    if size > 1e-12 and math.dist(a[0], a[-1]) < CLOSED_SHARE * size:
         first, (p, m) = a[:half + 1], (a[0], a[half])
         if sym == "turn":
             second = p + m - first[1:]
@@ -440,7 +470,7 @@ def fitted_shape(a):
     size = math.hypot(*(hi - lo))
     if size < 1e-12:
         raise ValueError(tr("pattern.it_s_just_a_dot"))
-    if math.dist(a[0], a[-1]) < 1e-6 * size:  # closed: from its leftmost point, as wide as the curve is long
+    if math.dist(a[0], a[-1]) < CLOSED_SHARE * size:  # closed: from its leftmost point, as wide as the curve is long
         at = int(a[:-1, 0].argmin())
         a = np.vstack([a[at:-1], a[:at + 1]])
         width = hi[0] - lo[0]

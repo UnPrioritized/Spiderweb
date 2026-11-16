@@ -25,7 +25,7 @@ from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_
 from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, SOFT_DEFAULT, clean_loop,
                            clean_pattern_graphs, formula_loop,
                            formula_shape, keep_sym, most_loops, new_pattern, new_shape, pattern_name, pattern_names,
-                           shape_name, shape_names)
+                           polar_of, polar_xy, shape_name, shape_names)
 from roll.roll_shared import ALT, grab_while_panning
 from window import look
 from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
@@ -53,6 +53,9 @@ def load_patterns(layer="pattern"):
         for key in (("x", "y") if layer == "shape" else ("formula", "along")):
             if key != "along" or str(p.get(key, "")).strip():
                 item[key] = str(p.get(key, ""))
+        if layer == "shape" and isinstance(p.get("polar"), str):  # (typed as one polar line: x / y come from it)
+            item["polar"] = p["polar"]
+            item["x"], item["y"] = polar_xy(p["polar"])
         loop = clean_loop(p["loop"]) if isinstance(p.get("loop"), dict) else None
         if loop:
             item["loop"] = loop
@@ -138,6 +141,8 @@ def saved_shape(item, k):
     """A saved shape (load_patterns("shape")) as a curve's shape."""
     out = {"preset": "", "name": item["name"], "x": item["x"], "y": item["y"], "vars": dict(item["vars"]), "k": k,
            "mirror": False}
+    if item.get("polar") is not None:
+        out["polar"] = item["polar"]
     if item.get("loop"):
         out["loop"] = copy.deepcopy(item["loop"])
     return keep_sym(out, item)
@@ -201,12 +206,13 @@ class FormulaDialog(tk.Toplevel):
         self.name_box.bind("<Return>", lambda e: (self.save(), "break")[1])  # (a name typed: Enter saves, user)
         # the formula boxes: y = and along = (a pattern) or x(t) = and y(t) = (a shape)
         keys = ("x", "y") if shape else ("formula", "along")
-        labels = {"x": tr("pattern_dialog.xt"), "y": tr("pattern_dialog.yt"), "formula": tr("pattern_dialog.y"),
-                  "along": tr("pattern_dialog.along")}
-        self.texts, self.entries = {}, []
+        self.labels = {"x": tr("pattern_dialog.xt"), "y": tr("pattern_dialog.yt"), "formula": tr("pattern_dialog.y"),
+                       "along": tr("pattern_dialog.along"), "polar": tr("pattern_dialog.rt")}
+        self.texts, self.entries, self.rows = {}, [], {}
         self.editing = tk.BooleanVar(value=False)
+        self.polar = shape and "polar" in self.pat  # (a shape typed as one polar line r(t), see pattern.polar_xy)
         for r, key in enumerate(keys, start=1):
-            lb = ttk.Label(right, text=labels[key])
+            lb = ttk.Label(right, text=self.labels[key])
             lb.grid(row=r, column=0, sticky="w")
             row = ttk.Frame(right)
             row.grid(row=r, column=1, sticky="ew", padx=(5, 0), pady=1)
@@ -214,14 +220,21 @@ class FormulaDialog(tk.Toplevel):
             e = ttk.Entry(row, textvariable=var, width=34, font=look.mono(10), state="readonly")
             e.pack(side="left", fill="x", expand=True)
             self.entries.append(e)
+            self.rows[key] = (lb, row, e)
             if key == "along":
                 for w in (lb, e):
                     Tooltip(w, tr("pattern_dialog.along_tip"))
             if r == 1:
-                b = ttk.Checkbutton(row, text=tr("pattern_dialog.edit_formula"), variable=self.editing,
-                                    command=self.on_edit_mode)
+                b = self.edit_box = ttk.Checkbutton(row, text=tr("pattern_dialog.edit_formula"),
+                                                    variable=self.editing, command=self.on_edit_mode)
                 b.pack(side="left", padx=(6, 0))
                 Tooltip(b, tr("pattern_dialog.edit_formula_tip"))
+        if shape:  # the polar line's box: in x(t)'s place while typed that way (y(t)'s row hidden)
+            var = self.texts["polar"] = tk.StringVar(value=self.pat.get("polar", ""))
+            e = ttk.Entry(self.rows["x"][1], textvariable=var, width=34, font=look.mono(10), state="readonly")
+            self.entries.append(e)
+            self.rows["polar"] = (self.rows["x"][0], self.rows["x"][1], e)
+            Tooltip(e, tr("pattern_dialog.rt_tip"))
         r = len(keys) + 1
         ttk.Label(right, text=tr("pattern_dialog.shape_help") if shape else tr(host.pattern_help),
                   foreground=look.HINT, font=look.font(8), wraplength=int(440 * s),
@@ -238,6 +251,16 @@ class FormulaDialog(tk.Toplevel):
         cb.bind("<<ComboboxSelected>>", lambda e: self.on_sym(e.widget.current()))
         for w in (lb, cb):
             Tooltip(w, tr("pattern_dialog.sym_tip"))
+        self.type_box = None  # a shape: typed as x(t) and y(t), or as one polar line r(t)
+        if shape:
+            lb = ttk.Label(row, text=tr("pattern_dialog.type_as"))
+            lb.pack(side="left", padx=(12, 0))
+            names = [tr("pattern_dialog.type_xy"), tr("pattern_dialog.type_polar")]
+            cb = self.type_box = ttk.Combobox(row, values=names, state="readonly", width=max(len(n) for n in names))
+            cb.pack(side="left", padx=(5, 0))
+            cb.bind("<<ComboboxSelected>>", lambda e: self.on_type(e.widget.current() == 1))
+            for w in (lb, cb):
+                Tooltip(w, tr("pattern_dialog.type_tip"))
         self.flat_vars = {}  # a pattern's Flatten % + Softness % (the preview shows the loop before pressing)
         for key in (() if shape else ("flatten", "soft")):
             lb = ttk.Label(row, text=tr("panel_pattern." + key))
@@ -282,6 +305,9 @@ class FormulaDialog(tk.Toplevel):
         btns = ttk.Frame(right)
         btns.grid(row=r + 4, column=0, columnspan=2, sticky="ew", pady=(8, 0))
         ttk.Button(btns, text=tr("pattern_dialog.save"), command=self.save).pack(side="left")
+        b = ttk.Button(btns, text=tr("pattern_dialog.copy_formula"), command=self.copy_formula)
+        b.pack(side="left", padx=4)
+        Tooltip(b, tr("pattern_dialog.copy_formula_tip"))
         ttk.Button(btns, text=tr("pattern_dialog.cancel"), command=self.cancel).pack(side="right")
         ttk.Button(btns, text=tr("pattern_dialog.apply"), command=self.apply).pack(side="right", padx=4)
 
@@ -317,12 +343,12 @@ class FormulaDialog(tk.Toplevel):
 
     # ------------------------------------------------------------ undo inside the window
     def state(self):
-        return json.dumps({"pat": self.pat, "name": self.name.get(),
+        return json.dumps({"pat": self.pat, "name": self.name.get(), "polar": self.polar,
                            "texts": {key: var.get() for key, var in self.texts.items()}})
 
     def put_state(self, state):
         d = json.loads(state)
-        self.pat, self.drag, self.pan = d["pat"], None, None
+        self.pat, self.drag, self.pan, self.polar = d["pat"], None, None, d["polar"]
         self._loading = True
         self.name.set(d["name"])
         for key, var in self.texts.items():
@@ -370,6 +396,7 @@ class FormulaDialog(tk.Toplevel):
             keep = {key: self.pat[key] for key in ("loops", "each")}
             self.pat = new_pattern(what, self.k, self.pat) if kind == "preset" else saved_pattern(what, self.k, self.pat)
             self.pat.update(keep)
+        self.polar = "polar" in self.pat  # (x / y, unless it was saved typed as polar)
         self._loading = True
         self.name.set(name)
         for key, var in self.texts.items():
@@ -441,18 +468,83 @@ class FormulaDialog(tk.Toplevel):
             self.entries[0].focus_set()
             self.entries[0].icursor("end")
 
+    def on_type(self, polar):
+        """Type as x(t), y(t) / Polar r(t) picked. They never both count: x / y are written from the polar line; typed
+        as x / y the polar line is dropped (one still in r * cos / r * sin form gives its r back)."""
+        if polar == self.polar:
+            return
+        self.polar, r = polar, ""
+        if polar:
+            r = self.pat.get("polar") or polar_of(self.pat.get("x", ""), self.pat.get("y", "")) or ""
+            if r:
+                self.pat["polar"] = r
+            self._loading = True
+            self.texts["polar"].set(r)
+            self._loading = False
+        else:
+            self.pat.pop("polar", None)
+        self.refresh()
+        if polar and not r:
+            self.on_formula()  # ("Type a formula": nothing to show yet)
+        if self.polar and not self.editing.get():  # (typing it is what this is for)
+            self.editing.set(True)
+            self.on_edit_mode()
+        self.mark()
+
+    def show_type(self):
+        """The x(t) / y(t) boxes or the polar line's box, as typed."""
+        if not self.type_box:
+            return
+        self.type_box.current(1 if self.polar else 0)
+        lb, row, x_entry = self.rows["x"]
+        r_entry = self.rows["polar"][2]
+        shown, hidden = (r_entry, x_entry) if self.polar else (x_entry, r_entry)
+        if not shown.winfo_ismapped():
+            hidden.pack_forget()
+            shown.pack(side="left", fill="x", expand=True, before=self.edit_box)
+        lb.config(text=self.labels["polar" if self.polar else "x"])
+        for w in self.rows["y"][:2]:
+            if self.polar:
+                w.grid_remove()
+            else:
+                w.grid()
+
+    def copy_formula(self):
+        """The formula as text with the boxes' numbers in place of their names (to share it or keep it)."""
+        values = self.pat["vars"]
+
+        def filled(text):
+            def number(m):
+                if m.group() not in values:
+                    return m.group()
+                v = values[m.group()]
+                return f"({fmt(v)})" if v < 0 else fmt(v)
+            return re.sub(r"\b[A-Za-z_]\w*\b", number, text)
+        keys = ("polar",) if self.polar else ("x", "y") if self.layer == "shape" else ("formula", "along")
+        lines = [f"{self.labels[key]} {filled(self.texts[key].get())}" for key in keys
+                 if key != "along" or self.texts[key].get().strip()]
+        self.clipboard_clear()
+        self.clipboard_append("\n".join(lines))
+        self.set_info(tr("pattern_dialog.copied_by_hand" if self.pat.get("loop") else "pattern_dialog.copied"),
+                      look.GOOD, back=bool(self.pat.get("loop")))
+
     def on_formula(self):
         if self._loading:
             return
         texts = {key: var.get() for key, var in self.texts.items()}
+        if self.polar:  # (x / y written from the polar line)
+            texts["x"], texts["y"] = polar_xy(texts["polar"])
         try:
             if self.layer == "shape":
+                if self.polar and not texts["polar"].strip():
+                    raise ValueError
                 names = shape_names(texts["x"], texts["y"])
             else:
                 names = pattern_names(texts["formula"], texts["along"])
         except ValueError as e:
             self.ok = False
-            typed = any(t.strip() for t in texts.values())
+            typed = any(texts[key].strip() for key in (("polar",) if self.polar else
+                                                         [k for k in texts if k != "polar"]))
             self.set_info(tr("pattern_dialog.can_t_use_it", e=e) if typed else tr("pattern_dialog.type_a_formula"),
                           look.ERROR_DARK if typed else look.HINT)
             return
@@ -461,6 +553,15 @@ class FormulaDialog(tk.Toplevel):
             self._loading = True
             self.name.set("")
             self._loading = False
+        if self.layer == "shape":
+            if self.polar:
+                self._loading = True  # (x / y's boxes show what it writes, for when it's typed that way again)
+                self.texts["x"].set(texts["x"])
+                self.texts["y"].set(texts["y"])
+                self._loading = False
+            else:
+                texts.pop("polar")
+                self.pat.pop("polar", None)  # (typed as x / y: no polar line any more)
         self.pat.update(texts, vars={n: old.get(n, 1.0) for n in names}, preset="")
         if not self.pat.get("along", "x").strip():
             self.pat.pop("along")
@@ -525,6 +626,7 @@ class FormulaDialog(tk.Toplevel):
             var.set(fmt(self.pat["loops"] if name == "loops" else self.pat["vars"][name]))
             e.config(style="TEntry")
         self.sym.set(sym_label(self.pat.get("sym")))
+        self.show_type()
         for key, (var, e) in self.flat_vars.items():
             var.set(fmt(self.pat.get(key, SOFT_DEFAULT if key == "soft" else 0.0)))
             e.config(style="TEntry")

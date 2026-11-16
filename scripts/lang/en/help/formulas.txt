@@ -8,6 +8,8 @@ Below, "curve" means all of these. On a polyline the pattern runs along all of i
 The line takes a shape. One that ends where it starts (Circle, Flower, Heart, Figure 8) is as wide as from the curve's start (A) to its end (B) and sits on that line; the others (Spiral, Slow start, Fast start, S-curve, Reverse S, Quarter circle, Exponential, Logarithmic) start at A and end at B. They look round at the zoom you have when you pick them.
 [clip:formulas-shapes]
 
+Flower's sharpness changes the petals: 0 = round waves, higher = pointed tips (1 = a star with straight sides), on to thin spikes; below 0 = fatter, rounder petals with narrow dips between them.
+
 ## Pattern along the line
 
 A pattern repeats along the line (along its shape, if it has one). These are the notes each one makes:
@@ -51,9 +53,9 @@ Custom… (at the top of each list) shows every shape or pattern with its formul
 
 When its two halves match (like Wave, Bounce, S-curve or Circle), the points come as symmetric halves: moving a point moves its partner in the other half too. Double-click the line to add a point, right-click a point to remove it, Alt+drag for a sharp corner.
 
-The grid shows the numbers (x from 0 to 1 along one loop; y in keys); the mouse wheel zooms, dragging empty space (or middle-dragging) moves around, and Fit view shows all of it again. Save puts it in your list (patterns.json in the user folder next to Spiderweb), and from then on it's in the Formula menu too.
+The grid shows the numbers (x from 0 to 1 along one loop; y in keys); the mouse wheel zooms, dragging empty space (or middle-dragging) moves around, and Fit view shows all of it again. Save puts it in your list (patterns.json in the user folder next to Spiderweb), and from then on it's in the Formula menu too. Copy formula copies it as text with the numbers from the boxes filled in, to share or keep (changes made by hand aren't in it).
 
-Your own formula: tick Edit formula. A pattern is y of x for one loop (x goes from 0 to 1, y = how far to the side); a shape is x(t) and y(t), t going from 0 to 1 while it's drawn. Any other name in it (like height) gets its own number box. A pattern's "along =" box can move the line forward or back along the curve, in loops; going back makes it run over itself, like Curls.
+Your own formula: tick Edit formula. A pattern is y of x for one loop (x goes from 0 to 1, y = how far to the side); a shape is x(t) and y(t), t going from 0 to 1 while it's drawn. Any other name in it (like height) gets its own number box. A closed shape can also be typed as one line: Type as → Polar r(t), where r is how far from the middle the shape is as it goes once round (1 = a circle; Flower can be switched to it). Its x(t) and y(t) are made from it, so it's one or the other: change x(t) or y(t) by hand and the polar line is gone. A pattern's "along =" box can move the line forward or back along the curve, in loops; going back makes it run over itself, like Curls.
 
 Works: numbers, + - * / ^ % ( ), pi, e, sin cos tan asin acos atan sinh cosh tanh sqrt exp ln log log10 log2 abs min max floor ceil round pow. log is the same as ln (the natural log); use log10 for base 10.
 
