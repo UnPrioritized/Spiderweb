@@ -606,41 +606,64 @@ class LiquifyBend(StirBend):
 
     def _close(self, qx, qy, ax, ay):
         """Points' homes (map units) by a close search: a Liquify moves a spot at most its largest push, so each home
-        lies within that of its point; a fine grid (half a map cell apart: a whole cell missed some), looked at ONCE
-        over the map + that reach, each point's window of it cut out; Newton's steps (compiled, all points at once)
-        from its CLOSE_TRIES nearest looks. Two homes (a real crease) = the one nearest (ax, ay). (x, y, err): err
-        inf where none was found."""
+        lies within that of its point; a fine grid (half a map cell apart: a whole cell missed some) over the map +
+        that reach, looked at ONCE and sorted into buckets by where each spot LOOKS; a point's starts = the grid
+        spots looking into its bucket and the ones round it (more rings while none settles), its CLOSE_TRIES
+        nearest; Newton's steps (compiled, all points at once). Two homes (a real crease) = the one nearest (ax, ay).
+        (x, y, err): err inf where none was found."""
         from notes.warp import _newton
         B = len(qx)
-        P = np.abs(self.A).reshape(-1, 2).max(0) + 1e-6
         if getattr(self, "_grid", None) is None:
-            cell = 1.0 / max(min(self.A.shape[:2]) - 1, 1) / 2
-            n = np.minimum(np.ceil((1 + 4 * P) / cell).astype(int) + 1, CLOSE_GRID * 4)
-            gx = np.linspace(-2 * P[0], 1 + 2 * P[0], n[0])
-            gy = np.linspace(-2 * P[1], 1 + 2 * P[1], n[1])
-            GX, GY = np.meshgrid(gx, gy)
+            P = np.abs(self.A).reshape(-1, 2).max(0) + 1e-6
+            h = 1.0 / max(min(self.A.shape[:2]) - 1, 1) / 2
+            n = np.minimum(np.ceil((1 + 4 * P) / h).astype(int) + 1, CLOSE_GRID * 4)
+            GX, GY = (a.ravel() for a in np.meshgrid(np.linspace(-2 * P[0], 1 + 2 * P[0], n[0]),
+                                                     np.linspace(-2 * P[1], 1 + 2 * P[1], n[1])))
             LX, LY = self._look_map(GX, GY)
-            self._grid = gx, gy, GX, GY, LX, LY
-        gx, gy, GX, GY, LX, LY = self._grid
-        T = CLOSE_TRIES
-        SX, SY = np.repeat(qx[:, None], T, 1), np.repeat(qy[:, None], T, 1)
-        for i in range(B):  # (each point's window: index slices of the grid, no new looks)
-            c0, c1 = np.searchsorted(gx, [qx[i] - P[0], qx[i] + P[0]])
-            r0, r1 = np.searchsorted(gy, [qy[i] - P[1], qy[i] + P[1]])
-            wx, wy = GX[r0:r1 + 1, c0:c1 + 1].ravel(), GY[r0:r1 + 1, c0:c1 + 1].ravel()
-            if not len(wx):
+            b = 2 * max((1 + 4 * P[0]) / (n[0] - 1), (1 + 4 * P[1]) / (n[1] - 1))  # (a bucket: two grid steps)
+            x0, y0 = float(LX.min()), float(LY.min())
+            W = int((LX.max() - x0) / b) + 3
+            key = (np.floor((LY - y0) / b).astype(np.int64) + 1) * W + np.floor((LX - x0) / b).astype(np.int64) + 1
+            o = np.argsort(key, kind="stable")
+            self._grid = GX[o], GY[o], LX[o], LY[o], key[o], b, x0, y0, W
+        GX, GY, LX, LY, keys, b, x0, y0, W = self._grid
+        cx = np.floor((qx - x0) / b).astype(np.int64) + 1
+        cy = np.floor((qy - y0) / b).astype(np.int64) + 1
+        out_x, out_y, out_e = qx.copy(), qy.copy(), np.full(B, np.inf)
+        left = np.arange(B)
+        for ring in (1, 3, 8):  # (buckets round the point's own; wider only for points still without a home)
+            if not len(left):
+                break
+            qi, gi = [], []
+            for dy in range(-ring, ring + 1):
+                for dx in range(-ring, ring + 1):
+                    k =(cy[left] + dy) * W + cx[left] + dx
+                    lo, hi = np.searchsorted(keys, k, "left"), np.searchsorted(keys, k, "right")
+                    c = hi - lo
+                    if not c.any():
+                        continue
+                    qi.append(np.repeat(left, c))
+                    gi.append(np.arange(c.sum()) - np.repeat(np.cumsum(c) - c - lo, c))
+            if not qi:
                 continue
-            d2 = (LX[r0:r1 + 1, c0:c1 + 1].ravel() - qx[i]) ** 2 + (LY[r0:r1 + 1, c0:c1 + 1].ravel() - qy[i]) ** 2
-            near = np.argpartition(d2, T - 1)[:T] if len(d2) > T else np.resize(np.arange(len(d2)), T)
-            SX[i], SY[i] = wx[near], wy[near]
-        sx, sy, e = _newton(self.A, np.repeat(qx, T), np.repeat(qy, T), False, SX.ravel(), SY.ravel())
-        sx, sy, e = sx.reshape(B, T), sy.reshape(B, T), e.reshape(B, T)
-        far = np.hypot(sx - ax[:, None], sy - ay[:, None])
-        far[~(e <= FOLD)] = np.inf
-        j = far.argmin(1)
-        r = np.arange(B)
-        found = np.isfinite(far[r, j])
-        return sx[r, j], sy[r, j], np.where(found, e[r, j], np.inf)
+            qi, gi = np.concatenate(qi), np.concatenate(gi)
+            d2 = (LX[gi] - qx[qi]) ** 2 + (LY[gi] - qy[qi]) ** 2
+            o = np.lexsort((d2, qi))
+            qi, gi = qi[o], gi[o]
+            first = np.r_[True, qi[1:] != qi[:-1]]
+            start = np.maximum.accumulate(np.where(first, np.arange(len(qi)), 0))
+            keep = np.arange(len(qi)) - start < CLOSE_TRIES
+            qi, gi = qi[keep], gi[keep]
+            sx, sy, e = _newton(self.A, qx[qi], qy[qi], False, GX[gi], GY[gi])
+            far = np.hypot(sx - ax[qi], sy - ay[qi])
+            far[~(e <= FOLD)] = np.inf
+            o = np.lexsort((far, qi))
+            first = o[np.r_[True, qi[o][1:] != qi[o][:-1]]]
+            got = np.isfinite(far[first])
+            w = qi[first][got]
+            out_x[w], out_y[w], out_e[w] = sx[first][got], sy[first][got], e[first][got]
+            left = left[~np.isfinite(out_e[left])]
+        return out_x, out_y, out_e
 
     def within(self, t, k):
         x, y = self.to_unit(t, k)
@@ -1130,7 +1153,8 @@ SEARCH_SPAN = (-1.0, 2.0)
 CLOSE_GRID = 401  # (LiquifyBend._close: its grid over the map, half a map cell apart, at most 4x this each way)
 CLOSE_TRIES = 96  # (its nearest looks Newton starts from)
 CLOSE_FROM = 1e-7  # (LiquifyBend: points farther from home than this get the close search)
-CLOSE_MOST = 64  # (more points lost than this in one go: a real fold, the pulled way)
+CLOSE_MOST = 2048  # (more points lost than this in one go: the pulled way (speed only: a Liquify map always
+# gives every point a home, user 2026-11-17: strong pushes went the pulled way, slow + chopped))
 
 
 def searcher(look):

@@ -1512,15 +1512,17 @@ def shape_tabs_done(sh, ppq, keys, get):
                 raise Folded
             made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
         except Folded:
-            if got == PULL and not bend and tracks is not None and len(made):
+            laid = None
+            if got == PULL and not bend and tracks is not None and len(made) and base.get("cycle"):
+                from notes.custom import cycle_turns
+                if np.array_equal(np.asarray(tracks), cycle_turns(base, made[:, :3], ppq)):
+                    laid = cycle_turns  # (its colours are its Colours cycle alone: laid again on the result)
+            if laid is not None:
                 # (hunt 2026-11-17: a drawn shape that folds with Colours bend too OFF: a row's touching pieces
-                # joined whatever their colour, then the colours laid by where the notes are now (the drawn
-                # shape's nearest note), not stairs of the rows they came from)
-                from notes.recolour import nearest
-                was, was_tr = made, np.asarray(tracks)
+                # joined whatever their colour, then its Colours cycle laid on them as if drawn that way, not
+                # stairs of the rows they came from; the nearest drawn note's colour ran out past the box: user)
                 made, _ = pulled(made, None, look, box, ppq, joined=True, within=within)
-                tracks = was_tr[nearest(was[:, :4], (made[:, 0] + made[:, 1]) / 2,
-                                        made[:, 2].astype(np.float64), own=False)] if len(made) else was_tr[:0]
+                tracks = laid(base, made[:, :3], ppq) if len(made) else np.zeros(0, np.int64)
             else:
                 made, tracks = pulled(made, tracks, look, box, ppq, joined=got == PULL, within=within)
         return dict(out, _bent=bent_token(*_on_keys(made, tracks, keys)))
