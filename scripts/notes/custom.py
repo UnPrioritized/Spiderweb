@@ -1607,6 +1607,16 @@ def filled_uv(sh, u, v, fc=False):
     return d >= 1 if sh.get("union") else d % 2 == 1
 
 
+def plain_union(sh, plan):
+    """Overlaps cancel out off changes nothing here: every line is part of a loop and no area is inside more than
+    one (faces' depth never above 1), so it's the plain even-odd fill, made the quick way (the walled way, a key row
+    at a time: the user's square with 128 Nested steps took 1.3 s a centre point move, 2026-11-16)."""
+    if plan["attached"] or plan["flat"]:
+        return False
+    fc = shape_faces(sh)
+    return fc is not None and fc.depth is not None and len(fc.depth) > 0 and int(fc.depth.max()) <= 1
+
+
 def fill_test(sh):
     """What Fill / Spam fill, when it isn't the plain even-odd of fill_plan's loops: test(x, y) = for each row of
     spots in beats / keys ((n, m) arrays spread over one piece of a key row; the first one, its middle, decides)
@@ -1617,6 +1627,8 @@ def fill_test(sh):
         return None
     plan = fill_plan(sh)
     if not (sh.get("union") or plan["attached"] or plan["flat"]):
+        return None
+    if sh.get("union") and plain_union(sh, plan):
         return None
     frame = sh["pts"]
     known = []  # (shape_faces, found at the first question: asked for every key row)
