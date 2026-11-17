@@ -13,6 +13,7 @@ user leaves it: PLAN.md stage C, App.colour_edit). Add ▾ opens the existing to
 
 import copy
 import importlib
+import threading
 import tkinter as tk
 import weakref
 from tkinter import ttk
@@ -1087,19 +1088,49 @@ class PropertiesWindow(tk.Toplevel):
         if not changes:
             return self.sync(follow=False)
         nudge = len(changes) <= NUDGE_SHAPES
-        news = []
-        for sh, change in changes:
-            if change[0] == "move":
-                db, dp = change[1], change[2]
-                news.append((sh, dict(sh, pts=[[b + db, p + dp] for b, p in sh["pts"]])))
-            else:
-                news.append((sh, self.sized(sh, change, key, v) if nudge else app.stretched(sh, *change[1:])))
-        self.begin(tr("props.undo_place"))
-        for sh, new in news:
-            sh.clear()
-            sh.update(new)
-        app.roll.box_kept = None  # (a kept Select box was round the old place)
-        self.done()
+
+        def news_of():
+            news = []
+            for sh, change in changes:
+                if change[0] == "move":
+                    db, dp = change[1], change[2]
+                    news.append((sh, dict(sh, pts=[[b + db, p + dp] for b, p in sh["pts"]])))
+                else:
+                    news.append((sh, self.sized(sh, change, key, v) if nudge else app.stretched(sh, *change[1:])))
+            return news
+
+        def put_on(news):
+            self.begin(tr("props.undo_place"))
+            for sh, new in news:
+                sh.clear()
+                sh.update(new)
+            app.roll.box_kept = None  # (a kept Select box was round the old place)
+            self.done()
+        # (sized makes a shape's notes up to NUDGE_TRIES times: slow shapes' tries in a background thread, the
+        # window answers meanwhile; put on once found, if the shapes are still as they were; App._shape_took)
+        slow = nudge and sum(app._shape_took.get(id(sh), 0.0) for sh, c in changes if c[0] == "size") > 0.02
+        if not slow or not app.count_later_ok():
+            return put_on(news_of())
+        from notes.engine import shape_key
+        was = [shape_key(sh) for sh, _ in changes]
+        got = {}
+
+        def work():
+            try:
+                got["news"] = news_of()
+            except Exception:  # (made the usual way below, which tells about it)
+                pass
+
+        def check():
+            if worker.is_alive():
+                self.after(15, check)
+                return
+            if not self.winfo_exists() or [shape_key(sh) for sh, _ in changes] != was:
+                return
+            put_on(got["news"] if "news" in got else news_of())
+        worker = threading.Thread(target=work, daemon=True, name="notes")
+        worker.start()
+        self.after(15, check)
 
     def sized(self, sh, change, key, v):
         """sh sized so its notes' Length / Highest key come out as typed (v), or as near as its notes can (a spam

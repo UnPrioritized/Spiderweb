@@ -488,6 +488,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._merge_keys = {}  # merged shapes' parts' settings when last seen (remake_merges)
         self._notes_time = 0.0  # how long that took the last time
         self._shape_took = {}  # id(shape) -> how long its own notes took the last time they were made (late_ok)
+        self._key_took = {}  # notes cache key -> the same, so a new object for the same shape knows it
         self._make_time = 0.0  # how long the last making of every note took, remembered or not (late_ok)
         self._mask_time = 0.0  # ... and the masks' preview (mask.mask_view)
         self._late_notes = None  # while dragging: notes left until the mouse rests
@@ -2078,7 +2079,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             got = shared_arrays(got, cache)
             self._notes_worked += 1
             if top:  # (late_ok: this shape's notes are slow to make, whatever the last making took)
-                self._shape_took[id(own)] = time.perf_counter() - started
+                self._shape_took[id(own)] = self._key_took[key] = time.perf_counter() - started
+                if len(self._key_took) > 4000:  # (only a guess per notes: the oldest half forgotten)
+                    for k in list(itertools.islice(self._key_took, 2000)):
+                        del self._key_took[k]
+        elif not self._notes_depth and key in self._key_took:  # (remembered notes: a new object for the same shape,
+            self._shape_took[id(own)] = self._key_took[key]    # e.g. after undo, keeps how slow they were)
         cache[key] = got  # (last = used most recently: trim_notes forgets the oldest first)
         self._notes_used[key] = self.shapes_gen
         if not self._notes_depth:
@@ -2894,6 +2900,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """notes_tracks for a background job (read on Tk's thread, used in the job's): App.notes_tracks' way, the
         remembered notes only read, its own new ones in job["own"]; stops at the next shape once job["stop"]."""
         known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
+        key_took = self._key_took  # (only read in the thread too)
         voiced, wide = self.channel_mode.get() == "auto", self.all16()
         heard = (self.channel_mode.get(), self.heard_rule())
 
@@ -2930,7 +2937,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 got = shared_arrays(got, job["own"])
                 job["own"][k] = got
                 if top:  # (App._shape_took, by the job's copy: notes_made hands it to the real shape)
-                    job.setdefault("took", {})[id(own)] = time.perf_counter() - started
+                    job.setdefault("took", {})[id(own)] = job.setdefault("key_took", {})[k] = \
+                        time.perf_counter() - started
+            elif not job["depth"] and k in key_took:  # (remembered: how slow they were, App.notes_tracks' way)
+                job.setdefault("took", {})[id(own)] = key_took[k]
             job["used"].append(k)
             if not job["depth"]:
                 job["top"].append(k)
@@ -3082,6 +3092,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             sh = job["real"].get(c)
             if sh is not None:
                 self._shape_took[id(sh)] = took
+        self._key_took.update(job.get("key_took", {}))
         self._job_stash = job["stash"]
         self._job_off = (job["off_for"], job["got"][2], job.get("off"))  # (shapes_changed: used when still right)
         return job["got"]
