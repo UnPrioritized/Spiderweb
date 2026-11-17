@@ -1,0 +1,29 @@
+Tick Symmetrical steps, the first row of a custom shape's settings, for perfectly even staircases. Every key row moves by the same whole number of gates, or by one gate every few rows. Diagonals come out even, mirrored halves match exactly, and [page:nested_tiles|Nested] bands are equally thick everywhere.
+
+The tick works with a gate: Inside set to Spam, Outline spam, or Nested with Spam notes. With any other Inside it shows greyed, and its tip says what to pick. Text, pasted notes, pictures and a [page:hz_bass|Hz bass] don't have it.
+
+## How the sides snap
+
+Each straight side of the drawing goes to the nearest clean angle: 1, 2, 3 or more gates a row, or 1 gate every 2, 3 or more rows. The corners land where those sides meet, so the side that closes the shape is corrected too. Every key row then starts and ends exactly on a gate, so no row has a bit left over.
+
+Curves, ovals and freehand lines stay as drawn: only their rows are made whole gates.
+
+Start: Aligned puts the steps on the song's gate grid, so shapes side by side line up. Auto counts from the left edge of the shape's box. Centred works like Auto here, so it isn't shown.
+
+## Editing
+
+Ticking snaps the corners in one step; Ctrl+Z takes it back. Unticking gives the drawing back as it was before the tick, moved, resized or flipped along with any changes made meanwhile. If you moved single points while it was on, those edits stay.
+
+Drag the shape, its corners or its points freely: the notes show the even version right away, and a thin faded line shows where the corners will land. Let go and they snap there. The shape's box then fits the drawing again, so it always shows where the notes are.
+
+Resizing jumps in whole gates. Changing the gate stretches the shape, so every row keeps the same number of notes. Flipping sideways gives an exact mirror.
+
+While it's on, these are hidden because they would break the steps: Ends, Centred, turning and slanting the box from outside its corners and sides, Nested's Copy angle, Turn, Last size and Spacing, and the [page:deform|Deform] row. A Stir, Warp or Liquify set to bend the shape bends nothing until it's unticked again.
+
+## Gate Range
+
+With a [page:fill#Range… (next to|gate Range] across the keys, each key row steps by its own gate, so the sides bend smoothly along the Range's graph. Every note is still a whole gate, and both halves of a mirrored shape still match: each row counts its gates from the middle of the box. The faded line shows the bent edge. A Range across time would change the gate along a row, so the Range window offers only the two key directions for these shapes.
+
+## Nested
+
+With [page:nested_tiles|Nested] (Shrink by Scaling or Even band), every band is one row thick along flat sides and one gate thick along slopes, with a clean staircase where they meet. The Steps count still spreads the bands over the whole shape. Blend and Copies of another drawing make their copies as usual.

@@ -372,6 +372,8 @@ class CustomPanel:
         self.shapes_changed()
         self.sync_custom()
         self.roll.focus_set()
+        if value:
+            self.tips.show("even_steps", wait=True)  # (the first time: how it's edited)
 
     def even_settle(self):
         """A let go on the piano roll (move, resize, a point, a stroke drawn into it): selected shapes with
