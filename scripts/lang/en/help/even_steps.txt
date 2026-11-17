@@ -24,7 +24,7 @@ While it's on, these are hidden because they would break the steps: Ends, Centre
 
 With a [page:fill#Range… (next to|gate Range], every note is still a whole gate and no row has a bit left over.
 
-Across time: every key row starts and ends on the Range's cut lines, and each side moves the same number of notes every row, so the steps grow or shrink along the shape with the gates. "Each key row by itself" is off for these shapes.
+Across time: the outline stays where you drew it, and every key row is rounded out to the Range's cut lines, so the steps grow or shrink along the shape with the gates. Changing From, To or the graph only changes the cuts, never the outline. "Each key row by itself" is off for these shapes.
 
 Across the keys, the Range window's "Symmetrical steps" choice decides the sides. Straight sides (the usual): the outline stays where you drew it, and each key row is rounded out to whole gates of its own size, counted from the middle of the box. Bend with the gates: every row steps by exactly one of its own gates, so the sides bend along the Range's graph, outward where the gates grow. Both halves of a mirrored shape match either way, and the faded line shows the bent edge. Switching the bend off again straightens the outline back.
 

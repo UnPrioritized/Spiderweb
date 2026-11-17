@@ -284,10 +284,10 @@ def gate_stretched(sh, gate, ppq):
 
 # ---- Gate Range (user 2026-11-17). By keys: Straight sides (default: the drawing as it is, each row rounded out to
 # whole gates of its own from the box's middle) or Bend with the gates (range "even_bend": every row steps by ITS OWN
-# gate, the sides bend along the Range graph). Along time: every row starts / ends on the Range's cut lines. Bend /
-# time use a STAND-IN SPACE (RangeSpace) where every row has gate a; the sides snap there as usual, each row's
-# stretch is widened to whole a, then taken back (range_chop). The real outline = the straight stand-in sides taken
-# back: bent (shown_strokes).
+# gate, the sides bend along the Range graph). Along time: the drawing as it is, each row rounded out to the Range's
+# cut lines. Bend uses a STAND-IN SPACE (RangeSpace) where every row has gate a; the sides snap there as usual, each
+# row's stretch is widened to whole a, then taken back (range_chop). The real outline = the straight stand-in sides
+# taken back: bent (shown_strokes).
 
 def keys_grid(sh, ppq):
     """sh's gate Range by keys (gaterange.RangeKeys; keys_down too), else None."""
@@ -327,8 +327,7 @@ def keys_middle(sh, ppq):
 class RangeSpace:
     """A gate Range's stand-in space for Symmetrical steps: fwd(tick, pitch) -> x (whole numbers = where that row's
     notes may start / end), back(x, pitch) -> tick. kind "keys" = Bend with the gates (each row's gates from the
-    box's middle), "time" = the Range's cut squares along time (every row cut at the same places, user 2026-11-17:
-    "expected across time to also work"). Stand-in ticks = origin + x * a (a = the first gate)."""
+    box's middle). Stand-in ticks = origin + x * a (a = the first gate)."""
 
     def __init__(self, kind, fwd, back, origin, a, grid):
         self.kind, self.fwd, self.back, self.origin, self.a, self.grid = kind, fwd, back, origin, a, grid
@@ -336,7 +335,8 @@ class RangeSpace:
 
 def range_space(sh, ppq):
     """sh's RangeSpace, "rows" for a Range by keys with straight sides (no stand-in: each row rounded out to its
-    own gates from the middle), or None (no Range / one the steps can't follow: Each key row by itself)."""
+    own gates from the middle) or along time (each row rounded out to the cut lines), or None (no Range / one the
+    steps can't follow: Each key row by itself)."""
     import numpy as np
     from notes.gaterange import RangeKeys, keys_up, range_grid
     r = sh.get("range")
@@ -357,24 +357,8 @@ def range_space(sh, ppq):
     sq = range_grid(sh, ppq)
     if not isinstance(sq, np.ndarray) or not len(sq):
         return None
-    edges = np.r_[sq[:, 0], sq[-1, 1]].astype(float)
-    idx = np.arange(len(edges), dtype=float)
-    g0, g1 = edges[1] - edges[0], edges[-1] - edges[-2]
-
-    def fwd(t, p):  # (how many cut squares from the first edge; past the ends: the end squares' size)
-        if t < edges[0]:
-            return (t - edges[0]) / g0
-        if t > edges[-1]:
-            return idx[-1] + (t - edges[-1]) / g1
-        return float(np.interp(t, edges, idx))
-
-    def back(x, p):
-        if x < 0:
-            return edges[0] + x * g0
-        if x > idx[-1]:
-            return edges[-1] + (x - idx[-1]) * g1
-        return float(np.interp(x, idx, edges))
-    return RangeSpace("time", fwd, back, int(edges[0]), int(g0), edges)
+    return "rows"  # (along time: the drawing as it is, each row rounded out to the Range's cut lines; user
+    # 2026-11-17: snapping the sides in cut squares moved the corners whenever From / To changed: "feels random")
 
 
 def keys_version(sh, ppq, sp):
@@ -411,39 +395,42 @@ def keys_version(sh, ppq, sp):
 def range_chop(sh, stretches, g, count=False):
     """custom_chop.chop for a Range with Symmetrical steps (g = range_grid's): None when it isn't one.
     Bend with the gates: stand-in stretches widened to whole a, taken to each row's own gates from the middle.
-    Time: widened to whole a, each a = one of the Range's cut squares. Straight sides ("_even_rows"): each row's
-    own stretch rounded out to its own gates from the middle. Then back to back notes (count: how many each)."""
+    Straight sides ("_even_rows"): each row's own stretch rounded out to its own gates from the middle; along time
+    (g = the cut squares) rounded out to the cut lines. Then back to back notes (count: how many each)."""
     import numpy as np
     from notes.custom_chop import on_grid
     from notes.gaterange import RangeKeys
     kind = sh.get("_even_space") or ("rows" if sh.get("_even_rows") else None)
-    if kind in ("keys", "rows") and not isinstance(g, RangeKeys) or kind == "time" and not isinstance(g, np.ndarray):
-        return None
-    if kind is None:
+    if kind == "rows" and isinstance(g, np.ndarray):
+        kind = "cuts"  # (along time)
+    elif kind is None or not isinstance(g, RangeKeys):
         return None
     t0 = int(sh["_even"])
     none = np.zeros(0, np.int64) if count else np.zeros((0, 3), np.int64)
-    if kind == "time":
-        st = on_grid(stretches, int(sh["_even_a"]), t0)
-        if not len(st):
-            return none
-        a = int(sh["_even_a"])
-        j0, j1 = (st[:, 0] - t0) // a, (st[:, 1] - t0) // a
+    st = np.array(stretches, np.int64).reshape(-1, 3)
+    if not len(st):
+        return none
+    if kind == "cuts":  # (each row's own ends rounded out to the Range's cut lines; past the ends: the end squares)
+        edges = np.r_[g[:, 0], g[-1, 1]].astype(np.int64)
+        e0, e1, last = int(edges[0]), int(edges[-1]), len(edges) - 1
+        g0, g1 = max(1, int(edges[1] - edges[0])), max(1, int(edges[-1] - edges[-2]))
+
+        def line(t, up):  # (the cut line at / before tick t, or at / after when up)
+            inside = np.searchsorted(edges, t, "left" if up else "right") - (0 if up else 1)
+            past = -((e1 - t) // g1) if up else (t - e1) // g1
+            before = -((e0 - t) // g0) if up else (t - e0) // g0
+            return np.where(t < e0, before, np.where(t > e1, last + past, np.clip(inside, 0, last)))
+        j0 = line(st[:, 0], False)
+        j1 = np.maximum(line(st[:, 1], True), j0 + 1)
         n = j1 - j0
         if count:
             return n
         k = np.repeat(j0, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
-        edges = np.r_[g[:, 0], g[-1, 1]].astype(np.int64)
-        e0, e1, last = edges[0], edges[-1], len(edges) - 1
-        g0, g1 = edges[1] - edges[0], edges[-1] - edges[-2]
 
-        def at(j):  # (cut line j; past the ends: the end squares' size on)
+        def at(j):  # (cut line j)
             return np.where(j < 0, e0 + j * g0, np.where(j > last, e1 + (j - last) * g1,
                                                           edges[np.clip(j, 0, last)]))
         return np.column_stack([at(k), at(k + 1), np.repeat(st[:, 2], n)])
-    st = np.array(stretches, np.int64).reshape(-1, 3)
-    if not len(st):
-        return none
     keys = np.unique(st[:, 2])
     gates = np.array([row_gates(g)(int(q)) for q in keys.tolist()], np.int64)[np.searchsorted(keys, st[:, 2])]
     if kind == "keys":
