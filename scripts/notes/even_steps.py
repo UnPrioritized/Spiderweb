@@ -35,7 +35,76 @@ def even_version(sh, ppq):
         return sh
     origin = grid_start(sh, ppq)
     strokes = [snapped_stroke(st, to_bp, to_uv, ppq, g, origin) for st in sh["strokes"]]
+    strokes = chains_snapped(sh["strokes"], strokes, to_bp, to_uv, ppq, g, origin)
     return dict(sh, strokes=strokes, _even=origin)
+
+
+def chains_snapped(old, strokes, to_bp, to_uv, ppq, g, origin):
+    """Open straight-sided strokes whose ends meet end to end into a closed outline (a triangle drawn as three
+    lines, a line stopping just short of its start; ends within custom.TOUCH_BEATS / TOUCH_KEYS) snapped as one
+    loop (hunt 2026-11-17: they got no even sides). Each stroke keeps its own corners when the snap keeps every
+    corner; else the chain becomes one closed stroke (the first's settings; only when they all share them)."""
+    from notes.custom import TOUCH_BEATS, TOUCH_KEYS
+    open_ = [i for i, st in enumerate(old) if plain_poly(st) and len(st.get("pts") or []) >= 2
+             and strokes[i] is st]  # (not closed: closed ones snapped already)
+    if not open_:
+        return strokes
+    ends = {i: (to_bp(*old[i]["pts"][0]), to_bp(*old[i]["pts"][-1])) for i in open_}
+
+    def meet(a, b):
+        return abs(a[0] - b[0]) <= TOUCH_BEATS and abs(a[1] - b[1]) <= TOUCH_KEYS
+
+    out, used = list(strokes), set()
+    for i in open_:
+        if i in used:
+            continue
+        chain, at, start = [(i, False)], ends[i][1], ends[i][0]
+        while not meet(at, start):
+            nxt = next(((j, rev) for j in open_ if j not in used and j not in (k for k, _ in chain)
+                        for rev in (False, True) if meet(at, ends[j][1 if rev else 0])), None)
+            if nxt is None:
+                break
+            chain.append(nxt)
+            at = ends[nxt[0]][0 if nxt[1] else 1]
+        if not meet(at, start) or len({(old[k].get("role"), old[k].get("colour")) for k, _ in chain}) > 1:
+            continue  # (not closed / strokes of different kinds: as drawn)
+        used.update(k for k, _ in chain)
+        pieces = [old[k]["pts"][::-1] if rev else old[k]["pts"] for k, rev in chain]
+        corners = [p for piece in pieces for p in piece[:-1]]
+        xy = [((to_bp(u, v)[0] * ppq - origin) / g, to_bp(u, v)[1] + 0.5) for u, v in corners]
+
+        def back(x, y):
+            return list(to_uv((origin + x * g) / ppq, y - 0.5))
+        got = _same_corners(xy)
+        if got is not None:  # (each stroke its own corners, the ends shared)
+            at_ = 0
+            for (k, rev), piece in zip(chain, pieces):
+                m = len(piece) - 1
+                new = [back(*got[(at_ + n) % len(got)]) for n in range(m + 1)]
+                out[k] = dict(old[k], pts=new[::-1] if rev else new)
+                at_ += m
+            continue
+        loop = even_loop(xy)
+        if loop is None:
+            continue
+        pts = [back(x, y) for x, y in loop]
+        out[chain[0][0]] = dict(old[chain[0][0]], pts=pts + [list(pts[0])])
+        for k, _ in chain[1:]:
+            out[k] = None
+    return [st for st in out if st is not None]
+
+
+def _same_corners(pts):
+    """even_loop keeping every corner (None when a corner would go or come: the caller joins the strokes then)."""
+    cur = pts
+    for _ in range(AGAIN):
+        got = _snapped_loop(cur)
+        if got is None or len(got) != len(cur):
+            return None
+        if all(_length(p, q) <= 1e-9 for p, q in zip(got, cur)):
+            return got
+        cur = got
+    return cur
 
 
 def snapped_shape(sh, ppq):
