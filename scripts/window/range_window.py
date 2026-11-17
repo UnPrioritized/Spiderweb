@@ -230,10 +230,11 @@ class RangeGraph(PointGraph, tk.Toplevel):
             t.pop("range_kept", None)
             t["range" if on else "range_kept"] = json.loads(json.dumps(m))
             if self.even and self.placed(t) and even_on(t) and stores_snap(t):  # (Symmetrical steps: stored for
-                t["pts"], t["strokes"], free = range_restored(before, t, self.app.ppq)  # the new Range, a bent
-                if free:  # outline straightened first)
+                t["pts"], t["strokes"], free = range_restored(before, t, self.app.ppq)  # the new Range)
+                if free:
                     t["even_free"] = free
         self.app.shapes_changed()
+        self.app.sync_panel()  # (the panel's Range-on rows while the window is open, hunt 2026-11-17)
         self.count = sum(self.app.note_count(t) or 0 for t in self.tgts if self.placed(t))
 
         def counted():  # (the chart from notes made in the background when not remembered: App.notes_soon)

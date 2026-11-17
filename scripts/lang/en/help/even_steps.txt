@@ -24,11 +24,11 @@ While it's on, these are hidden because they would break the steps: Ends, Centre
 
 With a [page:fill#Range… (next to|gate Range], every note is still a whole gate and no row has a bit left over.
 
-The Range window's "Symmetrical steps" choice decides the sides. Straight sides (the usual) keeps the outline where you drew it and only rounds each key row out to whole gates. Bend with the gates makes the sides step by whole gates, so they bend along the Range's graph. Switching the bend off again straightens the outline back.
+The Range window's "Symmetrical steps" choice decides the sides. Straight sides (the usual) keeps the outline where you drew it and only rounds each key row out to whole gates. Bend with the gates makes every side step by exactly the same amount every row, so the sides bend along the Range's graph. With Bend, your drawing stays as you drew it and its corners are what you drag; the notes and a thin faded line show the bent edge.
 
-Across time: every note starts and ends on the Range's cut lines. With Straight sides the steps grow or shrink along the shape with the gates. With Bend with the gates your drawing is laid over the cut squares, so each side moves by the same squares every row and curves as the gates grow. Its corners stay at the same spots of the box when you change From, To or the graph. "Each key row by itself" is off for these shapes.
+Across time: every note starts and ends on the Range's cut lines. With Straight sides the steps grow or shrink along the shape with the gates. With Bend with the gates your drawing is laid over the cut squares, and each side moves by the same number of squares every row, so it curves as the gates grow. The corners at the box's left and right edges stay there; when From, To or the graph changes, the far corner (a triangle's top) can jump to the nearest even slope. "Each key row by itself" is off for these shapes.
 
-Across the keys: Straight sides rounds each key row out to whole gates of its own size, counted from the middle of the box. Bend with the gates makes every row step by exactly one of its own gates, so the sides bend outward where the gates grow, and the faded line shows the bent edge. Both halves of a mirrored shape match either way.
+Across the keys: Straight sides rounds each key row out to whole gates of its own size, counted from the middle of the box. Bend with the gates makes every row step by exactly one of its own gates, so the sides bend outward where the gates grow. Both halves of a mirrored shape match either way.
 
 ## Nested
 

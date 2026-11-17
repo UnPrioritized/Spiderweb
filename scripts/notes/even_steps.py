@@ -116,8 +116,9 @@ def snapped_shape(sh, ppq):
     corners where the even version has them. Curves keep their place in the box (they move by under half a gate)."""
     from notes.custom import frame_upright, map_stroke, stroke_points
     on = dict(sh, even=True)
-    if not stores_snap(sh) or "_even" not in even_version(on, ppq):
-        return [list(p) for p in sh["pts"]], sh["strokes"]
+    ev = even_version(on, ppq)
+    if not stores_snap(sh) or "_even" not in ev or "_even_space" in ev:  # (Bend with the gates: the drawing stays
+        return [list(p) for p in sh["pts"]], sh["strokes"]  # as drawn, the bend is only shown: shown_strokes)
     strokes = shown_strokes(on, ppq)
     pts = [list(p) for p in sh["pts"]]
     if axis_box(pts) and not sh.get("range") and not sh.get("fit"):
@@ -215,7 +216,6 @@ def ticked(sh, ppq):
     (pts / strokes before, "at" = the snapped box, "mark" = the snapped strokes' fingerprint) so unticking gives it
     back (user 2026-11-17: unticking left it snapped, with leftovers)."""
     pts, strokes = snapped_shape(dict(sh, even=True), ppq)
-    strokes = time_bent(dict(sh, pts=pts), strokes, ppq)  # (a Range along time set to bend: curved now)
     import copy
     free = {"pts": [list(p) for p in sh["pts"]], "strokes": copy.deepcopy(sh["strokes"]), "at": [list(p) for p in pts],
             "mark": drawing_mark(strokes)}  # (own lists: a move changing the box in place mustn't move these)
@@ -287,8 +287,8 @@ def gate_stretched(sh, gate, ppq):
 # whole gates of its own from the box's middle) or Bend with the gates (range "even_bend": every row steps by ITS OWN
 # gate, the sides bend along the Range graph). Along time: the drawing as it is, each row rounded out to the Range's
 # cut lines. Bend uses a STAND-IN SPACE (RangeSpace) where every row has gate a; the sides snap there as usual, each
-# row's stretch is widened to whole a, then taken back (range_chop). The real outline = the straight stand-in sides
-# taken back: bent (shown_strokes).
+# row's stretch is widened to whole a, then taken back (range_chop). The bent outline = the straight stand-in sides
+# taken back (shown_strokes): only SHOWN (faded landing line), the stored drawing stays as drawn.
 
 def keys_grid(sh, ppq):
     """sh's gate Range by keys (gaterange.RangeKeys; keys_down too), else None."""
@@ -361,31 +361,25 @@ def range_space(sh, ppq):
     if not r.get("even_bend"):
         return "rows"  # (straight sides: the drawing as it is, each row rounded out to the Range's cut lines)
     # Bend with the gates along time (user 2026-11-17: "2 key rows on varying gate will form some kind of log
-    # curve"): the stored outline is BENT (time_bent: the drawing laid over the cut squares by its share of the box,
-    # so its corners never move; snapping the sides in squares made them jump with every From / To: "feels
-    # random"). Stand-in x = cut-square count, where that outline is straight again; never snapped.
+    # curve"; then "1, 1, 2, 1, 1, 2 is actually bad too ... make it fixed as always"): the DRAWING is laid over the
+    # cut squares by its share of the box (fwd: box's left edge = square 0, right edge = the last), snapped there
+    # like any even shape (every row moves the same squares), taken back through the real squares (back: bent).
+    # The stored drawing never bends (hunt 2026-11-17: a stored bend baked in on every gate / turn / resize).
     edges = np.r_[sq[:, 0], sq[-1, 1]].astype(float)
     idx = np.arange(len(edges), dtype=float)
     e0, e1, n = edges[0], edges[-1], idx[-1]
     g0, g1 = edges[1] - edges[0], edges[-1] - edges[-2]
 
-    def fwd(t, p):  # (how many cut squares from the first edge; past the ends: the end squares' size)
-        if t < e0:
-            return (t - e0) / g0
-        if t > e1:
-            return n + (t - e1) / g1
-        return float(np.interp(t, edges, idx))
+    def fwd(t, p):  # (the drawing's share of the box, in squares)
+        return (t - e0) / max(e1 - e0, 1.0) * n
 
-    def back(x, p):
+    def back(x, p):  # (square count -> its real tick; past the ends: the end squares' size)
         if x < 0:
             return e0 + x * g0
         if x > n:
             return e1 + (x - n) * g1
         return float(np.interp(x, idx, edges))
-    sp = RangeSpace("time", fwd, back, int(e0), int(g0), edges)
-    sp.lin = lambda t: (t - e0) / max(e1 - e0, 1.0) * n  # (a straight drawing's share of the box, in squares)
-    sp.lin_back = lambda x: e0 + x / n * (e1 - e0) if n else e0
-    return sp
+    return RangeSpace("time", fwd, back, int(e0), int(g0), edges)
 
 
 def keys_version(sh, ppq, sp):
@@ -407,9 +401,8 @@ def keys_version(sh, ppq, sp):
     out = []
     for st in sh["strokes"]:
         pts = st.get("pts") or []
-        if sp.kind != "time" and plain_poly(st) and len(pts) >= 4 and all(abs(c - d) <= SAME
-                                                                          for c, d in zip(pts[0], pts[-1])):
-            got = even_loop([stand_in(u, v) for u, v in pts[:-1]])
+        if plain_poly(st) and len(pts) >= 4 and all(abs(c - d) <= SAME for c, d in zip(pts[0], pts[-1])):
+            got = even_loop([stand_in(u, v) for u, v in pts[:-1]], len(sp.grid) - 1 if sp.kind == "time" else None)
             if got is not None:
                 loop = [back(x, y) for x, y in got]
                 out.append(dict(st, pts=loop + [list(loop[0])], _snapped=True))
@@ -444,6 +437,9 @@ def range_chop(sh, stretches, g, count=False):
         if not len(st):
             return none
         j0, j1 = (st[:, 0] - t0) // a, (st[:, 1] - t0) // a
+        last = len(g)  # (never past the box: the cut squares are the box, user 2026-11-17)
+        j0 = np.clip(j0, 0, last)
+        j1 = np.maximum(np.clip(j1, 0, last), j0)
     else:
         st = np.array(stretches, np.int64).reshape(-1, 3)
         if not len(st):
@@ -488,71 +484,20 @@ def range_chop(sh, stretches, g, count=False):
     return np.column_stack([starts, starts + gg, np.repeat(st[:, 2], n)])
 
 
-def unbent_strokes(sh, ppq):
-    """A shape stored bent by its Range (Bend with the gates / along time): its straight-sided strokes again,
-    corner to corner (hunt 2026-11-17: the bend stayed after the Range was switched off). Others as they are."""
-    sp = range_space(sh, ppq)
-    to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(sh["pts"])
-    if not isinstance(sp, RangeSpace) or to_uv is None:
-        return sh["strokes"]
-    out = []
-    for st in sh["strokes"]:
-        pts = st.get("pts") or []
-        if plain_poly(st) and len(pts) >= 4 and all(abs(c - d) <= SAME for c, d in zip(pts[0], pts[-1])):
-            xy = [(sp.fwd(to_bp(u, v)[0] * ppq, to_bp(u, v)[1]), to_bp(u, v)[1]) for u, v in pts[:-1]]
-            corners = _straight_dropped(xy)  # (the row-middle points of a bent side lie on its stand-in line)
-            loop = [list(to_uv((sp.lin_back(x) if sp.kind == "time" else sp.back(x, p)) / ppq, p))
-                    for x, p in corners]  # (time: the straight drawing = the squares' share of the box)
-            out.append(dict(st, pts=loop + [list(loop[0])]))
-        else:
-            out.append(st)
-    return out
-
-
-def time_bent(sh, strokes, ppq):
-    """Bend with the gates along time: straight closed sides laid over the cut squares by their share of the box
-    (a point at every row's middle), so each row steps by the same squares and the sides curve as the gates grow.
-    The corners stay where they are. Other strokes / other Ranges: as they are."""
-    sp = range_space(dict(sh, even=True), ppq)
-    to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(sh["pts"])
-    if not isinstance(sp, RangeSpace) or sp.kind != "time" or to_uv is None:
-        return strokes
-
-    def real(b, p):
-        return list(to_uv(sp.back(sp.lin(b * ppq), p) / ppq, p))
-    out = []
-    for st in strokes:
-        pts = st.get("pts") or []
-        if not (plain_poly(st) and len(pts) >= 4 and all(abs(c - d) <= SAME for c, d in zip(pts[0], pts[-1]))):
-            out.append(st)
-            continue
-        bp = [to_bp(u, v) for u, v in pts]
-        bent = []
-        for (b0, p0), (b1, p1) in zip(bp, bp[1:]):
-            bent.append(real(b0, p0))
-            lo, hi = sorted((p0, p1))
-            fs = sorted((q - p0) / (p1 - p0) for q in range(math.floor(lo), math.ceil(hi) + 1) if lo < q < hi)
-            bent += [real(b0 + f * (b1 - b0), p0 + f * (p1 - p0)) for f in fs]  # (each row's middle it crosses)
-        bent.append(list(bent[0]))
-        out.append(dict(st, pts=bent))
-    return out
-
-
 def range_restored(before, after, ppq):
-    """A Range changed on an even shape (Range window): (pts, strokes, even_free) stored for the new Range: a bent
-    outline straightened first, then snapped / bent the new way. even_free re-marked when the drawing was only
-    ours."""
+    """A Range changed on an even shape (Range window): (pts, strokes, even_free) stored for the new Range (no
+    Range / Straight sides: snapped as usual; Bend with the gates: the drawing as it is). even_free re-marked when
+    the drawing was only ours."""
     mine = (before.get("even_free") or {}).get("mark") == drawing_mark(before["strokes"])
-    work = dict(after, strokes=unbent_strokes(before, ppq))
-    pts, strokes = snapped_shape(work, ppq)
-    strokes = time_bent(dict(work, pts=pts), strokes, ppq)
+    pts, strokes = snapped_shape(dict(after, strokes=before["strokes"]), ppq)
     free = before.get("even_free")
     return pts, strokes, (dict(free, mark=drawing_mark(strokes)) if mine and free else free)
 
 
 def shown_strokes(sh, ppq):
-    """The strokes where the notes show the shape (the landing line; what a let go stores): even_version's, but a
-    Range's straight stand-in sides taken back (a point at every row's middle: the bent edge)."""
+    """The strokes where the notes show the shape (the landing line; what a let go stores without a bend):
+    even_version's, but a Range's straight stand-in sides taken back (a point at every row's middle: the bent edge,
+    only shown)."""
     ev = even_version(sh, ppq)
     if ev is sh or "_even_space" not in ev:
         return ev["strokes"]
@@ -679,10 +624,13 @@ def snapped_stroke(st, to_bp, to_uv, ppq, g, origin):
     return dict(st, pts=out + [list(out[0])])
 
 
-def clean_line(p, q):
+def clean_line(p, q, span=None):
     """The clean line nearest the side p -> q: ("flat", y) or (slope, c) meaning x = c + slope * y, slope a whole
     number of gates a row (0 = upright) or +-1/m (one gate every m rows); c on the values that put the line on
-    gate lines where it crosses between rows (whole numbers for whole slopes, steps of 1/m otherwise)."""
+    gate lines where it crosses between rows (whole numbers for whole slopes, steps of 1/m otherwise). span (a
+    Range along time bent: the box is 0 .. span squares): the line goes through the side's end nearer the box's
+    left / right edge, not its middle (user 2026-11-17: the corners at the box's edges stay put, the shape stays in
+    the box; only the far corner moves when the slope changes)."""
     (x0, y0), (x1, y1) = p, q
     dy, dx = y1 - y0, x1 - x0
     if abs(dy) < FLAT_ROWS - NOISE:  # (NOISE: a side snapped to exactly half a row stays sloped next time)
@@ -696,8 +644,12 @@ def clean_line(p, q):
             slope, step = 0.0, 1.0
         else:
             slope, step = math.copysign(1.0 / m, s), 1.0 / m
-    c = ((x0 - slope * y0) + (x1 - slope * y1)) / 2
-    return (slope, math.floor(c / step + 0.5) * step)
+    if span is None:
+        c = ((x0 - slope * y0) + (x1 - slope * y1)) / 2
+        return (slope, math.floor(c / step + 0.5) * step)
+    ex, ey = min(p, q, key=lambda e: min(e[0], span - e[0]))
+    c = (ex - slope * ey) / step  # (rounded INTO the box: a corner on its edge never moves out)
+    return (slope, (math.ceil(c - NOISE) if ex < span / 2 else math.floor(c + NOISE)) * step)
 
 
 def _abc(line):
@@ -719,18 +671,40 @@ def _on(line, y=None, x=None):
 AGAIN = 8  # snapped again until nothing moves (a side squeezed short by its neighbours can turn flat), at most
 
 
-def even_loop(pts):
+def even_loop(pts, span=None):
     """A closed loop's corners [(x, y)] (not repeated at the end) -> the even loop's corners, or None if it
     folds away to nothing. Snapped until nothing moves: the stored even shape snaps to itself. Points on a straight
-    line between their neighbours go first (a Range by keys' stored bent side has one at every row's middle: alone
-    each piece is too short to tell its angle)."""
+    line between their neighbours go first. span: see clean_line."""
     pts = _straight_dropped(pts)
     for _ in range(AGAIN):
-        got = _snapped_loop(pts)
+        got = _snapped_loop(pts, span)
         if got is None or len(got) == len(pts) and all(_length(p, q) <= 1e-9 for p, q in zip(got, pts)):
-            return got
+            return _off_row_lines(got)
         pts = got
-    return pts
+    return _off_row_lines(pts)
+
+
+INSIDE = 1e-6  # a flat side on a line between rows is moved this many rows into the shape (_off_row_lines)
+
+
+def _off_row_lines(pts):
+    """Flat sides lying exactly ON a line between two rows moved a hair into the shape: float noise from the box
+    (a turn there and back left 40.300000000000004) decided whether the row outside got notes (hunt 2026-11-17).
+    Snapping again puts them back on the line first, so this never adds up."""
+    if pts is None or len(pts) < 3:
+        return pts
+    n = len(pts)
+    area = sum(pts[i][0] * pts[(i + 1) % n][1] - pts[(i + 1) % n][0] * pts[i][1] for i in range(n))
+    if abs(area) <= SAME:
+        return pts
+    out = [list(p) for p in pts]
+    for i in range(n):
+        (x0, y0), (x1, y1) = pts[i], pts[(i + 1) % n]
+        if abs(y0 - y1) <= SAME and abs(y0 - round(y0)) <= 1e-9 and abs(x1 - x0) > SAME:
+            d = INSIDE * math.copysign(1.0, x1 - x0) * math.copysign(1.0, area)  # (the inside: left of the way
+            out[i][1] = y0 + d  # round when it runs anticlockwise)
+            out[(i + 1) % n][1] = y1 + d
+    return [tuple(p) for p in out]
 
 
 def _straight_dropped(pts):
@@ -748,11 +722,11 @@ def _straight_dropped(pts):
     return out
 
 
-def _snapped_loop(pts):
+def _snapped_loop(pts, span=None):
     n = len(pts)
     if n < 3:
         return None
-    lines = [clean_line(pts[i], pts[(i + 1) % n]) for i in range(n)]
+    lines = [clean_line(pts[i], pts[(i + 1) % n], span) for i in range(n)]
     out = []
     for i in range(n):  # corner i: where side i - 1 meets side i
         l1, l2 = lines[i - 1], lines[i]
