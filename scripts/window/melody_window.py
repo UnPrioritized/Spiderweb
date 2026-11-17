@@ -740,7 +740,8 @@ class MelodyWindow(tk.Toplevel):
     def watching(self):
         self.watch = None
         try:
-            self.sync()
+            if not self.app._bg_notes:  # (notes made in the background: looked at once they're in, never forced)
+                self.sync()
         finally:
             if self.winfo_exists():
                 self.watch = self.after(WATCH_MS, self.watching)
