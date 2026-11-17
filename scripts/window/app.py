@@ -483,6 +483,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._notes_worked = 0  # shapes whose notes had to be worked out (not remembered)
         self._merge_keys = {}  # merged shapes' parts' settings when last seen (remake_merges)
         self._notes_time = 0.0  # how long that took the last time
+        self._shape_took = {}  # id(shape) -> how long its own notes took the last time they were made (late_ok)
         self._make_time = 0.0  # how long the last making of every note took, remembered or not (late_ok)
         self._mask_time = 0.0  # ... and the masks' preview (mask.mask_view)
         self._late_notes = None  # while dragging: notes left until the mouse rests
@@ -2034,12 +2035,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         are made as for one channel (Own channel per note needs Multi channel). keys: made on another key range
         (a shape past the edges, made lifted: engine.past_edges). edges=False: the notes before a page, never cut
         at the edges (only the finished shape is: shape_notes_tracks' way; pages_hunt 5, 2026-11-06)."""
+        own, started = sh, time.perf_counter()
         sh, keys, key = self.notes_cache_key(sh, keys, edges)
         cache, asked = self._notes_cache, self._notes_asked
         if asked:
             asked[-1].add(key)
         got = cache.pop(key, None)
         if got is None:
+            top = not self._notes_depth
             self._notes_depth += 1
             asked.append(set())
             try:
@@ -2053,6 +2056,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self._notes_deps[key] = deps
             got = shared_arrays(got, cache)
             self._notes_worked += 1
+            if top:  # (late_ok: this shape's notes are slow to make, whatever the last making took)
+                self._shape_took[id(own)] = time.perf_counter() - started
         cache[key] = got  # (last = used most recently: trim_notes forgets the oldest first)
         self._notes_used[key] = self.shapes_gen
         if not self._notes_depth:
@@ -2853,6 +2858,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         def notes_tracks(sh, keys=None, edges=True):
             if job["stop"]:
                 raise Stopped
+            own, started = sh, time.perf_counter()
             if not voiced:  # (as App.notes_tracks: Recolour left out too, not a Domino paste's)
                 sh = recolour_alone(one_voice(sh))
             elif "recolour" in sh:
@@ -2867,6 +2873,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 job["asked"][-1].add(k)
             got = known.get(k) or job["own"].get(k)
             if got is None:
+                top = not job["depth"]
                 job["depth"] += 1
                 job["asked"].append(set())
                 try:
@@ -2880,6 +2887,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 job["deps"][k] = deps
                 got = shared_arrays(got, job["own"])
                 job["own"][k] = got
+                if top:  # (App._shape_took, by the job's copy: notes_made hands it to the real shape)
+                    job.setdefault("took", {})[id(own)] = time.perf_counter() - started
             job["used"].append(k)
             if not job["depth"]:
                 job["top"].append(k)
@@ -2909,6 +2918,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         shapes = self.thread_shapes(key)
         job = self._coming = self.thread_job(key, show=show, follow=follow, stash={})
         # (stash: all_notes' own, for lay_again)
+        real = self.edit_shapes()
+        job["real"] = {id(c): r for c, r in zip(shapes, real)} if len(real) == len(shapes) else {}
         sels, fast, rule = frozenset(self.sels), speed.loops(), stack_rule(self)
         job["off_for"] = off_for = self.offrange_wanted()  # (the notes kept past the edges made here too)
         notes_tracks = self.thread_maker(job, key)
@@ -3025,6 +3036,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._make_time = job["time"]
         self.roll.ready_order(job["got"][2], *job["drawn"])
         self._pairs = (weakref.ref(job["got"][2]), *job["pairs"])
+        for c, took in job.get("took", {}).items():
+            sh = job["real"].get(c)
+            if sh is not None:
+                self._shape_took[id(sh)] = took
         self._job_stash = job["stash"]
         self._job_off = (job["off_for"], job["got"][2], job.get("off"))  # (shapes_changed: used when still right)
         return job["got"]
@@ -3043,7 +3058,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """The notes can be made in the background (shapes_changed): the last making took longer than LATE_S. The notes
         on screen stay meanwhile: the same shapes in the same places (maybe more after them) = as they are, else
         renumbered to the new list (renumber_shown: Delete, undo / redo, History, Join, Split...)."""
-        if self._make_time + self._mask_time <= LATE_S or self._merges_owed:
+        if self._merges_owed or self._make_time + self._mask_time <= LATE_S and not self.slow_shape_owed():
             return False
         if self.companion is not None or getattr(self, "fold_window", None):  # (Draw on Domino / Fold tracks: their
             return False                                                       # own notes, made at once)
@@ -3052,6 +3067,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return True
         self.renumber_shown()
         return True
+
+    def slow_shape_owed(self):
+        """A shape whose own notes were slow to make the last time (> LATE_S) needs them made again (changed): the
+        making will be slow even if the last one was quick (another shape edited, its notes remembered)."""
+        took = self._shape_took
+        if len(took) > 2 * len(self.shapes) + 16:  # (shapes gone: forgotten)
+            ids = {id(sh) for sh in self.shapes}
+            self._shape_took = took = {k: v for k, v in took.items() if k in ids}
+        for sh in self.shapes:
+            if took.get(id(sh), 0.0) > LATE_S and self.notes_cache_key(sh)[2] not in self._notes_cache:
+                return True
+        return False
 
     def renumber_shown(self):
         """The shape list changed under the notes on screen: those notes (and what's counted per shape from them)
