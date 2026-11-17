@@ -675,9 +675,9 @@ class WarpWindow(tk.Toplevel):
                 self.hint.config(text=text)
         if shape:  # (any Channels mode, any colours: the shape bends; orange when its outline stays as it was)
             from notes.shape_bend import warp_shape
-            from window.stir_window import outline_kept
+            from window.stir_window import outline_kept_soon
             lonely = single = False
-            same = outline_kept(app, tgts, lambda r, t: warp_shape(r, t.get("off")) is not None)
+            same = outline_kept_soon(app, self, tgts, lambda r, t: warp_shape(r, t.get("off")) is not None)
         else:
             lonely, single = app.recolour_trouble(tgts, [r or {"mode": KEEP} for r in rcs])
             same = False

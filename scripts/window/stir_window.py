@@ -1262,7 +1262,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         past OUTLINE_KEPT_MOST notes aren't checked (a second making of them)."""
         if not any(s["turn"] or s["twist"] or s["bulge"] or bends(s) for s in sts):
             return False
-        return outline_kept(self.app, tgts, lambda r, t: shape_tabs(r, t.get("off")))
+        return outline_kept_soon(self.app, self, tgts, lambda r, t: shape_tabs(r, t.get("off")))
 
     # ---- changes
 
@@ -1725,19 +1725,15 @@ def outline_kept(app, tgts, has):
     orange line in the Stir / Warp window). Shapes past OUTLINE_KEPT_MOST notes aren't checked. Shapes whose notes
     are CUT where bent (pastes, Cut notes where bent) aren't either: no outline to keep, and it made all their notes
     on the window's thread (2.6 M at Twist 50: 1.4 s a change before the background thread began; user 2026-11-17)."""
-    from notes.shape_bend import cuts_notes
+    pairs = outline_pairs(tgts, has)
+    if pairs is None:
+        return False
     seen = False
-    for t in tgts:
-        r = t.get("recolour")
-        if not isinstance(r, dict) or not has(r, t):
-            continue
-        if cuts_notes(r, t):
-            return False
+    for t, bare in pairs:
         notes = app.notes_of(t)
         if len(notes) > OUTLINE_KEPT_MOST:
             return False
-        rest = colour_part(r)
-        plain = app.notes_of(dict(t, recolour=rest) if rest else without_recolour(t))
+        plain = app.notes_of(bare)
         if len(plain) != len(notes):
             return False
         a, b = np.asarray(notes)[:, :3], np.asarray(plain)[:, :3]
@@ -1747,6 +1743,46 @@ def outline_kept(app, tgts, has):
             return False
         seen = True
     return seen
+
+
+def outline_pairs(tgts, has):
+    """(shape, the same without its Shape steps) for outline_kept's shapes; None = no answer but False (notes cut
+    where bent)."""
+    from notes.shape_bend import cuts_notes
+    out = []
+    for t in tgts:
+        r = t.get("recolour")
+        if not isinstance(r, dict) or not has(r, t):
+            continue
+        if cuts_notes(r, t):
+            return None
+        rest = colour_part(r)
+        out.append((t, dict(t, recolour=rest) if rest else without_recolour(t)))
+    return out
+
+
+def outline_kept_soon(app, win, tgts, has):
+    """outline_kept for a window's orange line without making notes on the window's thread (Stir / Warp / Liquify
+    sync): the answer when the notes are remembered; else the line as it was, the notes made in the background
+    (after the ones being made after an edit), then win.sync() once more."""
+    pairs = outline_pairs(tgts, has)
+    if not pairs:
+        win._outline_same = False
+        return False
+    need = [s for p in pairs for s in p]
+    if all(app.remembered_count(s) is not None for s in need):
+        win._outline_same = outline_kept(app, tgts, has)
+        return win._outline_same
+    keys = tuple(app.notes_cache_key(s)[2] for s in need)
+    if getattr(win, "_outline_tried", None) == keys:  # (made once and still not remembered: no loop)
+        return False
+    win._outline_tried = keys
+
+    def again():
+        if win.winfo_exists():
+            win.sync()
+    app.after_notes(lambda: app.notes_soon(need, again, "outline"))
+    return getattr(win, "_outline_same", False)
 
 
 def open_stir(app):
