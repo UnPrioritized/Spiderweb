@@ -1707,14 +1707,45 @@ _BENT = OrderedDict()  # (bent_token -> (notes, tracks): notes a Shape tab made,
 BENT_KEPT = 6
 
 
+HASH_SPLIT = 1 << 23  # (bytes: more = hashed in pieces on several cores)
+_HASH_POOL = []
+_HASH_LOCK = threading.Lock()
+
+
+def _content_hash(parts):
+    """A name for the bytes of parts (contiguous arrays / bytes), read in place (no copy). Big ones in pieces on half
+    the cores (hashlib lets go of the GIL), then the pieces' digests hashed (Cut notes where bent: 2.9 M notes =
+    160 MB, 113 ms on one core with a copy, 2026-11-17). Each part's length counts too."""
+    import hashlib
+    views = [memoryview(p).cast("B") for p in parts]
+    total = sum(len(v) for v in views)
+    if total < HASH_SPLIT:
+        h = hashlib.blake2b(digest_size=12)
+        for v in views:
+            h.update(v)
+        return h.hexdigest()
+    with _HASH_LOCK:  # (notes are made on more than one thread)
+        if not _HASH_POOL:
+            from concurrent.futures import ThreadPoolExecutor
+            import os
+            workers = max(1, (os.cpu_count() or 2) // 2)
+            _HASH_POOL.extend((ThreadPoolExecutor(workers, thread_name_prefix="hash"), workers))
+        pool, workers = _HASH_POOL
+    size = max(HASH_SPLIT // 4, -(-total // (workers * 2)))
+    pieces = [v[i:i + size] for v in views for i in range(0, len(v), size)] or [b""]
+    h = hashlib.blake2b(digest_size=12)
+    h.update(repr([len(v) for v in views]).encode())
+    for d in pool.map(lambda b: hashlib.blake2b(b, digest_size=16).digest(), pieces):
+        h.update(d)
+    return h.hexdigest()
+
+
 def bent_token(notes, tracks):
     """A name for notes (and tracks) a Shape tab made, kept a while: sh["_bent"] = it makes heard_kind give them as
     the shape's own notes (every step after runs on them). Named by their content (the notes caches see it)."""
-    import hashlib
     notes = np.ascontiguousarray(notes, np.int64)
-    h = hashlib.blake2b(notes.tobytes(), digest_size=12)
-    h.update(b"|" if tracks is None else np.ascontiguousarray(tracks, np.int64).tobytes())
-    token = h.hexdigest()
+    tr = None if tracks is None else np.ascontiguousarray(tracks, np.int64)
+    token = _content_hash([notes, b"|" if tr is None else tr])
     _BENT[token] = (notes, None if tracks is None else np.asarray(tracks, np.int64))
     _BENT.move_to_end(token)
     while len(_BENT) > BENT_KEPT:
