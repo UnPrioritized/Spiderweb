@@ -2316,7 +2316,10 @@ class RollDrawing:
             self._carry_pic = None
             return
         if d is None:
-            a = (kb - dx - iw // 2, top - dy - ih // 2, w - dx + iw // 2, h - dy + ih // 2)
+            if self.drag and self.drag[0] == "move":  # (a drag: half a screen round it, slid without making it again)
+                a = (kb - dx - iw // 2, top - dy - ih // 2, w - dx + iw // 2, h - dy + ih // 2)
+            else:  # (notes made after an edit: only what's on screen, a quarter of the work; a drag that starts
+                a = (kb - dx, top - dy, w - dx, h - dy)  # meanwhile needs more and makes it again, as above)
             d = self._carry_pic = {"orig": orig, "view": view, "area": a, "photo": [], "at": (self.view_t, self.view_top),
                                    "ref": {j: app.rendered_pts[self.carry_ref(j)] for j in orig}}
             rects = self.note_rects(w, h, area=a, only=True)
