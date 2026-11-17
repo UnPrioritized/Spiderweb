@@ -1518,12 +1518,17 @@ def has_areas(sh):
             and not has_nested(sh) and not has_tiles(sh) and not has_ripples(sh))
 
 
+def even_kind(sh):
+    """A shape that could take Symmetrical steps with another Inside fill (its tick shown, greyed until then;
+    user 2026-11-17): a drawn custom shape, never text, pasted notes, pictures or a Hz bass."""
+    return (sh.get("kind", "custom") == "custom" and not sh.get("text") and "notes" not in sh
+            and "picture" not in sh and not sh.get("hz"))
+
+
 def even_can(sh):
     """Symmetrical steps (sh["even"], PLAN.md "Even steps") can be used on sh: a shape whose notes have a gate =
     Spam, Outline spam, Nested with Spam notes (never text, pasted notes, pictures, Hz bass, Tiles / Ripples)."""
-    return (sh.get("kind", "custom") == "custom" and sh.get("fill") in SPAM_FILLS and not sh.get("text")
-            and "notes" not in sh and "picture" not in sh and not sh.get("hz") and not sh.get("tiles")
-            and not sh.get("ripples"))
+    return even_kind(sh) and sh.get("fill") in SPAM_FILLS and not sh.get("tiles") and not sh.get("ripples")
 
 
 def even_on(sh):

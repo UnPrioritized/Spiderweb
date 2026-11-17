@@ -1298,11 +1298,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def _build_shape_settings(self, side):
         self.settings = ttk.LabelFrame(side, text=tr("app.new_shape_defaults"), padding=6)
         self.settings.pack(fill="x", pady=(8, 0))
-        # Symmetrical steps (PLAN.md "Even steps"): the FIRST row, only while the shape has a gate (sync_even)
+        # Symmetrical steps (PLAN.md "Even steps"): the FIRST row for drawn custom shapes, greyed until the Inside
+        # fill has a gate (sync_even)
         self.even_var = tk.BooleanVar(value=False)
         self.even_tick = ttk.Checkbutton(self.settings, text=tr("panel_custom.even"), variable=self.even_var,
                                          command=self.on_even)
-        Tooltip(self.even_tick, tr("panel_custom.even_tip"))
+        self.even_tip = Tooltip(self.even_tick, tr("panel_custom.even_tip"))  # (+ why, while greyed: sync_even)
         v = self.vel_row = ttk.Frame(self.settings)
         v.pack(fill="x")
         lb = ttk.Label(v, text=tr("app.velocity"))

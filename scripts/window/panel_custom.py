@@ -11,7 +11,7 @@ from tkinter import ttk, messagebox, simpledialog
 from files.lang import tr, trn
 from notes.areas import most_colours
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, drawing_in_box,
-                          edge_gate, even_can, even_on, fit_upright, gap_lines, gate_ticks, join_strokes, map_stroke, normalize_areas,
+                          edge_gate, even_can, even_kind, even_on, fit_upright, gap_lines, gate_ticks, join_strokes, map_stroke, normalize_areas,
                           normalize_strokes, open_paths, shelve_patterns)
 from notes.even_steps import gate_stretched, snapped_shape
 from window import look
@@ -324,20 +324,25 @@ class CustomPanel:
         return [t for t in self.custom_targets() if id(t) not in parts and even_can(t)]
 
     def sync_even(self):
-        """The Symmetrical steps tick: the panel's first row, shown only while every custom target has a gate."""
+        """The Symmetrical steps tick: the panel's first row for drawn custom shapes; greyed (its tip says why) until
+        every one has an Inside fill with a gate (user 2026-11-17: it couldn't be found before)."""
         tgts = self.custom_targets() if self._rows["custom"] else []
+        if tgts and tgts[0] is self.custom_defaults and self.tool.get() in ("text", "hz"):
+            tgts = []  # (settings for new text / Hz bass: never)
         parts = self.merge_part_ids() if tgts else ()
-        shown = bool(tgts) and all(id(t) not in parts and even_can(t) for t in tgts)
+        shown = bool(tgts) and all(id(t) not in parts and even_kind(t) for t in tgts)
+        usable = shown and all(even_can(t) for t in tgts)
         ons = {bool(t.get("even")) for t in tgts}
         self._loading = True
         self.even_var.set(ons == {True})
         self._loading = False
-        self.even_tick.state(["alternate" if len(ons) > 1 else "!alternate"])
+        self.even_tick.state(["alternate" if len(ons) > 1 else "!alternate", "!disabled" if usable else "disabled"])
+        self.even_tip.text = tr("panel_custom.even_tip") + ("" if usable else tr("panel_custom.even_needs"))
         pack_shown(self.even_tick, shown, anchor="w", before=self.vel_row, pady=(0, 3))
         # (on for a selected shape: no Deform row, its bends would break the even steps; user)
         pack_shown(self.deform_box, not any(even_on(self.shapes[i]) for i in self.sels), fill="x", pady=(4, 0),
                    after=self.recolour_box)
-        return shown and True in ons
+        return usable and True in ons  # (on: the rows it replaces hidden)
 
     def on_even(self):
         """Symmetrical steps ticked / unticked: one undo step for every shape it changes."""
