@@ -1467,7 +1467,22 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.tips.show(topic)
                 break
 
+    def warm_menu(self):
+        """The right-click menu's slow question (does a gate aware flip change millions of pasted notes? ~0.1 s at
+        2 M) worked out ahead in a background thread for the selected pasted shape, so the menu opens at once
+        (gateflip remembers the last answer; the notes are read-only arrays from the notes cache)."""
+        from notes import gateflip
+        sh = self.selected()
+        if sh is None or self._bg_notes or sh.get("gate_flip") or not gateflip.is_pasted(sh):
+            return
+        got = self.notes_known(sh)
+        if got is None or len(got[0]) < 100_000 or gateflip._same[0] is got[0]:
+            return
+        threading.Thread(target=gateflip.runs_same_both_ways, args=(got[0], got[1]), daemon=True,
+                         name="menu").start()
+
     def sync_list_selection(self):
+        self.warm_menu()
         rows = [r for r, row in enumerate(self.shape_rows()) if self.sels.intersection(row)]
         if list(self.listbox.curselection()) == rows:  # (the same: left as it is, at every drag step, redraw hunt)
             return
