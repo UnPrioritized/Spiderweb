@@ -42,27 +42,45 @@ def snapped_shape(sh, ppq):
     """(pts, strokes) of sh stored even (the tick ticked, a gate change, a let go): an upright box made a whole
     number of gates wide from its left edge (so a sideways flip lands on the same grid), the straight sides'
     corners where the even version has them. Curves keep their place in the box (they move by under half a gate)."""
-    pts = [list(p) for p in sh["pts"]]
-    from notes.custom import frame_upright
-    if frame_upright(pts) and not sh.get("range"):  # (a Range's rows have gates of their own: box as it is)
-        g = gate_ticks(sh["gate"], ppq) / ppq
-        w = pts[1][0] - pts[0][0]
-        whole = max(1, math.floor(abs(w) / g + 0.5)) * g
-        if w >= 0:  # (the left edge stays: Auto's grid counts from it)
-            pts[1][0] = pts[0][0] + whole
-        else:  # (flipped sideways: point 1 is the left edge)
-            pts[0][0] = pts[2][0] = pts[1][0] + whole
+    from notes.custom import frame_upright, map_stroke, stroke_points
     on = dict(sh, even=True)
     if "_even" not in even_version(on, ppq):
-        return pts, sh["strokes"]
+        return [list(p) for p in sh["pts"]], sh["strokes"]
+    strokes = shown_strokes(on, ppq)
+    pts = [list(p) for p in sh["pts"]]
+    if frame_upright(pts) and not sh.get("range") and not sh.get("fit"):
+        pts = hugging_box(pts, strokes, gate_ticks(sh["gate"], ppq) / ppq)
     to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(pts)
-    out = []
-    for old, new in zip(sh["strokes"], shown_strokes(on, ppq)):
-        if new is old or to_uv is None:
-            out.append(old)
-        else:
-            out.append(dict(new, pts=[list(to_uv(*to_bp(u, v))) for u, v in new["pts"]]))
-    return pts, out
+    if to_uv is None:
+        return [list(p) for p in sh["pts"]], strokes
+    (a0, c0), (a1, _), (_, c2) = sh["pts"]
+    (n0, m0), (n1, _), (_, m2) = pts
+    su = (a1 - a0) / (n1 - n0) if frame_upright(pts) and abs(n1 - n0) > 1e-12 else 1.0  # (u stretched: arcs stay
+    sv = (c2 - c0) / (m2 - m0) if frame_upright(pts) and abs(m2 - m0) > 1e-12 else 1.0  # round)
+    return pts, [map_stroke(st, lambda u, v: to_uv(*to_bp(u, v)), su, sv) for st in strokes]
+
+
+def hugging_box(pts, strokes, g):
+    """An upright box round the snapped drawing (user 2026-11-17: snapped corners stuck out of the box, so "Copies
+    of" another drawing, filling the box, never reached them): its left edge moved by whole gates (the grid Auto
+    counts from stays the same), a whole number of gates wide, from the drawing's lowest to highest pitch; flips
+    kept."""
+    from notes.custom import stroke_points
+    to_bp = frame_to_bp(pts)
+    xy = [to_bp(u, v) for st in strokes for u, v in stroke_points(st)]
+    if not xy:
+        return pts
+    (b0, p0), (b1, _), (_, p2) = pts
+    left = min(b0, b1)
+    lo_b, hi_b = min(x for x, _ in xy), max(x for x, _ in xy)
+    lo_p, hi_p = min(p for _, p in xy), max(p for _, p in xy)
+    xl = left + math.floor((lo_b - left) / g + NOISE) * g
+    xr = xl + max(1, math.ceil((hi_b - xl) / g - NOISE)) * g
+    if hi_p - lo_p < 1e-9:
+        return pts
+    bl, br = (xl, xr) if b1 >= b0 else (xr, xl)
+    pl, ph = (lo_p, hi_p) if p2 >= p0 else (hi_p, lo_p)
+    return [[bl, pl], [br, pl], [bl, ph]]
 
 
 def drawing_mark(strokes):

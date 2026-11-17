@@ -10,7 +10,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.areas import most_colours
 from notes.custom import shelve_patterns, unshelve
-from notes.nested import MOST_COLOURS, MOST_SHORTEST, MOST_STEPS, NESTED_DEFAULTS
+from notes.nested import MOST_COLOURS, MOST_SHORTEST, MOST_STEPS, NESTED_DEFAULTS, even_nested
 from window import look
 from window.drawer import library_lists
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, name_list, set_names, unchanged
@@ -67,6 +67,7 @@ class NestedPanel:
         """The Nested rows, put in self.custom_rows (shown by sync_custom while Nested is the Inside fill)."""
         self.nested_rows, self.nested_boxes, self.nested_way_rows = [], {}, {}
         self.nested_turn_rows = set()
+        self.nested_parts = {}  # (each box's label, box and unit: Last size / Spacing hide alone, nested_row_states)
         self.nested_table = []  # (the rows lined up with the Tiles ones, panel_tiles)
         row, self.nested_notes_box = drop_row(self, opts, "nested_notes", [t for _, t in NOTES_CHOICES])
         self.nested_notes_box.bind("<<ComboboxSelected>>", lambda e: (
@@ -102,10 +103,11 @@ class NestedPanel:
                 var = tk.StringVar()
                 e = ttk.Entry(row, textvariable=var, width=5)
                 e.grid(row=0, column=3 * n + 1, sticky="w", padx=4)
+                self.nested_parts[key] = [lb, e]
                 if unit:  # (a lone box's unit may reach past the second column)
-                    ttk.Label(row, text=unit if unit == "%" else tr("panel_custom." + unit),
-                              foreground=look.HINT).grid(row=0, column=3 * n + 2, sticky="w",
-                                                         columnspan=1 if len(line) > 1 else 4)
+                    u = ttk.Label(row, text=unit if unit == "%" else tr("panel_custom." + unit), foreground=look.HINT)
+                    u.grid(row=0, column=3 * n + 2, sticky="w", columnspan=1 if len(line) > 1 else 4)
+                    self.nested_parts[key].append(u)
                 apply = (lambda left=False, key=key: self.on_nested_box(key, left))
                 e.bind("<Return>", lambda ev, apply=apply: apply())
                 leave_box(self, e, var, apply)
@@ -153,6 +155,14 @@ class NestedPanel:
         way = cfg.get("way", "scale")
         out = {w: on and self.nested_way_rows.get(w, way) == way and not (even and w in self.nested_turn_rows)
                for w in self.nested_rows}
+        # (Symmetrical steps making the bands by depth: Last size / Spacing do nothing there, hidden; user 2026-11-17)
+        bare = on and even_nested(t)
+        for key in ("last", "spacing"):
+            for w in self.nested_parts[key]:
+                if bare and w.winfo_manager():
+                    w.grid_remove()
+                elif not bare and not w.winfo_manager():
+                    w.grid()
         # (Morph into it: only with another drawing picked, in any of the shapes)
         out[self.nested_morph_row] &= any((x.get("nested") or {}).get("of") for x in [t] + self.nested_targets())
         return out
