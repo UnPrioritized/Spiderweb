@@ -1856,7 +1856,7 @@ def from_unit(x, y, rc, box, own):
         (a0, a1), (b0, b1) = whole_shares(rc)
         x, y = a0 + x * (a1 - a0), b0 + y * (b1 - b0) if b1 > b0 else y
         x, y = 0.5 + f[2] * (y - 0.5), 0.5 + f[1] * (x - 0.5)  # (f[1], f[2] are +-1: each its own way back)
-    return t0 + x * max(t1 - t0, 1.0), (k0 + y * (k1 - k0) if k1 > k0 else np.full(len(x), float(k0)))
+    return t0 + x * max(t1 - t0, 1.0), (k0 + y * (k1 - k0) if k1 > k0 else np.full(np.shape(x), float(k0)))
 
 
 def stir_from(at, rc, box, own, spots=None, colours=None):
