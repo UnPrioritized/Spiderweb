@@ -860,7 +860,8 @@ class RollDrawing:
             if not (self.drag and self.drag[0] == "move"):  # (a rest: the same picture goes on after it)
                 self._carry_pic = None
         # (a drag called off: the notes catch up; a held knob / number box isn't one)
-        if app.notes_late and not (self.drag or app.scrubbing) and not app._late_notes and not app._bg_notes:
+        if (app.notes_late and not (self.drag or app.scrubbing) and not app._late_notes and not app._bg_notes
+                and not getattr(self, "grid_job", None)):  # (a resize snap being worked out: grid_soon)
             app.notes_rested()
         if carried is not None and not self._hide_sels and w > self.kb_w and h > self.ruler_h:
             self.paint_carried(w, h, rows, cols, fixed, *carried)

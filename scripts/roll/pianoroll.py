@@ -6,6 +6,7 @@ roll_shared.py (colours, keys, caches)."""
 
 import copy
 import math
+import threading
 import time
 import tkinter as tk
 from types import SimpleNamespace
@@ -56,6 +57,41 @@ EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
 W_REPEAT_MS = 60  # W let go: back from "what the export gets" only if no press followed this soon (Linux repeats)
 
+
+def grid_x(sh, make, x, sb, ppq, notes_of):
+    """PianoRoll.notes_onto_grid's search on a copy of sh (any thread: notes_of = that thread's): the dragged
+    side's beat x nudged so the notes' edge on that side lands on the grid line nearest it (secant steps, at most
+    5 makings); x itself when nothing is closer, None when sh makes no notes."""
+    s, right = dict(sh), None
+
+    def edge(at):
+        nonlocal right
+        s["pts"] = make(at)
+        notes = notes_of({k: v for k, v in s.items() if k != "nested"} if s.get("nested") else dict(s))
+        if not len(notes):
+            return None
+        first, last = float(notes[:, 0].min()) / ppq, float(notes[:, 1].max()) / ppq
+        if right is None:
+            right = at >= (first + last) / 2
+        return last if right else first
+    got = edge(x)
+    if got is None:
+        return None
+    goal, near = round(got / sb) * sb, 0.5 / ppq
+    best, tried = (abs(got - goal), x), (x, got)
+    for _ in range(4):
+        if best[0] < near:
+            break
+        px, pe = tried
+        nx = x + goal - got if px == x or abs(got - pe) < 1e-12 else x - (got - goal) * (x - px) / (got - pe)
+        tried, x = (x, got), nx
+        got = edge(x)
+        if got is None:
+            break
+        if abs(got - goal) < best[0] - 1e-12:
+            best = (abs(got - goal), x)
+    return best[1]
+
 class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
                 PathEditing, SustainStops, LassoDrawing, CentreDots, LiquifyBrush, WarpGrid, MelodyMarks, GlissEditing,
                 tk.Canvas):
@@ -100,6 +136,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         #                          zoomed far in the shape jumped off the mouse by the press's snapping)
         self.grid_later = None   # a resize whose notes were too slow to snap while dragging: (make, beat) for let go
         self.grid_slow = False   # (and from then on, for the rest of the drag)
+        self.grid_job = None  # (a let go's snap being worked out in the background: grid_soon)
         self.inside_fit = None   # a fitted box being dragged: the frame in it (custom.frame_in_box; frame_for_box)
         self.limit = None        # how far the shapes being edited may reach (limits)
         self._pan = None
@@ -518,6 +555,70 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         """How far (beats) edges[side] (note_edges) is from the grid line nearest it; 0 for nothing to play."""
         sb = self.app.snap_beats()
         return round(edges[side] / sb) * sb - edges[side] if sb and edges and side is not None else 0.0
+
+    def grid_soon(self, sh, make, x):
+        """notes_onto_grid at the let go of a resize whose notes are slow (grid_later), its tries made in a
+        background thread (the window answers meanwhile): the snapped place put on sh once found, if sh is still
+        where it was let go and no new drag began; its notes kept for the making after it. False = nothing to snap
+        or it can't go in the background (done the old way then)."""
+        app, sb = self.app, self.app.snap_beats()
+        if not sb or sh.get("hz") or make(x + sb) == make(x) or not app.count_later_ok():
+            return False
+        key = (None, app.ppq, app.keys)
+        job = app.thread_job(key, x=None)
+        notes_tracks = app.thread_maker(job, key)
+        base, at_let_go = copy.deepcopy(sh), copy.deepcopy(sh["pts"])
+        lim = self.limit or self.limits([sh])  # (the drag's limits: the snap never takes it past an edge)
+        ppq = app.ppq
+
+        def work():
+            try:
+                job["x"] = grid_x(base, make, x, sb, ppq, lambda s: notes_tracks(s)[0])
+            except Exception:  # (Stopped / MemoryError: left where it was let go)
+                job["x"] = None
+            job["done"] = True
+
+        def settle(now):
+            """The snap put on sh (when still right); now = a click waiting (App.finish_notes makes the notes
+            next), else the notes made as after an edit."""
+            if self.grid_job is not job:
+                return
+            self.grid_job = app._grid_finish = None
+            ok = (job["x"] is not None and not self.drag and any(s is sh for s in app.shapes)
+                  and sh["pts"] == at_let_go)
+            if ok:
+                sh["pts"] = make(job["x"])
+                r = self.reach([sh])
+                if r and lim and not (r[0] >= lim[0] - 1e-9 and r[1] >= lim[1] - 1e-9 and r[2] <= lim[2] + 1e-9):
+                    sh["pts"], ok = at_let_go, False  # (it would pass an edge: stays where it stopped)
+            if ok:
+                keep = shape_key(sh)  # (only the snapped place's notes kept: the tries' would fill the memory)
+                job["own"] = {k: v for k, v in job["own"].items() if k[0] == keep}
+                app.keep_job_notes(job)
+                app.sync_points()
+            if not now:
+                app.shapes_changed()  # (in the background on a big project, as after an edit)
+
+        def check():
+            if not job["done"]:
+                self.after(15, check)
+                return
+            settle(False)
+
+        def finish():  # (a click / a read of the notes while it's worked out: waits for it, App.finish_notes)
+            job["thread"].join()
+            settle(True)
+        job["thread"] = threading.Thread(target=work, daemon=True, name="notes")
+        self.grid_job, app._grid_finish = job, finish
+        if not app._bg_notes:  # (the "Making notes…" box: as after an edit)
+            app._bg_since = time.perf_counter()
+            self.after(160, self.request_redraw)
+        app.notes_late = app._bg_notes = True  # (clicks / reads wait for the snap and its notes: notes_wait)
+        from window import notes_wait
+        app._bg_serial = notes_wait.last_event  # (the let go's other bindings don't wait for it)
+        job["thread"].start()
+        self.after(15, check)
+        return True
 
     def notes_onto_grid(self, sh, make, x, late=True):
         """A resize: sh["pts"] = make(beat) for the dragged corner / side at that beat, nudged so the notes' edge on
@@ -1763,14 +1864,18 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         kind = self.drag[0]
         if kind == "resize" and self.grid_later and not e.state & SHIFT:  # (too slow to snap the notes while
             # dragging: done now, BEFORE the notes catch up, so they're made once, at the snapped spot)
-            step = self.held_step([self.app.sel])
-            self.notes_onto_grid(self.app.selected(), *self.grid_later, late=False)
-            self.grid_later = None
-            if self.stayed_inside(step):  # (the snap would pass an edge: it stays where it stopped)
-                self.app.shape_edited()
+            if self.grid_soon(self.app.selected(), *self.grid_later):  # (the tries in the background: the notes
+                self.grid_later = None                                    # are made once it's snapped)
+            else:
+                step = self.held_step([self.app.sel])
+                self.notes_onto_grid(self.app.selected(), *self.grid_later, late=False)
+                self.grid_later = None
+                if self.stayed_inside(step):  # (the snap would pass an edge: it stays where it stopped)
+                    self.app.shape_edited()
         if kind == "handle" and getattr(self, "held_big", None):
             self.big_drag_asked()
-        self.app.catch_up_notes()
+        if not getattr(self, "grid_job", None):  # (a snap being worked out: its notes come with it, grid_soon)
+            self.app.catch_up_notes()
         if kind == "sustop":
             self.stop_release(e)
             self.drag = None

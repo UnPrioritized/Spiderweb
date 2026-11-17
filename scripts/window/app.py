@@ -252,6 +252,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     _bg_serial = None  # (the event that started it: its other bindings don't wait for it)
     _bg_since = None  # (perf_counter when this run of background makings began: the "Making notes…" box)
     _counting = None  # (a "lots of notes" count being made in the background: confirm_big, count_done)
+    _grid_finish = None  # (a resize snap being worked out in the background: waits for it, roll.grid_soon)
     _bg_carry = None  # (the selected shapes whose old notes go along meanwhile: roll_draw.carry_from)
     _job_stash = None  # (all_notes' stash from the notes made in the background: notes_made, for lay_again)
     stale_ok = 0  # > 0: the view is being drawn: the notes as they are on screen, not waited for
@@ -1472,7 +1473,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         2 M) worked out ahead in a background thread for the selected pasted shape, so the menu opens at once
         (gateflip remembers the last answer; the notes are read-only arrays from the notes cache)."""
         from notes import gateflip
-        sh = self.selected()
+        sh = self.shapes[self.sel] if self.sel is not None and self.sel < len(self.shapes) else None
         if sh is None or self._bg_notes or sh.get("gate_flip") or not gateflip.is_pasted(sh):
             return
         got = self.notes_known(sh)
@@ -3232,6 +3233,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self._counting:
             self._counting["thread"].join()
             self.count_done(self._counting)
+        if self._grid_finish:  # (a resize's snap being worked out: put on first, roll.grid_soon)
+            self._grid_finish()
         if self._bg_notes:
             self._bg_notes = False
             self.shapes_changed(now=True)
