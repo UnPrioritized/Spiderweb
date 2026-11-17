@@ -24,9 +24,11 @@ While it's on, these are hidden because they would break the steps: Ends, Centre
 
 With a [page:fill#Range… (next to|gate Range], every note is still a whole gate and no row has a bit left over.
 
-Across time: the outline stays where you drew it, and every key row is rounded out to the Range's cut lines, so the steps grow or shrink along the shape with the gates. Changing From, To or the graph only changes the cuts, never the outline. "Each key row by itself" is off for these shapes.
+The Range window's "Symmetrical steps" choice decides the sides. Straight sides (the usual) keeps the outline where you drew it and only rounds each key row out to whole gates. Bend with the gates makes the sides step by whole gates, so they bend along the Range's graph. Switching the bend off again straightens the outline back.
 
-Across the keys, the Range window's "Symmetrical steps" choice decides the sides. Straight sides (the usual): the outline stays where you drew it, and each key row is rounded out to whole gates of its own size, counted from the middle of the box. Bend with the gates: every row steps by exactly one of its own gates, so the sides bend along the Range's graph, outward where the gates grow. Both halves of a mirrored shape match either way, and the faded line shows the bent edge. Switching the bend off again straightens the outline back.
+Across time: every note starts and ends on the Range's cut lines. With Straight sides the steps grow or shrink along the shape with the gates. With Bend with the gates your drawing is laid over the cut squares, so each side moves by the same squares every row and curves as the gates grow. Its corners stay at the same spots of the box when you change From, To or the graph. "Each key row by itself" is off for these shapes.
+
+Across the keys: Straight sides rounds each key row out to whole gates of its own size, counted from the middle of the box. Bend with the gates makes every row step by exactly one of its own gates, so the sides bend outward where the gates grow, and the faded line shows the bent edge. Both halves of a mirrored shape match either way.
 
 ## Nested
 

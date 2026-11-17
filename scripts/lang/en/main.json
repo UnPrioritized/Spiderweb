@@ -1545,7 +1545,7 @@
  "range_window.even": "Symmetrical steps:",
  "range_window.even_straight": "Straight sides",
  "range_window.even_bend": "Bend with the gates",
- "range_window.even_tip": "For shapes with Symmetrical steps, across keys. Straight sides: the outline stays where you drew it, each key row rounded out to whole gates of its own. Bend with the gates: every row steps by exactly one of its own gates, so the sides bend along the graph (outward where the gates grow).",
+ "range_window.even_tip": "For shapes with Symmetrical steps. Straight sides: the outline stays where you drew it, each key row rounded out to whole gates. Bend with the gates: the sides step by whole gates, so they bend along the graph. Across keys every row steps by one of its own gates (outward where the gates grow); across time the corners stay put and the sides curve as the gates grow.",
  "panel_custom.even": "Symmetrical steps",
  "panel_custom.even_needs": "\n\nPick Spam, Outline spam, or Nested with Spam notes under Inside to use it.",
  "panel_custom.even_tip": "Every staircase the same: each key row moves by the same whole number of gates (or one gate every few rows), so diagonals are even, nested bands are as thick everywhere and mirrored halves match exactly. You still drag freely; the notes show the even version.",

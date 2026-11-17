@@ -365,7 +365,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
         time = on and self.memo[0]["dir"] == "time"  # (each key row by itself: left to right only)
         self.rows_var.set(self.memo[0]["rows"])
         self.even_box.current(1 if self.memo[0].get("even_bend") else 0)
-        self.even_box.config(state="readonly" if on and self.memo[0]["dir"] != "time" else "disabled")
+        self.even_box.config(state="readonly" if on else "disabled")  # (time too: user 2026-11-17, the curve)
         time = time and not self.even  # (Symmetrical steps: every row whole cut squares, never its own graph)
         self.rows_check.config(state="normal" if time else "disabled")
         self.join_var.set(self.memo[0]["join"])

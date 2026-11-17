@@ -215,6 +215,7 @@ def ticked(sh, ppq):
     (pts / strokes before, "at" = the snapped box, "mark" = the snapped strokes' fingerprint) so unticking gives it
     back (user 2026-11-17: unticking left it snapped, with leftovers)."""
     pts, strokes = snapped_shape(dict(sh, even=True), ppq)
+    strokes = time_bent(dict(sh, pts=pts), strokes, ppq)  # (a Range along time set to bend: curved now)
     import copy
     free = {"pts": [list(p) for p in sh["pts"]], "strokes": copy.deepcopy(sh["strokes"]), "at": [list(p) for p in pts],
             "mark": drawing_mark(strokes)}  # (own lists: a move changing the box in place mustn't move these)
@@ -357,8 +358,34 @@ def range_space(sh, ppq):
     sq = range_grid(sh, ppq)
     if not isinstance(sq, np.ndarray) or not len(sq):
         return None
-    return "rows"  # (along time: the drawing as it is, each row rounded out to the Range's cut lines; user
-    # 2026-11-17: snapping the sides in cut squares moved the corners whenever From / To changed: "feels random")
+    if not r.get("even_bend"):
+        return "rows"  # (straight sides: the drawing as it is, each row rounded out to the Range's cut lines)
+    # Bend with the gates along time (user 2026-11-17: "2 key rows on varying gate will form some kind of log
+    # curve"): the stored outline is BENT (time_bent: the drawing laid over the cut squares by its share of the box,
+    # so its corners never move; snapping the sides in squares made them jump with every From / To: "feels
+    # random"). Stand-in x = cut-square count, where that outline is straight again; never snapped.
+    edges = np.r_[sq[:, 0], sq[-1, 1]].astype(float)
+    idx = np.arange(len(edges), dtype=float)
+    e0, e1, n = edges[0], edges[-1], idx[-1]
+    g0, g1 = edges[1] - edges[0], edges[-1] - edges[-2]
+
+    def fwd(t, p):  # (how many cut squares from the first edge; past the ends: the end squares' size)
+        if t < e0:
+            return (t - e0) / g0
+        if t > e1:
+            return n + (t - e1) / g1
+        return float(np.interp(t, edges, idx))
+
+    def back(x, p):
+        if x < 0:
+            return e0 + x * g0
+        if x > n:
+            return e1 + (x - n) * g1
+        return float(np.interp(x, idx, edges))
+    sp = RangeSpace("time", fwd, back, int(e0), int(g0), edges)
+    sp.lin = lambda t: (t - e0) / max(e1 - e0, 1.0) * n  # (a straight drawing's share of the box, in squares)
+    sp.lin_back = lambda x: e0 + x / n * (e1 - e0) if n else e0
+    return sp
 
 
 def keys_version(sh, ppq, sp):
@@ -380,7 +407,8 @@ def keys_version(sh, ppq, sp):
     out = []
     for st in sh["strokes"]:
         pts = st.get("pts") or []
-        if plain_poly(st) and len(pts) >= 4 and all(abs(c - d) <= SAME for c, d in zip(pts[0], pts[-1])):
+        if sp.kind != "time" and plain_poly(st) and len(pts) >= 4 and all(abs(c - d) <= SAME
+                                                                          for c, d in zip(pts[0], pts[-1])):
             got = even_loop([stand_in(u, v) for u, v in pts[:-1]])
             if got is not None:
                 loop = [back(x, y) for x, y in got]
@@ -403,14 +431,24 @@ def range_chop(sh, stretches, g, count=False):
     kind = sh.get("_even_space") or ("rows" if sh.get("_even_rows") else None)
     if kind == "rows" and isinstance(g, np.ndarray):
         kind = "cuts"  # (along time)
+    elif kind == "time":
+        if not isinstance(g, np.ndarray):
+            return None
     elif kind is None or not isinstance(g, RangeKeys):
         return None
     t0 = int(sh["_even"])
     none = np.zeros(0, np.int64) if count else np.zeros((0, 3), np.int64)
-    st = np.array(stretches, np.int64).reshape(-1, 3)
-    if not len(st):
-        return none
-    if kind == "cuts":  # (each row's own ends rounded out to the Range's cut lines; past the ends: the end squares)
+    if kind == "time":  # (Bend with the gates: stand-in stretches widened to whole a, each a = one cut square)
+        a = int(sh["_even_a"])
+        st = on_grid(stretches, a, t0)
+        if not len(st):
+            return none
+        j0, j1 = (st[:, 0] - t0) // a, (st[:, 1] - t0) // a
+    else:
+        st = np.array(stretches, np.int64).reshape(-1, 3)
+        if not len(st):
+            return none
+    if kind in ("cuts", "time"):  # (past the Range's ends: the end squares' size on)
         edges = np.r_[g[:, 0], g[-1, 1]].astype(np.int64)
         e0, e1, last = int(edges[0]), int(edges[-1]), len(edges) - 1
         g0, g1 = max(1, int(edges[1] - edges[0])), max(1, int(edges[-1] - edges[-2]))
@@ -420,8 +458,9 @@ def range_chop(sh, stretches, g, count=False):
             past = -((e1 - t) // g1) if up else (t - e1) // g1
             before = -((e0 - t) // g0) if up else (t - e0) // g0
             return np.where(t < e0, before, np.where(t > e1, last + past, np.clip(inside, 0, last)))
-        j0 = line(st[:, 0], False)
-        j1 = np.maximum(line(st[:, 1], True), j0 + 1)
+        if kind == "cuts":  # (straight sides: each row's own ends rounded out to the cut lines)
+            j0 = line(st[:, 0], False)
+            j1 = np.maximum(line(st[:, 1], True), j0 + 1)
         n = j1 - j0
         if count:
             return n
@@ -462,19 +501,51 @@ def unbent_strokes(sh, ppq):
         if plain_poly(st) and len(pts) >= 4 and all(abs(c - d) <= SAME for c, d in zip(pts[0], pts[-1])):
             xy = [(sp.fwd(to_bp(u, v)[0] * ppq, to_bp(u, v)[1]), to_bp(u, v)[1]) for u, v in pts[:-1]]
             corners = _straight_dropped(xy)  # (the row-middle points of a bent side lie on its stand-in line)
-            loop = [list(to_uv(sp.back(x, p) / ppq, p)) for x, p in corners]
+            loop = [list(to_uv((sp.lin_back(x) if sp.kind == "time" else sp.back(x, p)) / ppq, p))
+                    for x, p in corners]  # (time: the straight drawing = the squares' share of the box)
             out.append(dict(st, pts=loop + [list(loop[0])]))
         else:
             out.append(st)
     return out
 
 
+def time_bent(sh, strokes, ppq):
+    """Bend with the gates along time: straight closed sides laid over the cut squares by their share of the box
+    (a point at every row's middle), so each row steps by the same squares and the sides curve as the gates grow.
+    The corners stay where they are. Other strokes / other Ranges: as they are."""
+    sp = range_space(dict(sh, even=True), ppq)
+    to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(sh["pts"])
+    if not isinstance(sp, RangeSpace) or sp.kind != "time" or to_uv is None:
+        return strokes
+
+    def real(b, p):
+        return list(to_uv(sp.back(sp.lin(b * ppq), p) / ppq, p))
+    out = []
+    for st in strokes:
+        pts = st.get("pts") or []
+        if not (plain_poly(st) and len(pts) >= 4 and all(abs(c - d) <= SAME for c, d in zip(pts[0], pts[-1]))):
+            out.append(st)
+            continue
+        bp = [to_bp(u, v) for u, v in pts]
+        bent = []
+        for (b0, p0), (b1, p1) in zip(bp, bp[1:]):
+            bent.append(real(b0, p0))
+            lo, hi = sorted((p0, p1))
+            fs = sorted((q - p0) / (p1 - p0) for q in range(math.floor(lo), math.ceil(hi) + 1) if lo < q < hi)
+            bent += [real(b0 + f * (b1 - b0), p0 + f * (p1 - p0)) for f in fs]  # (each row's middle it crosses)
+        bent.append(list(bent[0]))
+        out.append(dict(st, pts=bent))
+    return out
+
+
 def range_restored(before, after, ppq):
     """A Range changed on an even shape (Range window): (pts, strokes, even_free) stored for the new Range: a bent
-    outline straightened first, then snapped the new way. even_free re-marked when the drawing was only ours."""
+    outline straightened first, then snapped / bent the new way. even_free re-marked when the drawing was only
+    ours."""
     mine = (before.get("even_free") or {}).get("mark") == drawing_mark(before["strokes"])
     work = dict(after, strokes=unbent_strokes(before, ppq))
     pts, strokes = snapped_shape(work, ppq)
+    strokes = time_bent(dict(work, pts=pts), strokes, ppq)
     free = before.get("even_free")
     return pts, strokes, (dict(free, mark=drawing_mark(strokes)) if mine and free else free)
 
