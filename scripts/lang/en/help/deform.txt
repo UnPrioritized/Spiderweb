@@ -2,7 +2,14 @@ The Deform row in the side panel (under Recolour) holds [page:stir|Stir…], [pa
 
 ## Colours or Shape
 
-"Moves" at the top of each window picks what it bends. Colours (the start) moves only the colours: the notes stay where they are, and each note takes the colour the bend brings to its place. Shape bends the shape itself: its lines go where the bend takes them, and its notes are made again from the bent shape, so Fill, Spam and its own colours follow the new lines. In Stir each tab has its own choice; Warp and Liquify have one each per shape.
+"Moves" at the top of each window picks what it bends. Colours (the start) moves only the colours: the notes stay where they are, and each note takes the colour the bend brings to its place. Shape bends the shape itself. In Stir each tab has its own choice; Warp and Liquify have one each per shape.
+
+"Cut notes where bent" (under Moves, ticked at first) says how a drawn shape bends:
+
+- Ticked: the shape's notes are made first, then each note is bent and cut where the bend curves it, the same way pasted notes bend (see below). Fill rows, Spam and patterns bend along like a picture.
+- Unticked: only the outline bends, and the notes are laid out again inside the bent outline. A Fill row stays one long note from edge to edge, and Spam rows stay straight.
+
+The two ways give slightly different edges even on a plain Fill, since one cuts bent notes and the other fills the bent outline row by row.
 
 The shape's box and its handles stay where they are, and the bent notes may go past the box. A step set to Shape shows ◇ after its name (in Stir's tabs and in Properties). Settings that only choose colours (At the edges, Squeeze, Colour sets, flips, Colour edges, Folds) are greyed for Shape.
 
@@ -12,11 +19,13 @@ A Liquify set to Shape can also reach past the box: brush outside it and the sha
 
 Shape steps always run first, before any colour step, in this order: the Stir tabs set to Shape (left to right), then the Warp, then the Liquify. After that come all the colour steps (Recolour, Stir tabs set to Colours, Warp, Liquify and the rest) in their usual order. So a colour step always sees the shape already bent. Properties lists the Shape steps at the top and won't let you drag a colour step above them.
 
-"Colours bend too" (beside Moves, ticked at first) keeps the shape's own colours on the notes they were on, so a Colours pattern or coloured areas bend with the shape. Unticked, the colours are laid out again on the bent shape as if it had been drawn that way.
+"Colours bend too" (beside Moves, ticked at first) keeps the shape's own colours on the notes they were on, so a Colours pattern or coloured areas bend with the shape. Unticked, the colours are laid out again on the bent shape as if it had been drawn that way. It only matters when "Cut notes where bent" is unticked: cut notes always keep their own colours, so it's greyed then.
 
-## Pasted notes are cut into pieces
+## Notes cut into pieces
 
-Pasted notes and plain notes bend too. Each note bends like a tiny box: where the bend moves part of a long note to another key it is cut into pieces, so a long note under a twist turns into a slanted run of short notes, while notes that stay on their key stay whole (only stretched or squeezed). Notes that touched still touch, and each piece keeps its note's velocity, colour and track. Pieces shorter than one tick are dropped. Notes bent past the top or bottom key or before beat 0 follow "Keep notes made there" like any others ([page:offrange|Notes past the keys]).
+Pasted notes, plain notes, and drawn shapes with "Cut notes where bent" ticked bend note by note. Each note bends like a tiny box: where the bend moves part of a long note to another key it is cut into pieces, so a long note under a twist turns into a slanted run of short notes, while notes that stay on their key stay whole (only stretched or squeezed). Notes that touched still touch, and each piece keeps its note's velocity, colour and track. Pieces shorter than one tick are dropped. A very strong Twist can cut a shape into millions of pieces; they're made in the background, so the window stays free while they catch up. Notes bent past the top or bottom key or before beat 0 follow "Keep notes made there" like any others ([page:offrange|Notes past the keys]).
+
+For pasted notes this is the only way, so the tick is greyed for them.
 
 Note tool pages, Glue and Sustain work on the bent notes, since the bend comes first.
 
@@ -28,6 +37,6 @@ Where a push or twirl squeezes notes together they bunch up, and where it pulls 
 
 ## Good to know
 
-Only the outline matters for a drawn shape: bending the inside of a filled shape changes nothing, and the window says so in orange. Pictures and Hz bass shapes can only bend their colours, so Shape is greyed for them.
+With "Cut notes where bent" unticked only the outline matters: bending the inside of a filled shape changes nothing, and the window says so in orange. Pictures and Hz bass shapes can only bend their colours, so Shape is greyed for them.
 
 The bends are never baked in: come back any time, change a knob, a point or a brush stroke, and the notes are made again. On very big pastes (a million notes) each change takes about a second.

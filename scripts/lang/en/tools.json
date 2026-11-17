@@ -1311,7 +1311,7 @@
  "step.glue": "Glue",
  "step.glue_after": "Glue after {page}",
  "warp.hint": "Drag the grid's points on the piano roll to bend the selected shape's colours. A point can go past the shape's edge too. Esc while dragging puts the point back.",
- "warp.hint_shape": "Drag the grid's points on the piano roll to bend the selected shape itself: its notes are made again from the bent shape when you let go. A point can go past the shape's edge too. Esc while dragging puts the point back.",
+ "warp.hint_shape": "Drag the grid's points on the piano roll to bend the selected shape itself: its notes are made again when you let go. A point can go past the shape's edge too. Esc while dragging puts the point back.",
  "warp.needs": "Channels isn't Multi channel now: all the notes are in one channel, so warping changes nothing.",
  "warp.one": "This shape has only one colour, so there's nothing to bend. Give it more with Colours in the side panel.",
  "warp.zero": "Strength is 0 %, so the bend doesn't show yet.",
