@@ -28,6 +28,8 @@ LOOP_SAMPLES = 256  # points per loop (a multiple of 4, so a zigzag's tips are e
 MAX_POINTS = 400000  # the most points a pattern makes (so a huge loop count can't hang the program)
 MAX_LOOPS = MAX_POINTS // 8  # the most loops (8 points a loop at least, so each keeps its shape; user: the Loops
                              # box stops there, more used to stop the line short of its end)
+MOST_SIDE = 4096.0  # keys: the farthest a pattern goes to the side (the farthest notes kept past the keys reach;
+                    # heavy sweep 2026-11-17: a Height of a billion keys ran out of memory)
 
 # (id, name, formula, its numbers)
 PATTERN_PRESETS = [
@@ -153,6 +155,7 @@ def clean_pattern(p):
         return None
     if not (out["loops"] > 0 and out["k"] > 0 and math.isfinite(out["scale"])):
         return None
+    out["k"] = min(max(out["k"], 1e-4), 1e4)  # (the piano roll's beats per key: a file's billion ran out of memory)
     if along.strip():
         out["along"] = along
     if p.get("name"):
@@ -577,12 +580,12 @@ def shape_paths(paths, p):
     return out
 
 
-def formed_paths(paths, sh):
-    """The curve's pieces (paths) with its shape, then its pattern, on them."""
+def formed_paths(paths, sh, most=None):
+    """The curve's pieces (paths) with its shape, then its pattern, on them (most: see pattern_paths)."""
     if sh.get("shape"):
         paths = shape_paths(paths, sh["shape"])
     if sh.get("pattern"):
-        paths = pattern_paths(paths, sh["pattern"])
+        paths = pattern_paths(paths, sh["pattern"], most=most)
     return paths
 
 
@@ -857,8 +860,9 @@ def _clear_stretches(s, v, ln):
     return np.insert(s, at, np.concatenate(add_s)), np.insert(v, at, np.concatenate(add_v))
 
 
-def pattern_paths(paths, p, arrays=False):
+def pattern_paths(paths, p, arrays=False, most=None):
     """The pattern laid along each path ((beat, pitch) point lists: a curve's pieces), as (beat, pitch) lists.
+    most: the farthest it goes to the side, in the paths' own units (MOST_SIDE keys when None).
     Unchanged if the formula can't be worked out. A Loops graph moves the loops along the line (their count stays):
     over each piece with Each piece, else over the whole line. arrays: each piece as an (n, 2) array instead (a
     second pattern laid on top next: no lists of tuples in between)."""
@@ -867,6 +871,7 @@ def pattern_paths(paths, p, arrays=False):
     except ValueError:
         return paths
     warp = loop_warp(p)
+    most = MOST_SIDE if most is None else most
     peak = float(np.max(np.abs(v))) if len(v) else 0.0
     graphs = number_graphs(p)
     height = graphs.pop("height") if smooth_height(p, graphs) else None  # (the rest: one value per loop)
@@ -931,6 +936,7 @@ def pattern_paths(paths, p, arrays=False):
             side = side * np.interp((s + offset) / total, *height)
         if p.get("flatten"):  # (the wall stays where the plain loop's peak puts it: taller graphed loops press more)
             side = flattened(side, peak, p["flatten"], p.get("soft", SOFT_DEFAULT))
+        side = np.clip(side, -most, most)  # (a huge typed number: out of memory, never seen on any keys)
         inside = np.nonzero((s >= 0) & (s <= size))[0]
         if not len(inside):
             out.append(a * [k, 1.0] if arrays else [tuple(q) for q in (a * [k, 1.0]).tolist()])

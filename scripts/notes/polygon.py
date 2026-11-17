@@ -35,6 +35,8 @@ MIN_POINTS = 2  # (2 = a flat line, two sides on top of each other: a pattern on
 MOST_TWIST = 100.0  # % (100 = each side leaves its corner at a right angle)
 MOST_TURN = 180.0  # degrees a star's inner points turn
 SIDE_STEPS = 32  # points along a twisted side
+MOST_SIDE = 40.0  # its own heights: the farthest a pattern takes a side out (heavy sweep 2026-11-17: a typed
+                  # Height of a billion ran out of memory; 40 heights takes ~1 s on a dense patterned polygon)
 
 
 def _signed(d, key, most):
@@ -239,17 +241,17 @@ def formed_sides(st):
     sides = side_paths(st["pts"], st.get("corners"))
     p2 = st.get("pattern2") if st.get("pattern") else None
     if not p2:
-        return formed_paths(sides, st)
+        return formed_paths(sides, st, MOST_SIDE)
     if st.get("mix") == "turns":
         out = [None] * len(sides)
-        out[0::2] = formed_paths(sides[0::2], st)
+        out[0::2] = formed_paths(sides[0::2], st, MOST_SIDE)
         if len(sides) > 1:
-            out[1::2] = formed_paths(sides[1::2], dict(st, pattern=p2))
+            out[1::2] = formed_paths(sides[1::2], dict(st, pattern=p2), MOST_SIDE)
         return out
     if st.get("shape"):
         sides = shape_paths(sides, st["shape"])
-    first = pattern_paths(sides, st["pattern"], arrays=True)
-    out = pattern_paths(first, p2)
+    first = pattern_paths(sides, st["pattern"], arrays=True, most=MOST_SIDE)
+    out = pattern_paths(first, p2, most=MOST_SIDE)
     if out is first:  # (the second can't be worked out, e.g. from an edited file: the first one alone)
         out = [[tuple(q) for q in np.asarray(a, float).tolist()] for a in first]
     return out

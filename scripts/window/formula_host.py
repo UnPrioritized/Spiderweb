@@ -607,7 +607,7 @@ class PolygonHost(AppHost):
         sides the pattern really runs on (a second pattern On top: the first one's outline; Taking turns: every
         other side)."""
         from notes.pattern import pattern_paths, shape_paths
-        from notes.polygon import polygon_strokes, side_paths
+        from notes.polygon import MOST_SIDE, polygon_strokes, side_paths
         k, scale = pat.get("k", 1.0), pat.get("scale", 1.0)
         turns = holder.get("pattern2") and holder.get("pattern") and holder.get("mix") == "turns"
         paths = []
@@ -616,7 +616,7 @@ class PolygonHost(AppHost):
             if st.get("shape"):
                 sides = shape_paths(sides, st["shape"])
             if layer == "pattern2" and not turns and holder.get("pattern"):
-                sides = pattern_paths(sides, holder["pattern"])
+                sides = pattern_paths(sides, holder["pattern"], most=MOST_SIDE)
             elif turns:
                 sides = sides[1::2] if layer == "pattern2" else sides[0::2]
             paths += sides
