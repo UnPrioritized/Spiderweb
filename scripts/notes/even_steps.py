@@ -28,8 +28,10 @@ def even_version(sh, ppq):
     if not even_on(sh):
         return sh
     if sh.get("range"):
-        grid = keys_grid(sh, ppq)
-        return keys_version(sh, ppq, grid) if grid is not None else sh
+        sp = range_space(sh, ppq)
+        if sp == "rows":  # (by keys, straight sides: the drawing as it is, each row its own whole gates)
+            return dict(sh, _even=keys_middle(sh, ppq), _even_rows=True)
+        return keys_version(sh, ppq, sp) if sp is not None else sh
     g = gate_ticks(sh["gate"], ppq)
     to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(sh["pts"])
     if to_uv is None:
@@ -280,11 +282,12 @@ def gate_stretched(sh, gate, ppq):
     return snapped_shape(dict(sh, pts=pts, gate=gate), ppq)
 
 
-# ---- Gate Range by keys (user 2026-11-17: "smooth bend": each row steps by ITS OWN gate, the sides bend along the
-# Range graph, still whole notes, mirror halves exact). The STAND-IN SPACE: every row's ticks from the box's left
-# edge t0 scaled by a / that row's gate (a = the first gate), so every row has gate a there; the sides snap there as
-# usual, each row's stretch is widened to whole gates of a, then taken back to the row's own gate (chop,
-# "_even_keys"). The real outline = those straight sides taken back row by row: bent (shown_strokes).
+# ---- Gate Range (user 2026-11-17). By keys: Straight sides (default: the drawing as it is, each row rounded out to
+# whole gates of its own from the box's middle) or Bend with the gates (range "even_bend": every row steps by ITS OWN
+# gate, the sides bend along the Range graph). Along time: every row starts / ends on the Range's cut lines. Bend /
+# time use a STAND-IN SPACE (RangeSpace) where every row has gate a; the sides snap there as usual, each row's
+# stretch is widened to whole a, then taken back (range_chop). The real outline = the straight stand-in sides taken
+# back: bent (shown_strokes).
 
 def keys_grid(sh, ppq):
     """sh's gate Range by keys (gaterange.RangeKeys; keys_down too), else None."""
@@ -321,18 +324,71 @@ def keys_middle(sh, ppq):
     return math.floor((lo + hi) / 2 * ppq + 0.5)
 
 
-def keys_version(sh, ppq, grid):
-    """even_version for a Range by keys: strokes in the stand-in space (in the shape's own box), "_even" = the tick
-    the rows count from (keys_middle), "_even_keys" = the stand-in gate a."""
+class RangeSpace:
+    """A gate Range's stand-in space for Symmetrical steps: fwd(tick, pitch) -> x (whole numbers = where that row's
+    notes may start / end), back(x, pitch) -> tick. kind "keys" = Bend with the gates (each row's gates from the
+    box's middle), "time" = the Range's cut squares along time (every row cut at the same places, user 2026-11-17:
+    "expected across time to also work"). Stand-in ticks = origin + x * a (a = the first gate)."""
+
+    def __init__(self, kind, fwd, back, origin, a, grid):
+        self.kind, self.fwd, self.back, self.origin, self.a, self.grid = kind, fwd, back, origin, a, grid
+
+
+def range_space(sh, ppq):
+    """sh's RangeSpace, "rows" for a Range by keys with straight sides (no stand-in: each row rounded out to its
+    own gates from the middle), or None (no Range / one the steps can't follow: Each key row by itself)."""
+    import numpy as np
+    from notes.gaterange import RangeKeys, keys_up, range_grid
+    r = sh.get("range")
+    if not r:
+        return None
+    r = keys_up(r)
+    if r["dir"] == "keys":
+        grid = range_grid(sh, ppq)
+        if not isinstance(grid, RangeKeys):
+            return None
+        if not r.get("even_bend"):
+            return "rows"
+        gate, mid = row_gates(grid), keys_middle(sh, ppq)
+        return RangeSpace("keys", lambda t, p: (t - mid) / gate(_row(p)), lambda x, p: mid + x * gate(_row(p)),
+                          mid, grid.a, grid)
+    if r.get("rows"):
+        return None
+    sq = range_grid(sh, ppq)
+    if not isinstance(sq, np.ndarray) or not len(sq):
+        return None
+    edges = np.r_[sq[:, 0], sq[-1, 1]].astype(float)
+    idx = np.arange(len(edges), dtype=float)
+    g0, g1 = edges[1] - edges[0], edges[-1] - edges[-2]
+
+    def fwd(t, p):  # (how many cut squares from the first edge; past the ends: the end squares' size)
+        if t < edges[0]:
+            return (t - edges[0]) / g0
+        if t > edges[-1]:
+            return idx[-1] + (t - edges[-1]) / g1
+        return float(np.interp(t, edges, idx))
+
+    def back(x, p):
+        if x < 0:
+            return edges[0] + x * g0
+        if x > idx[-1]:
+            return edges[-1] + (x - idx[-1]) * g1
+        return float(np.interp(x, idx, edges))
+    return RangeSpace("time", fwd, back, int(edges[0]), int(g0), edges)
+
+
+def keys_version(sh, ppq, sp):
+    """even_version for a Range with a stand-in space (RangeSpace): strokes in the stand-in space (in the shape's
+    own box), "_even" = sp.origin, "_even_space" = its kind, "_even_a" = the stand-in gate a."""
     from notes.custom import stroke_points
     to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(sh["pts"])
     if to_uv is None:
         return sh
-    gate, t0, a = row_gates(grid), keys_middle(sh, ppq), grid.a
+    t0, a = sp.origin, sp.a
 
     def stand_in(u, v):  # (stroke u, v -> stand-in (x in gates of a, y = pitch + 0.5))
         b, p = to_bp(u, v)
-        return ((b * ppq - t0) / gate(_row(p)), p + 0.5)
+        return (sp.fwd(b * ppq, p), p + 0.5)
 
     def back(x, y):  # (stand-in -> u, v in the box)
         return list(to_uv((t0 + x * a) / ppq, y - 0.5))
@@ -349,42 +405,105 @@ def keys_version(sh, ppq, grid):
         loop = [back(*stand_in(u, v)) for u, v in stroke_points(st)]
         out.append({**{k: v for k, v in st.items() if k in ("role", "colour")}, "kind": "poly", "pts": loop,
                     "free": True})  # (a curve as drawn, in the stand-in space: never snapped)
-    return dict(sh, strokes=out, _even=t0, _even_keys=a)
+    return dict(sh, strokes=out, _even=t0, _even_space=sp.kind, _even_a=a)
 
 
-def keys_chop(stretches, grid, a, t0, count=False):
-    """chop for a Range by keys with Symmetrical steps: stand-in stretches widened to whole gates of a from t0,
-    taken to each row's own gates (from t0 too), then cut into that row's gates back to back (count: how many
-    each)."""
+def range_chop(sh, stretches, g, count=False):
+    """custom_chop.chop for a Range with Symmetrical steps (g = range_grid's): None when it isn't one.
+    Bend with the gates: stand-in stretches widened to whole a, taken to each row's own gates from the middle.
+    Time: widened to whole a, each a = one of the Range's cut squares. Straight sides ("_even_rows"): each row's
+    own stretch rounded out to its own gates from the middle. Then back to back notes (count: how many each)."""
     import numpy as np
     from notes.custom_chop import on_grid
-    st = on_grid(stretches, a, t0)
+    from notes.gaterange import RangeKeys
+    kind = sh.get("_even_space") or ("rows" if sh.get("_even_rows") else None)
+    if kind in ("keys", "rows") and not isinstance(g, RangeKeys) or kind == "time" and not isinstance(g, np.ndarray):
+        return None
+    if kind is None:
+        return None
+    t0 = int(sh["_even"])
+    none = np.zeros(0, np.int64) if count else np.zeros((0, 3), np.int64)
+    if kind == "time":
+        st = on_grid(stretches, int(sh["_even_a"]), t0)
+        if not len(st):
+            return none
+        a = int(sh["_even_a"])
+        j0, j1 = (st[:, 0] - t0) // a, (st[:, 1] - t0) // a
+        n = j1 - j0
+        if count:
+            return n
+        k = np.repeat(j0, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+        edges = np.r_[g[:, 0], g[-1, 1]].astype(np.int64)
+        e0, e1, last = edges[0], edges[-1], len(edges) - 1
+        g0, g1 = edges[1] - edges[0], edges[-1] - edges[-2]
+
+        def at(j):  # (cut line j; past the ends: the end squares' size on)
+            return np.where(j < 0, e0 + j * g0, np.where(j > last, e1 + (j - last) * g1,
+                                                          edges[np.clip(j, 0, last)]))
+        return np.column_stack([at(k), at(k + 1), np.repeat(st[:, 2], n)])
+    st = np.array(stretches, np.int64).reshape(-1, 3)
     if not len(st):
-        return np.zeros(0, np.int64) if count else np.zeros((0, 3), np.int64)
+        return none
     keys = np.unique(st[:, 2])
-    gates = np.array([row_gates(grid)(int(k)) for k in keys.tolist()], np.int64)[np.searchsorted(keys, st[:, 2])]
-    j0, j1 = (st[:, 0] - t0) // a, (st[:, 1] - t0) // a
+    gates = np.array([row_gates(g)(int(q)) for q in keys.tolist()], np.int64)[np.searchsorted(keys, st[:, 2])]
+    if kind == "keys":
+        a = int(sh["_even_a"])
+        st = on_grid(st, a, t0)
+        j0, j1 = (st[:, 0] - t0) // a, (st[:, 1] - t0) // a
+    else:  # (straight sides: the row's own ends rounded out to its own gates)
+        j0 = (st[:, 0] - t0) // gates
+        j1 = np.maximum(-((t0 - st[:, 1]) // gates), j0 + 1)
     n = j1 - j0
     if count:
         return n
     k = np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
-    g = np.repeat(gates, n)
-    starts = t0 + (np.repeat(j0, n) + k) * g
-    return np.column_stack([starts, starts + g, np.repeat(st[:, 2], n)])
+    gg = np.repeat(gates, n)
+    starts = t0 + (np.repeat(j0, n) + k) * gg
+    return np.column_stack([starts, starts + gg, np.repeat(st[:, 2], n)])
+
+
+def unbent_strokes(sh, ppq):
+    """A shape stored bent by its Range (Bend with the gates / along time): its straight-sided strokes again,
+    corner to corner (hunt 2026-11-17: the bend stayed after the Range was switched off). Others as they are."""
+    sp = range_space(sh, ppq)
+    to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(sh["pts"])
+    if not isinstance(sp, RangeSpace) or to_uv is None:
+        return sh["strokes"]
+    out = []
+    for st in sh["strokes"]:
+        pts = st.get("pts") or []
+        if plain_poly(st) and len(pts) >= 4 and all(abs(c - d) <= SAME for c, d in zip(pts[0], pts[-1])):
+            xy = [(sp.fwd(to_bp(u, v)[0] * ppq, to_bp(u, v)[1]), to_bp(u, v)[1]) for u, v in pts[:-1]]
+            corners = _straight_dropped(xy)  # (the row-middle points of a bent side lie on its stand-in line)
+            loop = [list(to_uv(sp.back(x, p) / ppq, p)) for x, p in corners]
+            out.append(dict(st, pts=loop + [list(loop[0])]))
+        else:
+            out.append(st)
+    return out
+
+
+def range_restored(before, after, ppq):
+    """A Range changed on an even shape (Range window): (pts, strokes, even_free) stored for the new Range: a bent
+    outline straightened first, then snapped the new way. even_free re-marked when the drawing was only ours."""
+    mine = (before.get("even_free") or {}).get("mark") == drawing_mark(before["strokes"])
+    work = dict(after, strokes=unbent_strokes(before, ppq))
+    pts, strokes = snapped_shape(work, ppq)
+    free = before.get("even_free")
+    return pts, strokes, (dict(free, mark=drawing_mark(strokes)) if mine and free else free)
 
 
 def shown_strokes(sh, ppq):
     """The strokes where the notes show the shape (the landing line; what a let go stores): even_version's, but a
-    Range by keys' straight stand-in sides taken back row by row (a point at every row's middle: the bent edge)."""
+    Range's straight stand-in sides taken back (a point at every row's middle: the bent edge)."""
     ev = even_version(sh, ppq)
-    if ev is sh or "_even_keys" not in ev:
+    if ev is sh or "_even_space" not in ev:
         return ev["strokes"]
-    grid = keys_grid(sh, ppq)
-    gate, t0, a = row_gates(grid), ev["_even"], ev["_even_keys"]
+    sp = range_space(sh, ppq)
+    t0, a = ev["_even"], ev["_even_a"]
     to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(sh["pts"])
 
     def real(b, p):  # (stand-in beats / pitch -> u, v of the real spot)
-        return list(to_uv((t0 + (b * ppq - t0) * gate(_row(p)) / a) / ppq, p))
+        return list(to_uv(sp.back((b * ppq - t0) / a, p) / ppq, p))
 
     out = []
     for old, st in zip(sh["strokes"], ev["strokes"]):

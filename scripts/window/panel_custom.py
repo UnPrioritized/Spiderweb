@@ -13,8 +13,8 @@ from notes.areas import most_colours
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, drawing_in_box,
                           edge_gate, even_can, even_kind, even_on, fit_upright, gap_lines, gate_ticks, join_strokes, map_stroke, normalize_areas,
                           normalize_strokes, open_paths, shelve_patterns)
-from notes.even_steps import (drawing_mark, gate_stretched, remarked, same_drawing, snapped_shape, ticked,
-                              unticked)
+from notes.even_steps import (drawing_mark, gate_stretched, range_restored, remarked, same_drawing, snapped_shape,
+                              ticked, unticked)
 from window import look
 from window.drawer import Drawer, clean_name, library_lists, library_names, load_drawing, save_shape, shape_stamp
 from window.panel_funnel import GATE_STEPS
@@ -673,6 +673,7 @@ class CustomPanel:
         if placed:
             self.push_undo(name=CUSTOM_NAMES.get(key, key))
         for t in tgts:
+            was = dict(t)  # (as it was: a Range's bent outline is read with its own gate)
             if key == "gate" and t is not self.custom_defaults and even_on(t) and not t.get("range"):
                 t["pts"], t["strokes"] = gate_stretched(t, value, self.ppq)  # (Symmetrical steps: the shape
                 # stretches, every step the same number of gates; user)
@@ -683,6 +684,10 @@ class CustomPanel:
                 shelve_patterns(t)
             if key == "gate" and t.get("range"):  # (a new gate typed in the panel = one flat gate again, user;
                 t["range_kept"] = t.pop("range")  # kept for the Range window to bring back)
+                if t is not self.custom_defaults and even_on(t):  # (Symmetrical steps: a bent outline straight)
+                    t["pts"], t["strokes"], free = range_restored(was, t, self.ppq)
+                    if free:
+                        t["even_free"] = free
             if not value and (key in ("edge", "edge_mode") or key in CUSTOM_FLAGS and t is not self.custom_defaults):
                 t.pop(key, None)  # (shapes only have them when they're on)
         if key == "fill":  # (Spam again on a shape with Symmetrical steps ticked: snapped in this step)

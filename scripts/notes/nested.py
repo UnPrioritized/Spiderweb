@@ -183,7 +183,7 @@ def nested_spans(sh, ppq):
     cfg = sh["nested"]
     shaped = {k: v for k, v in cfg.items() if k not in RECOLOUR}
     key = (json.dumps([sh["strokes"], sh["pts"], shaped, sh.get("round")]), bool(sh.get("union")), ppq,
-           (sh.get("_even"), sh.get("_even_keys"), sh["gate"], sh["fill"]) if sh.get("_even") is not None else None)
+           (sh.get("_even"), sh.get("_even_space"), sh["gate"], sh["fill"]) if sh.get("_even") is not None else None)
     got = _spans.get(key)  # (the steps, before their colours: Colours / Every other one empty only recolour)
     if got is None:
         if len(_spans) > 60:

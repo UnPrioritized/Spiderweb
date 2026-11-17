@@ -18,6 +18,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.custom import SPAM_FILLS, even_on, gate_ticks, range_gates
+from notes.even_steps import range_restored, stores_snap
 from notes.funnel import funnel_gates, funnel_range
 from notes.gaterange import (DIRS, ENDS, STRAIGHT, clean_range, ends_of, exact_ok, few_steps, gate_steps, halved,
                              steps_to, with_ends, y_gate)
@@ -224,9 +225,14 @@ class RangeGraph(PointGraph, tk.Toplevel):
         """Put the window's settings on the shapes and show them."""
         on = self.on_var.get()
         for t, m in zip(self.tgts, self.memo):
+            before = dict(t)
             t.pop("range", None)
             t.pop("range_kept", None)
             t["range" if on else "range_kept"] = json.loads(json.dumps(m))
+            if self.even and self.placed(t) and even_on(t) and stores_snap(t):  # (Symmetrical steps: stored for
+                t["pts"], t["strokes"], free = range_restored(before, t, self.app.ppq)  # the new Range, a bent
+                if free:  # outline straightened first)
+                    t["even_free"] = free
         self.app.shapes_changed()
         self.count = sum(self.app.note_count(t) or 0 for t in self.tgts if self.placed(t))
 
