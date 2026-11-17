@@ -1372,29 +1372,46 @@ pub fn sliver_hosts(s: &mut [i64], e: &mut [i64], r: &[i64], fp: &[i64], most: i
     m as i64
 }
 
-/// fastloops._edge_find: pieces a0 .. a1 (one row, by start; run = running end) that can touch span (a, b) ->
-/// (lo, hi); me > a still to test inside.
+/// fastloops._edge_step: a row's next span (a, b): the pieces still touching it kept in act (piece order), the ones
+/// starting before b added (ptr = the row's next piece not looked at, r1 = the row's end) -> (how many in act, ptr).
 #[inline(always)]
-fn edge_find(ms: &[i64], run: &[i64], a0: usize, a1: usize, a: i64, b: i64) -> (usize, usize) {
-    let (mut lo, mut hi) = (a0, a1);
-    while lo < hi {
-        let m = (lo + hi) / 2;
-        if run[m] > a {
-            hi = m;
-        } else {
-            lo = m + 1;
+#[allow(clippy::too_many_arguments)]
+fn edge_step(ms: &[i64], me: &[i64], act: &mut [i64], na: usize, mut ptr: usize, r1: usize, a: i64, b: i64)
+             -> (usize, usize) {
+    let mut w = 0usize;
+    for t in 0..na {
+        let p = act[t];
+        if me[p as usize] > a {
+            act[w] = p;
+            w += 1;
         }
     }
-    let (mut h0, mut h1) = (lo, a1);
-    while h0 < h1 {
-        let m = (h0 + h1) / 2;
-        if ms[m] >= b {
-            h1 = m;
-        } else {
-            h0 = m + 1;
+    while ptr < r1 && ms[ptr] < b {
+        if me[ptr] > a {
+            act[w] = ptr as i64;
+            w += 1;
         }
+        ptr += 1;
     }
-    (lo, h0)
+    (w, ptr)
+}
+
+/// edge_rows: the piece range of span k's row, found when the row changes ((r0, r1, ptr, na) carried along).
+#[inline(always)]
+fn edge_row(mr: &[i64], sp_row: &[i64], k: usize, st: &mut (usize, usize, usize, usize)) {
+    if k == 0 || sp_row[k] != sp_row[k - 1] {
+        let n = mr.len();
+        let row = sp_row[k];
+        let mut r0 = if k > 0 { st.1 } else { 0 };
+        while r0 < n && mr[r0] < row {
+            r0 += 1;
+        }
+        let mut r1 = r0;
+        while r1 < n && mr[r1] == row {
+            r1 += 1;
+        }
+        *st = (r0, r1, r0, 0);
+    }
 }
 
 /// fastloops.edge_rows (notes/shape_bend.edge_from_rows, Cut notes where bent: each row's edge from the outline):
@@ -1411,38 +1428,14 @@ pub fn edge_rows(ms: &[i64], me: &[i64], mr: &[i64], run: &mut [i64], full: &[i6
         return FAILED;
     }
     let has_full = full.len() == n && n > 0;
-    let mut i = 0;
-    while i < n {
-        let mut j = i;
-        let mut top = me[i];
-        while j < n && mr[j] == mr[i] {
-            top = top.max(me[j]);
-            run[j] = top;
-            j += 1;
-        }
-        i = j;
-    }
     let mut total = 0i64;
-    let mut r0 = 0usize;
+    let mut st = (0usize, 0usize, 0usize, 0usize); // (row's first piece, its end, next piece to look at, touching)
     for k in 0..ns {
-        let row = sp_row[k];
-        while r0 < n && mr[r0] < row {
-            r0 += 1;
-        }
-        let mut r1 = r0;
-        while r1 < n && mr[r1] == row {
-            r1 += 1;
-        }
-        let (a, b) = (sp_a[k], sp_b[k]);
-        let (lo, hi) = edge_find(ms, run, r0, r1, a, b);
-        let mut c = 0i64;
-        for p in lo..hi {
-            if me[p] > a {
-                c += 1;
-            }
-        }
-        n_in[k] = c;
-        total += c;
+        edge_row(mr, sp_row, k, &mut st);
+        let (na, ptr) = edge_step(ms, me, run, st.3, st.2, st.1, sp_a[k], sp_b[k]);
+        (st.3, st.2) = (na, ptr);
+        n_in[k] = na as i64;
+        total += na as i64;
     }
     if total as usize > cap {
         return (1i64 << 40) + total;
@@ -1450,30 +1443,23 @@ pub fn edge_rows(ms: &[i64], me: &[i64], mr: &[i64], run: &mut [i64], full: &[i6
     let (o0, rest) = out.d.split_at_mut(cap);
     let (o1, o2) = rest.split_at_mut(cap);
     let mut no = 0usize;
-    r0 = 0;
+    st = (0, 0, 0, 0);
     for k in 0..ns {
-        let m = n_in[k];
+        edge_row(mr, sp_row, k, &mut st);
+        let (a, b) = (sp_a[k], sp_b[k]);
+        let (na, ptr) = edge_step(ms, me, run, st.3, st.2, st.1, a, b);
+        (st.3, st.2) = (na, ptr);
+        let m = na as i64;
         if m == 0 {
             continue;
         }
-        let row = sp_row[k];
-        while r0 < n && mr[r0] < row {
-            r0 += 1;
-        }
-        let mut r1 = r0;
-        while r1 < n && mr[r1] == row {
-            r1 += 1;
-        }
-        let (a, b) = (sp_a[k], sp_b[k]);
-        let (lo, hi) = edge_find(ms, run, r0, r1, a, b);
         let f0 = no;
-        for p in lo..hi {
-            if me[p] > a {
-                o0[no] = p as i64;
-                o1[no] = ms[p].max(a);
-                o2[no] = me[p].min(b);
-                no += 1;
-            }
+        for t in 0..na {
+            let p = run[t] as usize;
+            o0[no] = p as i64;
+            o1[no] = ms[p].max(a);
+            o2[no] = me[p].min(b);
+            no += 1;
         }
         if !stretch {
             let mut w = f0;

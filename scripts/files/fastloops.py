@@ -3758,89 +3758,78 @@ def box_rows(xs, ys, lo, cnt, out):
 
 
 @njit(nogil=True)
-def _edge_find(ms, me, run, a0, a1, a, b):
-    """edge_rows: the pieces a0 .. a1 (one row, by start; run = running end) touching span (a, b): (lo, hi), test
-    me > a inside."""
-    lo, hi = a0, a1
-    while lo < hi:  # (the first whose running end passes a)
-        m = (lo + hi) // 2
-        if run[m] > a:
-            hi = m
-        else:
-            lo = m + 1
-    h0, h1 = lo, a1
-    while h0 < h1:  # (the first starting at b or later)
-        m = (h0 + h1) // 2
-        if ms[m] >= b:
-            h1 = m
-        else:
-            h0 = m + 1
-    return lo, h0
+def _edge_step(ms, me, act, na, ptr, r1, a, b):
+    """edge_rows: the next span (a, b) of a row (spans in order, apart): the pieces still touching it kept in act
+    (in piece order), the ones starting before b added (ptr = the next piece of the row not looked at yet, r1 = the
+    row's end) -> (how many in act, ptr). Each piece goes in once and out once: one pass along the row."""
+    w = 0
+    for t in range(na):
+        p = act[t]
+        if me[p] > a:
+            act[w] = p
+            w += 1
+    while ptr < r1 and ms[ptr] < b:
+        if me[ptr] > a:
+            act[w] = ptr
+            w += 1
+        ptr += 1
+    return w, ptr
 
 
 @njit(nogil=True)
 def edge_rows(ms, me, mr, run, full, sp_row, sp_a, sp_b, most, least, stretch, n_in, out):
     """shape_bend.edge_from_rows' pieces x spans: pieces (ms, me, mr) sorted by row, then start (run: work space, the
-    running end per row); spans (sp_row, sp_a, sp_b) by row, then start, apart. Each span's pieces touching it (in
-    piece order) clipped; stretch: the first starts at the span's start, the last ends at its end, each reaches the
-    next, an end piece under `most` joined into its neighbour; else (clip): kept when at least half its own length,
-    a span's first / last one dropped when under `least` (and under full[p], when full is given). n_in = each span's
-    pieces before drops. -> how many (piece, start, end) went in out[0..2, :] (2 ** 40 + the count needed when out
-    is too small: nothing written)."""
+    pieces touching the span); spans (sp_row, sp_a, sp_b) by row, then start, apart. Each span's pieces touching it
+    (in piece order) clipped; stretch: the first starts at the span's start, the last ends at its end, each reaches
+    the next, an end piece under `most` joined into its neighbour; else (clip): kept when at least half its own
+    length, a span's first / last one dropped when under `least` (and under full[p], when full is given). n_in =
+    each span's pieces before drops. -> how many (piece, start, end) went in out[0..2, :] (2 ** 40 + the count
+    needed when out is too small: nothing written)."""
     n = len(ms)
     ns = len(sp_a)
     has_full = len(full) == n and n > 0
-    # (each row's running end)
-    i = 0
-    while i < n:
-        j = i
-        top = me[i]
-        while j < n and mr[j] == mr[i]:
-            top = max(top, me[j])
-            run[j] = top
-            j += 1
-        i = j
     cap = out.shape[1]
     total = 0
-    r0 = 0
+    r0, r1, ptr, na = 0, 0, 0, 0
     for k in range(ns):  # (count first)
         row = sp_row[k]
-        while r0 < n and mr[r0] < row:
-            r0 += 1
-        r1 = r0
-        while r1 < n and mr[r1] == row:
-            r1 += 1
-        a, b = sp_a[k], sp_b[k]
-        lo, hi = _edge_find(ms, me, run, r0, r1, a, b)
-        c = 0
-        for p in range(lo, hi):
-            if me[p] > a:
-                c += 1
-        n_in[k] = c
-        total += c
+        if k == 0 or row != sp_row[k - 1]:  # (a new row: its pieces found once)
+            r0 = r1 if k else 0
+            while r0 < n and mr[r0] < row:
+                r0 += 1
+            r1 = r0
+            while r1 < n and mr[r1] == row:
+                r1 += 1
+            ptr, na = r0, 0
+        na, ptr = _edge_step(ms, me, run, na, ptr, r1, sp_a[k], sp_b[k])
+        n_in[k] = na
+        total += na
     if total > cap:
         return (1 << 40) + total
     no = 0
-    r0 = 0
+    r0, r1, ptr, na = 0, 0, 0, 0
     for k in range(ns):
-        m = n_in[k]
+        row = sp_row[k]
+        if k == 0 or row != sp_row[k - 1]:
+            r0 = r1 if k else 0
+            while r0 < n and mr[r0] < row:
+                r0 += 1
+            r1 = r0
+            while r1 < n and mr[r1] == row:
+                r1 += 1
+            ptr, na = r0, 0
+        a, b = sp_a[k], sp_b[k]
+        na, ptr = _edge_step(ms, me, run, na, ptr, r1, a, b)
+        m = na
         if m == 0:
             continue
-        row = sp_row[k]
-        while r0 < n and mr[r0] < row:
-            r0 += 1
-        r1 = r0
-        while r1 < n and mr[r1] == row:
-            r1 += 1
-        a, b = sp_a[k], sp_b[k]
-        lo, hi = _edge_find(ms, me, run, r0, r1, a, b)
         f0 = no
-        for p in range(lo, hi):
-            if me[p] > a:
-                out[0, no] = p
-                out[1, no] = max(ms[p], a)
-                out[2, no] = min(me[p], b)
-                no += 1
+        for t in range(na):
+            p = run[t]
+            out[0, no] = p
+            out[1, no] = max(ms[p], a)
+            out[2, no] = min(me[p], b)
+            no += 1
         if not stretch:
             w = f0
             for q in range(f0, no):
