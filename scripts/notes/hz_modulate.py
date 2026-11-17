@@ -383,12 +383,15 @@ def mod_value(hz, src, beat, tone=None):
                     else min(1.0, max(0.0, n.get("played", pitch(n)) / 127.0)))
         if tone is not None:
             return np.full(beat.shape, float(of(tone)))
-        tones = sorted(hz.get("tones") or (), key=lambda n: (n["t"], n["len"]))
-        if not tones:
+        def made():  # (every note's start and value, once per note making: 200,000 notes took ~90 ms a call)
+            tones = sorted(hz.get("tones") or (), key=lambda n: (n["t"], n["len"]))
+            return np.array([n["t"] for n in tones]), np.array([float(of(n)) for n in tones])
+        starts, values = cached(hz, ("mod_src", src), made)
+        if not len(starts):
             return np.full(beat.shape, 1.0 if src == "velocity" else hz.get("key", HZ_DEFAULTS["key"]) / 127.0)
         # (no tone: the newest note's, as a synth's effects after its voices; together: the longest)
-        i = np.searchsorted(np.array([n["t"] for n in tones]), beat, side="right") - 1
-        return np.array([float(of(n)) for n in tones])[np.clip(i, 0, len(tones) - 1)]
+        i = np.searchsorted(starts, beat, side="right") - 1
+        return values[np.clip(i, 0, len(starts) - 1)]
     span = note_span(hz, beat, tone)
     s0, end = span if span is not None else (0.0, 0.0)
     if src in MOD_ENVS:
