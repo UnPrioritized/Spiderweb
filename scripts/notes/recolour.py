@@ -2779,15 +2779,20 @@ class Rows:
     def __init__(self, at, smooth=0.0):
         from notes.engine import unique_inverse
         k = np.asarray(at[:, 2], np.int64)
-        self.keys, inv = unique_inverse(k)  # (np.unique's, counted: millions of notes)
-        self.a = np.full(len(self.keys), np.inf)
-        self.b = np.full(len(self.keys), -np.inf)
-        np.minimum.at(self.a, inv, np.asarray(at[:, 0], np.float64))
-        np.maximum.at(self.b, inv, np.asarray(at[:, 1], np.float64))
+        fast = getattr(loops(), "row_bounds", None)
+        got = None if fast is None else fast(k, at[:, 0], at[:, 1], np.asarray(at[:, 1] - at[:, 0], np.float64) / 2)
+        if got is not None:  # (compiled, on several cores: the very same numbers)
+            self.keys, self.a, self.b, self.g = got
+        else:
+            self.keys, inv = unique_inverse(k)  # (np.unique's, counted: millions of notes)
+            self.a = np.full(len(self.keys), np.inf)
+            self.b = np.full(len(self.keys), -np.inf)
+            np.minimum.at(self.a, inv, np.asarray(at[:, 0], np.float64))
+            np.maximum.at(self.b, inv, np.asarray(at[:, 1], np.float64))
+            self.g = np.full(len(self.keys), np.inf)  # (each row's shortest note's half: its first / last middle)
+            np.minimum.at(self.g, inv, np.asarray(at[:, 1] - at[:, 0], np.float64) / 2)
         self.a0, self.b0 = self.a, self.b
         self.at = at  # (kept until bw is first asked for, then let go)
-        self.g = np.full(len(self.keys), np.inf)  # (each row's shortest note's half: its first / last middle)
-        np.minimum.at(self.g, inv, np.asarray(at[:, 1] - at[:, 0], np.float64) / 2)
         if smooth > 0 and len(self.keys) > 2:
             r = smooth / 100 * float(self.keys[-1] - self.keys[0]) / 2
             self.a, self.b = smooth_ends(self.keys, self.a, r), smooth_ends(self.keys, self.b, r)
@@ -2825,6 +2830,10 @@ class Rows:
         if h is None:
             h = float(self.keys[-1] - self.keys[0]) + 1.0
         key = np.asarray(key, np.float64)
+        fast = getattr(loops(), "key_wrap", None) if key.ndim == 1 else None
+        got = None if fast is None else fast(key, base, h)
+        if got is not None:  # (compiled, on several cores: the very same numbers)
+            return got
         return np.where((key < base) | (key >= base + h), base + np.mod(key - base, h), key)
 
     def key_bounced(self, key, twice=False, lines=None):

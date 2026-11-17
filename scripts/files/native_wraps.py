@@ -45,6 +45,7 @@ NOT_IN_ORDER = -10  # (note_stretches: the notes aren't in key / start order; Nu
 BIG_GAPS = 4096  # (gap_ticks: anchors past this = written into arrays made in Python)
 FACES_MANY = 2048  # (face_build: lines from which its slabs are shared out on half the cores)
 BLOCK_MANY = 20000  # (block_notes: notes from which they're shared out on half the cores)
+ROWS_MANY = 20000  # (row_bounds / key_wrap: notes from which they're shared out on half the cores)
 
 
 def rows_of(out, m):
@@ -333,6 +334,36 @@ class Wraps:
         if not hasattr(self.x, "face_build"):
             return None
         return self._tuple("face_build", (x0, y0, x1, y1, levels, hy, hx0, hx1, eps, len(x0) >= FACES_MANY))
+
+    def row_bounds(self, k, a, b, d):
+        """recolour.Rows' (keys, np.minimum.at of a, np.maximum.at of b, np.minimum.at of d per key row), or None =
+        not run (Rows' NumPy way, the same numbers). Not in NEEDS (NumPy's way is the twin)."""
+        if not hasattr(self.x, "row_bounds"):
+            return None
+        got = self.x.row_bounds(np.ascontiguousarray(k, np.int64), np.ascontiguousarray(a, np.float64),
+                                np.ascontiguousarray(b, np.float64), np.ascontiguousarray(d, np.float64),
+                                len(k) >= ROWS_MANY)
+        return None if got.__class__ is int else got
+
+    def unique_keep(self, a, kc):
+        """engine.unique_index for whole-number note rows (kc = the key column): the rows kept, or None = not run
+        (its NumPy way, the same rows)."""
+        if not hasattr(self.x, "unique_keep"):
+            return None
+        a = np.ascontiguousarray(a, np.int64)
+        keep = np.empty(len(a), np.uint8)
+        got = self.x.unique_keep(a, kc, keep, len(a) >= ROWS_MANY)
+        if got < 0:
+            return None
+        return np.arange(len(a)) if got == len(a) else np.flatnonzero(keep)
+
+    def key_wrap(self, key, base, h):
+        """recolour.Rows.key_wrapped's numbers, or None = not run (its NumPy way)."""
+        if not hasattr(self.x, "key_wrap"):
+            return None
+        key = np.ascontiguousarray(key, np.float64)
+        out = np.empty(len(key), np.float64)
+        return out if self.x.key_wrap(key, float(base), float(h), out, len(key) >= ROWS_MANY) >= 0 else None
 
     def block_notes(self, rows, g):
         """custom.block_notes' pieces of (start, end, key, velocity, track) rows in the box g -> (pieces, 5) rows, or

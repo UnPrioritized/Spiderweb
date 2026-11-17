@@ -76,6 +76,7 @@ mod order;
 mod piece;
 mod play;
 mod recolour;
+mod rows;
 mod stir;
 mod tempo;
 mod turn;

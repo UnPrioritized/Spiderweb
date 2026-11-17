@@ -759,6 +759,9 @@ def note_array(notes, columns):
     return np.asarray(notes, np.int64).reshape(-1, columns)
 
 
+UNIQUE_COMPILED = 2048  # (rows: fewer = the NumPy way, quick enough and no call cost)
+
+
 def unique_rows(a):
     """a without rows that repeat an earlier row (order kept)."""
     keep = unique_index(a)
@@ -769,6 +772,11 @@ def unique_index(a):
     """The rows unique_rows keeps."""
     if len(a) < 2:
         return np.arange(len(a))
+    if a.dtype == np.int64 and a.ndim == 2 and a.shape[1] in (3, 4, 5) and len(a) >= UNIQUE_COMPILED:
+        fast = getattr(loops(), "unique_keep", None)  # (compiled: grouped by key, on several cores; the same rows)
+        got = None if fast is None else fast(a, 2)
+        if got is not None:
+            return got
     if a.dtype == np.int64 and a.ndim == 2 and a.shape[1] == 5:  # (pasted notes + velocity + track: by key, start,
         # end, track; rows alike in those four (few) sorted again with the velocity. 3 M notes 0.65 s -> ~0.15 s)
         c = a.T
