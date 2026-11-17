@@ -119,28 +119,9 @@ def dialog(parent, title, text, strong, tick=None, danger=None, yes=None, no=Non
     from window.widgets import centre_over, remember_place
     centre_over(win, parent.winfo_toplevel())
     remember_place(win, "big_ask")
-    root = parent._root()
-    held = getattr(root, "held_scrub", None)  # (a number box label / knob dragged when it came up)
     win.deiconify()
     win.grab_set()
     first.focus_set()
     win.bell()
-    win.wait_window()
-    if held is not None and getattr(root, "held_scrub", None) is held:
-        let_go(held)
+    win.wait_window()  # (a drag it came up in the middle of gets its let go after: window/lost_release.py)
     return answer[0], skip.get()
-
-
-def let_go(held):
-    """A drag the question came up in the middle of: its let go went to the question, so it ends here as let go
-    (else it stayed "held": Delete waited and Ctrl+Z only put the box back, user 2026-11-17)."""
-    knob = getattr(held, "knob", None)
-    if knob is not None:  # (a knob in Shares / Stir...: shares_window.KnobHold)
-        knob.release()
-        return
-    box = getattr(held, "held", None)
-    if box:
-        box["box"][0].config(cursor="")
-        held.held = None
-    if getattr(held, "drag", None) is not None and hasattr(held, "release"):
-        held.release(None)

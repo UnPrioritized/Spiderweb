@@ -17,6 +17,8 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
+from window import lost_release
+
 VIEW, PASS, WAIT = "view", "pass", "wait"
 BUTTONS = 0x100 | 0x400 | 0x800 | 0x1000  # (left, right, 4, 5 held; the middle one pans)
 MIDDLE = 0x200
@@ -48,6 +50,7 @@ def install(app):
     if not getattr(tk.CallWrapper, "_notes_wait", False):
         tk.CallWrapper.__call__ = _call
         tk.CallWrapper._notes_wait = True
+    lost_release.install()
     if freeze_log:
         _log("start", 0.0, 0.0, "", "")
         app.after(5, _heartbeat)
@@ -166,6 +169,8 @@ def _call_sorted(self, *args):
             if big_ask.shown != asked and self.subst and _press(args[0]):
                 return "break"  # (a press that brought up a question: its let go went to the question, so the
                 # press is used up by it; else the piano roll kept "holding" a shape and shortcuts waited)
+        if self.subst and args:
+            lost_release.seen(args[0])  # (a press whose let go goes to a question gets it later)
         if timer:
             return func(*args)
         _depth += 1
