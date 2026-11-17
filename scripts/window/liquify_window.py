@@ -74,21 +74,29 @@ class LiquifyWindow(tk.Toplevel):
         # beside it; a shape without a Liquify takes them with its first stroke: settings.ini [liquify])
         self.moves = "shape" if settings.get("liquify", "moves", "colours") == "shape" else "colours"
         self.bend_colours_pick = settings.get("liquify", "bend_colours", "1") != "0"
+        self.chop_pick = settings.get("liquify", "chop", "1") != "0"  # (Cut notes where bent, user 2026-11-17)
         word = ttk.Label(form, text=tr("stir.moves"))
-        word.grid(row=0, column=0, sticky="w", pady=(0, 6))
+        word.grid(row=0, column=0, sticky="nw", pady=(0, 6))
         Tooltip(word, tr("liquify.moves_tip"))
         top = ttk.Frame(form)
         top.grid(row=0, column=1, columnspan=3, sticky="w", padx=(6, 0), pady=(0, 6))
+        line = ttk.Frame(top)
+        line.pack(anchor="w")
         values = [tr("stir.moves_colours"), tr("stir.moves_shape")]
-        b = self.moves_box = ttk.Combobox(top, values=values, state="readonly", width=max(len(v) for v in values) + 1)
+        b = self.moves_box = ttk.Combobox(line, values=values, state="readonly", width=max(len(v) for v in values) + 1)
         b.pack(side="left")
         b.bind("<<ComboboxSelected>>", lambda e: self.on_moves())
         Tooltip(b, tr("liquify.moves_tip"))
         self.bend_colours = tk.BooleanVar(value=True)
-        t = self.bend_colours_tick = ttk.Checkbutton(top, text=tr("stir.bend_colours"), variable=self.bend_colours,
+        t = self.bend_colours_tick = ttk.Checkbutton(line, text=tr("stir.bend_colours"), variable=self.bend_colours,
                                                      command=self.on_bend_colours)
         t.pack(side="left", padx=(12, 0))
         Tooltip(t, tr("liquify.bend_colours_tip"))
+        # (Cut notes where bent under Moves, like the Stir window's; live on drawn shapes set to Shape)
+        self.chop = tk.BooleanVar(value=True)
+        t = self.chop_tick = ttk.Checkbutton(top, text=tr("stir.chop"), variable=self.chop, command=self.on_chop)
+        t.pack(anchor="w", pady=(2, 0))
+        Tooltip(t, tr("liquify.chop_tip"))
         ttk.Label(form, text=tr("liquify.tool")).grid(row=1, column=0, sticky="nw", pady=(0, 6))
         tools = ttk.Frame(form)
         tools.grid(row=1, column=1, columnspan=3, sticky="w", pady=(0, 6))
@@ -187,12 +195,13 @@ class LiquifyWindow(tk.Toplevel):
         return self.app.recolour_targets()
 
     def kind_picks(self, sh=None):
-        """What a shape's first stroke takes from the window: Moves (+ Colours bend too off), as saved (a picture:
-        nothing, it stays Colours; hunt 2026-11-17)."""
+        """What a shape's first stroke takes from the window: Moves (+ Colours bend too / Cut notes where bent off), as
+        saved (a picture: nothing, it stays Colours; hunt 2026-11-17)."""
         from notes.shape_bend import can_bend
         if self.moves != "shape" or (sh is not None and not can_bend(sh)):
             return {}
-        return {"moves": "shape", **({} if self.bend_colours_pick else {"bend_colours": False})}
+        return {"moves": "shape", **({} if self.bend_colours_pick else {"bend_colours": False}),
+                **({} if self.chop_pick else {"chop": False})}
 
     def kind_of(self, sh):
         """What shape sh's Liquify bends ("colours" / "shape"; none yet = the window's pick; a picture = Colours)."""
@@ -235,10 +244,25 @@ class LiquifyWindow(tk.Toplevel):
                 return old
             if (got.get("moves") or "colours") == kind:
                 return old
-            new = {k: v for k, v in got.items() if k not in ("moves", "bend_colours", "map", "forward")}
-            new = dict(new, moves="shape", forward=True) if kind == "shape" else new
+            new = {k: v for k, v in got.items() if k not in ("moves", "bend_colours", "chop", "map", "forward")}
+            new = dict(new, forward=True, **self.kind_picks(sh)) if kind == "shape" else new  # (+ the window's ticks)
             return dict(old, liquify=new)
         self.app.change_recolour(change, tr("liquify.undo_moves"))
+        self.sync()
+
+    def on_chop(self):
+        v = bool(self.chop.get())
+        self.chop_tick.state(["!alternate"])
+        self.chop_pick = v
+        put("chop", "1" if v else "0")
+
+        def change(old, sh):
+            got = (old or {}).get("liquify")
+            if not got or got.get("moves") != "shape":
+                return old
+            new = {k: x for k, x in got.items() if k != "chop"}
+            return dict(old, liquify=new if v else dict(new, chop=False))
+        self.app.change_recolour(change, tr("liquify.undo_chop"))
         self.sync()
 
     def on_bend_colours(self):
@@ -381,11 +405,20 @@ class LiquifyWindow(tk.Toplevel):
             self.moves_box.current(("colours", "shape").index(next(iter(kinds))))
         pictures = tgts and all("picture" in t or "picture_notes" in t for t in tgts)  # (pictures: Shape greyed)
         self.moves_box.config(state="readonly" if tgts and not pictures else "disabled")
-        bends_ = {g.get("bend_colours", True) if g else self.bend_colours_pick
-                  for g, k in zip(lqs, self.kinds()) if k == "shape"} or {self.bend_colours_pick}
+        # (Cut notes where bent: drawn shapes set to Shape (pasted notes are always cut); Colours bend too only where
+        # the outline bends, user 2026-11-17)
+        drawn = [g for g, k, t in zip(lqs, self.kinds(), tgts) if k == "shape" and "notes" not in t]
+        chops = {g.get("chop", True) if g else self.chop_pick for g in drawn} or {self.chop_pick}
+        self.chop.set(chops == {True})
+        self.chop_tick.state(["alternate" if len(chops) > 1 else "!alternate",
+                              "!disabled" if drawn or not tgts and self.moves == "shape" else "disabled"])
+        laid = [g for g in drawn if not (g.get("chop", True) if g else self.chop_pick)]
+        bends_ = {g.get("bend_colours", True) if g else self.bend_colours_pick for g in laid} or {
+            self.bend_colours_pick}
         self.bend_colours.set(bends_ == {True})
         self.bend_colours_tick.state(["alternate" if len(bends_) > 1 else "!alternate",
-                                      "!disabled" if "shape" in kinds else "disabled"])
+                                      "!disabled" if laid or not tgts and self.moves == "shape" and not self.chop_pick
+                                      else "disabled"])
         self.edge_box.config(state="disabled" if shape else "readonly")
         if shape:
             from notes.shape_bend import liquify_shape

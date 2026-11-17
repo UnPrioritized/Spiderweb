@@ -608,6 +608,9 @@ class LiquifyBend(StirBend):
         Two homes (a crease of a very strong twirl): the one nearest the first guess (gx0, gy0). -> (x, y, found)."""
         gy, gx = self.A.shape[:2]
         if getattr(self, "_cells", None) is None:
+            few = self._seeded_few(mx, my, gx0, gy0)  # (a handful of spots: only the cells that can reach each)
+            if few is not None:
+                return few
             self._cells = None
             moved = (self.A != 0).any(2)
             cm = moved[:-1, :-1] | moved[1:, :-1] | moved[:-1, 1:] | moved[1:, 1:]
@@ -653,6 +656,54 @@ class LiquifyBend(StirBend):
         first = o[np.r_[True, qi[o][1:] != qi[o][:-1]]] if len(o) else o
         w = qi[first]
         ox[w], oy[w], found[w] = sx[first], sy[first], True
+        return ox, oy, found
+
+    def _seeded_few(self, mx, my, gx0, gy0):
+        """_seeded for a handful of spots, the same answers without sorting every moved cell (user 2026-11-17: a long
+        shape zoomed far in, Cut notes where bent: 7 spots bucketed 770k cells, 0.43 s an update): each spot looks
+        only at the cells whose home is within the map's largest offset of it. None = too many spots for this."""
+        A = self.A
+        gy, gx = A.shape[:2]
+        hx, hy = 1.0 / (gx - 1), 1.0 / (gy - 1)
+        if not hasattr(self, "_reach"):
+            self._reach = float(np.abs(A).max()) if A.size else 0.0
+        d = self._reach
+        wi, wj = min(int(d / hx) + 3, gx - 1), min(int(d / hy) + 3, gy - 1)
+        # (looking through a window is far cheaper a cell than sorting cells into buckets: up to twice the map's cells)
+        if len(mx) * (2 * wi + 1) * (2 * wj + 1) > 2 * (gx - 1) * (gy - 1):
+            return None
+        n = len(mx)
+        ox, oy, found = mx.copy(), my.copy(), np.zeros(n, bool)
+        for q in range(n):
+            i0 = max(int(np.floor((mx[q] - d) / hx)) - 1, 0)
+            i1 = min(int(np.ceil((mx[q] + d) / hx)) + 1, gx - 1)
+            j0 = max(int(np.floor((my[q] - d) / hy)) - 1, 0)
+            j1 = min(int(np.ceil((my[q] + d) / hy)) + 1, gy - 1)
+            if i1 <= i0 or j1 <= j0:
+                continue
+            w = A[j0:j1 + 1, i0:i1 + 1]
+            X = np.arange(i0, i1 + 1)[None, :] * hx + w[:, :, 0]
+            Y = np.arange(j0, j1 + 1)[:, None] * hy + w[:, :, 1]
+            cx = (X[:-1, :-1], X[:-1, 1:], X[1:, :-1], X[1:, 1:])
+            cy = (Y[:-1, :-1], Y[:-1, 1:], Y[1:, :-1], Y[1:, 1:])
+            mv = (w != 0).any(2)  # (moved cells only, as the buckets hold)
+            e = 1e-7  # (a box a hair larger: never drops a cell _in_cell would take)
+            hit = ((mv[:-1, :-1] | mv[:-1, 1:] | mv[1:, :-1] | mv[1:, 1:])
+                   & (np.minimum(np.minimum(cx[0], cx[1]), np.minimum(cx[2], cx[3])) <= mx[q] + e)
+                   & (np.maximum(np.maximum(cx[0], cx[1]), np.maximum(cx[2], cx[3])) >= mx[q] - e)
+                   & (np.minimum(np.minimum(cy[0], cy[1]), np.minimum(cy[2], cy[3])) <= my[q] + e)
+                   & (np.maximum(np.maximum(cy[0], cy[1]), np.maximum(cy[2], cy[3])) >= my[q] - e))
+            cj, ci = np.nonzero(hit)
+            if not len(cj):
+                continue
+            cj, ci = cj + j0, ci + i0
+            sx, sy, ok = self._in_cell(cj, ci, np.full(len(cj), mx[q]), np.full(len(cj), my[q]))
+            if not ok.any():
+                continue
+            o = np.flatnonzero(ok)
+            # (two homes, a crease: the one nearest the first guess; ties = the first in bucket order (row, column))
+            best = o[np.argmin((sx[o] - gx0[q]) ** 2 + (sy[o] - gy0[q]) ** 2)]
+            ox[q], oy[q], found[q] = sx[best], sy[best], True
         return ox, oy, found
 
     def _in_cell(self, cj, ci, qx, qy):

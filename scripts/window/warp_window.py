@@ -78,6 +78,7 @@ class WarpWindow(tk.Toplevel):
         # them at their first drag, settings.ini [warp] moves / bend_colours)
         self.moves = "shape" if settings.get("warp", "moves", "colours") == "shape" else "colours"
         self.bend_colours_pick = settings.get("warp", "bend_colours", "1") != "0"
+        self.chop_pick = settings.get("warp", "chop", "1") != "0"  # (Cut notes where bent, user 2026-11-17)
         self._fit = {}  # fit_key(the Warp a size change left) -> the Warp before the first size change
         # (Preset: the last one picked + its Bend % / way, for shapes without one yet; settings.ini [warp])
         p = pr.ok([settings.get("warp", "preset", "arc"), _number(settings.get("warp", "preset_bend", "50"), 50.0),
@@ -100,16 +101,23 @@ class WarpWindow(tk.Toplevel):
         Tooltip(word, tr("warp.moves_tip"))
         top = ttk.Frame(form)
         top.grid(row=0, column=1, sticky="w", padx=(6, 0), pady=(0, 6))
+        line = ttk.Frame(top)
+        line.pack(anchor="w")
         values = [tr("stir.moves_colours"), tr("stir.moves_shape")]
-        b = self.moves_box = ttk.Combobox(top, values=values, state="readonly", width=max(len(v) for v in values) + 1)
+        b = self.moves_box = ttk.Combobox(line, values=values, state="readonly", width=max(len(v) for v in values) + 1)
         b.pack(side="left")
         b.bind("<<ComboboxSelected>>", lambda e: self.on_moves())
         Tooltip(b, tr("warp.moves_tip"))
         self.bend_colours = tk.BooleanVar(value=True)
-        t = self.bend_colours_tick = ttk.Checkbutton(top, text=tr("stir.bend_colours"), variable=self.bend_colours,
+        t = self.bend_colours_tick = ttk.Checkbutton(line, text=tr("stir.bend_colours"), variable=self.bend_colours,
                                                      command=self.on_bend_colours)
         t.pack(side="left", padx=(12, 0))
         Tooltip(t, tr("warp.bend_colours_tip"))
+        # (Cut notes where bent under Moves, like the Stir window's; live on drawn shapes set to Shape)
+        self.chop = tk.BooleanVar(value=True)
+        t = self.chop_tick = ttk.Checkbutton(top, text=tr("stir.chop"), variable=self.chop, command=self.on_chop)
+        t.pack(anchor="w", pady=(2, 0))
+        Tooltip(t, tr("warp.chop_tip"))
         self.boxes = {}
         grids = [tr("warp.grid_n", cols=c, rows=r) for c, r in wp_.GRIDS] + [tr("warp.custom")]
         # (rows: Grid size, its Custom boxes, Preset, its Bend % + way, then Cells (the old "Bend:" row, renamed so
@@ -289,12 +297,13 @@ class WarpWindow(tk.Toplevel):
         return [self.kind_of(t) for t in self.targets()]
 
     def kind_picks(self, sh=None):
-        """What a shape's first drag takes from the window: Moves (+ Colours bend too off), as saved in a Warp (a
-        picture: nothing, it stays Colours)."""
+        """What a shape's first drag takes from the window: Moves (+ Colours bend too / Cut notes where bent off), as
+        saved in a Warp (a picture: nothing, it stays Colours)."""
         from notes.shape_bend import can_bend
         if self.moves != "shape" or (sh is not None and not can_bend(sh)):
             return {}
-        return {"moves": "shape", **({} if self.bend_colours_pick else {"bend_colours": False})}
+        return {"moves": "shape", **({} if self.bend_colours_pick else {"bend_colours": False}),
+                **({} if self.chop_pick else {"chop": False})}
 
     def on_moves(self):
         """Moves: Colours / Shape picked: the selected shapes' Warps bend that (one undo step); the window's pick for
@@ -311,8 +320,21 @@ class WarpWindow(tk.Toplevel):
             if not can_bend(sh):  # (a picture in the selection keeps its colour Warp: hunt 2026-11-17)
                 return w
             out = {k: v for k, v in w.items() if k not in wp_.KIND_KEYS}
-            return dict(out, moves="shape") if self.moves == "shape" else out
+            return dict(out, **self.kind_picks(sh)) if self.moves == "shape" else out  # (+ the window's ticks)
         self._change(set_to, tr("warp.undo_moves"), keep_kind=False)
+
+    def on_chop(self):
+        v = bool(self.chop.get())
+        self.chop_tick.state(["!alternate"])
+        self.chop_pick = v
+        put("chop", "1" if v else "0")
+
+        def set_to(w, sh):
+            if w.get("moves") != "shape":
+                return w
+            out = {k: x for k, x in w.items() if k != "chop"}
+            return out if v else dict(out, chop=False)
+        self._change(set_to, tr("warp.undo_chop"), keep_kind=False)
 
     def on_bend_colours(self):
         v = bool(self.bend_colours.get())
@@ -623,11 +645,20 @@ class WarpWindow(tk.Toplevel):
             self.moves_box.set("")
         else:
             self.moves_box.current(("colours", "shape").index(next(iter(kinds))))
-        bends_ = {w.get("bend_colours", True) if w else self.bend_colours_pick
-                  for w, k in zip(ws, each) if k == "shape"} or {self.bend_colours_pick}
+        # (Cut notes where bent: drawn shapes set to Shape (pasted notes are always cut); Colours bend too only where
+        # the outline bends, user 2026-11-17)
+        drawn = [(w, t) for w, k, t in zip(ws, each, tgts) if k == "shape" and "notes" not in t]
+        chops = {w.get("chop", True) if w else self.chop_pick for w, _ in drawn} or {self.chop_pick}
+        self.chop.set(chops == {True})
+        self.chop_tick.state(["alternate" if len(chops) > 1 else "!alternate",
+                              "!disabled" if drawn or not tgts and self.moves == "shape" else "disabled"])
+        laid = [w for w, _ in drawn if not (w.get("chop", True) if w else self.chop_pick)]
+        bends_ = {w.get("bend_colours", True) if w else self.bend_colours_pick for w in laid} or {
+            self.bend_colours_pick}
         self.bend_colours.set(bends_ == {True})
         self.bend_colours_tick.state(["alternate" if len(bends_) > 1 else "!alternate",
-                                      "!disabled" if "shape" in kinds else "disabled"])
+                                      "!disabled" if laid or not tgts and self.moves == "shape" and not self.chop_pick
+                                      else "disabled"])
         pictures = tgts and all("picture" in t or "picture_notes" in t for t in tgts)  # (pictures: Shape greyed, user)
         self.moves_box.config(state="readonly" if tgts and not pictures else "disabled")
         for name in ("edges", "folds", "edge"):  # (which colour a note takes: nothing to do with a bent shape)

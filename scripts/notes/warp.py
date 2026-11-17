@@ -1357,7 +1357,8 @@ def remove_mirrored(wp, way, k):
 REFIT_STEPS = 8  # (spots per cell the re-fit compares at)
 
 
-KIND_KEYS = ("moves", "bend_colours")  # (what the Warp bends: Colours / Shape + Colours bend too, stage F)
+KIND_KEYS = ("moves", "bend_colours", "chop")  # (what the Warp bends: Colours / Shape + Colours bend too, stage F,
+# + Cut notes where bent, user 2026-11-17)
 
 
 def kind_kept(new, old):
