@@ -1182,8 +1182,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             b["entry"].config(state="normal" if on and live else "disabled")
         # (Cut notes where bent: drawn shapes' Shape tabs only (pasted notes are always cut); Colours bend too only
         # where the outline bends (a tab not cut), user 2026-11-17)
-        drawn = [s for s, t in zip(sts, tgts) if s["moves"] == "shape" and "notes" not in t]
-        chops = {s["chop"] for s in drawn} or {True}
+        # (a tab cut anyway: pasted notes / funnels / Glissandos..., or an earlier Shape tab already cuts: shown
+        # ticked + greyed, hunt 2026-11-17 #3 / #5)
+        from notes.shape_bend import always_cut, cut_before
+        shaped = [(s, t) for s, t in zip(sts, tgts) if s["moves"] == "shape"]
+        drawn = [s for s, t in shaped if not always_cut(t)
+                 and not cut_before(clean_recolour(t.get("recolour")), t, "stir", self.tab)]
+        chops = {s["chop"] for s in drawn} | ({True} if len(drawn) < len(shaped) or not shaped else set())
         self.chop.set(chops == {True})
         self.chop_tick.state(["alternate" if len(chops) > 1 else "!alternate",
                               "!disabled" if on and drawn else "disabled"])

@@ -647,8 +647,13 @@ class WarpWindow(tk.Toplevel):
             self.moves_box.current(("colours", "shape").index(next(iter(kinds))))
         # (Cut notes where bent: drawn shapes set to Shape (pasted notes are always cut); Colours bend too only where
         # the outline bends, user 2026-11-17)
-        drawn = [(w, t) for w, k, t in zip(ws, each, tgts) if k == "shape" and "notes" not in t]
-        chops = {w.get("chop", True) if w else self.chop_pick for w, _ in drawn} or {self.chop_pick}
+        # (cut anyway: pasted notes / funnels / Glissandos..., or a Stir tab set to Shape already cuts: ticked +
+        # greyed, hunt 2026-11-17 #3 / #5)
+        from notes.shape_bend import always_cut, cut_before
+        shaped = [(w, t) for w, k, t in zip(ws, each, tgts) if k == "shape"]
+        drawn = [(w, t) for w, t in shaped if not always_cut(t) and not cut_before(self.cleaned(t)[0], t, "warp")]
+        chops = {w.get("chop", True) if w else self.chop_pick for w, _ in drawn} | (
+            {True} if len(drawn) < len(shaped) else set()) or {self.chop_pick}
         self.chop.set(chops == {True})
         self.chop_tick.state(["alternate" if len(chops) > 1 else "!alternate",
                               "!disabled" if drawn or not tgts and self.moves == "shape" else "disabled"])

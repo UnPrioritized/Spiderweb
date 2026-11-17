@@ -1113,7 +1113,7 @@
  "warp.bend_colours_tip": "Ticked: each note of the bent shape takes the colour of the note it came from, so a Colours pattern or coloured areas bend along with the shape.\nUnticked: the colours are laid out again on the bent shape, as if it had been drawn that way.\nOnly while Moves is Shape.",
  "warp.undo_moves": "Warp moves",
  "warp.undo_bend_colours": "Warp colours bend too",
- "warp.chop_tip": "Ticked: the shape's notes are made first, then bent with the grid and cut where the bend curves them, like pasted notes. Fill rows, Spam and patterns bend along like a picture.\nUnticked: only the outline bends, and the notes are laid out again inside it (long Fill rows stay whole).\nOnly while Moves is Shape, for drawn shapes. Pasted notes are always cut.\nShapes without a Warp yet take this when you first drag a point.",
+ "warp.chop_tip": "Ticked: the shape's notes are made first, then bent with the grid and cut where the bend curves them, like pasted notes. Fill rows, Spam and patterns bend along like a picture.\nUnticked: only the outline bends, and the notes are laid out again inside it (long Fill rows stay whole).\nOnly while Moves is Shape, for drawn shapes. Greyed and ticked when the notes are cut anyway: pasted notes, funnels, Glissandos and joined curves, or when an earlier Shape step already cuts them (every step after it cuts too).\nShapes without a Warp yet take this when you first drag a point.",
  "warp.undo_chop": "Warp cut notes where bent",
  "warp.shape_same": "This Warp doesn't change this shape's outline: the points you moved don't reach its edge (a point in the middle of a filled square only bends the inside). Drag points on or near the outline.",
  "warp.nothing": "Select a shape to warp it.",

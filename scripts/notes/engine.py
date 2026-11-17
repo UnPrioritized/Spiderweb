@@ -1487,7 +1487,10 @@ def shape_tabs_done(sh, ppq, keys, get):
             ok = ok | b.within(t, k)
         return ok
     from notes.shape_bend import AS_NOTES, Folded, StirBend, note_boxes_bent
-    as_notes = "notes" in base and "picture" not in base and "picture_notes" not in base
+    from notes.shape_bend import always_cut
+    # (pasted notes and kinds whose lines can't be bent (funnel, Glissando, joined curves, per-dot polylines): always
+    # bent note by note, measured the cut way, whatever the tick says: hunt 2026-11-17 #5)
+    as_notes = always_cut(base)
     # (CUT NOTES WHERE BENT, user 2026-11-17, a tick per Shape step, on by default: a drawn shape's notes made unbent,
     # then bent + cut like pasted notes. Steps before the first ticked one bend the outline (notes laid in it), the
     # ticked one and every later one bend + cut those notes)
@@ -1497,7 +1500,7 @@ def shape_tabs_done(sh, ppq, keys, get):
     # Turn of 90 maps the notes onto themselves exactly (user 2026-11-17: the turned square stuck out half a key's
     # worth of ticks and lost its top row). The Warp grid / Liquify brush stay on the box as drawn)
     cell = (box[0], box[1], box[2] - 0.5, box[3] + 0.5), (own[0], own[1], own[2] - 0.5, own[3] + 0.5)
-    note_benders = [StirBend(st, rule, cell[0], cell[1], ppq) for st in tabs] + benders[len(tabs):]
+    note_benders = [_cell_stir(st, rule, box, own, cell, ppq) for st in tabs] + benders[len(tabs):]
     if as_notes or first == 0:
         got = AS_NOTES
         benders = note_benders  # (look / within / bend_tk below read it)
@@ -1537,9 +1540,11 @@ def shape_tabs_done(sh, ppq, keys, get):
         try:
             if got == PULL or any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
                 raise Folded
-            made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
             if not as_notes and first is not None:  # (a drawn shape cut where bent: its edge from the bent outline)
-                made, tracks = _outline_edge(sh, ppq, keys, get, made, tracks)
+                made, tracks, full = note_boxes_bent(made, tracks, bend_tk, ppq, look, lengths=True)
+                made, tracks = _outline_edge(sh, ppq, keys, get, made, tracks, full)
+            else:
+                made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
         except Folded:
             laid = None
             if got == PULL and not bend and tracks is not None and len(made) and base.get("cycle"):
@@ -1564,6 +1569,22 @@ def shape_tabs_done(sh, ppq, keys, get):
         t, k = look((made[:, 0] + made[:, 1]) / 2, made[:, 2].astype(np.float64))
         tracks = np.asarray(before)[nearest(notes, t, k, own=False)]
     return dict(got, _bent=bent_token(made, tracks))
+
+
+def _cell_stir(st, rule, box, own, cell, ppq):
+    """A Stir tab's bender for cut notes: measured in the box grown half a key each way (cell), with its Centre point
+    and Area spot kept on the very spot they mark on the drawn box (hunt 2026-11-17: a corner Centre point moved half
+    a key, a Turn 180 there lost a row)."""
+    from notes.shape_bend import StirBend
+    plain, grown = StirBend(st, rule, box, own, ppq), StirBend(st, rule, cell[0], cell[1], ppq)
+    moved = {}
+    for key in ("centre", "spot"):
+        v = st.get(key)
+        if isinstance(v, (list, tuple)) and len(v) == 2:
+            t, k = plain.from_unit(np.float64(v[0] / 100), np.float64(v[1] / 100))
+            x, y = grown.to_unit(t, k)
+            moved[key] = [float(x) * 100, float(y) * 100]
+    return StirBend(dict(st, **moved), rule, cell[0], cell[1], ppq) if moved else grown
 
 
 def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, bend, out, sh):
@@ -1602,14 +1623,14 @@ def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, be
         # unticked + a Warp ticked))
         if any(isinstance(b, StirBend) and (b.st.get("polar") or b.st.get("kaleido", 0) >= 2) for b in rest):
             raise Folded
-        made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
-        made, tracks = _outline_edge(sh, ppq, keys, get, made, tracks)
+        made, tracks, full = note_boxes_bent(made, tracks, bend_tk, ppq, look, lengths=True)
+        made, tracks = _outline_edge(sh, ppq, keys, get, made, tracks, full)
     except Folded:
         made, tracks = pulled(made, tracks, look, box, ppq, joined=False, within=within)
     return dict(out, _bent=bent_token(*_on_keys(made, tracks, keys)))
 
 
-def _outline_edge(sh, ppq, keys, get, made, tracks):
+def _outline_edge(sh, ppq, keys, get, made, tracks, full=None):
     """A drawn shape's cut notes (made, tracks) with each key row's EDGE taken from its bent outline (user 2026-11-17,
     test28: the cut rows' starts wobbled round a smooth curve; picked "edge from the outline"): the shape made the
     outline way (every Shape step's Cut notes where bent off) gives each row's spans; pieces are clipped to them, the
@@ -1632,7 +1653,7 @@ def _outline_edge(sh, ppq, keys, get, made, tracks):
     line, _ = get(_steps_off(without_recolour(res)))
     from notes.shape_bend import CHOP_PART, edge_from_rows
     return edge_from_rows(np.asarray(made, np.int64), tracks, np.asarray(line, np.int64),
-                          max(int(ppq) // CHOP_PART, 1), stretch)
+                          max(int(ppq) // CHOP_PART, 1), stretch, full)
 
 
 STEP_KEYS = ("fx", "_m", "glue", "sustain", "extend", "subtract", "gate_flip", "order", "off", "_upto")

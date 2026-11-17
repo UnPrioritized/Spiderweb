@@ -407,8 +407,13 @@ class LiquifyWindow(tk.Toplevel):
         self.moves_box.config(state="readonly" if tgts and not pictures else "disabled")
         # (Cut notes where bent: drawn shapes set to Shape (pasted notes are always cut); Colours bend too only where
         # the outline bends, user 2026-11-17)
-        drawn = [g for g, k, t in zip(lqs, self.kinds(), tgts) if k == "shape" and "notes" not in t]
-        chops = {g.get("chop", True) if g else self.chop_pick for g in drawn} or {self.chop_pick}
+        # (cut anyway: pasted notes / funnels / Glissandos..., or a Stir tab / the Warp set to Shape already cuts:
+        # ticked + greyed, hunt 2026-11-17 #3 / #5)
+        from notes.shape_bend import always_cut, cut_before
+        shaped = [(g, t, r) for g, k, t, r in zip(lqs, self.kinds(), tgts, rcs) if k == "shape"]
+        drawn = [g for g, t, r in shaped if not always_cut(t) and not cut_before(r, t, "liquify")]
+        chops = {g.get("chop", True) if g else self.chop_pick for g in drawn} | (
+            {True} if len(drawn) < len(shaped) else set()) or {self.chop_pick}
         self.chop.set(chops == {True})
         self.chop_tick.state(["alternate" if len(chops) > 1 else "!alternate",
                               "!disabled" if drawn or not tgts and self.moves == "shape" else "disabled"])

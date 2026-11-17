@@ -151,6 +151,45 @@ def liquify_shape(r, off=()):
     return lq
 
 
+def always_cut(sh):
+    """Whether shape sh bends note by note whatever "Cut notes where bent" says: pasted / plain notes, and kinds whose
+    lines can't be bent (bent_shape's AS_NOTES: funnel, Glissando, joined curves, a polyline with Last note per dot).
+    The windows show their tick ticked + greyed (hunt 2026-11-17 #5)."""
+    if "picture" in sh or "picture_notes" in sh:
+        return False
+    if "notes" in sh:
+        return True
+    kind = sh.get("kind")
+    if kind in ("funnel", "gliss"):
+        return True
+    if kind in ("line", "poly", "free", "curve", "arc") and not sh.get("cut") and not sh.get("join"):
+        from notes.joined import is_joined
+        if is_joined(sh):
+            return True
+        return bool(kind == "poly" and sh.get("end_dot") and not sh.get("by_snap") and len(sh.get("pts") or ()) > 2
+                    and not (sh.get("shape") or sh.get("pattern")))
+    return False
+
+
+def cut_before(r, sh, kind, n=0):
+    """Whether a Shape step running BEFORE this one (kind "stir" tab n / "warp" / "liquify") cuts the notes: then this
+    step cuts them too, whatever its own tick (engine.shape_tabs_done: every step after the first ticked one). The
+    windows show its tick ticked + greyed (hunt 2026-11-17 #3)."""
+    if not isinstance(r, dict):
+        return False
+    off = [list(e) for e in sh.get("off") or ()]
+    stack = rc.stir_stack(r.get("stir"))
+    upto = n if kind == "stir" else len(stack)
+    for i, s in enumerate(stack[:upto]):
+        if ["stir", i] not in off and is_shape(s) and _moves(s) and s.get("chop", True):
+            return True
+    if kind == "liquify":
+        wp = warp_shape(r, sh.get("off"))
+        if wp is not None and wp.get("chop", True):
+            return True
+    return False
+
+
 def cuts_notes(r, sh):
     """Whether shape sh with saved Recolour r bends its NOTES (each cut where bent) rather than its outline: pasted /
     plain notes, or a Shape step (Stir tab / Warp / Liquify) with Cut notes where bent on (engine.shape_tabs_done)."""
@@ -900,17 +939,19 @@ CHOP_PART = 32  # (or 1/32 beat sideways)
 CHOP_DEPTH = 24  # (halvings at most: 2^24 pieces of a note; pieces under 1 tick stop sooner)
 
 
-def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None):
+def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None, lengths=False):
     """notes (n, 4+: start, end, key, velocity, ...) + tracks (or None) bent forwards by bend_tk(t, k) -> (t, k)
     (floats; Folded when it can't): the new notes (sorted by start, key) and their tracks. look_back(t, k): the bend
     backwards; a hole inside a key row whose middle comes from inside a note is filled from that note (two rows'
     boxes chopped at different places leave a sliver between their bent sides): a neighbour from that very note is
     stretched over it instead (one cut, not two: user 2026-11-17, test27's Warp made 648 slivers of 1-15 ticks). Two
     pieces from different key rows overlapping by at most CHOP_PART of a beat (the same seam, cut at different places
-    each side) meet halfway instead."""
+    each side) meet halfway instead. lengths: also each new note's own note's length as drawn (third item; the edge
+    step tells a note the cutting shortened from one drawn short, hunt 2026-11-17)."""
     notes = np.asarray(notes, np.int64)
     if not len(notes):
-        return _note_boxes_bent(notes, tracks, bend_tk, ppq)
+        got = _note_boxes_bent(notes, tracks, bend_tk, ppq)
+        return (*got, np.zeros(0, np.int64)) if lengths else got
     # (each note's own key + number carried along as two last columns through every copy, dropped at the end)
     tagged = np.column_stack((notes, notes[:, 2], np.arange(len(notes))))
     out, tr = _note_boxes_bent(tagged, tracks, bend_tk, ppq)
@@ -920,7 +961,10 @@ def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None):
     most = max(int(ppq) // CHOP_PART, 1)
     out, tr = _seams_met(out, tr, most, by_row)
     out, tr = _slivers_joined(out, tr, notes[:, 1] - notes[:, 0], most)
-    return _by_start(out[:, :-2], tr)
+    if not lengths:
+        return _by_start(out[:, :-2], tr)
+    o = _order(out[:, 2], out[:, 0])
+    return out[o, :-2], (np.asarray(tr)[o] if tr is not None else None), (notes[:, 1] - notes[:, 0])[out[o, -1]]
 
 
 def _slivers_joined(out, tr, full, most):
@@ -1005,7 +1049,7 @@ def _holes_filled(notes, tracks, out, tr, look_back):
     return out[o], (tr[o] if tr is not None else None)
 
 
-def edge_from_rows(made, tracks, line, most=1, stretch=True):
+def edge_from_rows(made, tracks, line, most=1, stretch=True, full=None):
     """Cut notes `made` (+ tracks) given each key row's ends of `line` (the same shape made the outline way): every
     row's merged spans of line's notes; pieces clipped to them, the first piece of a span starting at its start, the
     last ending at its end, no gap inside a span, an end piece shorter than `most` joined into its neighbour; pieces
@@ -1013,12 +1057,15 @@ def edge_from_rows(made, tracks, line, most=1, stretch=True):
     doesn't have are dropped (stray pieces past the outline). Whole-array work (a Twist 50 outline has thousands of
     spans); _edge_from_rows_plain = the same rules one span at a time. stretch False (Spam, outlines, patterns: their
     row ends are real notes; user 2026-11-17 picked "clip to the outline" from test29's previews): only clipped, pieces
-    past the outline gone, nothing stretched, no gap filled, no span given a note."""
+    past the outline gone, nothing stretched, no gap filled, no span given a note. full: each piece's own note's length
+    as drawn (note_boxes_bent lengths=): an end note is dropped as short only when it was SHORTENED (an Outline fill's
+    one-tick walls are drawn that short: hunt 2026-11-17 #1)."""
     if not len(made) or not len(line):
         return made, tracks
     tr = np.asarray(tracks) if tracks is not None else None
     o = _order(made[:, 0], made[:, 2])
     made, tr = made[o], (tr[o] if tr is not None else None)
+    full = np.asarray(full)[o] if full is not None else None
     line = line[_order(line[:, 0], line[:, 2])]
     lr, ls = line[:, 2], line[:, 0]
     le = _running_max(line[:, 1], lr)
@@ -1028,7 +1075,7 @@ def edge_from_rows(made, tracks, line, most=1, stretch=True):
     W = int(max(made[:, 1].max(), sp_b.max())) - t0 + 2
     r0 = int(min(made[:, 2].min(), sp_row.min()))
     if (int(max(made[:, 2].max(), sp_row.max())) - r0 + 1) * W >= 1 << 62:
-        return _edge_from_rows_plain(made, tr, line, most, stretch)
+        return _edge_from_rows_plain(made, tr, line, most, stretch, full)
     ka = (sp_row - r0) * W + (sp_a - t0)
     kb = (sp_row - r0) * W + (sp_b - t0)
     rk = (made[:, 2] - r0) * W
@@ -1054,7 +1101,10 @@ def edge_from_rows(made, tracks, line, most=1, stretch=True):
         if len(q):
             least = int(np.median(made[:, 1] - made[:, 0])) // 2
             end = np.r_[True, si[1:] != si[:-1]] | np.r_[si[1:] != si[:-1], True]
-            keep &= ~end | (L >= least)
+            short = L < least
+            if full is not None:
+                short &= L < full[pi]  # (only notes the cutting / trimming shortened)
+            keep &= ~end | ~short
         return _by_start(q[keep], qt[keep] if qt is not None else None)
     if len(q):
         fs = np.r_[True, si[1:] != si[:-1]]
@@ -1088,21 +1138,34 @@ def edge_from_rows(made, tracks, line, most=1, stretch=True):
         dist = np.where(same, np.abs((made[cands, 0] + made[cands, 1]) // 2 - mid[:, None]), np.iinfo(np.int64).max)
         best = cands[np.arange(len(empty)), np.argmin(dist, 1)]
         ok = same.any(1)
+        if not ok.all():  # (a row the outline has but no piece reached (an edge row half a key off: a turn round a
+            # corner, hunt 2026-11-17 #2): from the nearest piece in the rows next to it)
+            for i in np.flatnonzero(~ok):
+                for d in (1, -1, 2, -2):
+                    r = sp_row[empty[i]] + d
+                    lo_i = np.searchsorted(made[:, 2], r, "left")
+                    hi_i = np.searchsorted(made[:, 2], r, "right")
+                    if hi_i > lo_i:
+                        seg = made[lo_i:hi_i]
+                        best[i] = lo_i + int(np.argmin(np.abs((seg[:, 0] + seg[:, 1]) // 2 - mid[i])))
+                        ok[i] = True
+                        break
         add = made[best[ok]].copy()
-        add[:, 0], add[:, 1] = sp_a[empty[ok]], sp_b[empty[ok]]
+        add[:, 0], add[:, 1], add[:, 2] = sp_a[empty[ok]], sp_b[empty[ok]], sp_row[empty[ok]]
         q = np.concatenate((q, add))
         if qt is not None:
             qt = np.concatenate((qt, tr[best[ok]]))
     return _by_start(q, qt)
 
 
-def _edge_from_rows_plain(made, tracks, line, most=1, stretch=True):
+def _edge_from_rows_plain(made, tracks, line, most=1, stretch=True, full=None):
     """edge_from_rows one row / span at a time (when the ticks are too far apart for one sort key)."""
     if not len(made) or not len(line):
         return made, tracks
     tr = np.asarray(tracks) if tracks is not None else None
     o = _order(made[:, 0], made[:, 2])
     made, tr = made[o], (tr[o] if tr is not None else None)
+    full = np.asarray(full)[o] if full is not None else None
     lo_ = _order(line[:, 0], line[:, 2])
     line = line[lo_]
     rows_m, at_m = np.unique(made[:, 2], return_index=True)
@@ -1132,7 +1195,10 @@ def _edge_from_rows_plain(made, tracks, line, most=1, stretch=True):
                 keep = 2 * L >= P[hit, 1] - P[hit, 0]
                 if len(q):  # (the span's first / last note: at least half a usual note, as edge_from_rows)
                     least = int(np.median(made[:, 1] - made[:, 0])) // 2
-                    keep[[0, -1]] &= L[[0, -1]] >= least
+                    short = L < least
+                    if full is not None:
+                        short &= L < full[m0:m1][hit]
+                    keep[[0, -1]] &= ~short[[0, -1]]
                 outs.append(q[keep])
                 if T is not None:
                     trs.append(T[hit][keep])
