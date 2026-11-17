@@ -36,6 +36,7 @@ from window import look
 from window.notes_wait import stale_ok
 
 CARRY_REST_S = 0.15  # notes made in the background: their carried picture waits this long after a zoom (carried_pic)
+MAKING_SHOW_S = 0.15  # notes made in the background this long: the "Making notes…" box shows (draw_making_label)
 TIP_MARKS = 10  # a ruler tempo mark's tip lists at most this many changes, then "+N more"
 CC_CROWD = 2000  # the ruler's CC row: past this many events only those on screen are laid out, and past this many
 #                  on screen plain marks (one per pixel) + a count per stretch (hunt 2026-10-29: 300,000 froze each
@@ -957,6 +958,7 @@ class RollDrawing:
         for i in app.sels:
             if i < len(app.shapes) and "picture" in app.shapes[i]:
                 self.draw_picture_label(app.shapes[i])
+        self.draw_making_label(w, h)
         self.draw_cut_marks()
         sel = self.point_shape()
         if sel and app.parts:
@@ -1045,6 +1047,36 @@ class RollDrawing:
                 bx = (bx[0] + dx, bx[1] + dy, bx[2] + dx, bx[3] + dy)
             r = self.create_rectangle(bx[0] - 4, bx[1] - 2, bx[2] + 4, bx[3] + 2, fill=look.LABEL_BG, outline=look.LABEL_EDGE)
             self.tag_lower(r, t)
+
+    def draw_making_label(self, w, h):
+        """Notes being made in the background for longer than MAKING_SHOW_S: a small "Making notes…" box (the
+        picture label's look, user 2026-11-17: the status line alone is easy to miss) under the selected shapes'
+        lines (above them at the bottom edge), else in the piano roll's top left corner."""
+        app = self.app
+        since = getattr(app, "_bg_since", None)
+        if not app._bg_notes or since is None or time.perf_counter() - since < MAKING_SHOW_S:
+            return
+        boxes = [self.bbox(f"lines{i}") for i in app.sels]
+        boxes = [b for b in boxes if b]
+        left, top = self.kb_w + 8, self.ruler_h + 4
+        t = self.create_text(0, 0, text=tr("app.making_notes"), anchor="nw", font=look.font(9, family=look.TK))
+        bx = self.bbox(t)
+        if not bx:
+            return
+        tw, th = bx[2] - bx[0], bx[3] - bx[1]
+        if boxes:
+            x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
+            y1 = max(b[3] for b in boxes)
+            x, y = x0 + 5, y1 + 6
+            if y + th + 4 > h - 4:  # (no room under them: above)
+                y = y0 - 6 - th
+        else:
+            x, y = left, top
+        x = min(max(x, left), max(left, w - tw - 12))
+        y = min(max(y, top), max(top, h - th - 6))
+        self.move(t, x, y)
+        r = self.create_rectangle(x - 4, y - 2, x + tw + 4, y + th + 2, fill=look.LABEL_BG, outline=look.LABEL_EDGE)
+        self.tag_lower(r, t)
 
     def off_selected(self, off):
         """The selected shapes' rows of off (kept notes past the edges), None when there are none; remembered per
