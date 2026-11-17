@@ -1596,7 +1596,9 @@ def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, be
             p = b.bend2(p)
         return p[:, 0], p[:, 1]
     try:
-        if any(isinstance(b, StirBend) and (b.st["polar"] or b.st["kaleido"] >= 2) for b in rest):
+        # (Warp / Liquify benders are StirBends too, with only a ripple: .get, user's crash 2026-11-17 (a Stir tab
+        # unticked + a Warp ticked))
+        if any(isinstance(b, StirBend) and (b.st.get("polar") or b.st.get("kaleido", 0) >= 2) for b in rest):
             raise Folded
         made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
     except Folded:
