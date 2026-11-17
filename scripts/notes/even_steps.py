@@ -44,20 +44,42 @@ def snapped_shape(sh, ppq):
     corners where the even version has them. Curves keep their place in the box (they move by under half a gate)."""
     from notes.custom import frame_upright, map_stroke, stroke_points
     on = dict(sh, even=True)
-    if "_even" not in even_version(on, ppq):
+    if not stores_snap(sh) or "_even" not in even_version(on, ppq):
         return [list(p) for p in sh["pts"]], sh["strokes"]
     strokes = shown_strokes(on, ppq)
     pts = [list(p) for p in sh["pts"]]
-    if frame_upright(pts) and not sh.get("range") and not sh.get("fit"):
+    if axis_box(pts) and not sh.get("range") and not sh.get("fit"):
         pts = hugging_box(pts, strokes, gate_ticks(sh["gate"], ppq) / ppq)
     to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(pts)
     if to_uv is None:
         return [list(p) for p in sh["pts"]], strokes
-    (a0, c0), (a1, _), (_, c2) = sh["pts"]
-    (n0, m0), (n1, _), (_, m2) = pts
-    su = (a1 - a0) / (n1 - n0) if frame_upright(pts) and abs(n1 - n0) > 1e-12 else 1.0  # (u stretched: arcs stay
-    sv = (c2 - c0) / (m2 - m0) if frame_upright(pts) and abs(m2 - m0) > 1e-12 else 1.0  # round)
+    (a0, c0), (a1, c1), (a2, c2) = sh["pts"]
+    (n0, m0), (n1, m1), (n2, m2) = pts
+    lu, lv = math.hypot(n1 - n0, m1 - m0), math.hypot(n2 - n0, m2 - m0)
+    su = math.hypot(a1 - a0, c1 - c0) / lu if lu > 1e-12 else 1.0  # (u / v stretched: arcs stay round)
+    sv = math.hypot(a2 - a0, c2 - c0) / lv if lv > 1e-12 else 1.0
     return pts, [map_stroke(st, lambda u, v: to_uv(*to_bp(u, v)), su, sv) for st in strokes]
+
+
+def axis_box(pts):
+    """The box's sides run along time and keys: upright, or turned a quarter / half way (hunt 2026-11-17: a shape
+    turned 90 degrees was left out of box fitting and whole-gate resizing)."""
+    (b0, p0), (b1, p1), (b2, p2) = pts
+    return (abs(p1 - p0) < 1e-9 and abs(b2 - b0) < 1e-9) or (abs(b1 - b0) < 1e-9 and abs(p2 - p0) < 1e-9)
+
+
+def _box_sides(pts):
+    """(left, right, low, high) of an axis box's frame points."""
+    (b0, p0), (b1, p1), (b2, p2) = pts
+    bs, ps = (b0, b1, b2, b1 + b2 - b0), (p0, p1, p2, p1 + p2 - p0)
+    return min(bs), max(bs), min(ps), max(ps)
+
+
+def _moved_sides(pts, old, new):
+    """Each frame point's beat / pitch taken from the old box's side it sits on to that side in the new box."""
+    l0, r0, d0, u0 = old
+    l1, r1, d1, u1 = new
+    return [[l1 if abs(b - l0) <= abs(b - r0) else r1, d1 if abs(p - d0) <= abs(p - u0) else u1] for b, p in pts]
 
 
 def hugging_box(pts, strokes, g):
@@ -70,17 +92,15 @@ def hugging_box(pts, strokes, g):
     xy = [to_bp(u, v) for st in strokes for u, v in stroke_points(st)]
     if not xy:
         return pts
-    (b0, p0), (b1, _), (_, p2) = pts
-    left = min(b0, b1)
+    old = _box_sides(pts)
+    left = old[0]
     lo_b, hi_b = min(x for x, _ in xy), max(x for x, _ in xy)
     lo_p, hi_p = min(p for _, p in xy), max(p for _, p in xy)
     xl = left + math.floor((lo_b - left) / g + NOISE) * g
     xr = xl + max(1, math.ceil((hi_b - xl) / g - NOISE)) * g
     if hi_p - lo_p < 1e-9:
         return pts
-    bl, br = (xl, xr) if b1 >= b0 else (xr, xl)
-    pl, ph = (lo_p, hi_p) if p2 >= p0 else (hi_p, lo_p)
-    return [[bl, pl], [br, pl], [bl, ph]]
+    return _moved_sides(pts, old, (xl, xr, lo_p, hi_p))  # (flips / quarter turns kept)
 
 
 def drawing_mark(strokes):
@@ -146,12 +166,12 @@ def whole_width(new, orig, sh, ppq):
     """Frame points new (a resize of orig) with the moved left / right side put a whole number of gates from the
     side that stayed (Symmetrical steps: resizing jumps in whole steps, user). Turned boxes / both sides moved:
     new as it is."""
-    from notes.custom import frame_upright
-    if not (even_on(sh) and frame_upright(new) and frame_upright(orig)) or sh.get("fit"):
+    if not (even_on(sh) and axis_box(new) and axis_box(orig)) or sh.get("fit"):
         return new
     g = gate_ticks(sh["gate"], ppq) / ppq
-    lo, hi = sorted((new[0][0], new[1][0]))
-    olo, ohi = sorted((orig[0][0], orig[1][0]))
+    sides = _box_sides(new)
+    lo, hi, d, u = sides
+    olo, ohi, _, _ = _box_sides(orig)
     whole = max(1, math.floor((hi - lo) / g + 0.5)) * g
     if abs(lo - olo) < 1e-9:
         hi = lo + whole
@@ -159,8 +179,7 @@ def whole_width(new, orig, sh, ppq):
         lo = hi - whole
     else:
         return new
-    a, b = (lo, hi) if new[1][0] >= new[0][0] else (hi, lo)
-    return [[a, new[0][1]], [b, new[1][1]], [a, new[2][1]]]
+    return _moved_sides(new, sides, (lo, hi, d, u))
 
 
 def gate_stretched(sh, gate, ppq):
@@ -302,59 +321,53 @@ def shown_strokes(sh, ppq):
 # (user: "fill like now", each band the same whole number of cells).
 
 def nested_cells(sh, ppq, base):
-    """(depth grid, first row key, first gate column, gate, grid start) of base's (start, end, key) rows widened to
-    whole gates; depth 0 = outside."""
+    """(rows, columns, depths, gate, grid start) of every note cell of base's (start, end, key) rows widened to
+    whole gates, in row then column order. Only the cells themselves (hunt 2026-11-17: a grid over the whole box
+    took 0.45 s and 750 MB for a thin slanted band at PPQ 15360)."""
     import numpy as np
     from notes.custom import merged_rows
     from notes.custom_chop import on_grid
     g, o = gate_ticks(sh["gate"], ppq), int(sh["_even"])
     st = merged_rows(on_grid(base, g, o))
-    k0, k1 = int(st[:, 2].min()), int(st[:, 2].max())
+    st = st[np.lexsort((st[:, 0], st[:, 2]))]
     j0s, j1s = (st[:, 0] - o) // g, (st[:, 1] - o) // g
-    c0 = int(j0s.min())
-    inside = np.zeros((k1 - k0 + 1, int(j1s.max()) - c0), bool)
-    for k, a, b in zip((st[:, 2] - k0).tolist(), (j0s - c0).tolist(), (j1s - c0).tolist()):
-        inside[k, a:b] = True
-    depth = np.minimum(_edge_dist(inside, 1), _edge_dist(inside, 0))
-    return depth, k0, c0, g, o
-
-
-def _edge_dist(inside, axis):
-    """Each inside cell's count of cells to the nearest outside one along axis (either way; 1 = at the edge)."""
-    import numpy as np
-    a = np.moveaxis(inside, axis, -1)
-    n = a.shape[-1]
-    idx = np.arange(n)
-    last_out = np.maximum.accumulate(np.where(a, -1, idx), axis=-1)  # (the nearest outside cell before, -1 = none)
-    nxt = np.minimum.accumulate(np.where(a, n, idx)[..., ::-1], axis=-1)[..., ::-1]  # (after, n = none)
-    d = np.minimum(idx - last_out, nxt - idx)
-    return np.moveaxis(np.where(a, d, 0), -1, axis)
+    n = j1s - j0s
+    first = np.repeat(np.cumsum(n) - n, n)
+    cols = np.repeat(j0s, n) + np.arange(int(n.sum())) - first
+    rows = np.repeat(st[:, 2], n)
+    across = np.minimum(cols - np.repeat(j0s, n) + 1, np.repeat(j1s, n) - cols)  # (cells to the row's end)
+    o2 = np.lexsort((rows, cols))  # (by column, then key: runs of keys one above the other)
+    r, c = rows[o2], cols[o2]
+    new = np.r_[True, (c[1:] != c[:-1]) | (r[1:] != r[:-1] + 1)]
+    run = np.cumsum(new) - 1
+    starts = np.flatnonzero(new)
+    lo, hi = r[starts][run], r[np.r_[starts[1:], len(r)] - 1][run]
+    up = np.empty(len(r), np.int64)
+    up[o2] = np.minimum(r - lo + 1, hi - r + 1)  # (cells to the column's end)
+    return rows, cols, np.minimum(across, up), g, o
 
 
 def nested_even(sh, ppq, base, cfg):
     """Nested's steps for an even shape: step i = every cell at least i x band deep, as (start, end, key) rows;
-    band = the deepest / Steps, at least one cell (Last size / Spacing / Turn / the centre point: not used)."""
+    band = the deepest / Steps, at least one cell (Last size / Spacing / Turn / the centre point: not used). Each
+    step looks only at the cells the one before kept (they only get fewer)."""
     import numpy as np
-    depth, k0, c0, g, o = nested_cells(sh, ppq, base)
-    most = int(depth.max())
+    rows, cols, depth, g, o = nested_cells(sh, ppq, base)
+    most = int(depth.max()) if len(depth) else 0
     n = cfg["steps"]
     band = max(1, math.floor(most / n + 0.5))
-    row_most, col_most = depth.max(axis=1), depth.max(axis=0)
     out = []
     for i in range(n):
         least = 1 + i * band
-        if least > most:  # (deeper than the shape goes: empty, no scan)
+        if least > most:  # (deeper than the shape goes: empty)
             out.append(np.zeros((0, 3), np.int64))
             continue
-        rs, cs = np.flatnonzero(row_most >= least), np.flatnonzero(col_most >= least)
-        r0, c1 = int(rs[0]), int(cs[0])  # (only the rows / columns still that deep: they shrink step by step)
-        on = depth[r0:int(rs[-1]) + 1, c1:int(cs[-1]) + 1] >= least
-        edge = np.diff(np.pad(on, ((0, 0), (1, 1))).astype(np.int8), axis=1)
-        at = np.flatnonzero(edge)  # (row by row, left to right: each run's start then its end)
-        w = edge.shape[1]
-        a, b = at[0::2], at[1::2]
-        out.append(np.column_stack([o + (c0 + c1 + a % w) * g, o + (c0 + c1 + b % w) * g, k0 + r0 + a // w])
-                   .astype(np.int64))
+        keep = depth >= least
+        rows, cols, depth = rows[keep], cols[keep], depth[keep]
+        new = np.r_[True, (rows[1:] != rows[:-1]) | (cols[1:] != cols[:-1] + 1)]  # (a run of cells on one key)
+        s = np.flatnonzero(new)
+        e = np.r_[s[1:], len(rows)] - 1
+        out.append(np.column_stack([o + cols[s] * g, o + (cols[e] + 1) * g, rows[s]]).astype(np.int64))
     return out
 
 
@@ -369,9 +382,18 @@ def grid_start(sh, ppq):
 
 
 def plain_poly(st):
-    """A stroke of straight sides as drawn (not a curve, freehand, smoothed or a polygon side with a pattern)."""
-    return (st.get("kind") == "poly" and not st.get("smooth") and not st.get("free")
-            and not (st.get("sides") and st.get("formula")))
+    """A stroke of straight sides as drawn: not a curve, freehand, smoothed, with a pattern / Formula along it
+    (pattern.has_formula: they stay as drawn, hunt 2026-11-17) or a polygon's twisted sides ("corners")."""
+    from notes.pattern import has_formula
+    return (st.get("kind") == "poly" and not st.get("smooth") and not st.get("free") and not st.get("corners")
+            and not has_formula(st))
+
+
+def stores_snap(sh):
+    """Is the snapped drawing stored in sh (at a tick / let go)? Not for a sliced piece (its notes come from the
+    even whole: re-snapping its cut edge broke it) nor a polygon (its own settings remake its lines on open /
+    paste; its notes are even anyway). Hunt 2026-11-17."""
+    return not sh.get("cut") and not sh.get("polygon")
 
 
 def snapped_stroke(st, to_bp, to_uv, ppq, g, origin):

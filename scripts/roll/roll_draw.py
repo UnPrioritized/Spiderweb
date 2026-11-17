@@ -12,7 +12,7 @@ import tkinter.font as tkfont
 import numpy as np
 
 from notes.custom import custom_note_count, edge_inner, even_on, gap_lines, role_of
-from notes.even_steps import even_version, same_drawing, shown_strokes
+from notes.even_steps import even_version, same_drawing, shown_strokes, stores_snap
 from files import colours
 from files.lang import tr, trn
 from files.midi_index import CC_MOST
@@ -2583,15 +2583,21 @@ class RollDrawing:
         it (being dragged freely) gets a thin faded line in its line colour where its corners will land on let go."""
         self.delete("even_landing")
         app = self.app
-        for i in app.sels:
+        memo = self.__dict__.setdefault("_landing_memo", {})  # (worked out once per drawing: every pan step redrew
+        for i in app.sels:  # it, ~22 ms a 2000-point outline, hunt 2026-11-17)
             sh = app.shapes[i] if i < len(app.shapes) else None
-            if not sh or sh.get("kind") != "custom" or not even_on(sh):
-                continue
-            if "_even" not in even_version(sh, app.ppq):
-                continue
-            strokes = shown_strokes(sh, app.ppq)  # (a Range by keys: the bent sides)
-            if not same_drawing(sh["pts"], strokes, sh["pts"], sh["strokes"]):
-                self.draw_path(dict(sh, strokes=strokes), look.EVEN_LANDING, 1, tags="even_landing")
+            if not sh or sh.get("kind") != "custom" or not even_on(sh) or not stores_snap(sh):
+                continue  # (a sliced piece / polygon keeps its own lines: no landing line)
+            key = json.dumps([sh["strokes"], sh["pts"], sh["gate"], sh.get("align"), sh.get("range"), sh.get("fill"),
+                              app.ppq], sort_keys=True)
+            if key not in memo:
+                if len(memo) > 16:
+                    memo.clear()
+                strokes = shown_strokes(sh, app.ppq) if "_even" in even_version(sh, app.ppq) else None
+                memo[key] = (None if strokes is None or same_drawing(sh["pts"], strokes, sh["pts"], sh["strokes"])
+                             else strokes)  # (a Range by keys: the bent sides)
+            if memo[key] is not None:
+                self.draw_path(dict(sh, strokes=memo[key]), look.EVEN_LANDING, 1, tags="even_landing")
 
     def draw_path(self, sh, color, width, dash=None, tags=()):
         if "notes" in sh:  # pasted notes: their box, thin and dashed (the notes are the shape)

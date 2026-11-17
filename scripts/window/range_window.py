@@ -68,11 +68,10 @@ class RangeGraph(PointGraph, tk.Toplevel):
         for i, t in enumerate(self.tgts[1:], 1):  # (shapes without a Range on take the one shown: the first's)
             if not t.get("range"):
                 self.memo[i] = json.loads(json.dumps(self.memo[0]))
-        # Symmetrical steps: Keys only (the gate changing along a row breaks the steps, user), a Time range = Keys
-        self.dirs = DIRS[1:] if not self.funnel and any(even_on(t) for t in self.tgts) else DIRS
-        for m in self.memo:
-            if m and m["dir"] not in self.dirs:
-                m["dir"] = self.dirs[0]
+        # Symmetrical steps on a shape (user 2026-11-17): every direction works; by keys its sides stay straight or
+        # bend with the gates (the "even" dropdown), "Each key row by itself" is off (each row whole cut squares)
+        self.even = not self.funnel and any(even_on(t) for t in self.tgts)
+        self.dirs = DIRS
         self.closed = False
         self.drag, self.hover, self.bar_hover, self.counts = None, None, None, None
         self.held, self.drag_from = False, None  # (a drag's graph that would make too many notes: not used yet)
@@ -138,10 +137,19 @@ class RangeGraph(PointGraph, tk.Toplevel):
         self.ends_box.pack(side="left", padx=4)
         self.ends_box.bind("<<ComboboxSelected>>", lambda e: self.change_ends(ENDS[self.ends_box.current()]))
         Tooltip(self.ends_box, tr("range_window.ends_tip"))
+        even_row = ttk.Frame(box)  # (Symmetrical steps shapes, by keys: straight sides or bent with the gates)
+        ttk.Label(even_row, text=tr("range_window.even")).pack(side="left")
+        self.even_box = ttk.Combobox(even_row, values=[tr("range_window.even_straight"), tr("range_window.even_bend")],
+                                     state="readonly", width=24)
+        self.even_box.pack(side="left", padx=4)
+        self.even_box.bind("<<ComboboxSelected>>", lambda e: self.change("even_bend", self.even_box.current() == 1))
+        Tooltip(self.even_box, tr("range_window.even_tip"))
         if not self.funnel:
             self.rows_check.pack(anchor="w", pady=(4, 0))
             self.join_check.pack(anchor="w", padx=(int(20 * s), 0))
             ends_row.pack(anchor="w", pady=(4, 0))
+            if self.even:
+                even_row.pack(anchor="w", pady=(4, 0))
         self.info = ttk.Label(box, text="")
         self.info.pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(box)
@@ -350,6 +358,9 @@ class RangeGraph(PointGraph, tk.Toplevel):
         self.dir_box.config(state="readonly" if on else "disabled")
         time = on and self.memo[0]["dir"] == "time"  # (each key row by itself: left to right only)
         self.rows_var.set(self.memo[0]["rows"])
+        self.even_box.current(1 if self.memo[0].get("even_bend") else 0)
+        self.even_box.config(state="readonly" if on and self.memo[0]["dir"] != "time" else "disabled")
+        time = time and not self.even  # (Symmetrical steps: every row whole cut squares, never its own graph)
         self.rows_check.config(state="normal" if time else "disabled")
         self.join_var.set(self.memo[0]["join"])
         self.join_check.config(state="normal" if time and self.memo[0]["rows"] else "disabled")

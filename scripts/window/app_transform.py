@@ -55,6 +55,7 @@ class AppTransform:
                 sh.pop("fx", None)
         keep_pushes(self.shapes, sizes, lambda v: (-v[0], v[1]) if sideways else (v[0], -v[1]))
         self.roll.move_kept_box(lambda b, p: (even - b, p) if sideways else (b, even - p))  # (flips too)
+        self.even_settle(remake=False)  # (Symmetrical steps: snapped in this step, panel_custom.even_settle)
         self.sync_panel()
         self.shapes_changed()
 
@@ -142,6 +143,7 @@ class AppTransform:
             turned_piece(sh, frm, turned)
         self.roll.move_kept_box(lambda b, p: (cb + sign * (p - cp) * r + db, cp - sign * (b - cb) / r + dp),
                                 turned=True)  # (too)
+        self.even_settle(remake=False)  # (Symmetrical steps: snapped in this step, panel_custom.even_settle)
         self.shapes_changed()  # (first: notes made in the background, the panel's Recolour row waits for them)
         self.sync_panel()
 

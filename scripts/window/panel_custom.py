@@ -375,11 +375,12 @@ class CustomPanel:
         if value:
             self.tips.show("even_steps", wait=True)  # (the first time: how it's edited)
 
-    def even_settle(self):
-        """A let go on the piano roll (move, resize, a point, a stroke drawn into it): selected shapes with
-        Symmetrical steps on have their corners snapped where the notes already show them (user: "let go = the
-        corners snap there"), in the drag's own undo step. Only a box change since the tick (no stroke edited) keeps
-        unticking able to give the drawing back."""
+    def even_settle(self, remake=True):
+        """A let go on the piano roll (move, resize, a point, a stroke drawn into it), a turn / flip, an Inside
+        change: selected shapes with Symmetrical steps on have their corners snapped where the notes already show
+        them (user: "let go = the corners snap there"), in that action's own undo step (hunt 2026-11-17: a turn
+        left the landing line, the next click snapped it as a "Move"). Only a box change since the tick (no stroke
+        edited) keeps unticking able to give the drawing back. remake=False: the caller makes the notes after."""
         changed = False
         for i in sorted(self.sels):
             sh = self.shapes[i] if i < len(self.shapes) else None
@@ -393,7 +394,7 @@ class CustomPanel:
             if mine:
                 sh["even_free"] = remarked(sh, strokes)
             changed = True
-        if changed:
+        if changed and remake:
             self.shapes_changed()
 
     def sync_custom(self):
@@ -684,6 +685,8 @@ class CustomPanel:
                 t["range_kept"] = t.pop("range")  # kept for the Range window to bring back)
             if not value and (key in ("edge", "edge_mode") or key in CUSTOM_FLAGS and t is not self.custom_defaults):
                 t.pop(key, None)  # (shapes only have them when they're on)
+        if key == "fill":  # (Spam again on a shape with Symmetrical steps ticked: snapped in this step)
+            self.even_settle(remake=False)
         self.shapes_changed()
         self.sync_custom()
         if key == "fill":  # (Colours' "Each key row" is greyed or not by the fill)
