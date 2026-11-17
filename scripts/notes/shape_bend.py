@@ -904,34 +904,82 @@ def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None):
     """notes (n, 4+: start, end, key, velocity, ...) + tracks (or None) bent forwards by bend_tk(t, k) -> (t, k)
     (floats; Folded when it can't): the new notes (sorted by start, key) and their tracks. look_back(t, k): the bend
     backwards; a hole inside a key row whose middle comes from inside a note is filled from that note (two rows'
-    boxes chopped at different places leave a sliver between their bent sides)."""
-    out, tr = _note_boxes_bent(notes, tracks, bend_tk, ppq)
-    if look_back is None or len(out) < 2:
-        return _by_start(out, tr)
-    return _holes_filled(np.asarray(notes, np.int64), tracks, out, tr, look_back)
+    boxes chopped at different places leave a sliver between their bent sides): a neighbour from that very note is
+    stretched over it instead (one cut, not two: user 2026-11-17, test27's Warp made 648 slivers of 1-15 ticks). Two
+    pieces from different key rows overlapping by at most CHOP_PART of a beat (the same seam, cut at different places
+    each side) meet halfway instead."""
+    notes = np.asarray(notes, np.int64)
+    if not len(notes):
+        return _note_boxes_bent(notes, tracks, bend_tk, ppq)
+    # (each note's own key + number carried along as two last columns through every copy, dropped at the end)
+    tagged = np.column_stack((notes, notes[:, 2], np.arange(len(notes))))
+    out, tr = _note_boxes_bent(tagged, tracks, bend_tk, ppq)
+    by_row = look_back is not None and len(out) >= 2
+    if by_row:
+        out, tr = _holes_filled(tagged, tracks, out, tr, look_back)
+    out, tr = _seams_met(out, tr, max(int(ppq) // CHOP_PART, 1), by_row)
+    return _by_start(out[:, :-2], tr)
 
 
 def _holes_filled(notes, tracks, out, tr, look_back):
+    """out (its last column = each piece's note number) sorted by row + start, holes inside a row whose middle looks
+    back into a note filled: by stretching the piece beside it when it's of that note, else a new piece."""
     o = _order(out[:, 0], out[:, 2])
     out = out[o]
     tr = np.asarray(tr)[o] if tr is not None else None
     run = _running_max(out[:, 1], out[:, 2])
     hole = np.nonzero((out[1:, 2] == out[:-1, 2]) & (out[1:, 0] > run[:-1]))[0]
     if not len(hole):
-        return _by_start(out, tr)
+        return out, tr
     a, b = run[hole], out[hole + 1, 0]
     t, k = look_back((a + b) / 2, out[hole, 2].astype(np.float64))
     src = _finder(notes)(t, k)
     fill = src >= 0
     if not fill.any():
-        return _by_start(out, tr)
-    j = src[fill]
-    add = notes[j].copy()
-    add[:, 0], add[:, 1], add[:, 2] = a[fill], b[fill], out[hole[fill], 2]
-    out = np.concatenate((out, add))
-    if tr is not None:
-        tr = np.concatenate((tr, np.asarray(tracks)[j]))
-    return _by_start(out, tr)
+        return out, tr
+    hole, a, b, j = hole[fill], a[fill], b[fill], src[fill]
+    out = out.copy()
+    left = (out[hole, -1] == j) & (out[hole, 1] == a)  # (the piece before: of that note, ending at the hole)
+    right = ~left & (out[hole + 1, -1] == j)  # (the piece after: of that note)
+    out[hole[left], 1] = b[left]
+    out[hole[right] + 1, 0] = a[right]
+    new = ~left & ~right
+    if new.any():
+        add = notes[j[new]].copy()
+        add[:, 0], add[:, 1], add[:, 2] = a[new], b[new], out[hole[new], 2]
+        out = np.concatenate((out, add))
+        if tr is not None:
+            tr = np.concatenate((tr, np.asarray(tracks)[j[new]]))
+    o = _order(out[:, 0], out[:, 2])
+    return out[o], (tr[o] if tr is not None else None)
+
+
+def _seams_met(out, tr, most, by_row=False):
+    """Two pieces next to each other on a row, from notes of DIFFERENT key rows, overlapping by 1..most ticks (one
+    seam between two bent rows, cut at different places on each side) meet halfway: one cut, no overlap. Real
+    overlaps (more than `most`, or notes of one key row, as a paste may have) stay. by_row: out is sorted by row +
+    start already."""
+    if len(out) < 2:
+        return out, tr
+    if by_row:
+        out = out.copy()
+    else:
+        o = _order(out[:, 0], out[:, 2])
+        out = out[o].copy()
+        tr = np.asarray(tr)[o] if tr is not None else None
+    over = out[:-1, 1] - out[1:, 0]
+    seam = np.flatnonzero((out[1:, 2] == out[:-1, 2]) & (out[1:, -2] != out[:-1, -2]) & (over > 0) & (over <= most)
+                          & (out[:-1, 0] < out[1:, 0]) & (out[:-1, 1] < out[1:, 1]))
+    if len(seam):
+        # (a piece with seams on both sides: each side moves only its own end)
+        mid = (out[seam, 1] + out[seam + 1, 0]) // 2
+        out[seam, 1] = mid
+        out[seam + 1, 0] = mid
+        ok = out[:, 1] > out[:, 0]
+        if not ok.all():
+            out = out[ok]
+            tr = tr[ok] if tr is not None else None
+    return out, tr
 
 
 def _order(*keys):
