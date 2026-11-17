@@ -1212,9 +1212,11 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             var.set(vals == {True})
             tick.state(["alternate" if len(vals) > 1 else "!alternate", "!disabled" if on else "disabled"])
         self.middle.state(["!disabled" if on and any(s["centre"] != [50.0, 50.0] for s in sts) else "disabled"])
-        many = any(len(app.colour_owns(t)) > 1 for t in tgts)
-        for w in self.sets_row:
-            grid_shown(w, many)
+        owns = [app.colour_owns(t, then=lambda: self.winfo_exists() and self.sync()) for t in tgts]
+        if all(o is not None for o in owns):  # (notes not made yet: the row stays as it is until they are)
+            many = any(len(o) > 1 for o in owns)
+            for w in self.sets_row:
+                grid_shown(w, many)
         # (a Shape tab, user 2026-11-16: the settings that only change colours do nothing there: greyed)
         shape = bool(sts) and all(s["moves"] == "shape" for s in sts)
         if shape:

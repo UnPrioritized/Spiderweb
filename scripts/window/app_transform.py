@@ -69,9 +69,16 @@ class AppTransform:
         # (a Recolour only colours, but its Shape steps (Stir / Warp / Liquify set to Shape) bend the notes: left out,
         # their bend is mirrored in the shape's own box, so the middle is the unbent notes'; hunt 2026-11-17: a bent
         # Spam shape crept sideways at each flip)
-        got = [self.whole_notes({k: v for k, v in sh.items()
-                                 if k not in ("fx", "_m", "sustain", "range", "subtract", "extend", "recolour")})
-               for sh in shapes if not sh.get("hz") and "picture" not in sh]
+        # (a Recolour WITHOUT Shape steps only colours, its notes never move: kept, so a shape with nothing else to
+        # leave out is the shape itself and its remembered notes are used, not made again; 337.spwb: 0.22 s a flip)
+        from notes.shape_bend import has_shape
+
+        def plain(sh):
+            gone = ("fx", "_m", "sustain", "range", "subtract", "extend")
+            if isinstance(sh.get("recolour"), dict) and has_shape(sh["recolour"]):
+                gone += ("recolour",)
+            return {k: v for k, v in sh.items() if k not in gone}
+        got = [self.whole_notes(plain(sh)) for sh in shapes if not sh.get("hz") and "picture" not in sh]
         got = [n for n in got if len(n)]
         if not got:
             return mid2

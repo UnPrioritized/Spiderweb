@@ -300,10 +300,14 @@ class RecolourPanel:
         """How many colours a colour set holds: 15, 16 while Multi channel uses channel 10."""
         return 16 if self.all16() else 15
 
-    def colour_owns(self, sh):
+    def colour_owns(self, sh, then=None):
         """Each colour set's own colours of sh's notes before Recolour (the notes as remembered: no new work after a
-        change)."""
-        notes, tracks = self.notes_tracks(without_recolour(sh))
+        change). then: for a hint only: notes not remembered = None now, made in the background, then() after."""
+        bare = without_recolour(sh)
+        if then is not None and self.notes_known(bare) is None:
+            self.notes_soon([bare], then, "owns")
+            return None
+        notes, tracks = self.notes_tracks(bare)
         if tracks is None:  # (all on one colour)
             return [np.zeros(1, np.int64)] if len(notes) else []
         if not len(tracks):
@@ -357,7 +361,7 @@ class RecolourPanel:
             # (Off + a Stir counts too: it says why the stir shows nothing, hunt 2026-11-02)
             from notes.shape_bend import colour_part  # (Shape steps bend in every Channels mode: never orange)
             lonely, single = self.recolour_trouble(tgts, [colour_part(r) if r else r for r in act])
-            owns = [self.colour_owns(t) if r else [] for t, r in zip(tgts, on)]
+            owns = [(self.colour_owns(t, then=self.sync_recolour) or []) if r else [] for t, r in zip(tgts, on)]
             self.recolour_mode.config(state="readonly" if tgts else "disabled",
                                       style="Gap.TCombobox" if lonely or single else "TCombobox")
             show_mixed(self.recolour_mode, len(modes) > 1, self.recolour_tip,
@@ -390,9 +394,11 @@ class RecolourPanel:
         one has nothing to swap (e.g. one colour, hunt 2026-10-25). Stir window: rcs = what a stir would make."""
         lonely = any(rcs) and self.channel_mode.get() != "auto" and not all(
             pasted_notes(t) for t, r in zip(tgts, rcs) if r)
-        single = not lonely and any(
-            r and not enough(palettes(self.colour_owns(t), None if r["mode"] == KEEP else wanted(r), self.set_most()),
-                             r.get("mix") and r["mode"] != KEEP) for t, r in zip(tgts, rcs))
+        def few(t, r):  # (notes not made yet: no warning until they are, sync_recolour then)
+            owns = self.colour_owns(t, then=self.sync_recolour)
+            return owns is not None and not enough(palettes(owns, None if r["mode"] == KEEP else wanted(r),
+                                                            self.set_most()), r.get("mix") and r["mode"] != KEEP)
+        single = not lonely and any(r and few(t, r) for t, r in zip(tgts, rcs))
         return lonely, single
 
     def on_recolour(self, what, left=None):
