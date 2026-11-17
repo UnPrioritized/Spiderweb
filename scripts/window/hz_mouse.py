@@ -209,11 +209,12 @@ class HzMouse:
         bend handle, ("left" / "right", tone) a note's end, ("tune", tone) the red line in a note (tall rows only),
         ("note", tone), or None."""
         r = 6 * self.s
-        for dx, dy, i, which, s in self.dots():
+        xs = (x - r, x + r)  # (only slides that can be under the mouse are worked out)
+        for dx, dy, i, which, s in self.dots(xs):
             if abs(x - dx) <= r and abs(y - dy) <= r:
                 return which, i, s
-        handle = next((("bend", i, s) for dx, dy, i, s, *_ in self.handles() if abs(x - dx) <= r and abs(y - dy) <= r),
-                      None)
+        handle = next((("bend", i, s) for dx, dy, i, s, *_ in self.handles(xs)
+                       if abs(x - dx) <= r and abs(y - dy) <= r), None)
         if x < self.kb_w or y < self.ruler_h or self.sketching():  # (Sketch: a note is only its line, bend_hit)
             return handle
         for i in range(len(self.tones) - 1, -1, -1):
@@ -362,7 +363,8 @@ class HzMouse:
                                   "tune": tr("hz.step_tune"), "bend": tr("hz.step_bend")}.get(kind,
                                                                                               tr("hz.step_length"))}
             if kind == "bend":  # (where the handle was grabbed: it moves as far as the mouse from there)
-                self.drag.update(handle=next(h for h in self.handles() if h[3] is hit[2]),
+                self.drag.update(handle=next(h for h in self.handles((e.x - 7 * self.s, e.x + 7 * self.s))
+                                             if h[3] is hit[2]),
                                  had_bend="bend" in hit[2])
             if kind == "note" and kept and i in sel0:  # a note the kept box selected: the box goes along
                 boxes = boxes_upright(kept)[0]

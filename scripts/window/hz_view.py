@@ -320,12 +320,12 @@ class HzView:
         if self.app.hz_line.get():
             self.draw_line(w)
         red = self.slide_red()  # (faded while the Arpeggio leaves the slides out)
-        for x, y, *_ in self.dots():
+        for x, y, *_ in self.dots(self.view_xs()):
             r = 3.5 * s
             if x + r < 0 or x - r > w:
                 continue
             c.create_oval(x - r, y - r, x + r, y + r, fill=look.HZ_DOT, outline=red, width=max(1, round(1.5 * s)))
-        for x, y, _, sl, *_ in self.handles():  # a slide's bend: hollow while it follows the Glide curve
+        for x, y, _, sl, *_ in self.handles(self.view_xs()):  # a slide's bend: hollow while it follows the Glide curve
             r = 3 * s
             if x + r < 0 or x - r > w:
                 continue
@@ -473,11 +473,21 @@ class HzView:
                 y = self.pitch_y(n["key"])
                 c.create_line(self.x_of(n["t"]), y, self.x_of(n["t"] + n["len"]), y, fill=GREEN)
 
-    def dots(self):
+    def slide_away(self, x0, x1, xs, pad):
+        """True when a slide from beat x0 to x1 (its dots / handle) lies wholly outside the pixel span xs = (lo, hi),
+        pad px to spare: worked out only near what's asked (user 2026-11-18: every mouse move worked out every
+        slide's bent pitches, ~300 ms at 1,200 notes)."""
+        return xs is not None and (self.x_of(x1) + pad < xs[0] or self.x_of(x0) - pad > xs[1])
+
+    def view_xs(self):
+        """The notes canvas's pixel span, for dots() / handles() while drawing."""
+        return -12 * self.s, self.canvas.winfo_width() + 12 * self.s
+
+    def dots(self, xs=None):
         """[(x, y, tone number, "in" / "out", slide)]: the red line's dots, two for each slide made: "out" on the
         note it leaves, "in" on the note it goes to (tone number = the note the dot is on). A dot with no lead sits
         just outside its note's end (so the end itself stays free for changing the note's length). None while the
-        red line is hidden."""
+        red line is hidden. xs = (lo, hi) pixels: only slides reaching that span (the rest can't be there)."""
         out = []
         if not self.app.hz_line.get():
             return out
@@ -485,6 +495,8 @@ class HzView:
         off, most = 6 * self.s, self.bend_most()
         for a, b, s in links(self.tones):  # (on the notes' bent pitches, where the slide leaves / arrives)
             x0, x1, _, _ = glide(a, b, s)
+            if self.slide_away(x0, x1, xs, off + 1):
+                continue
             out.append((self.x_of(x0) + (off if x0 >= a["t"] + a["len"] else 0),
                         self.pitch_y(self.bent_pitch(a, x0, most)), index[id(a)], "out", s))
             out.append((self.x_of(x1) - (off if x1 <= b["t"] else 0), self.pitch_y(self.bent_pitch(b, x1, most)),
@@ -504,22 +516,24 @@ class HzView:
     def slide_red(self):
         return fade(RED) if self.slides_off() else RED
 
-    def handles(self):
+    def handles(self, xs=None):
         """[(x, y, tone number, slide, pitch at its start, at its end, the Glide curve it follows or None)]: each
         slide's bend handle, on its curve at hz_glide.handle_u (tone number = the note it leaves). None while the
         red line is hidden, on a slide between two notes of the same tone (nothing to bend), or one too short to grab
-        beside its dots (a dot's grab area reaching it)."""
+        beside its dots (a dot's grab area reaching it). xs: as dots()."""
         out = []
         if not self.app.hz_line.get():
             return out
         hz, index = None, {id(n): i for i, n in enumerate(self.tones)}
         near = 12 * self.s
         ends = {}
-        for x, y, _, _, s in self.dots():
+        for x, y, _, _, s in self.dots(xs):
             ends.setdefault(id(s), []).append((x, y))
         most = self.bend_most()
         for a, b, s in links(self.tones):
             f0, f1, k0, k1 = glide(a, b, s)
+            if self.slide_away(f0, f1, xs, 1):
+                continue
             k0, k1 = self.bent_pitch(a, f0, most), self.bent_pitch(b, f1, most)  # (from / to the bent pitches)
             if abs(k1 - k0) < 1e-6 or self.x_of(f1) - self.x_of(f0) < 20 * self.s:
                 continue

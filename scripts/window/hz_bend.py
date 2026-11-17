@@ -188,7 +188,8 @@ class HzBend:
             d = max(abs(x - hx), abs(y - hy))  # the point for good, hunt 2026-11-13)
             if d <= r and (grip is None or d < grip[0]):
                 grip = (d, ("handle", i, j, side))
-        slides = [max(abs(x - dx), abs(y - dy)) for dx, dy, *_ in self.dots() + self.handles()]
+        xs = (x - r, x + r)  # (only slides that can be in reach)
+        slides = [max(abs(x - dx), abs(y - dy)) for dx, dy, *_ in self.dots(xs) + self.handles(xs)]
         for px, py, i, j in reversed(self.bend_points()):
             d = max(abs(x - px), abs(y - py))
             if d <= r and (grip is None or d < grip[0]):  # (a slide's dot nearer still wins: one just after a note's
@@ -201,7 +202,8 @@ class HzBend:
             if abs(x - sx) <= r and abs(y - sy) <= r:
                 return "curve", i, j
         r = 6 * self.s  # (as hz_mouse.hit grabs them)
-        if any(abs(x - dx) <= r and abs(y - dy) <= r for dx, dy, *_ in self.dots() + self.handles()):
+        xs = (x - r, x + r)
+        if any(abs(x - dx) <= r and abs(y - dy) <= r for dx, dy, *_ in self.dots(xs) + self.handles(xs)):
             return ("slide",)
         if x < self.kb_w or y < self.ruler_h:
             return None
