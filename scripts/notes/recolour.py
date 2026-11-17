@@ -1464,6 +1464,8 @@ def _before_stir(notes, tracks, rc, held, gate, own):
             return a
         if id(a) not in mine:
             b = a.copy() if any(np.shares_memory(a, x) for x in (notes, tracks) if isinstance(x, np.ndarray)) else a
+            if b is not a:
+                _apart_copied(a, b)
             b.setflags(write=False)
             mine[id(a)] = b
         return mine[id(a)]
@@ -3528,18 +3530,31 @@ def _apart_plan(notes):
         p.place = np.full(len(s), -1, np.int64)
         p.place[ib[order]] = np.cumsum(new) - 1
     if big:
-        key = id(notes)
-
-        def gone(ref):  # (the notes let go: their plan too, at once)
-            if _APART.get(key, (None,))[0] is ref:
-                del _APART[key]
-        try:
-            _APART[key] = (weakref.ref(notes, gone), p)
-        except TypeError:  # (a view of another array can't be linked weakly: not remembered)
-            return p
-        while len(_APART) > 2:
-            _APART.popitem(last=False)
+        _apart_keep(notes, p)
     return p
+
+
+def _apart_keep(notes, p):
+    """Remember plan p for the notes array notes (by the array itself, the newest 2)."""
+    key = id(notes)
+
+    def gone(ref):  # (the notes let go: their plan too, at once)
+        if _APART.get(key, (None,))[0] is ref:
+            del _APART[key]
+    try:
+        _APART[key] = (weakref.ref(notes, gone), p)
+    except TypeError:  # (a view of another array can't be linked weakly: not remembered)
+        return
+    while len(_APART) > 2:
+        _APART.popitem(last=False)
+
+
+def _apart_copied(a, b):
+    """b is a copy of the notes array a: a's remembered plan (if any) is b's too (the same numbers; the colour steps
+    before a Stir ran on a, the Stir runs on the kept copy b: 3 M notes ~40 ms saved)."""
+    got = _APART.get(id(a)) if isinstance(a, np.ndarray) and APART_KEPT[0] else None
+    if got is not None and got[0]() is a:
+        _apart_keep(b, got[1])
 
 
 def _apart_fewer(p, keep):
