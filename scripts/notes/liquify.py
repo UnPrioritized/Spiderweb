@@ -193,6 +193,8 @@ def clean_liquify(d):
         out["moves"] = "shape"
         if d.get("bend_colours") is False:
             out["bend_colours"] = False
+        if d.get("chop") is False:  # (Cut notes where bent off: the outline bent, its notes laid again; user 11-17)
+            out["chop"] = False
         # (a Shape map is a "where each point goes" one, "forward": True (PLAN.md Liquify Shape rebuild); one made
         # before it ("where it comes from", never released) opens unbent: its map dropped, user 2026-11-17)
         if d.get("forward") is True and "map" in out:

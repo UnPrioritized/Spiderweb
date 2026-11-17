@@ -117,6 +117,8 @@ def clean_warp(d, keep=False):
         out["moves"] = "shape"
         if d.get("bend_colours") is False:
             out["bend_colours"] = False
+        if d.get("chop") is False:  # (Cut notes where bent off: the outline bent, its notes laid again; user 11-17)
+            out["chop"] = False
     h = _clean_handles(d.get("h"), c, r)
     inner = _clean_inner(d.get("in"), c, r)
     preset = None

@@ -1488,7 +1488,27 @@ def shape_tabs_done(sh, ppq, keys, get):
         return ok
     from notes.shape_bend import AS_NOTES, Folded, note_boxes_bent
     as_notes = "notes" in base and "picture" not in base and "picture_notes" not in base
-    got = AS_NOTES if as_notes else bent_shape(out, tabs, rule, box, own, ppq, wp, lq)
+    # (CUT NOTES WHERE BENT, user 2026-11-17, a tick per Shape step, on by default: a drawn shape's notes made unbent,
+    # then bent + cut like pasted notes. Steps before the first ticked one bend the outline (notes laid in it), the
+    # ticked one and every later one bend + cut those notes)
+    chops = [st.get("chop", True) for st in tabs] + [x.get("chop", True) for x in (wp, lq) if x is not None]
+    first = next((i for i, c in enumerate(chops) if c), None)
+    if as_notes or first == 0:
+        got = AS_NOTES
+    elif first is None:
+        got = bent_shape(out, tabs, rule, box, own, ppq, wp, lq)
+    else:
+        lead_tabs = tabs[:first]
+        lead_wp = wp if first > len(tabs) else None  # (the Liquify runs last: never before a ticked step)
+        lead_lq = None
+        got = bent_shape(out, lead_tabs, rule, box, own, ppq, lead_wp, lead_lq)
+        if got is None or got == PULL:  # (the outline can't take the steps before: every step cuts)
+            got = AS_NOTES
+        else:
+            return _chopped_after(got, base, notes, before, benders[:first], benders[first:], box, ppq, keys, get,
+                                  any(st["bend_colours"] for st in lead_tabs)
+                                  or (lead_wp is not None and lead_wp.get("bend_colours", True))
+                                  or (lead_lq is not None and lead_lq.get("bend_colours", True)), out)
     if got is None:
         return out
     # (COLOURS BEND TOO, user 2026-11-17, a tick per tab, on by default: each note of the bent shape takes the
@@ -1535,6 +1555,46 @@ def shape_tabs_done(sh, ppq, keys, get):
         t, k = look((made[:, 0] + made[:, 1]) / 2, made[:, 2].astype(np.float64))
         tracks = np.asarray(before)[nearest(notes, t, k, own=False)]
     return dict(got, _bent=bent_token(made, tracks))
+
+
+def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, bend, out):
+    """shape_tabs_done when a later Shape step cuts notes and the ones before it don't: got = the shape with its
+    outline bent by the steps before (benders lead), its notes made (colours carried back through lead when bend),
+    then bent + cut by the rest (benders rest) like pasted notes. Returns out with its "_bent" notes."""
+    from notes.shape_bend import Folded, StirBend, note_boxes_bent, pulled
+    plain = _steps_off(without_recolour(got))
+    made, tracks = get(dict(plain, _free=True) if "pts" in plain else plain)
+    made = np.asarray(made, np.int64)
+    if bend and before is not None and len(before) and len(made):
+        from notes.recolour import nearest
+        t, k = (made[:, 0] + made[:, 1]) / 2, made[:, 2].astype(np.float64)
+        for b in reversed(lead):
+            t, k = b.look_tk(t, k)
+        tracks = np.asarray(before)[nearest(notes, t, k, own=False)]
+
+    def look(t, k):
+        for b in reversed(rest):
+            t, k = b.look_tk(t, k)
+        return t, k
+
+    def within(t, k):
+        ok = rest[0].within(t, k)
+        for b in rest[1:]:
+            ok = ok | b.within(t, k)
+        return ok
+
+    def bend_tk(t, k):
+        p = np.column_stack((t, k))
+        for b in rest:
+            p = b.bend2(p)
+        return p[:, 0], p[:, 1]
+    try:
+        if any(isinstance(b, StirBend) and (b.st["polar"] or b.st["kaleido"] >= 2) for b in rest):
+            raise Folded
+        made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
+    except Folded:
+        made, tracks = pulled(made, tracks, look, box, ppq, joined=False, within=within)
+    return dict(out, _bent=bent_token(*_on_keys(made, tracks, keys)))
 
 
 STEP_KEYS = ("fx", "_m", "glue", "sustain", "extend", "subtract", "gate_flip", "order", "off", "_upto")

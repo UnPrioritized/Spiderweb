@@ -373,6 +373,14 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         Tooltip(self.bend_colours_tick, tr("stir.bend_colours_tip"))
         self._put(None, (1, word), (2, self._pick(form, "moves", STIR_MOVES, word)), (3, self.bend_colours_tick, 2),
                   pady=0)
+        # (Cut notes where bent, user 2026-11-17: a tick per tab under Moves, on by default; live on Shape tabs of
+        # drawn shapes: their notes bent + cut like pasted notes; off = the outline bent, notes laid again in it)
+        self.chop = tk.BooleanVar(value=True)
+        self.chop_tick = ttk.Checkbutton(form, text=tr("stir.chop"), variable=self.chop,
+                                         command=lambda: self.set_stir("chop", bool(self.chop.get()),
+                                                                       tr("stir.undo_chop")))
+        Tooltip(self.chop_tick, tr("stir.chop_tip"))
+        self._put(None, (2, self.chop_tick, 3), pady=2)
 
     def _build_knobs(self, form):
         """Turn / Twist / Bulge knobs with their boxes, and At the edges + Bend's Smooth corners beside them."""
@@ -1172,10 +1180,18 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             b["shown"] = text
             live = key not in second or any(s[second[key]] for s in sts)
             b["entry"].config(state="normal" if on and live else "disabled")
-        bends_ = {s["bend_colours"] for s in sts if s["moves"] == "shape"} or {True}
+        # (Cut notes where bent: drawn shapes' Shape tabs only (pasted notes are always cut); Colours bend too only
+        # where the outline bends (a tab not cut), user 2026-11-17)
+        drawn = [s for s, t in zip(sts, tgts) if s["moves"] == "shape" and "notes" not in t]
+        chops = {s["chop"] for s in drawn} or {True}
+        self.chop.set(chops == {True})
+        self.chop_tick.state(["alternate" if len(chops) > 1 else "!alternate",
+                              "!disabled" if on and drawn else "disabled"])
+        laid = [s for s in drawn if not s["chop"]]
+        bends_ = {s["bend_colours"] for s in laid} or {True}
         self.bend_colours.set(bends_ == {True})
         self.bend_colours_tick.state(["alternate" if len(bends_) > 1 else "!alternate",
-                                      "!disabled" if on and any(s["moves"] == "shape" for s in sts) else "disabled"])
+                                      "!disabled" if on and laid else "disabled"])
         outs = {s["bulge_out"] for s in sts}
         self.bulge_out.set(outs == {True})
         live = any(s["bulge"] and not (s["reach"] is not None and s["area_bulge"]) for s in sts)
