@@ -157,6 +157,8 @@ DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), 
               ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
               ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h"), ("picture", tr("app.picture"), "i")]
 LATE_S = 0.15  # making the notes took longer than this (s): after an edit they're made in the background (late_ok)
+COMBINE_BIG = 1_000_000  # notes: the shapes' remembered notes past this = putting them together is slow (late_ok)
+COMBINE_SHAPES = 300  # (shapes: more aren't counted for it, combine_big)
 OLD_NOTES_SHARE = 8  # the notes cache (shapes as they WERE = undo targets) may take 1/8 of the PC's memory...
 OLD_NOTES_MOST = 2 ** 30  # (bytes) ...and at most 1 GB (user 2026-11-10: a big limit; undo past it makes notes again)
 WINE_NOTES_SHARE = 16  # (Wine-like systems: 1/16, phones)
@@ -3111,7 +3113,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """The notes can be made in the background (shapes_changed): the last making took longer than LATE_S. The notes
         on screen stay meanwhile: the same shapes in the same places (maybe more after them) = as they are, else
         renumbered to the new list (renumber_shown: Delete, undo / redo, History, Join, Split...)."""
-        if self._merges_owed or self._make_time + self._mask_time <= LATE_S and not self.slow_shape_owed():
+        if self._merges_owed or self._make_time + self._mask_time <= LATE_S and not self.slow_shape_owed() and \
+                not self.combine_big():
             return False
         return self.keep_shown()
 
@@ -3126,6 +3129,23 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return True
         self.renumber_shown()
         return True
+
+    def combine_big(self):
+        """The shapes' remembered notes add up to more than COMBINE_BIG: putting them together (overlaps, channels)
+        is slow even when the last making was quick (Delete of a 3 M-note shape, then undo: 0.32 s on slow.spwb).
+        Projects past COMBINE_SHAPES shapes aren't counted (the last making says enough there)."""
+        made = self._made_shapes
+        if len(self.shapes) > COMBINE_SHAPES or len(self.shapes) == len(made) and all(
+                a is b for a, b in zip(self.shapes, made)):  # (an edit in place: slow_shape_owed covers it; only a
+            return False                                       # changed list (undo, paste...) can jump this far)
+        n, cache = 0, self._notes_cache
+        for sh in self.shapes:
+            got = cache.get(self.notes_cache_key(sh)[2])
+            if got is not None:
+                n += len(got[0])
+                if n > COMBINE_BIG:
+                    return True
+        return False
 
     def slow_shape_owed(self):
         """A shape whose own notes were slow to make the last time (> LATE_S) needs them made again (changed): the
