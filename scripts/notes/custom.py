@@ -48,12 +48,13 @@ ALIGNS = ("auto", "aligned", "centred")
 # stretch are stretched or squeezed so a whole number fits exactly (the spam start doesn't matter then)
 ENDS = ("round", "keep", "drop", "min", "stretch")
 CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "ends": "round", "union": False,
-                   "apart": False, "borders": False}
+                   "apart": False, "borders": False, "even": False}
 # on / off settings a custom shape only has when they're on: "union" = where outlines overlap it's filled too (off:
 # overlaps cancel out, even-odd); "apart" = Fill / Spam "Outline": the outline's notes on a channel of their own
 # (with Multi channel), the inside's on another; "borders" = with "Outline" and areas coloured by hand (areas.py),
 # where two colours meet is outline too (else only where the filled part ends)
-CUSTOM_FLAGS = ("union", "apart", "borders")
+# "even" = Symmetrical steps (even_on; PLAN.md "Even steps"): every key row steps by the same whole gates
+CUSTOM_FLAGS = ("union", "apart", "borders", "even")
 # "Colours" (any shape but pasted notes): sh["cycle"] = {"by", "n", "every"} (only when on) = the notes take turns
 # over n channels (with Multi channel each turn gets a channel, so a colour, of its own). "step" = by the step the
 # note starts on (spam: its gate columns; others: each start time in turn), "key" = by key (rows), "time" = by a
@@ -1515,6 +1516,19 @@ def has_areas(sh):
     fills take their place)."""
     return (bool(sh.get("areas")) and sh.get("fill") in ("fill", "spam") and not sh.get("text") and "notes" not in sh
             and not has_nested(sh) and not has_tiles(sh) and not has_ripples(sh))
+
+
+def even_can(sh):
+    """Symmetrical steps (sh["even"], PLAN.md "Even steps") can be used on sh: a shape whose notes have a gate =
+    Spam, Outline spam, Nested with Spam notes (never text, pasted notes, pictures, Hz bass, Tiles / Ripples)."""
+    return (sh.get("kind", "custom") == "custom" and sh.get("fill") in SPAM_FILLS and not sh.get("text")
+            and "notes" not in sh and "picture" not in sh and not sh.get("hz") and not sh.get("tiles")
+            and not sh.get("ripples"))
+
+
+def even_on(sh):
+    """Symmetrical steps ticked on a shape that can use it (kept but unused while it can't: back when it can)."""
+    return bool(sh.get("even")) and even_can(sh)
 
 
 def has_nested(sh):

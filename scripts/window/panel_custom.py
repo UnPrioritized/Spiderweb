@@ -11,7 +11,7 @@ from tkinter import ttk, messagebox, simpledialog
 from files.lang import tr, trn
 from notes.areas import most_colours
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, drawing_in_box,
-                          edge_gate, fit_upright, gap_lines, gate_ticks, join_strokes, map_stroke, normalize_areas,
+                          edge_gate, even_can, even_on, fit_upright, gap_lines, gate_ticks, join_strokes, map_stroke, normalize_areas,
                           normalize_strokes, open_paths, shelve_patterns)
 from window import look
 from window.drawer import Drawer, clean_name, library_lists, library_names, load_drawing, save_shape, shape_stamp
@@ -50,7 +50,7 @@ CUSTOM_NAMES = {"fill": tr("panel_custom.inside_fill"), "gate": tr("panel_custom
                 "align": tr("panel_custom.spam_start"), "ends": tr("panel_custom.spam_ends"),
                 "union": tr("panel_custom.overlaps_cancel_out"),
                 "apart": tr("panel_custom.normal_outline"), "edge": tr("panel_custom.edge_undo"),
-                "borders": tr("panel_custom.borders"),
+                "borders": tr("panel_custom.borders"), "even": tr("panel_custom.even"),
                 "edge_mode": tr("panel_custom.edge_undo")}  # (History)
 APART_CHOICES = [tr("panel_custom.normal"), tr("panel_custom.outline")]
 APART_TIP = tr("panel_custom.normal_all_its_notes_together_outline")
@@ -316,6 +316,50 @@ class CustomPanel:
     def merge_part_ids(self):
         return {id(p) for sh in self.shapes if sh.get("merge") for p in sh["merge"]["parts"]}
 
+    def even_targets(self):
+        """What the Symmetrical steps tick changes: the custom targets but a merged shape's parts (their outline
+        never changes, user) and shapes it can't be used on."""
+        parts = self.merge_part_ids()
+        return [t for t in self.custom_targets() if id(t) not in parts and even_can(t)]
+
+    def sync_even(self):
+        """The Symmetrical steps tick: the panel's first row, shown only while every custom target has a gate."""
+        tgts = self.custom_targets() if self._rows["custom"] else []
+        parts = self.merge_part_ids() if tgts else ()
+        shown = bool(tgts) and all(id(t) not in parts and even_can(t) for t in tgts)
+        ons = {bool(t.get("even")) for t in tgts}
+        self._loading = True
+        self.even_var.set(ons == {True})
+        self._loading = False
+        self.even_tick.state(["alternate" if len(ons) > 1 else "!alternate"])
+        pack_shown(self.even_tick, shown, anchor="w", before=self.vel_row, pady=(0, 3))
+        # (on for a selected shape: no Deform row, its bends would break the even steps; user)
+        pack_shown(self.deform_box, not any(even_on(self.shapes[i]) for i in self.sels), fill="x", pady=(4, 0),
+                   after=self.recolour_box)
+        return shown and True in ons
+
+    def on_even(self):
+        """Symmetrical steps ticked / unticked: one undo step for every shape it changes."""
+        if self._loading:
+            return
+        self.even_tick.state(["!alternate"])
+        value = self.even_var.get()
+        tgts = [t for t in self.even_targets() if bool(t.get("even")) != value]
+        if not tgts:
+            return self.sync_custom()
+        if any(t is not self.custom_defaults for t in tgts):
+            self.push_undo(name=CUSTOM_NAMES["even"])
+        for t in tgts:
+            if value:
+                t["even"] = True
+            elif t is self.custom_defaults:
+                t["even"] = False
+            else:
+                t.pop("even", None)  # (shapes only have it when it's on)
+        self.shapes_changed()
+        self.sync_custom()
+        self.roll.focus_set()
+
     def sync_custom(self):
         tgts = self.custom_targets()
         placed = bool(tgts) and tgts[0] is not self.custom_defaults
@@ -335,6 +379,7 @@ class CustomPanel:
                     row.pack(fill="x", pady=(2, 0))
         self._rows["custom"] = placed or bool(tgts and makes_custom)
         self.layout_rows()
+        even = self.sync_even()  # (on: Ends, Centred, Copy angle and Turn hidden; free turn / skew too, roll)
         if not self._rows["custom"]:
             return
         self.sync_polygon()
@@ -390,7 +435,8 @@ class CustomPanel:
         self.gate_var.set(fmt(gate_ticks(gate, self.ppq)))  # (the whole ticks the notes use, never a fraction)
         self.edge_var.set(fmt(edge_gate(tgts[0], self.ppq)))
         self.edge_entry.config(style="TEntry")
-        self.align_var.set(tgts[0].get("align", "auto"))
+        align = tgts[0].get("align", "auto")
+        self.align_var.set("auto" if even and align == "centred" else align)  # (Centred = Auto with even steps)
         ends = tgts[0].get("ends", "drop")
         self.ends_box.current(ENDS.index(ends) if ends in ENDS else 0)
         rg = tgts[0].get("range")
@@ -425,7 +471,8 @@ class CustomPanel:
         self.sync_ripples(tgts[0])
         ranged = spam and not hz and bool(rg)  # (Range: its own grid from the shape's left edge, so no ends / start)
         for b in self.align_buttons:  # (stretched gates fill each key exactly: where they start doesn't matter)
-            b.config(state="normal" if spam and not hz and ends != "stretch" else "disabled")
+            b.config(state="normal" if spam and not hz and (ends != "stretch" or even) else "disabled")
+        pack_shown(self.align_buttons[2], not even, side="left", padx=(4, 0))  # (Centred: Auto with even steps)
         self._loading = True
         self.cancel_var.set(not tgts[0].get("union"))
         apart = bool(tgts[0].get("apart"))
@@ -462,7 +509,9 @@ class CustomPanel:
                 self.cancel_box: fill in ("fill", "spam") and not text,
                 self.borders_box: fill in ("fill", "spam") and apart and shown not in PATTERN_FILLS
                 and self.coloured_areas(tgts, placed, name)}
-        rows.update(self.nested_row_states(tgts[0], shown == "nested"))
+        if even:  # (Symmetrical steps: no leftover to end, no free turn of the copies)
+            rows[self.ends_row] = False
+        rows.update(self.nested_row_states(tgts[0], shown == "nested", even))
         rows.update(self.tiles_row_states(tgts[0], shown == "tiles"))
         rows.update(self.ripples_row_states(tgts[0], shown == "ripples"))
         self.show_custom_rows({w for w, on in rows.items() if on})

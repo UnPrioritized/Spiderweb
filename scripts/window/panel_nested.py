@@ -66,6 +66,7 @@ class NestedPanel:
     def _build_nested(self, opts):
         """The Nested rows, put in self.custom_rows (shown by sync_custom while Nested is the Inside fill)."""
         self.nested_rows, self.nested_boxes, self.nested_way_rows = [], {}, {}
+        self.nested_turn_rows = set()
         self.nested_table = []  # (the rows lined up with the Tiles ones, panel_tiles)
         row, self.nested_notes_box = drop_row(self, opts, "nested_notes", [t for _, t in NOTES_CHOICES])
         self.nested_notes_box.bind("<<ComboboxSelected>>", lambda e: (
@@ -113,6 +114,8 @@ class NestedPanel:
                     Tooltip(w, tr("panel_custom." + text + "_tip"))
                 self.nested_boxes[key] = (e, var)
             self.nested_rows.append(row)
+            if line[0][0] in ("angle", "turn"):  # (hidden with Symmetrical steps)
+                self.nested_turn_rows.add(row)
             if line[0][0] in ONLY_FOR:
                 self.nested_way_rows[row] = ONLY_FOR[line[0][0]]
         self.nested_skip_var = tk.BooleanVar(value=False)
@@ -143,11 +146,13 @@ class NestedPanel:
         self.nested_skip_var.set(bool(cfg.get("skip")))
         self._loading = False
 
-    def nested_row_states(self, t, on):
-        """{row: shown} for sync_custom's show_custom_rows (on: Nested is the Inside fill shown)."""
+    def nested_row_states(self, t, on, even=False):
+        """{row: shown} for sync_custom's show_custom_rows (on: Nested is the Inside fill shown; even: Symmetrical
+        steps on = no Copy angle / Turn: the copies stay level, PLAN.md "Even steps")."""
         cfg = t.get("nested") or NESTED_DEFAULTS
         way = cfg.get("way", "scale")
-        out = {w: on and self.nested_way_rows.get(w, way) == way for w in self.nested_rows}
+        out = {w: on and self.nested_way_rows.get(w, way) == way and not (even and w in self.nested_turn_rows)
+               for w in self.nested_rows}
         # (Morph into it: only with another drawing picked, in any of the shapes)
         out[self.nested_morph_row] &= any((x.get("nested") or {}).get("of") for x in [t] + self.nested_targets())
         return out
