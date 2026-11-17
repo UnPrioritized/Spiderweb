@@ -1248,11 +1248,22 @@ def rows_spans(edges, q0, q1, ppq, wind=False):
         q, s, t = fast.rows_fill(c(xa, float), c(ya, float), c(xb, float), c(yb, float), int(q0), int(q1), int(ppq),
                                  bool(wind))
         return list(zip(q.tolist(), s.tolist(), t.tolist()))
-    got = rows_gaps(xa, ya, xb, yb, q0, q1)
+    got = _rows_spans(xa, ya, xb, yb, q0, q1, ppq, wind, True)
+    return got if got is not None else _rows_spans(xa, ya, xb, yb, q0, q1, ppq, wind, False)
+
+
+def _rows_spans(xa, ya, xb, yb, q0, q1, ppq, wind, split):
+    """rows_spans' NumPy way; split: rows with ROWS_SPLIT_FROM edges or more cut only at their own groups' corners
+    (rows_groups, as the compiled rows_fill: a row of 2,400 squares cut every edge at every square's corners) -> None
+    when that isn't exactly the same (edges crossing inside a gap, loops not closed): then call it with split off."""
+    none = []
+    got = rows_gaps(xa, ya, xb, yb, q0, q1, split=split, wind=wind)
     if got is None:
         return none
-    e, gap, y0, y1, mid, lv_row = got
-    xa, ya, xb, yb = xa[e], ya[e], xb[e], yb[e]
+    e, gap, y0, y1, mid, lv_row = got[:6]
+    cut_gap = got[6] if len(got) > 6 else None  # (split: which gaps lie in a split row)
+    exa, eya, exb, eyb = xa[e], ya[e], xb[e], yb[e]
+    xa, ya, xb, yb = exa, eya, exb, eyb
 
     def x_at(y):
         return xa + (xb - xa) * (y - ya) / (yb - ya)
@@ -1264,6 +1275,9 @@ def rows_spans(edges, q0, q1, ppq, wind=False):
     new[1:] = gap[1:] != gap[:-1]
     at = np.arange(len(gap))
     first_at = np.maximum.accumulate(np.where(new, at, 0))
+    if cut_gap is not None and not _split_same(order, gap, new, y0[order], y1[order], exa[order], eya[order],
+                                               exb[order], eyb[order], cut_gap, wind):
+        return None
     if wind:  # (each crossing's way up or down: in from where the count leaves 0, out where it's back at 0)
         d = np.sign(yb - ya)[order].astype(np.int64)
         run = np.cumsum(d)
@@ -1284,10 +1298,85 @@ def rows_spans(edges, q0, q1, ppq, wind=False):
     return rows_merged(a, b, q, q0, q1, ppq)
 
 
-def rows_gaps(xa, ya, xb, yb, q0, q1):
+ROWS_SPLIT_FROM = 64  # (rows_spans: a key row with this many edges or more is split into groups side by side, as
+# fastloops.ROWS_SPLIT_FROM)
+
+
+def _split_same(order, gap, new, y0, y1, xa, ya, xb, yb, cut_gap, wind):
+    """fastloops._split_same in NumPy (everything in each gap's left-to-right order): the crossings of every gap add
+    up to outside (nonzero: every gap; else each gap of a split row has an even count) and in a split row's gaps
+    the edges keep their order at both of the gap's levels (none cross inside it)."""
+    starts = np.flatnonzero(new)
+    if wind:
+        if np.add.reduceat(np.where(yb > ya, 1, -1), starts).any():
+            return False
+    else:
+        cnt = np.diff(np.r_[starts, len(gap)])
+        if (cnt[cut_gap[gap[starts]]] % 2).any():
+            return False
+    p = np.flatnonzero(~new[1:])  # (an edge and the next one in its gap)
+    p = p[cut_gap[gap[p]]]
+    if not len(p):
+        return True
+
+    def ex(k, y):  # (an edge's own corner exactly at a corner's height: fastloops._edge_x)
+        with np.errstate(invalid="ignore", divide="ignore"):
+            x = xa[k] + (xb[k] - xa[k]) * (y - ya[k]) / (yb[k] - ya[k])
+        return np.where(y == ya[k], xa[k], np.where(y == yb[k], xb[k], x))
+    for yy in (y0, y1):
+        if (~(ex(p, yy[p]) <= ex(p + 1, yy[p]))).any():
+            return False
+    return True
+
+
+def _row_groups(xa, ya, xb, yb, e, row, wind):
+    """fastloops._rows_fill_by's groups in NumPy: each (edge e, row) entry's group in its row (rows with fewer than
+    ROWS_SPLIT_FROM edges: one), and which rows were split. Edges whose x room in the row touches go together;
+    groups only end where the crossings of the row's middle line so far add up to outside."""
+    grp = np.zeros(len(e), np.int64)
+    starts = np.flatnonzero(np.r_[True, row[1:] != row[:-1]])
+    ends = np.r_[starts[1:], len(row)]
+    split = np.zeros(len(e), bool)
+    for s, t in zip(starts, ends):
+        if t - s < ROWS_SPLIT_FROM:
+            continue
+        k = e[s:t]
+        lo, hi = row[s] - 0.5, row[s] + 0.5
+        a_, b_ = xa[k], xb[k]
+        y0 = np.maximum(np.minimum(ya[k], yb[k]), lo)
+        y1 = np.minimum(np.maximum(ya[k], yb[k]), hi)
+        u0 = a_ + (b_ - a_) * (y0 - ya[k]) / (yb[k] - ya[k])
+        u1 = a_ + (b_ - a_) * (y1 - ya[k]) / (yb[k] - ya[k])
+        rlo, rhi = np.minimum(u0, u1), np.maximum(u0, u1)
+        rlo = rlo - 1e-9 * np.maximum(1.0, np.abs(rlo))
+        rhi = rhi + 1e-9 * np.maximum(1.0, np.abs(rhi))
+        if not (np.isfinite(rlo).all() and np.isfinite(rhi).all()):
+            continue
+        mid = float(row[s])
+        cross = ((ya[k] <= mid) != (yb[k] <= mid)).astype(np.int64)
+        if wind:
+            cross = np.where(yb[k] < ya[k], -cross, cross)
+        o = np.argsort(rlo, kind="stable")
+        c = cross[o]
+        acc = np.cumsum(c) - c  # (crossings before each, in x order)
+        reach = np.r_[-np.inf, np.maximum.accumulate(rhi[o])[:-1]]
+        out = (acc == 0) if wind else (acc % 2 == 0)
+        start = (rlo[o] > reach) & out & (reach > -np.inf)
+        total = int(c.sum())
+        if not ((total == 0) if wind else (total % 2 == 0)) or not start.any():
+            continue
+        g = np.empty(t - s, np.int64)
+        g[o] = np.cumsum(start)
+        grp[s:t] = g
+        split[s:t] = True
+    return grp, split
+
+
+def rows_gaps(xa, ya, xb, yb, q0, q1, split=False, wind=False):
     """row_gaps for every row q0..q1 at once (rows_spans, walled_rows): (e, gap, y0, y1, mid, lv_row) with gap a
     place in one list of every row's levels (row by row) and lv_row[gap] its row, or None when no edge reaches a
-    row."""
+    row. split (rows_spans): a row with many edges as groups side by side, each with only its own corners as levels
+    (_row_groups); then a 7th item: per level, whether it lies in a split row (_split_same checks those)."""
     mn, mx = np.minimum(ya, yb), np.maximum(ya, yb)
 
     def first_row(v, below):  # the first row q with v < q + 0.5 (below) / the last with v > q - 0.5
@@ -1307,6 +1396,10 @@ def rows_gaps(xa, ya, xb, yb, q0, q1):
     row = np.repeat(r0, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
     order = np.lexsort((e, row))
     e, row = e[order], row[order]
+    if split:
+        grp, cut = _row_groups(xa, ya, xb, yb, e, row, wind)
+        if cut.any():
+            return _slot_gaps(xa, ya, xb, yb, e, row, grp, cut, mn, mx)
     # each row's levels: its bottom and top edge and every corner strictly between them
     rows = np.arange(q0, q1 + 1)
     ys = np.concatenate([ya, yb])
@@ -1347,6 +1440,51 @@ def rows_gaps(xa, ya, xb, yb, q0, q1):
         return None
     y0, y1 = levels[gap], levels[gap + 1]
     return e, gap, y0, y1, (y0 + y1) / 2, lv_row
+
+
+def _slot_gaps(xa, ya, xb, yb, e, row, grp, cut, mn, mx):
+    """rows_gaps' end with split rows: each (row, group) a slot of its own whose levels are its row's bottom and top
+    and its own edges' corners strictly between (an unsplit row: every corner in it, as rows_gaps); the same
+    numbering of gaps, slot after slot. -> rows_gaps' items + per level whether its row was split."""
+    o = np.lexsort((e, grp, row))  # (in each slot the edges keep their order)
+    e, row, grp, cut = e[o], row[o], grp[o], cut[o]
+    new = np.r_[True, (row[1:] != row[:-1]) | (grp[1:] != grp[:-1])]
+    slot = np.cumsum(new) - 1
+    ns = int(slot[-1]) + 1
+    slot_row, slot_cut = row[new], cut[new]
+    lo, hi = row - 0.5, row + 0.5
+    ea, eb = ya[e], yb[e]
+    ca, cb = (ea > lo) & (ea < hi), (eb > lo) & (eb < hi)
+    every = np.arange(ns)
+    lv_key = np.concatenate([every, every, slot[ca], slot[cb]])
+    lv_val = np.concatenate([slot_row - 0.5, slot_row + 0.5, ea[ca], eb[cb]])
+    order = np.lexsort((lv_val, lv_key))
+    lv_key, lv_val = lv_key[order], lv_val[order]
+    keep = np.ones(len(lv_key), bool)
+    keep[1:] = (lv_key[1:] != lv_key[:-1]) | (lv_val[1:] != lv_val[:-1])
+    lv_key, levels = lv_key[keep], lv_val[keep]
+    off = np.searchsorted(lv_key, every)
+
+    def below(v):  # (rows_gaps' below, per slot)
+        k = len(levels)
+        allkey = np.concatenate([lv_key, slot])
+        allval = np.concatenate([levels, v])
+        is_level = np.concatenate([np.ones(k, np.int64), np.zeros(len(v), np.int64)])
+        o = np.lexsort((is_level, allval, allkey))
+        before = np.cumsum(is_level[o]) - is_level[o]
+        got = np.empty(len(v), np.int64)
+        q = o >= k
+        got[o[q] - k] = before[q]
+        return got - off[slot]
+    first = below(np.maximum(mn[e], lo))
+    n = below(np.minimum(mx[e], hi)) - first
+    first += off[slot]
+    e = np.repeat(e, n)
+    gap = np.repeat(first, n) + np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    if not len(gap):
+        return None
+    y0, y1 = levels[gap], levels[gap + 1]
+    return e, gap, y0, y1, (y0 + y1) / 2, slot_row[lv_key], slot_cut[lv_key]
 
 
 def rows_merged(a, b, q, q0, q1, ppq):
