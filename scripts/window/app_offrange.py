@@ -383,10 +383,11 @@ class AppOffrange:
         from roll.roll_draw import OFF_FADE
         OFF_FADE[0] = min(100, max(1, int(self.offrange_opacity.get())))
         if remake or not self.keeps_offrange():
-            if any(sh.get("into") for sh in self.shapes):  # (laid shapes count their kept colours: their notes
-                self.shapes_changed(now=True)              # may go on other tracks now, all_notes kept)
-            self.off_all = self.offrange_rows()
-            self.after_idle(self.exact_soon)
+            # (made with the notes, as after an edit: a big project's in the background, the kept notes in its
+            # thread too (App._start_coming); laid shapes count their kept colours, all_notes kept)
+            self.shapes_changed()
+            if self._bg_notes:  # (the rest when they're in: shapes_changed does it)
+                return
         self.made_version += 1
         self.off_masked = self.masked_offrange() if self.mask_preview.get() else None
         self._outgoing = None
