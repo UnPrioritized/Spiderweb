@@ -410,16 +410,20 @@ def move_now(app, boxes, dt, drow, copying=False, fresh=()):
         return r if r < 0 else int(ids[r + drow])
     ends = [None if b["rows"] is None else (end_id(b["rows"][0]), end_id(b["rows"][1])) for b in tl.boxes]
     app.shapes_changed()
-    boxes = []
-    for b, e in zip(tl.boxes, ends):
-        rows = None
-        if e is not None:
-            got = [r if r < 0 else tl.row_of_id(s) for r, s in zip(b["rows"], e)]  # (r < 0: the Conductor row)
-            rows = tuple(sorted(got)) if None not in got else (b["rows"][0] + drow, b["rows"][1] + drow)
-        boxes.append(dict(b, t0=b["t0"] + dt, t1=b["t1"] + dt, rows=rows))
-    tl.boxes = boxes
-    tl.tracks()  # (kept inside the rows there are)
-    tl.request_redraw()
+    old_boxes = tl.boxes
+
+    def boxes_on():  # (once the notes are made: a big project's in the background, App.after_notes)
+        boxes = []
+        for b, e in zip(old_boxes, ends):
+            rows = None
+            if e is not None:
+                got = [r if r < 0 else tl.row_of_id(s) for r, s in zip(b["rows"], e)]  # (r < 0: the Conductor row)
+                rows = tuple(sorted(got)) if None not in got else (b["rows"][0] + drow, b["rows"][1] + drow)
+            boxes.append(dict(b, t0=b["t0"] + dt, t1=b["t1"] + dt, rows=rows))
+        tl.boxes = boxes
+        tl.tracks()  # (kept inside the rows there are)
+        tl.request_redraw()
+    app.after_notes(boxes_on)
     if cut:
         app.status.config(text=trn("tracks.box_cut", cut, n=cut))
     return True

@@ -493,6 +493,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.shapes_gen = 0  # +1 at every shapes_changed (windows working out something slow from the shapes: same?)
         self._coming = None  # notes being made in the background while a drag rests (notes_rested)
         self._pairs = None  # (weak link to the notes, owners, slots): slot_pairs' last answer
+        self._after_notes = []  # work waiting for the notes being made in the background (after_notes)
+        self._soon_jobs = {}  # slot -> a window's notes being made in the background (notes_soon)
         self._made_shapes = []  # app.shapes when the notes were last made (late_ok: the same shapes, maybe more)
         self._position = None
         self._normal_geometry = None
@@ -2368,6 +2370,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.schedule_autosave()
         self.sync_history()
         self.sync_edit_lines()  # (the Properties window too: its place / size numbers come from these notes)
+        if self._after_notes:  # (work waiting for these notes: after_notes)
+            todo, self._after_notes = self._after_notes, []
+            for fn in todo:
+                fn()
+
+    def after_notes(self, fn):
+        """fn() once the notes are made: at once, or when the ones being made in the background are taken in
+        (shapes_changed's end). For code that reads the notes right after starting them (it waited for them)."""
+        if self._bg_notes or self._counting:
+            self._after_notes.append(fn)
+        else:
+            fn()
 
     def slots_pal(self):
         """The picture colours by slot as the notes have them now (the first picture's, else the first copy's)."""
@@ -3762,6 +3776,52 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         job["thread"].start()
         self.after(15, self._count_check, job)
 
+    def keep_job_notes(self, job):
+        """A background job's own new notes (thread_maker) put into the notes cache, as if made here."""
+        cache = self._notes_cache
+        for k, v in job["own"].items():
+            cache[k] = shared_arrays(v, cache)
+            self._notes_used[k] = self.shapes_gen
+        self._notes_deps.update(job["deps"])
+        self._notes_top.update(job["top"])
+        self.trim_notes()
+
+    def notes_soon(self, shapes, then, slot):
+        """then() once these shapes' notes are remembered (a window's count / chart from shapes not on screen): at
+        once when they are, else they're made in a background thread first (kept: notes_of finds them). A newer
+        call for the same slot (e.g. "range") stops the older one; then() isn't called for a stopped one."""
+        jobs = self._soon_jobs
+        old = jobs.pop(slot, None)
+        if old is not None:
+            old["stop"] = True
+        need = [sh for sh in shapes if self.remembered_count(sh) is None]
+        if not need or not self.count_later_ok():
+            return then()
+        key = (None, self.ppq, self.keys)
+        job = jobs[slot] = self.thread_job(key)
+        make = self.thread_maker(job, key)
+        trials = [copy.deepcopy(sh) for sh in need]
+
+        def work():
+            try:
+                for s in trials:
+                    make(s)
+            except Exception:  # (Stopped; MemoryError: then() makes them the usual way, which tells about it)
+                pass
+            job["done"] = True
+
+        def check():
+            if jobs.get(slot) is not job:
+                return
+            if not job["done"]:
+                self.after(15, check)
+                return
+            del jobs[slot]
+            self.keep_job_notes(job)
+            then()
+        threading.Thread(target=work, daemon=True, name="notes").start()
+        self.after(15, check)
+
     def _count_check(self, job):
         if job is not self._counting:
             return
@@ -3776,13 +3836,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if job is not self._counting:
             return
         self._counting = None
-        cache = self._notes_cache
-        for k, v in job["own"].items():  # (the making after it finds them: made once)
-            cache[k] = shared_arrays(v, cache)
-            self._notes_used[k] = self.shapes_gen
-        self._notes_deps.update(job["deps"])
-        self._notes_top.update(job["top"])
-        self.trim_notes()
+        self.keep_job_notes(job)  # (the making after it finds them: made once)
         bg, self._bg_notes = self._bg_notes, False  # (the question's own clicks: nothing being made to wait for)
         try:
             ok = self.ask_notes(job["known"] + (job["n"] or 0))

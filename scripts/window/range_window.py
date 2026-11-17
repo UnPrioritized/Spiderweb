@@ -39,6 +39,7 @@ BAR_PX = 3  # bars at least this wide: more gates than fit share a bar
 
 
 class RangeGraph(PointGraph, tk.Toplevel):
+    notes_pass = True  # (its clicks / drags don't wait for notes made in the background: notes_wait.pass_window)
     def __init__(self, app, tgts=None):
         super().__init__(app)
         self.app = app
@@ -214,10 +215,40 @@ class RangeGraph(PointGraph, tk.Toplevel):
             t["range" if on else "range_kept"] = json.loads(json.dumps(m))
         self.app.shapes_changed()
         self.count = sum(self.app.note_count(t) or 0 for t in self.tgts if self.placed(t))
-        self.counts = self.spread()
+
+        def counted():  # (the chart from notes made in the background when not remembered: App.notes_soon)
+            if not self.winfo_exists():
+                return
+            self.counts = self.spread()
+            self.show_boxes()
+            self.draw_chart()
         self.show_boxes()
         self.draw()
-        self.draw_chart()
+        self.app.notes_soon(self.spread_shapes(), counted, "range")
+
+    def spread_shapes(self):
+        """The shapes whose notes spread reads (notes_of)."""
+        if not self.on_var.get():
+            return []
+        out = []
+        for t in self.tgts:
+            if not self.placed(t) or not t.get("range"):
+                continue
+            if self.funnel:
+                if t["fill"] == "spam" and t.get("cut"):
+                    out.append(t)
+            elif t.get("fill") in SPAM_FILLS:
+                out.append(self.bare(t))
+        return out
+
+    @staticmethod
+    def bare(t):
+        """t as spread counts it: without Strum / Claw / Trim pages (they move notes, not their gates)."""
+        bare = {k: v for k, v in t.items() if k != "fx"}
+        fx = [st for st in t.get("fx") or () if st["tool"] not in ("strum", "claw", "trim")]
+        if any(st["tool"] == "chop" for st in fx):
+            bare["fx"] = fx
+        return bare
 
     def spread(self):
         """How many notes get each gate from From to To (the first shape's; others' gates outside left out), or None
@@ -240,10 +271,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
                 continue
             if t.get("fill") not in SPAM_FILLS:
                 continue
-            bare = {k: v for k, v in t.items() if k != "fx"}
-            fx = [st for st in t.get("fx") or () if st["tool"] not in ("strum", "claw", "trim")]
-            if any(st["tool"] == "chop" for st in fx):
-                bare["fx"] = fx
+            bare = self.bare(t)
             notes = self.app.notes_of(bare)
             if not len(notes):
                 continue

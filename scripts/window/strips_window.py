@@ -228,7 +228,13 @@ class StripsWindow(tk.Toplevel):
         """The line saying how many strips the shapes are cut into now (Multi channel), or ""."""
         if self.app.channel_mode.get() != "auto":
             return ""
-        sizes = [strip_sizes(self.app.rendered, i) for i, on in zip(self.idx, self.ons) if on]
+        app = self.app
+        app.stale_ok += 1  # (notes still being made: the count from the ones on screen, shown again once they're in)
+        try:
+            rendered = app.rendered
+        finally:
+            app.stale_ok -= 1
+        sizes = [strip_sizes(rendered, i) for i, on in zip(self.idx, self.ons) if on]
         sizes = [s for s in sizes if len(s)]
         if not sizes:
             return ""

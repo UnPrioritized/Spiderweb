@@ -1411,18 +1411,23 @@ class TrackList(tk.Canvas):
             if tempo_at is None:  # (Cancel / refused: the whole paste taken back, notes too, hunt 2026-11-15)
                 self.request_redraw()
                 return
-        r = app.rendered
-        mine = np.isin(r[:, 5], new) if new and len(r) else np.zeros(len(r), bool)
-        rows = self.note_rows()[mine]
-        rows = rows[rows >= 0]
-        if not len(rows):
-            return
-        t0, t1 = int(r[mine, 0].min()) / app.ppq, int(r[mine, 1].max()) / app.ppq
-        lo = int(rows.min())
-        if tempo_at is not None:  # (the tempo came along: the box holds it too, so a drag / Delete takes both, hunt)
-            t0, t1, lo = min(t0, tempo_at), max(t1, tempo_at + clip["length"]), CONDUCTOR_ROW
-        self.boxes = [{"t0": t0, "t1": t1, "rows": (lo, int(rows.max()))}]
-        self.request_redraw()
+        shapes = [app.shapes[i] for i in new]
+
+        def boxed():  # (once the paste's notes are made: a big project's in the background, App.after_notes)
+            now = [i for i, sh in enumerate(app.shapes) if any(sh is s for s in shapes)]
+            r = app.rendered
+            mine = np.isin(r[:, 5], now) if now and len(r) else np.zeros(len(r), bool)
+            rows = self.note_rows()[mine]
+            rows = rows[rows >= 0]
+            if not len(rows):
+                return
+            t0, t1 = int(r[mine, 0].min()) / app.ppq, int(r[mine, 1].max()) / app.ppq
+            lo = int(rows.min())
+            if tempo_at is not None:  # (the tempo came along: the box holds it too, so a drag / Delete takes both)
+                t0, t1, lo = min(t0, tempo_at), max(t1, tempo_at + clip["length"]), CONDUCTOR_ROW
+            self.boxes = [{"t0": t0, "t1": t1, "rows": (lo, int(rows.max()))}]
+            self.request_redraw()
+        app.after_notes(boxed)
 
     def paste_tempo(self, clip):
         """The copied tempo (a Conductor row box's or the Conductor pane's) at the play line, one undo step; a box on
@@ -1936,8 +1941,7 @@ class TrackList(tk.Canvas):
                 self.muted = (self.muted - {(s, c)}) | {HAND + v}
         tidy_tracks(app)
         self.current = HAND + ids[0]
-        self.own_changed()
-        self.name_new(ids)
+        self.own_changed(then=lambda: self.name_new(ids))  # (named by their places with the new notes)
 
     # ------------------------------------------------------------ Split / Join (PLAN #11 D)
 
@@ -2260,7 +2264,7 @@ class TrackList(tk.Canvas):
             self.map_muted(mine_now)
             self.map_behind(mine_now)
             app.shapes_changed()  # (its shapes on the new tracks: the automatic tracks as they are after)
-            self.tracks()
+            app.after_notes(self.tracks)
         return taken, rows
 
     def take_tracks(self, autos, owners):
@@ -2528,13 +2532,19 @@ class TrackList(tk.Canvas):
         app.own_tracks = new
         self.own_changed()
 
-    def own_changed(self):
+    def own_changed(self, then=None):
         """The own tracks changed (set_own): the list, its picker and the notes again (a channel changed: the shapes
         drawn into the track take it; shapes_changed does the status line, title and autosave). The notes first:
-        the old ones may belong to shapes Remove Track just deleted."""
+        the old ones may belong to shapes Remove Track just deleted. The list once they're made (a big project:
+        made in the background, App.after_notes), then then()."""
         self.app.shapes_changed()
-        self.tracks()
-        self.shown_changed()
+
+        def listed():
+            self.tracks()
+            self.shown_changed()
+            if then is not None:
+                then()
+        self.app.after_notes(listed)
 
     def named(self, own=None, ids=None):
         """own (default: the app's) with the unnamed tracks of yours listed now named "Track n" by their place now
@@ -2578,18 +2588,19 @@ class TrackList(tk.Canvas):
                               app.file_rows(), port)
         app.own_next = max(ids) + 1
         app.own_tracks = new
-        self.own_changed()
-        self.name_new(ids)
-        self.current = HAND + ids[0]
-        self.shown_changed()
-        at = self.row_of_id(self.current)
-        if at is not None:  # (in view)
-            y = self.row_y(at)
-            h = self.winfo_height() - self.area()[1]
-            if y < self.top or y + self.row_h > self.top + h:
-                self.top = y - h // 2
-                self.clamp()
-                self.request_redraw()
+        def shown():  # (once the notes are made: named by their places, highlighted, scrolled into view)
+            self.name_new(ids)
+            self.current = HAND + ids[0]
+            self.shown_changed()
+            at = self.row_of_id(self.current)
+            if at is not None:  # (in view)
+                y = self.row_y(at)
+                h = self.winfo_height() - self.area()[1]
+                if y < self.top or y + self.row_h > self.top + h:
+                    self.top = y - h // 2
+                    self.clamp()
+                    self.request_redraw()
+        self.own_changed(then=shown)
 
     def ask_add(self, row):
         """Add Tracks…: one track per channel ticked in its window, after row."""
