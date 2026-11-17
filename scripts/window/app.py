@@ -3636,9 +3636,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 sh["fx"] = fx
             else:
                 sh.pop("fx", None)
-        after = sum(len(self.notes_of(sh)) for sh in shapes)
         self.shapes_changed()
-        self.status.config(text=tr("app.glued", notes=trn("n.notes", before, n=before), after=after))
+
+        def said():  # (counted once the notes are made: a big project's in the background, after_notes)
+            after = sum(len(self.notes_of(sh)) for sh in shapes)
+            self.status.config(text=tr("app.glued", notes=trn("n.notes", before, n=before), after=after))
+        self.after_notes(said)
 
     def unglue_selected(self):
         """Right-click → Remove glue: the selected shapes' notes as they were before any glue."""

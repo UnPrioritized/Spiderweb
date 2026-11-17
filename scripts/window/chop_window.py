@@ -492,15 +492,24 @@ class ChopWindow(ToolWindow):
             if self.info.cget("text"):
                 self.info.config(text="")
             return
-        # (as shown: the steps after the page being edited skipped meanwhile, stage C: never made whole here)
-        after = sum(len(app.notes_of(app.edit_view(app.shapes[i], i))) for i in self.targets if i < len(app.shapes))
-
         def page_input(i):  # (the shape's notes as this page gets them)
             sh = app.shapes[i]
             fx = sh.get("fx") or []
             k = len(fx) if self.at is None else self.at.get(i, len(fx))
             return before_page(sh, k)
-        plain = [app.notes_of(page_input(i)) for i in self.targets if i < len(app.shapes)]
+        # (as shown: the steps after the page being edited skipped meanwhile, stage C: never made whole here)
+        shown = [app.edit_view(app.shapes[i], i) for i in self.targets if i < len(app.shapes)]
+        ins = [page_input(i) for i in self.targets if i < len(app.shapes)]
+        need = [s for s in shown + ins if app.remembered_count(s) is None]
+        tried = tuple(app.notes_cache_key(s)[2] for s in need)
+        if need and getattr(self, "_count_tried", None) != tried:  # (made in the background first: the window
+            self._count_tried = tried                                 # answers meanwhile, App.notes_soon; once)
+            if self.info.cget("text") != tr("chop.counting"):
+                self.info.config(text=tr("chop.counting"), foreground=look.HINT)
+            app.notes_soon(shown + ins, lambda: self.winfo_exists() and self.show_count(), "chop")
+            return
+        after = sum(len(app.notes_of(s)) for s in shown)
+        plain = [app.notes_of(s) for s in ins]
         before = sum(len(n) for n in plain)
         cl = self.clean(self.cfg)
         stuck = any(too_many(n, cl, app.ppq) for n in plain)
