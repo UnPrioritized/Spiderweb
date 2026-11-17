@@ -773,49 +773,120 @@ fn lower(lv: &[f64], v: f64) -> usize {
     a
 }
 
+/// fastloops.ROWS_SPLIT_FROM: a key row with this many edges or more is split into groups lying side by side.
+const ROWS_SPLIT_FROM: usize = 64;
+
+/// fastloops._x_room: an edge's x room inside a row (lo..hi), widened a hair (shared corners count as touching).
+#[inline(always)]
+fn x_room(xa: f64, ya: f64, xb: f64, yb: f64, lo: f64, hi: f64) -> (f64, f64) {
+    let (mut a, mut b) = (pmin(xa, xb), pmax(xa, xb));
+    if ya != yb {
+        let (y0, y1) = (pmax(pmin(ya, yb), lo), pmin(pmax(ya, yb), hi));
+        let u0 = xa + (xb - xa) * (y0 - ya) / (yb - ya);
+        let u1 = xa + (xb - xa) * (y1 - ya) / (yb - ya);
+        a = pmin(u0, u1);
+        b = pmax(u0, u1);
+    }
+    (a - 1e-9 * pmax(1.0, a.abs()), b + 1e-9 * pmax(1.0, b.abs()))
+}
+
 /// fastloops.rows_fill (custom.rows_spans: closed loops' inside on key rows q0..q1 in ticks) -> (row, start, end).
+/// A row with many edges is first split into groups side by side whose crossings add up to "outside" (each cut only
+/// at its own corners: a row of 2400 bent squares cut every edge at every square's corners, 23 M pieces); a split
+/// that isn't exactly the same (edges crossing inside a gap, loops not closed) -> the whole call the old way.
 pub fn rows_fill(xa: &[f64], ya: &[f64], xb: &[f64], yb: &[f64], q0: i64, q1: i64, ppq: i64, wind: bool) -> Outs {
     let ne = xa.len();
     if ya.len() != ne || xb.len() != ne || yb.len() != ne {
         return Err(FAILED);
     }
-    let empty = || -> Outs { Ok(vec![Out::I64(Vec::new(), 0), Out::I64(Vec::new(), 0), Out::I64(Vec::new(), 0)]) };
     if q1 < q0 || ne == 0 {
-        return empty();
+        return Ok(vec![Out::I64(Vec::new(), 0), Out::I64(Vec::new(), 0), Out::I64(Vec::new(), 0)]);
     }
-    let nr = (q1 - q0 + 1) as usize;
-    let (q0f, q1f) = (q0 as f64, q1 as f64);
-    let (mut r0, mut r1): (Vec<i64>, Vec<i64>) = (zeros(ne)?, zeros(ne)?);
-    let mut roff: Vec<usize> = zeros(nr + 1)?;
-    for e in 0..ne {
-        let (mn, mx) = (pmin(ya[e], yb[e]), pmax(ya[e], yb[e]));
-        let a = pmax(first_row(mn, true), q0f);
-        let b = pmin(first_row(mx, false), q1f);
-        if !(a.is_finite() && b.is_finite()) {
-            return Err(FAILED);
-        }
-        r0[e] = a as i64;
-        r1[e] = b as i64;
-        for q in r0[e]..=r1[e] {
-            roff[(q - q0) as usize + 1] += 1;
-        }
+    if let Some(got) = rows_fill_by(xa, ya, xb, yb, q0, q1, ppq, wind, true)? {
+        return Ok(got);
     }
+    rows_fill_by(xa, ya, xb, yb, q0, q1, ppq, wind, false)?.ok_or(FAILED)
+}
+
+/// fastloops._rows_slots: the slots of rows with many edges split into groups side by side (rows_fill).
+#[inline(never)]
+fn rows_slots(xa: &[f64], ya: &[f64], xb: &[f64], yb: &[f64], q0: i64, nr: usize, wind: bool, rows_e: &[usize],
+              roff: &[usize], big: usize, row_split: &mut [bool]) -> Result<(Vec<usize>, Vec<usize>, Vec<usize>), i64> {
+    let ents = roff[nr];
+    let (mut slot_e, mut soff, mut slot_row): (Vec<usize>, Vec<usize>, Vec<usize>) =
+        (zeros(ents)?, room(ents + nr + 1)?, room(ents + nr)?);
+    let (mut rlo, mut rhi, mut cross): (Vec<f64>, Vec<f64>, Vec<i64>) = (zeros(big)?, zeros(big)?, zeros(big)?);
+    let (mut order, mut grp, mut cnt): (Vec<usize>, Vec<usize>, Vec<usize>) = (zeros(big)?, zeros(big)?, zeros(big + 1)?);
+    soff.push(0);
+    let mut w = 0usize;
     for i in 0..nr {
-        roff[i + 1] += roff[i];
-    }
-    if roff[nr] == 0 {
-        return empty();
-    }
-    let mut at: Vec<usize> = copied(&roff[..nr])?;
-    let mut rows_e: Vec<usize> = zeros(roff[nr])?;
-    for e in 0..ne {
-        for q in r0[e]..=r1[e] {
-            let i = (q - q0) as usize;
-            rows_e[at[i]] = e;
-            at[i] += 1;
+        let row = &rows_e[roff[i]..roff[i + 1]];
+        let n = row.len();
+        let mut groups = 1usize;
+        if n >= ROWS_SPLIT_FROM {
+            let (lo, hi, mid) = ((q0 + i as i64) as f64 - 0.5, (q0 + i as i64) as f64 + 0.5, (q0 + i as i64) as f64);
+            let mut fine = true;
+            for k in 0..n {
+                let e = row[k];
+                let (a, b) = x_room(xa[e], ya[e], xb[e], yb[e], lo, hi);
+                fine &= a.is_finite() && b.is_finite();
+                rlo[k] = a;
+                rhi[k] = b;
+                cross[k] = if (ya[e] <= mid) != (yb[e] <= mid) { if wind && yb[e] < ya[e] { -1 } else { 1 } } else { 0 };
+                order[k] = k;
+            }
+            if fine {
+                let o = &mut order[..n];
+                o.sort_unstable_by(|p, q| np_cmp(rlo[*p], rlo[*q]).then(p.cmp(q)));
+                let (mut acc, mut reach, mut g) = (0i64, f64::NEG_INFINITY, 0usize);
+                for &k in o.iter() {
+                    if rlo[k] > reach && (if wind { acc == 0 } else { acc % 2 == 0 }) && reach > f64::NEG_INFINITY {
+                        g += 1;
+                    }
+                    acc += cross[k];
+                    reach = pmax(reach, rhi[k]);
+                    grp[k] = g;
+                }
+                let closed = if wind { acc == 0 } else { acc % 2 == 0 };
+                if closed {
+                    groups = g + 1;
+                }
+            }
         }
+        if groups == 1 {
+            slot_e[w..w + n].copy_from_slice(row);
+            w += n;
+            soff.push(w);
+            slot_row.push(i);
+            continue;
+        }
+        row_split[i] = true;
+        for c in cnt[..groups + 1].iter_mut() {
+            *c = 0;
+        }
+        for k in 0..n {
+            cnt[grp[k] + 1] += 1;
+        }
+        for g in 0..groups {
+            cnt[g + 1] += cnt[g];
+        }
+        for k in 0..n {
+            slot_e[w + cnt[grp[k]]] = row[k];
+            cnt[grp[k]] += 1;
+        }
+        for g in 0..groups {
+            soff.push(w + cnt[g]);
+            slot_row.push(i);
+        }
+        w += n;
     }
-    // each row's levels: its bottom and top and every corner strictly between
+    Ok((slot_e, soff, slot_row))
+}
+
+/// Each row's levels (offsets, values): its bottom and top and every corner strictly between (no row split).
+fn row_levels(ya: &[f64], yb: &[f64], q0: i64, nr: usize) -> Result<(Vec<usize>, Vec<f64>), i64> {
+    let q0f = q0 as f64;
+    let q1f = q0f + nr as f64 - 1.0;
     let row_of = |v: f64| -> Option<usize> {
         let vq = (v + 0.5).floor();
         for d in [-1.0, 0.0, 1.0] {
@@ -851,6 +922,99 @@ pub fn rows_fill(xa: &[f64], ya: &[f64], xb: &[f64], yb: &[f64], q0: i64, q1: i6
             at[i] += 1;
         }
     }
+    Ok((loff, lv))
+}
+
+/// Each slot's levels (offsets, values): its row's bottom and top and every corner of its edges strictly between.
+fn slot_levels(ya: &[f64], yb: &[f64], q0: i64, slot_e: &[usize], soff: &[usize], slot_row: &[usize])
+               -> Result<(Vec<usize>, Vec<f64>), i64> {
+    let ns = slot_row.len();
+    let mut loff: Vec<usize> = zeros(ns + 1)?;
+    for s in 0..ns {
+        let (lo, hi) = ((q0 + slot_row[s] as i64) as f64 - 0.5, (q0 + slot_row[s] as i64) as f64 + 0.5);
+        let mut c = 2;
+        for &e in &slot_e[soff[s]..soff[s + 1]] {
+            c += (ya[e] > lo && ya[e] < hi) as usize + (yb[e] > lo && yb[e] < hi) as usize;
+        }
+        loff[s + 1] = loff[s] + c;
+    }
+    let mut lv: Vec<f64> = zeros(loff[ns])?;
+    for s in 0..ns {
+        let (lo, hi) = ((q0 + slot_row[s] as i64) as f64 - 0.5, (q0 + slot_row[s] as i64) as f64 + 0.5);
+        let mut at = loff[s];
+        lv[at] = lo;
+        lv[at + 1] = hi;
+        at += 2;
+        for &e in &slot_e[soff[s]..soff[s + 1]] {
+            for v in [ya[e], yb[e]] {
+                if v > lo && v < hi {
+                    lv[at] = v;
+                    at += 1;
+                }
+            }
+        }
+    }
+    Ok((loff, lv))
+}
+
+/// rows_fill, rows with many edges split (split) or not; None = a split row wasn't exactly the same.
+fn rows_fill_by(xa: &[f64], ya: &[f64], xb: &[f64], yb: &[f64], q0: i64, q1: i64, ppq: i64, wind: bool, split: bool)
+                -> Result<Option<Vec<Out>>, i64> {
+    let ne = xa.len();
+    let empty = || -> Result<Option<Vec<Out>>, i64> {
+        Ok(Some(vec![Out::I64(Vec::new(), 0), Out::I64(Vec::new(), 0), Out::I64(Vec::new(), 0)]))
+    };
+    let nr = (q1 - q0 + 1) as usize;
+    let (q0f, q1f) = (q0 as f64, q1 as f64);
+    let (mut r0, mut r1): (Vec<i64>, Vec<i64>) = (zeros(ne)?, zeros(ne)?);
+    let mut roff: Vec<usize> = zeros(nr + 1)?;
+    for e in 0..ne {
+        let (mn, mx) = (pmin(ya[e], yb[e]), pmax(ya[e], yb[e]));
+        let a = pmax(first_row(mn, true), q0f);
+        let b = pmin(first_row(mx, false), q1f);
+        if !(a.is_finite() && b.is_finite()) {
+            return Err(FAILED);
+        }
+        r0[e] = a as i64;
+        r1[e] = b as i64;
+        for q in r0[e]..=r1[e] {
+            roff[(q - q0) as usize + 1] += 1;
+        }
+    }
+    for i in 0..nr {
+        roff[i + 1] += roff[i];
+    }
+    if roff[nr] == 0 {
+        return empty();
+    }
+    let mut at: Vec<usize> = copied(&roff[..nr])?;
+    let mut rows_e: Vec<usize> = zeros(roff[nr])?;
+    for e in 0..ne {
+        for q in r0[e]..=r1[e] {
+            let i = (q - q0) as usize;
+            rows_e[at[i]] = e;
+            at[i] += 1;
+        }
+    }
+    // SLOTS: each row's edges (in the edges' order) as one slot, or, a row with many edges, groups side by side:
+    // edges whose x room touches go together, and groups are joined until the crossings of the row's middle line
+    // so far add up to outside (closed loops: then the same in every gap of the row)
+    let mut row_split: Vec<bool> = filled(nr, false)?;
+    let most = (0..nr).map(|i| roff[i + 1] - roff[i]).max().unwrap_or(0);
+    let big = if split && most >= ROWS_SPLIT_FROM { most } else { 0 };
+    let (slot_e, soff, slot_row) = if big == 0 {
+        let mut one: Vec<usize> = zeros(nr)?;
+        for (i, v) in one.iter_mut().enumerate() {
+            *v = i;
+        }
+        (rows_e, roff, one)
+    } else {
+        rows_slots(xa, ya, xb, yb, q0, nr, wind, &rows_e, &roff, big, &mut row_split)?
+    };
+    let ns = slot_row.len();
+    let (loff, lv) = if big == 0 { row_levels(ya, yb, q0, nr)? } else { slot_levels(ya, yb, q0, &slot_e, &soff, &slot_row)? };
+    let nr = ns; // (from here on, "rows" are slots)
+    let mut lv = lv;
     let mut lcnt: Vec<usize> = zeros(nr)?;
     for i in 0..nr {
         let seg = &mut lv[loff[i]..loff[i + 1]];
@@ -871,15 +1035,15 @@ pub fn rows_fill(xa: &[f64], ya: &[f64], xb: &[f64], yb: &[f64], q0: i64, q1: i6
     let ng = gstart[nr];
     let mut gn: Vec<usize> = zeros(ng + 1)?;
     let span_of = |i: usize, e: usize, lv: &[f64]| -> (usize, usize) {
-        let (lo, hi) = ((q0 + i as i64) as f64 - 0.5, (q0 + i as i64) as f64 + 0.5);
+        let (lo, hi) = ((q0 + slot_row[i] as i64) as f64 - 0.5, (q0 + slot_row[i] as i64) as f64 + 0.5);
         let levels = &lv[loff[i]..loff[i] + lcnt[i]];
         let (mn, mx) = (pmin(ya[e], yb[e]), pmax(ya[e], yb[e]));
         (lower(levels, pmax(mn, lo)), lower(levels, pmin(mx, hi)))
     };
     let mut total = 0usize;
     for i in 0..nr {
-        for x in roff[i]..roff[i + 1] {
-            let (f, l) = span_of(i, rows_e[x], &lv);
+        for x in soff[i]..soff[i + 1] {
+            let (f, l) = span_of(i, slot_e[x], &lv);
             for g in f..l {
                 gn[gstart[i] + g + 1] += 1;
                 total += 1;
@@ -897,15 +1061,15 @@ pub fn rows_fill(xa: &[f64], ya: &[f64], xb: &[f64], yb: &[f64], q0: i64, q1: i6
     let mut pairs: Vec<(usize, f64, f64, i64, f64, usize)> = filled(total, (0, 0.0, 0.0, 0, 0.0, 0))?;
     for i in 0..nr {
         let s = loff[i];
-        for x in roff[i]..roff[i + 1] {
-            let e = rows_e[x];
+        for x in soff[i]..soff[i + 1] {
+            let e = slot_e[x];
             let (f, l) = span_of(i, e, &lv);
             for g in f..l {
                 let p = at[gstart[i] + g];
                 let (y0, y1) = (lv[s + g], lv[s + g + 1]);
                 let mid = (y0 + y1) / 2.0;
                 let xm = xa[e] + (xb[e] - xa[e]) * (mid - ya[e]) / (yb[e] - ya[e]);
-                pairs[p] = (e, y0, y1, q0 + i as i64, xm, p);
+                pairs[p] = (e, y0, y1, q0 + slot_row[i] as i64, xm, p);
                 at[gstart[i] + g] += 1;
             }
         }
@@ -920,6 +1084,9 @@ pub fn rows_fill(xa: &[f64], ya: &[f64], xb: &[f64], yb: &[f64], q0: i64, q1: i6
         let u1 = xa[e] + (xb[e] - xa[e]) * (y1 - ya[e]) / (yb[e] - ya[e]);
         left[p] = pmin(u0, u1);
         right[p] = pmax(u0, u1);
+    }
+    if row_split.iter().any(|&b| b) && !split_same(&pairs, &gn, &gstart, &slot_row, &row_split, xa, ya, xb, yb, wind) {
+        return Ok(None);
     }
     // (a, b, row, place) pieces
     let mut pieces: Vec<(f64, f64, i64, usize)> = room(total)?;
@@ -1006,7 +1173,61 @@ pub fn rows_fill(xa: &[f64], ya: &[f64], xb: &[f64], yb: &[f64], q0: i64, q1: i6
     oq.truncate(no);
     os.truncate(no);
     ot.truncate(no);
-    Ok(vec![Out::I64(oq, 0), Out::I64(os, 0), Out::I64(ot, 0)])
+    Ok(Some(vec![Out::I64(oq, 0), Out::I64(os, 0), Out::I64(ot, 0)]))
+}
+
+/// Edge k's x at height y: its own corner exactly at a corner's height (the sum can miss it by a last digit, and two
+/// edges meeting at a tip would look crossed), else rows_fill's sum.
+#[inline(always)]
+fn edge_x(xa: &[f64], ya: &[f64], xb: &[f64], yb: &[f64], k: usize, y: f64) -> f64 {
+    if y == ya[k] {
+        xa[k]
+    } else if y == yb[k] {
+        xb[k]
+    } else {
+        xa[k] + (xb[k] - xa[k]) * (y - ya[k]) / (yb[k] - ya[k])
+    }
+}
+
+/// fastloops._split_same: whether split rows give exactly what the whole row would: in every gap of a split row
+/// the edges keep their order from bottom to top (none cross inside it) and the crossings add up to outside (nonzero:
+/// in every gap of every row, else the old way's "n-th in with n-th out" could pair across gaps).
+#[inline(never)]
+fn split_same(pairs: &[(usize, f64, f64, i64, f64, usize)], gn: &[usize], gstart: &[usize], slot_row: &[usize],
+              row_split: &[bool], xa: &[f64], ya: &[f64], xb: &[f64], yb: &[f64], wind: bool) -> bool {
+    for i in 0..slot_row.len() {
+        let cut = row_split[slot_row[i]];
+        if !cut && !wind {
+            continue;
+        }
+        for g in gstart[i]..gstart[i + 1] {
+            let (s, t) = (gn[g], gn[g + 1]);
+            if wind {
+                let mut run = 0i64;
+                for p in s..t {
+                    let e = pairs[p].0;
+                    run += if yb[e] > ya[e] { 1 } else { -1 };
+                }
+                if run != 0 {
+                    return false;
+                }
+            } else if (t - s) % 2 != 0 {
+                return false;
+            }
+            if !cut {
+                continue;
+            }
+            for p in s..t.saturating_sub(1) {
+                let (e, y0, y1, _, _, _) = pairs[p];
+                let f = pairs[p + 1].0;
+                if !(edge_x(xa, ya, xb, yb, e, y0) <= edge_x(xa, ya, xb, yb, f, y0))
+                    || !(edge_x(xa, ya, xb, yb, e, y1) <= edge_x(xa, ya, xb, yb, f, y1)) {
+                    return false;
+                }
+            }
+        }
+    }
+    true
 }
 
 /// fastloops.cut_rows (custom.cut_out after its merged_by_key) -> how many pieces in out (room: len(s) + len(ok)).

@@ -3470,15 +3470,86 @@ def _lower(lv, s, t, v):
     return a - s
 
 
+ROWS_SPLIT_FROM = 64  # (rows_fill: a key row with this many edges or more is split into groups lying side by side)
+
+
+@njit(nogil=True)
+def _x_room(xa, ya, xb, yb, lo, hi):
+    """An edge's x room inside a row (lo..hi), widened a hair (shared corners count as touching)."""
+    a, b = min(xa, xb), max(xa, xb)
+    if ya != yb:
+        y0, y1 = max(min(ya, yb), lo), min(max(ya, yb), hi)
+        u0 = xa + (xb - xa) * (y0 - ya) / (yb - ya)
+        u1 = xa + (xb - xa) * (y1 - ya) / (yb - ya)
+        a, b = min(u0, u1), max(u0, u1)
+    return a - 1e-9 * max(1.0, abs(a)), b + 1e-9 * max(1.0, abs(b))
+
+
+@njit(nogil=True)
+def _split_same(pe, py0, py1, gn, gstart, slot_row, row_split, xa, ya, xb, yb, wind):
+    """Whether split rows give exactly what the whole row would: in every gap of a split row the edges keep their
+    order from bottom to top (none cross inside it) and the crossings add up to outside (nonzero: in every gap of
+    every row, else the old way's "n-th in with n-th out" could pair across gaps)."""
+    for i in range(len(slot_row)):
+        cut = row_split[slot_row[i]]
+        if not cut and not wind:
+            continue
+        for g in range(gstart[i], gstart[i + 1]):
+            s, t = gn[g], gn[g + 1]
+            if wind:
+                run = 0
+                for p in range(s, t):
+                    e = pe[p]
+                    run += 1 if yb[e] > ya[e] else -1
+                if run != 0:
+                    return False
+            elif (t - s) % 2 != 0:
+                return False
+            if not cut:
+                continue
+            for p in range(s, t - 1):
+                e, f, y0, y1 = pe[p], pe[p + 1], py0[p], py1[p]
+                if not _edge_x(xa, ya, xb, yb, e, y0) <= _edge_x(xa, ya, xb, yb, f, y0):
+                    return False
+                if not _edge_x(xa, ya, xb, yb, e, y1) <= _edge_x(xa, ya, xb, yb, f, y1):
+                    return False
+    return True
+
+
+@njit(nogil=True)
+def _edge_x(xa, ya, xb, yb, k, y):
+    """Edge k's x at height y: its own corner exactly at a corner's height (the sum can miss it by a last digit, and
+    two edges meeting at a tip would look crossed), else rows_fill's sum."""
+    if y == ya[k]:
+        return xa[k]
+    if y == yb[k]:
+        return xb[k]
+    return xa[k] + (xb[k] - xa[k]) * (y - ya[k]) / (yb[k] - ya[k])
+
+
 @njit(nogil=True)
 def rows_fill(xa, ya, xb, yb, q0, q1, ppq, wind):
     """custom.rows_spans (the inside of closed loops' edges, none level, on key rows q0..q1 in ticks; wind = nonzero,
-    else even-odd): the same sums in the same order. -> (row, start, end) arrays."""
+    else even-odd): the same sums in the same order. -> (row, start, end) arrays. A row with many edges is first
+    split into groups side by side whose crossings add up to "outside" (each cut only at its own corners: a row of
+    2400 bent squares cut every edge at every square's corners, 23 M pieces); a split that isn't exactly the same
+    (edges crossing inside a gap, loops not closed) -> the whole call the old way."""
+    ok, oq, os_, ot = _rows_fill_by(xa, ya, xb, yb, q0, q1, ppq, wind, True)
+    if ok:
+        return oq, os_, ot
+    ok, oq, os_, ot = _rows_fill_by(xa, ya, xb, yb, q0, q1, ppq, wind, False)
+    return oq, os_, ot
+
+
+@njit(nogil=True)
+def _rows_fill_by(xa, ya, xb, yb, q0, q1, ppq, wind, split):
+    """rows_fill, rows with many edges split (split) or not -> (False, ...) when a split row wasn't exactly the
+    same."""
     ne = len(xa)
     nr = q1 - q0 + 1
     z = np.zeros(0, np.int64)
     if nr <= 0 or ne == 0:
-        return z, z.copy(), z.copy()
+        return True, z, z.copy(), z.copy()
     r0 = np.empty(ne, np.int64)
     r1 = np.empty(ne, np.int64)
     roff = np.zeros(nr + 1, np.int64)
@@ -3492,41 +3563,98 @@ def rows_fill(xa, ya, xb, yb, q0, q1, ppq, wind):
     for i in range(nr):
         roff[i + 1] += roff[i]
     if roff[nr] == 0:
-        return z, z.copy(), z.copy()
+        return True, z, z.copy(), z.copy()
     at = roff[:nr].copy()
     rows_e = np.empty(roff[nr], np.int64)  # (each row's edges, in the edges' order)
     for e in range(ne):
         for q in range(r0[e], r1[e] + 1):
             rows_e[at[q - q0]] = e
             at[q - q0] += 1
-    loff = np.zeros(nr + 1, np.int64)  # (each row's levels: its bottom and top and every corner between)
+    # SLOTS: each row's edges (in the edges' order) as one slot, or, a row with many edges, groups side by side:
+    # edges whose x room touches go together, and groups are joined until the crossings of the row's middle line
+    # so far add up to outside (closed loops: then the same in every gap of the row)
+    ents = roff[nr]
+    slot_e = np.empty(ents, np.int64)
+    soff = np.zeros(ents + nr + 1, np.int64)
+    slot_row = np.empty(ents + nr, np.int64)
+    row_split = np.zeros(nr, np.bool_)
+    most = 0
     for i in range(nr):
-        loff[i + 1] = 2
-    for side in range(2):
-        for e in range(ne):
-            v = ya[e] if side == 0 else yb[e]
-            vq = math.floor(v + 0.5)
-            for d in range(-1, 2):
-                q = vq + d
-                if v > q - 0.5 and v < q + 0.5 and q >= q0 and q <= q1:
-                    loff[int(q) - q0 + 1] += 1
+        most = max(most, roff[i + 1] - roff[i])
+    big = most if split and most >= ROWS_SPLIT_FROM else 0
+    rlo, rhi, cross = np.empty(big), np.empty(big), np.empty(big, np.int64)
+    grp, cnt = np.empty(big, np.int64), np.empty(big + 1, np.int64)
+    ns = 0
+    w = 0
     for i in range(nr):
-        loff[i + 1] += loff[i]
-    lv = np.empty(loff[nr])
-    at = loff[:nr].copy()
-    for i in range(nr):
-        lv[at[i]], lv[at[i] + 1] = (q0 + i) - 0.5, (q0 + i) + 0.5
-        at[i] += 2
-    for side in range(2):
-        for e in range(ne):
-            v = ya[e] if side == 0 else yb[e]
-            vq = math.floor(v + 0.5)
-            for d in range(-1, 2):
-                q = vq + d
-                if v > q - 0.5 and v < q + 0.5 and q >= q0 and q <= q1:
-                    i = int(q) - q0
-                    lv[at[i]] = v
-                    at[i] += 1
+        n = roff[i + 1] - roff[i]
+        groups = 1
+        if split and n >= ROWS_SPLIT_FROM:
+            lo, hi, mid = (q0 + i) - 0.5, (q0 + i) + 0.5, float(q0 + i)
+            fine = True
+            for k in range(n):
+                e = rows_e[roff[i] + k]
+                a, b = _x_room(xa[e], ya[e], xb[e], yb[e], lo, hi)
+                fine = fine and math.isfinite(a) and math.isfinite(b)
+                rlo[k], rhi[k] = a, b
+                cross[k] = 0
+                if (ya[e] <= mid) != (yb[e] <= mid):
+                    cross[k] = -1 if wind and yb[e] < ya[e] else 1
+            if fine:
+                order = np.argsort(rlo[:n], kind="mergesort")
+                acc, reach, g = 0, -math.inf, 0
+                for k in order:
+                    if rlo[k] > reach and (acc == 0 if wind else acc % 2 == 0) and reach > -math.inf:
+                        g += 1
+                    acc += cross[k]
+                    reach = max(reach, rhi[k])
+                    grp[k] = g
+                if acc == 0 if wind else acc % 2 == 0:
+                    groups = g + 1
+        if groups == 1:
+            slot_e[w:w + n] = rows_e[roff[i]:roff[i + 1]]
+            w += n
+            soff[ns + 1] = w
+            slot_row[ns] = i
+            ns += 1
+            continue
+        row_split[i] = True
+        cnt[:groups + 1] = 0
+        for k in range(n):
+            cnt[grp[k] + 1] += 1
+        for g in range(groups):
+            cnt[g + 1] += cnt[g]
+        for k in range(n):
+            slot_e[w + cnt[grp[k]]] = rows_e[roff[i] + k]
+            cnt[grp[k]] += 1
+        for g in range(groups):
+            soff[ns + 1] = w + cnt[g]
+            slot_row[ns] = i
+            ns += 1
+        w += n
+    loff = np.zeros(ns + 1, np.int64)  # (each slot's levels: its row's bottom and top and its corners between)
+    for i in range(ns):
+        lo, hi = (q0 + slot_row[i]) - 0.5, (q0 + slot_row[i]) + 0.5
+        c = 2
+        for x in range(soff[i], soff[i + 1]):
+            e = slot_e[x]
+            c += (1 if lo < ya[e] < hi else 0) + (1 if lo < yb[e] < hi else 0)
+        loff[i + 1] = loff[i] + c
+    lv = np.empty(loff[ns])
+    for i in range(ns):
+        lo, hi = (q0 + slot_row[i]) - 0.5, (q0 + slot_row[i]) + 0.5
+        at_ = loff[i]
+        lv[at_], lv[at_ + 1] = lo, hi
+        at_ += 2
+        for x in range(soff[i], soff[i + 1]):
+            e = slot_e[x]
+            if lo < ya[e] < hi:
+                lv[at_] = ya[e]
+                at_ += 1
+            if lo < yb[e] < hi:
+                lv[at_] = yb[e]
+                at_ += 1
+    nr = ns  # (from here on, "rows" are slots)
     lcnt = np.empty(nr, np.int64)
     for i in range(nr):  # (sorted, each value once)
         s, t = loff[i], loff[i + 1]
@@ -3543,10 +3671,10 @@ def rows_fill(xa, ya, xb, yb, q0, q1, ppq, wind):
     gn = np.zeros(gstart[nr] + 1, np.int64)
     total = 0
     for i in range(nr):
-        lo, hi = (q0 + i) - 0.5, (q0 + i) + 0.5
+        lo, hi = (q0 + slot_row[i]) - 0.5, (q0 + slot_row[i]) + 0.5
         s = loff[i]
-        for x in range(roff[i], roff[i + 1]):
-            e = rows_e[x]
+        for x in range(soff[i], soff[i + 1]):
+            e = slot_e[x]
             mn, mx = min(ya[e], yb[e]), max(ya[e], yb[e])
             f = _lower(lv, s, s + lcnt[i], max(mn, lo))
             l = _lower(lv, s, s + lcnt[i], min(mx, hi))
@@ -3554,7 +3682,7 @@ def rows_fill(xa, ya, xb, yb, q0, q1, ppq, wind):
                 gn[gstart[i] + g + 1] += 1
                 total += 1
     if total == 0:
-        return z, z.copy(), z.copy()
+        return True, z, z.copy(), z.copy()
     ng = gstart[nr]
     for g in range(ng):
         gn[g + 1] += gn[g]
@@ -3564,16 +3692,16 @@ def rows_fill(xa, ya, xb, yb, q0, q1, ppq, wind):
     py1 = np.empty(total)
     prow = np.empty(total, np.int64)
     for i in range(nr):
-        lo, hi = (q0 + i) - 0.5, (q0 + i) + 0.5
+        lo, hi = (q0 + slot_row[i]) - 0.5, (q0 + slot_row[i]) + 0.5
         s = loff[i]
-        for x in range(roff[i], roff[i + 1]):
-            e = rows_e[x]
+        for x in range(soff[i], soff[i + 1]):
+            e = slot_e[x]
             mn, mx = min(ya[e], yb[e]), max(ya[e], yb[e])
             f = _lower(lv, s, s + lcnt[i], max(mn, lo))
             l = _lower(lv, s, s + lcnt[i], min(mx, hi))
             for g in range(f, l):
                 p = at[gstart[i] + g]
-                pe[p], py0[p], py1[p], prow[p] = e, lv[s + g], lv[s + g + 1], q0 + i
+                pe[p], py0[p], py1[p], prow[p] = e, lv[s + g], lv[s + g + 1], q0 + slot_row[i]
                 at[gstart[i] + g] += 1
     left = np.empty(total)
     right = np.empty(total)
@@ -3596,6 +3724,8 @@ def rows_fill(xa, ya, xb, yb, q0, q1, ppq, wind):
         u1 = xa[e] + (xb[e] - xa[e]) * (y1 - ya[e]) / (yb[e] - ya[e])
         left[p], right[p] = min(u0, u1), max(u0, u1)
         sgn[p] = 1 if yb[e] > ya[e] else -1
+    if row_split.any() and not _split_same(pe, py0, py1, gn, gstart, slot_row[:ns], row_split, xa, ya, xb, yb, wind):
+        return False, z, z.copy(), z.copy()
     pa = np.empty(total)
     pb = np.empty(total)
     pq = np.empty(total, np.int64)
@@ -3618,7 +3748,7 @@ def rows_fill(xa, ya, xb, yb, q0, q1, ppq, wind):
         wind = ni == no_
         if wind:
             if ni == 0:
-                return z, z.copy(), z.copy()
+                return True, z, z.copy(), z.copy()
             for x in range(ni):
                 pa[m], pb[m], pq[m] = left[ins[x]], right[outs[x]], prow[ins[x]]
                 m += 1
@@ -3628,7 +3758,7 @@ def rows_fill(xa, ya, xb, yb, q0, q1, ppq, wind):
                 pa[m], pb[m], pq[m] = left[p], right[p + 1], prow[p]
                 m += 1
         if m == 0:
-            return z, z.copy(), z.copy()
+            return True, z, z.copy(), z.copy()
     oq = np.empty(m, np.int64)
     os_ = np.empty(m, np.int64)
     ot = np.empty(m, np.int64)
@@ -3661,7 +3791,7 @@ def rows_fill(xa, ya, xb, yb, q0, q1, ppq, wind):
                 w += 1
         no = w
         s = t
-    return oq[:no].copy(), os_[:no].copy(), ot[:no].copy()
+    return True, oq[:no].copy(), os_[:no].copy(), ot[:no].copy()
 
 
 @njit(nogil=True)
