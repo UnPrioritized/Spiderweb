@@ -833,6 +833,10 @@ class RollDrawing:
         ring = box_notes(app)
         boxed = getattr(app, "_box_notes", None) if ring is not None else None
         carried = self.carried()
+        if carried is not None and carried[:2] == (0, 0) and carried[2] is False and not (
+                self.drag and self.drag[0] == "move"):
+            carried = None  # (made in the background, nothing moved: the picture on screen goes on as it is, ring
+            # and all; user 2026-11-18: building the old notes' layer took 60-110 ms on huge shapes)
         # (notes made in the background after an edit: the usual painting, the selected shapes' notes left out
         # and carried along on top as a see-through picture; scrolling moves the picture as usual)
         self._hide_sels = carried is not None and not (self.drag and self.drag[0] == "move")
