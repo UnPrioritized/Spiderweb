@@ -533,6 +533,16 @@ class LiquifyBend(StirBend):
         self.worst = 0.0
         self.st = {"ripple": 0.0, "ripple_len": 100.0}
 
+    @classmethod
+    def from_map(cls, A):
+        """A bender for a Shape map A alone (its own units, Strength taken in), for looking back through it (the
+        freeze tint: liquify.shown_mask): _from / _go only."""
+        b = cls.__new__(cls)
+        b.A = np.ascontiguousarray(A, np.float64)
+        b.span, b.S = (0.0, 0.0, 1.0, 1.0), np.ones(2)
+        b._cells = None
+        return b
+
     @staticmethod
     def offsets(lq):
         """The farthest a spot moves each way, in the colour box's units, and how far the map reaches past the box."""

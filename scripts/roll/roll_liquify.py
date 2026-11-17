@@ -450,7 +450,12 @@ class LiquifyBrush:
                         job["reach"] = self.liquify_reach(job["sh"], job["made"], job["span"])
                 if mask:                                     # can't be made past MOST_GRID)
                     m = job["m"] if job["m"] is not None else np.zeros(job["a"].shape[:2])
-                    job["m"] = lq.mask_dab(m, c, rj, J, pressure, density, freeze=tool == "freeze")
+                    if job.get("shape"):  # (Shape: frozen where the outline SHOWS, so a pushed part stays frozen)
+                        job["m"] = lq.mask_dab_fwd(m, job["a"], c, rj, J, pressure, density, freeze=tool == "freeze",
+                                                   strength=job.get("strength", 100.0),
+                                                   scale=lq.map_scale(job["span"]))
+                    else:
+                        job["m"] = lq.mask_dab(m, c, rj, J, pressure, density, freeze=tool == "freeze")
                     st["masked"] = True
                 elif job.get("shape"):  # (Shape: "where each point goes", in place, in the map's own units: only
                     # the points under the brush written, so a grown map's others keep their very numbers)
@@ -580,6 +585,9 @@ class LiquifyBrush:
             else:
                 sh.pop("recolour", None)
         if notes:
+            st = getattr(self, "lq", None)
+            if st is not None:  # (a Shape map moved: the freeze tint drawn again where the points show now)
+                st["map_n"] = st.get("map_n", 0) + 1
             self.app.colour_edit_set(("liquify", 0))  # (the steps after it skipped while brushed: PLAN.md stage C)
             self.app.shapes_changed(now=now)
         else:
@@ -991,9 +999,12 @@ class LiquifyBrush:
         view = (self.sx, self.sy, self.view_t, self.view_top, self.kb_w, self.ruler_h, W, H)
         for sh in self.app.recolour_targets():
             job = stroke.get(id(sh))
+            fwd = None  # (Shape: the tint drawn where the outline's frozen points SHOW: (map, Strength), hunt 11-17)
             if job is not None:
                 m, made, span = job["m"], job["made"], job.get("span", lq.SPAN)
-                mark = ("stroke", st.get("mask_n", 0), span)
+                if job.get("shape") and job["a"].any():
+                    fwd = (job["a"], job.get("strength", 100.0))
+                mark = ("stroke", st.get("mask_n", 0), span, st.get("map_n", 0) if fwd else 0)
             else:
                 g = (clean_recolour(sh.get("recolour")) or {}).get("liquify")
                 m = lq.mask_of(g)
@@ -1003,13 +1014,17 @@ class LiquifyBrush:
                 old = kept.get(id(sh))
                 # (its notes' box: looked up again only after a change of the shapes (a whole note pass on a big one))
                 made = old[2] if old and old[3] == self.app.shapes_gen else self.stir_made(sh, "liquify")
-                mark = (sh["recolour"]["liquify"]["frozen"], span)
+                shows = g.get("moves") == "shape" and g.get("map") and g.get("on") is not False
+                if shows:
+                    fwd = (lq.map_of(g), lq.full(g)["strength"])
+                mark = (sh["recolour"]["liquify"]["frozen"], span, g.get("map") if shows else None,
+                        g.get("strength") if shows else None)
             if m is None or made is None:
                 continue
             key = (id(made[1]), mark, view)
             got = kept.get(id(sh))
             if got is None or got[0] != key:
-                got = (key, self.liquify_mask_pic(made, m, W, H, span))
+                got = (key, self.liquify_mask_pic(made, m, W, H, span, fwd))
             got = got[:2] + (made, self.app.shapes_gen)
             self._lq_masks[id(sh)] = got
             if got[1]:
@@ -1018,9 +1033,10 @@ class LiquifyBrush:
         self.tag_raise("lqmask")
         self.tag_raise("lqbrush")
 
-    def liquify_mask_pic(self, made, m, W, H, span=lq.SPAN):
+    def liquify_mask_pic(self, made, m, W, H, span=lq.SPAN, fwd=None):
         """(picture, x, y) of the red tint of mask m over a shape on screen, or None (nothing frozen in view). span:
-        where the map lies (grown past the box: the tint reaches there too)."""
+        where the map lies (grown past the box: the tint reaches there too). fwd = (Shape map, Strength): the tint
+        where the frozen points show now (liquify.shown_mask)."""
         from roll.tiles import see_through
         if span == lq.SPAN:
             x0, y0, x1, y1 = self.liquify_box(made)
@@ -1047,7 +1063,10 @@ class LiquifyBrush:
         u = u0[0] + J[0][0] * i + J[0][1] * j
         v = u0[1] + J[1][0] * i + J[1][1] * j
         inside = (u >= 0) & (u <= 1) & (v >= 0) & (v <= 1)
-        val = lq.sample(m[..., None], u, v)[..., 0] * inside
+        if fwd is not None:
+            val = lq.shown_mask(m, fwd[0], u, v, fwd[1], lq.map_scale(span)) * inside
+        else:
+            val = lq.sample(m[..., None], u, v)[..., 0] * inside
         if not (val > 1 / 255).any():
             return None
         rgba = np.empty((ny, nx, 4), np.uint8)

@@ -63,9 +63,13 @@ def decode(grid, text):
     except (ValueError, zlib.error, UnicodeEncodeError):
         return None
     gx, gy = grid
-    if len(raw) != gx * gy * 4:
+    if len(raw) == gx * gy * 4:
+        kind = "<i2"
+    elif len(raw) == gx * gy * 8:  # (a wide map: encode(wide=True), Shape Liquifys)
+        kind = "<i4"
+    else:
         return None
-    a = np.frombuffer(raw, "<i2").astype(np.float64).reshape(gy, gx, 2) / SCALE
+    a = np.frombuffer(raw, kind).astype(np.float64).reshape(gy, gx, 2) / SCALE
     a.setflags(write=False)
     if len(_DECODED) > 16:
         _DECODED.pop(next(iter(_DECODED)))
@@ -73,17 +77,24 @@ def decode(grid, text):
     return a
 
 
-def _steps(a):
-    """A map in whole 1 / SCALE steps, as saved (MOST_PUSH boxes at most: int16)."""
-    return np.clip(np.rint(np.asarray(a, np.float64) * SCALE), -32767, 32767)
+WIDE_MOST = 2 ** 31 - 1  # (a wide map's steps: MOST_PUSH_WIDE boxes)
+MOST_PUSH_WIDE = WIDE_MOST / SCALE
 
 
-def encode(a, level=6):
+def _steps(a, wide=False):
+    """A map in whole 1 / SCALE steps, as saved (MOST_PUSH boxes at most: int16; wide: int32)."""
+    top = WIDE_MOST if wide else 32767
+    return np.clip(np.rint(np.asarray(a, np.float64) * SCALE), -top, top)
+
+
+def encode(a, level=6, wide=False):
     """A map array (up, across, 2) -> its text (rounded to 1 / SCALE, at most MOST_PUSH boxes). level = zlib's
     (1 while a stroke goes on: a big map's text made every update, user 2026-11-17 "restore is stuttery"). The
-    array it stands for is kept for decode (no unpacking it straight back)."""
-    st = _steps(a)
-    text = base64.b64encode(zlib.compress(st.astype("<i2").tobytes(), level)).decode("ascii")
+    array it stands for is kept for decode (no unpacking it straight back). wide: int32 steps (Shape maps: they
+    keep the moves divided by Strength, so 10 % stopped a push at 0.8 box; hunt 2026-11-17). decode tells the two
+    apart by length."""
+    st = _steps(a, wide)
+    text = base64.b64encode(zlib.compress(st.astype("<i4" if wide else "<i2").tobytes(), level)).decode("ascii")
     got = st / SCALE
     got.setflags(write=False)
     if len(_DECODED) > 16:
@@ -144,7 +155,7 @@ def with_arrays(lq, a, m, level=6):
     keep = {k: v for k, v in (lq or {}).items() if k not in ("grid", "map", "frozen")}
     out = dict(keep, grid=[a.shape[1], a.shape[0]])
     if np.rint(a * SCALE).any():
-        out["map"] = encode(a, level)
+        out["map"] = encode(a, level, wide=keep.get("moves") == "shape" and keep.get("forward") is True)
     if m is not None and mask_steps(m).any():
         out["frozen"] = encode_mask(m)
     return clean_liquify(out)
@@ -1054,6 +1065,13 @@ def blend(x, y, f):
     if not x and not y:
         return None
     near = (x if f < 0.5 else y) or x or y
+    if x and y and (x.get("moves") == "shape") != (y.get("moves") == "shape"):
+        # (a Shape map says where points GO, a Colours one where colours come FROM: never mixed. The end of the
+        # other kind counts as nothing pushed, so its bends fade out; hunt 2026-11-17)
+        if near is x:
+            y = None
+        else:
+            x = None
     if x and y and span_of(x) != span_of(y):  # (maps grown differently past the box: the nearer end's, whole)
         return near
     g = near["grid"]
@@ -1382,6 +1400,39 @@ def dab_fwd(a, tool, c, r, J, pressure=50.0, density=50.0, vec=(0.0, 0.0), turn=
         a[j[on], i[on], 0] = ((NX - px) / s * S[0])[on]
         a[j[on], i[on], 1] = ((NY - py) / s * S[1])[on]
     return done()
+
+
+def mask_dab_fwd(m, a, c, r, J, pressure=50.0, density=50.0, freeze=True, strength=100.0, scale=None):
+    """mask_dab for a Shape map a: the freeze mask m (one value per grid point: it belongs to the outline's own
+    points) painted on the points SHOWING under the brush, so a pushed-out part is frozen where you see it and the
+    tint follows it (hunt 2026-11-17: the mask stayed where things were drawn). A new array."""
+    m = np.array(m, np.float64)
+    J = np.asarray(J, np.float64)
+    try:
+        Ji = np.linalg.inv(J)
+    except np.linalg.LinAlgError:
+        return m
+    S = np.ones(2) if scale is None else np.asarray(scale, np.float64)
+    s = strength / 100.0 if strength > 1e-6 else 1.0
+    j, i, d = _fwd_points(a, c, r, J, Ji, s, S)
+    if not len(j):
+        return m
+    k = weight(d / max(r, 1e-9), density) * min(max(pressure / 100.0, 0.0), 1.0)
+    old = m[j, i]
+    m[j, i] = old + (1.0 - old) * k if freeze else old * (1.0 - k)
+    return m
+
+
+def shown_mask(m, a, u, v, strength=100.0, scale=None):
+    """The freeze mask m of a Shape map a as it SHOWS at spots (u, v) of the map's own 0..1: each spot takes the
+    mask of the point bent there (looked back through the map, shape_bend.LiquifyBend.from_map)."""
+    from notes.shape_bend import LiquifyBend
+    S = np.ones(2) if scale is None else np.asarray(scale, np.float64)
+    s = strength / 100.0 if strength > 1e-6 else 1.0
+    b = LiquifyBend.from_map(np.asarray(a, np.float64) / S * s)
+    shape = np.shape(u)
+    x, y = b._from(np.ravel(np.asarray(u, np.float64)), np.ravel(np.asarray(v, np.float64)))
+    return sample(np.asarray(m, np.float64)[..., None], x, y)[..., 0].reshape(shape)
 
 
 def straight(a, b, spacing):
