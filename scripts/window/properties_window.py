@@ -14,6 +14,7 @@ user leaves it: PLAN.md stage C, App.colour_edit). Add ▾ opens the existing to
 import copy
 import importlib
 import threading
+import time
 import tkinter as tk
 import weakref
 from tkinter import ttk
@@ -1062,6 +1063,10 @@ class PropertiesWindow(tk.Toplevel):
             return
         if self.blank(key):
             return
+        if app._grid_finish:  # (a sizing typed just before still being worked out: put on first, this one after it)
+            typed = self.vars[key].get()
+            app._grid_finish()
+            self.vars[key].set(typed)  # (putting it on showed the boxes again: the number just typed stays)
         t_lo, p_lo, p_hi = app.point_limits()
         lo_hi = {"start": (t_lo, 10 ** 9), "low": (p_lo, p_hi), "length": (1, 10 ** 9)}.get(key, (p_lo, p_hi))
         v = self.number_in(key, *lo_hi)
@@ -1121,14 +1126,37 @@ class PropertiesWindow(tk.Toplevel):
             except Exception:  # (made the usual way below, which tells about it)
                 pass
 
+        def settle():
+            """The sizing put on (when the shapes are still as they were), then the notes made as after an edit (a
+            click / key / undo / newer typed number waiting for it: App.finish_notes makes them at once)."""
+            if app._grid_finish is not finish:
+                return
+            app._grid_finish = None
+            if (self.winfo_exists() and all(any(s is sh for s in app.shapes) for sh, _ in changes)
+                    and [shape_key(sh) for sh, _ in changes] == was):
+                put_on(got["news"] if "news" in got else news_of())
+            else:
+                app.shapes_changed()  # (the waiting "Making notes…" ends as after any edit)
+
         def check():
+            if app._grid_finish is not finish:
+                return
             if worker.is_alive():
                 self.after(15, check)
                 return
-            if not self.winfo_exists() or [shape_key(sh) for sh, _ in changes] != was:
-                return
-            put_on(got["news"] if "news" in got else news_of())
+            settle()
+
+        def finish():
+            worker.join()
+            settle()
         worker = threading.Thread(target=work, daemon=True, name="notes")
+        app._grid_finish = finish  # (clicks / Ctrl+Z / the next typed number wait for it: the newest one wins)
+        if not app._bg_notes:  # (the "Making notes…" box from the Enter on, as after an edit)
+            app._bg_since = time.perf_counter()
+            app.after(160, app.roll.request_redraw)
+        app.notes_late = app._bg_notes = True
+        from window import notes_wait
+        app._bg_serial = notes_wait.last_event  # (the Enter's other bindings don't wait for it)
         worker.start()
         self.after(15, check)
 

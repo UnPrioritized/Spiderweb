@@ -3212,8 +3212,13 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 done[("keep", id(arr))] = keep
             return got
 
+        drawn_all = self.drawn_all
         for name in ("rendered", "drawn", "drawn_all", "pattern"):
             setattr(self, name, moved(getattr(self, name)))
+        kept = done.get(("keep", id(drawn_all)))
+        slots = self.drawn_slots
+        if kept is not None and len(slots) == len(kept) and not kept.all():
+            self.drawn_slots = slots[kept]  # (each note left keeps its real track: track_view below)
         for name in ("off_all", "off_masked"):
             if getattr(self, name, None) is not None:
                 setattr(self, name, moved(getattr(self, name)))
@@ -3251,6 +3256,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             start = got[1]
             at = np.cumsum(keep) - 1
             self.roll._start_order = (new, at[start[keep[start]]])
+        self.track_view()  # (the one-track view, hidden shapes' lines and the kept notes past the keys: the new list's)
         if len(new):
             chans = np.bincount(self.slot_pairs()[0], minlength=len(shapes)).tolist()
         else:
@@ -3260,15 +3266,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def finish_notes(self):
         """Notes still being made in the background (shapes_changed): waited for and taken in now (a "lots of notes"
-        count still going: finished and asked first, count_done)."""
+        count still going: finished and asked first, count_done; False = that question was answered No)."""
+        said = None
         if self._counting:
             self._counting["thread"].join()
-            self.count_done(self._counting)
+            said = self.count_done(self._counting)
         if self._grid_finish:  # (a resize's snap being worked out: put on first, roll.grid_soon)
             self._grid_finish()
         if self._bg_notes:
             self._bg_notes = False
             self.shapes_changed(now=True)
+        return said
 
     def shape_edited(self, moving=False):
         """The selected shape was changed with the mouse (moving: just dragged to another place)."""
@@ -3813,7 +3821,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def count_later(self, shapes, known, back):
         """confirm_big's count of shapes made in a background thread (their notes kept for the making after it)."""
         key = (None, self.ppq, self.keys)
-        job = self.thread_job(key, known=known, n=None, back=back, undo=len(self.undo_stack))
+        job = self.thread_job(key, known=known, n=None, back=back, undo=self.last_step())  # (No: steps above it)
         make = self.thread_maker(job, key)
         trials = [copy.deepcopy(sh) for sh in shapes]
 
@@ -3884,9 +3892,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def count_done(self, job):
         """The background count is in: its notes remembered, asked if too many (No = the change taken back), then
-        the notes held back are made."""
+        the notes held back are made. False = said No (the click / key that waited for it does nothing more)."""
         if job is not self._counting:
-            return
+            return None
         self._counting = None
         self.keep_job_notes(job)  # (the making after it finds them: made once)
         bg, self._bg_notes = self._bg_notes, False  # (the question's own clicks: nothing being made to wait for)
@@ -3898,13 +3906,23 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if job["back"] is not None:
                 job["back"]()
             else:
-                steps = max(0, len(self.undo_stack) - job["undo"])
+                steps = self.steps_since(job["undo"])
                 for _ in range(steps):
                     self.undo_roll()
                 del self.redo_stack[len(self.redo_stack) - steps:]  # (never redone: it was said No to)
         if self._bg_notes and not self._coming:
             self._make_coming(True)
             self.roll.request_redraw()
+        return ok
+
+    def steps_since(self, mark):
+        """How many undo steps came after the step `mark` (None: before any). Counted by the step itself, not the
+        History's length: a full History (300 steps) drops its oldest one at each new step."""
+        stack = self.undo_stack
+        for i in range(len(stack) - 1, -1, -1):
+            if stack[i] is mark:
+                return len(stack) - 1 - i
+        return len(stack) if mark is None else 0  # (mark gone: undone already, nothing of the change left)
 
     def ask_notes(self, n):
         """True = go ahead making n notes (asked past big_ask.BIG)."""

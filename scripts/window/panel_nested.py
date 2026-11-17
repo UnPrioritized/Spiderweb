@@ -228,6 +228,7 @@ class NestedPanel:
         placed = [t for t in tgts if t is not self.custom_defaults]
         if self.scrubbing is True and placed:  # (a box's label dragged: asked once at the let go, scrub_let_go;
             self._scrub_ask = placed            # counting at every step made the whole fill each time, 480 steps)
+            self.scrub_before(placed)
         else:
             tries = [copy.deepcopy(t) for t in placed]
             for t in tries:
@@ -246,15 +247,56 @@ class NestedPanel:
         """A number box's label let go (widgets.Scrub.release): a Nested / Ripples box dragged asks "lots of notes"
         now, once (user 2026-11-16: dragging Steps got slower the higher it went); No = the whole drag taken back."""
         shapes, self._scrub_ask = getattr(self, "_scrub_ask", None), None
+        before, self._scrub_was = getattr(self, "_scrub_was", None), None
+        if before is None or before[0] is not gesture:
+            before = (gesture, [])
+        after = [(t, copy.deepcopy(t.get("nested")), t.get("fill")) for t, _, _ in before[1]]
 
         def back():
-            self.take_back_scrub(gesture)
+            sc = self._scrub
+            if sc and sc["gesture"] is gesture and sc.get("at") == len(self.undo_stack):
+                self.take_back_scrub(gesture)
+            else:  # (another change came after it, e.g. a tick clicked during the count: only the drag's own values)
+                self.put_back_drag(before[1], after)
             self.shapes_changed(now=True)
             self.sync_custom()
         if shapes and not self.confirm_big(shapes, back=back):
             back()
         elif self.count_owed and not self._bg_notes:  # (the panel's count waited for the let go: counted now)
             self.sync_custom()
+
+    def scrub_before(self, placed):
+        """The dragged targets' Nested settings + Notes before the label drag (scrub_let_go's No puts back only
+        these when another change came after the drag)."""
+        held = self.held_scrub
+        gesture = held.drag["gesture"] if held is not None and getattr(held, "drag", None) else None
+        if gesture is None:
+            return
+        was = getattr(self, "_scrub_was", None)
+        if was is None or was[0] is not gesture:
+            was = self._scrub_was = (gesture, [])
+        for t in placed:
+            if not any(t is k for k, _, _ in was[1]):
+                was[1].append((t, copy.deepcopy(t.get("nested")), t.get("fill")))
+
+    def put_back_drag(self, before, after):
+        """A label drag's own changes taken back (its settings that still have the dragged value), as a step."""
+        live = [(t, nb, fb, na, fa) for (t, nb, fb), (_, na, fa) in zip(before, after)
+                if any(t is s for s in self.shapes)]
+        if not live:
+            return
+        self.push_undo(name=NESTED_UNDO)
+        for t, nb, fb, na, fa in live:
+            nb, na, now = nb or {}, na or {}, t.get("nested")
+            if now is not None:
+                for k in set(nb) | set(na):
+                    if nb.get(k) != na.get(k) and now.get(k) == na.get(k):
+                        if k in nb:
+                            now[k] = copy.deepcopy(nb[k])
+                        else:
+                            now.pop(k, None)
+            if fb != fa and t.get("fill") == fa:
+                t["fill"] = fb
 
     def colours_most(self):
         """The most colours a Nested / Ripples / Tiles fill's Colours box takes: 16 with "Use channel 10"."""

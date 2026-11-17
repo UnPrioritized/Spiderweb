@@ -157,7 +157,9 @@ def _call_sorted(self, *args):
         if how == WAIT:
             if waits is not None:
                 waits.append(("input", repr(args[0]) if self.subst and args else repr(func)))
-            _finish(app)
+            if _finish(app) is False and (not self.subst or _key(args[0])):
+                return "break"  # (a key / button that raised "lots of notes" and got No: done, e.g. Ctrl+Z won't
+                # undo another step after the change was taken back)
         if timer:
             return func(*args)
         _depth += 1
@@ -173,6 +175,10 @@ def _call_sorted(self, *args):
         raise
     except:  # noqa: E722 (as tkinter's own)
         self.widget._report_exception()
+
+
+def _key(e):
+    return str(getattr(e, "type", "")) in ("2", "KeyPress")
 
 
 def view_widget(app, w):
