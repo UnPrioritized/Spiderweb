@@ -425,7 +425,7 @@ class WarpGrid:
             wp = self.warp_mirror_handles(wp_.smooth_point(wp, k), k, None, *self.warp_mirror(g))
         if wp.get("on") is False:
             wp["on"] = True
-        self.warp_apply({"sh": g["sh"], "g": dict(g, wp=wp)}, now=True)
+        self.warp_apply({"sh": g["sh"], "g": dict(g, wp=wp)}, now="late")  # (made in the background on a big project)
         self.app.sync_recolour()
         self.app.schedule_autosave()
         self.redraw()
@@ -617,7 +617,7 @@ class WarpGrid:
         if wp_.clean_warp(wp) is None:  # (nothing left moved, even lines: the Warp goes; a flat grid that size)
             w = self.app.warp_window
             w.cols, w.rows = wp_.size(f)
-        self.warp_apply(st, now=True)
+        self.warp_apply(st, now="late")  # (made in the background on a big project)
         self.app.sync_recolour()
         self.app.schedule_autosave()
         self.redraw()
@@ -932,7 +932,7 @@ class WarpGrid:
         if wp.get("on") is False:
             wp["on"] = True
         st = {"sh": g["sh"], "g": dict(g, P=P, wp=wp)}
-        self.warp_apply(st, now=True)
+        self.warp_apply(st, now="late")  # (made in the background on a big project)
         self.app.sync_recolour()
         self.app.schedule_autosave()
         self.redraw()
@@ -1271,7 +1271,7 @@ class WarpGrid:
                 sh.pop("recolour", None)
             from window.history import undo_state
             self.app.drop_empty_step(undo_state(self.app.shapes))
-            self.app.shapes_changed(now=True)
+            self.app.shapes_changed(now="late")  # (made in the background on a big project)
             self.app.sync_recolour()
             self.redraw()
         self.draw_warp_grid()
