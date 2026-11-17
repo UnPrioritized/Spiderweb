@@ -8,7 +8,7 @@ import math
 import numpy as np
 
 from notes.bezier import anchor_count, fit, handle_anchor, sample
-from notes.custom import chop, row_spans, spam_gate
+from notes.custom import chop, row_spans_all, spam_gate
 from notes.gaterange import clean_range, y_gate
 from notes.hzbass import heard_layers
 from notes.paths import EDGE, pitch_of, top_key
@@ -554,8 +554,10 @@ def funnel_key_spans(sh, main=True):
             if s:
                 pieces.setdefault(q, []).append(s)
     for poly in funnel_polys(sh, main and sh.get("wall") == "past"):
-        for q in _keys([p for _, p in poly]):
-            pieces.setdefault(q, []).extend(tuple(s) for s in row_spans([poly], q))
+        keys = _keys([p for _, p in poly])
+        got = row_spans_all([poly], keys.start, keys.stop - 1)  # (every row at once: the same as row_spans)
+        for q in keys:
+            pieces.setdefault(q, []).extend(tuple(s) for s in got.get(q, ()))
     out = {}
     for q, spans in pieces.items():
         merged = []

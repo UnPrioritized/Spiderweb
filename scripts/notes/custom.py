@@ -1234,6 +1234,39 @@ def row_spans(polys, q, edges=None):
     return merge_spans(left[pair], right[pair + 1])
 
 
+def row_spans_all(polys, q0, q1):
+    """{q: row_spans(polys, q)} for rows q0..q1 at once (rows without any left out): the same sums in the same
+    order, so exactly the same beats (a funnel with 100 curves spent 0.65 s calling row_spans row by row)."""
+    xa, ya, xb, yb = poly_edges(polys)
+    if q1 < q0 or not len(xa):
+        return {}
+    got = rows_gaps(xa, ya, xb, yb, q0, q1)
+    if got is None:
+        return {}
+    e, gap, y0, y1, mid, lv_row = got
+    xa, ya, xb, yb = xa[e], ya[e], xb[e], yb[e]
+
+    def x_at(y):
+        return xa + (xb - xa) * (y - ya) / (yb - ya)
+
+    order = np.lexsort((x_at(mid), gap))  # in each gap from left to right (the same spot: in the edges' order)
+    gap = gap[order]
+    left, right = np.minimum(x_at(y0), x_at(y1))[order], np.maximum(x_at(y0), x_at(y1))[order]
+    new = np.ones(len(gap), bool)
+    new[1:] = gap[1:] != gap[:-1]
+    at = np.arange(len(gap))
+    rank = at - np.maximum.accumulate(np.where(new, at, 0))
+    pair = np.flatnonzero((rank % 2 == 0) & np.append(~new[1:], False))  # the 1st with the 2nd, the 3rd with ...
+    a, b, q = left[pair], right[pair + 1], lv_row[gap[pair]]
+    o = np.argsort(q, kind="stable")
+    a, b, q = a[o], b[o], q[o]
+    cut = np.flatnonzero(np.r_[True, q[1:] != q[:-1], True])
+    out = {}
+    for i, j in zip(cut[:-1].tolist(), cut[1:].tolist()):
+        out[int(q[i])] = [[float(a[i]), float(b[i])]] if j - i == 1 else merge_spans(a[i:j], b[i:j])
+    return out
+
+
 def rows_spans(edges, q0, q1, ppq, wind=False):
     """[(pitch, start tick, end tick)] of rows q0..q1: row_spans for every row at once (the same sums, so exactly
     the same notes; row by row was most of a Nested fill's time), in ticks like find_spans. wind: filled where the
