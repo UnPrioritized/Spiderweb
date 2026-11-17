@@ -2510,7 +2510,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         compares it by identity). as_mode: the list that channels mode would show (not kept: fit_into asks what Multi
         channel shows, for a Domino paste)."""
         own, mode = self.own_tracks, as_mode or self.channel_mode.get()
-        if not any(t.get("auto") for t in own):
+        # (asked at every track list look-up: walking 2,000 tracks each time made a track drag 10x slower; the list
+        # is replaced on every change, never edited in place, so its answer is kept with it)
+        had = getattr(self, "_own_auto", None)
+        if had is None or had[0] is not own:
+            had = self._own_auto = (own, any(t.get("auto") for t in own))
+        if not had[1]:
             return own
         chans = self.own_channels()
         # (a Domino paste: as in Multi channel in every mode, its gap tracks too; user 2026-11-01)

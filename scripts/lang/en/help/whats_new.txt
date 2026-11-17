@@ -33,6 +33,7 @@ What's new:
 • Faster: editing while a track is soloed or muted in a project with many tracks. With 256 tracks and one soloed, each change took up to several seconds; now it's instant.
 • Faster: the Hz bass window with many slides. Moving the mouse, scrolling and dragging notes are several times quicker on a long Hz bass.
 • Faster: funnels with many curves. Their notes are made about 5 times quicker after each change.
+• Faster: the track list with many tracks you added yourself. Dragging tracks and other track list actions are up to 10 times quicker with thousands of them.
 • Faster: undo and redo while tracks are muted. With hundreds of muted tracks each step took seconds; now it's about ten times quicker.
 • Faster: the velocity pane on big projects. Drawing a velocity line, scrolling and zooming over millions of notes is up to 8 times quicker.
 
