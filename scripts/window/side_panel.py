@@ -79,6 +79,7 @@ class ScrollingSide:
         g.bind("<ButtonRelease-1>", self.grip_release)
         g.bind("<Double-Button-1>", self.grip_double)
         c = self.side_canvas = tk.Canvas(box, highlightthickness=0, bd=0, bg=bg)
+        c.notes_pass = True  # (its clicks / keys don't wait for notes made in the background: notes_wait.pass_window)
         self.side_bar = ttk.Scrollbar(box, orient="vertical", command=c.yview)
         c.configure(yscrollcommand=self.side_bar.set)
         c.pack(side="left", fill="both", expand=True)

@@ -47,6 +47,7 @@ def put(name, value):
 
 
 class LiquifyWindow(tk.Toplevel):
+    notes_pass = True  # (its clicks / keys don't wait for notes made in the background: notes_wait.pass_window)
     def __init__(self, app):
         super().__init__(app)
         self.withdraw()

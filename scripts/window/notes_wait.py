@@ -192,7 +192,7 @@ def pass_window(w):
     """w is inside a window marked notes_pass (the note tool windows): its clicks / keys only change settings and
     start new notes (which stops the ones being made), so they run at once; whatever reads the notes still waits
     for them (late_attr)."""
-    for _ in range(12):
+    for _ in range(30):
         if w is None or isinstance(w, str):
             return False
         if getattr(w, "notes_pass", False):
