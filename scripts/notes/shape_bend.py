@@ -1045,8 +1045,17 @@ def edge_from_rows(made, tracks, line, most=1, stretch=True):
     qt = tr[pi] if tr is not None else None
     q[:, 0] = np.maximum(q[:, 0], sp_a[si])
     q[:, 1] = np.minimum(q[:, 1], sp_b[si])
-    if not stretch:
-        return _by_start(q, qt)
+    if not stretch:  # (a note the outline trims below half its own length: dropped, no slivers at the edge; user
+        # 2026-11-17 after trying the clip alone)
+        # (+ a row's first / last note shorter than half a usual note of the shape (the median: Spam's gate) dropped,
+        # pieces the bend cut short at the edge too; inside they stay, they're the bend's own cuts)
+        L = q[:, 1] - q[:, 0]
+        keep = 2 * L >= made[pi, 1] - made[pi, 0]
+        if len(q):
+            least = int(np.median(made[:, 1] - made[:, 0])) // 2
+            end = np.r_[True, si[1:] != si[:-1]] | np.r_[si[1:] != si[:-1], True]
+            keep &= ~end | (L >= least)
+        return _by_start(q[keep], qt[keep] if qt is not None else None)
     if len(q):
         fs = np.r_[True, si[1:] != si[:-1]]
         lst = np.r_[si[1:] != si[:-1], True]
@@ -1115,13 +1124,18 @@ def _edge_from_rows_plain(made, tracks, line, most=1, stretch=True):
         ends = np.maximum.reduceat(line[a0:a1, 1], np.flatnonzero(new))
         for a, b in zip(starts.tolist(), ends.tolist()):
             hit = np.flatnonzero((P[:, 1] > a) & (P[:, 0] < b))
-            if not stretch:  # (only clipped)
+            if not stretch:  # (only clipped; trimmed below half its length = dropped)
                 q = P[hit].copy()
                 q[:, 0] = np.maximum(q[:, 0], a)
                 q[:, 1] = np.minimum(q[:, 1], b)
-                outs.append(q)
+                L = q[:, 1] - q[:, 0]
+                keep = 2 * L >= P[hit, 1] - P[hit, 0]
+                if len(q):  # (the span's first / last note: at least half a usual note, as edge_from_rows)
+                    least = int(np.median(made[:, 1] - made[:, 0])) // 2
+                    keep[[0, -1]] &= L[[0, -1]] >= least
+                outs.append(q[keep])
                 if T is not None:
-                    trs.append(T[hit])
+                    trs.append(T[hit][keep])
                 continue
             if not len(hit):
                 j = int(np.argmin(np.abs((P[:, 0] + P[:, 1]) / 2 - (a + b) / 2)))
