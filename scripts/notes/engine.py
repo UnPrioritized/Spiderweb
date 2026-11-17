@@ -1486,15 +1486,21 @@ def shape_tabs_done(sh, ppq, keys, get):
         for b in benders[1:]:
             ok = ok | b.within(t, k)
         return ok
-    from notes.shape_bend import AS_NOTES, Folded, note_boxes_bent
+    from notes.shape_bend import AS_NOTES, Folded, StirBend, note_boxes_bent
     as_notes = "notes" in base and "picture" not in base and "picture_notes" not in base
     # (CUT NOTES WHERE BENT, user 2026-11-17, a tick per Shape step, on by default: a drawn shape's notes made unbent,
     # then bent + cut like pasted notes. Steps before the first ticked one bend the outline (notes laid in it), the
     # ticked one and every later one bend + cut those notes)
     chops = [st.get("chop", True) for st in tabs] + [x.get("chop", True) for x in (wp, lq) if x is not None]
     first = next((i for i, c in enumerate(chops) if c), None)
+    # (notes cut where bent are boxes half a key past their row each way: the Stir tabs measure in that box, so a
+    # Turn of 90 maps the notes onto themselves exactly (user 2026-11-17: the turned square stuck out half a key's
+    # worth of ticks and lost its top row). The Warp grid / Liquify brush stay on the box as drawn)
+    cell = (box[0], box[1], box[2] - 0.5, box[3] + 0.5), (own[0], own[1], own[2] - 0.5, own[3] + 0.5)
+    note_benders = [StirBend(st, rule, cell[0], cell[1], ppq) for st in tabs] + benders[len(tabs):]
     if as_notes or first == 0:
         got = AS_NOTES
+        benders = note_benders  # (look / within / bend_tk below read it)
     elif first is None:
         got = bent_shape(out, tabs, rule, box, own, ppq, wp, lq)
     else:
@@ -1504,8 +1510,9 @@ def shape_tabs_done(sh, ppq, keys, get):
         got = bent_shape(out, lead_tabs, rule, box, own, ppq, lead_wp, lead_lq)
         if got is None or got == PULL:  # (the outline can't take the steps before: every step cuts)
             got = AS_NOTES
+            benders = note_benders
         else:
-            return _chopped_after(got, base, notes, before, benders[:first], benders[first:], box, ppq, keys, get,
+            return _chopped_after(got, base, notes, before, benders[:first], note_benders[first:], box, ppq, keys, get,
                                   any(st["bend_colours"] for st in lead_tabs)
                                   or (lead_wp is not None and lead_wp.get("bend_colours", True))
                                   or (lead_lq is not None and lead_lq.get("bend_colours", True)), out)

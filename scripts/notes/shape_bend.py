@@ -896,7 +896,9 @@ def _note_boxes_bent(notes, tracks, bend_tk, ppq):
         bt, bk = bend_tk(np.concatenate((s, m, e)), np.concatenate((k, k, k)))
         dt = bt[n:2 * n] - (bt[:n] + bt[2 * n:]) / 2
         dk = bk[n:2 * n] - (bk[:n] + bk[2 * n:]) / 2
-        cut = ((np.abs(dk) > CHOP_KEYS) | (np.abs(dt) > tol_t)) & (e - s >= 2) & (depth < CHOP_DEPTH)
+        # (never halved below CHOP_PART of a beat: a very strong Twist cut a square into millions of 1-tick slivers,
+        # 2-3 s a change; user 2026-11-17. A piece that short is bent as a straight-sided box)
+        cut = ((np.abs(dk) > CHOP_KEYS) | (np.abs(dt) > tol_t)) & (e - s >= 2 * tol_t) & (depth < CHOP_DEPTH)
         keep = ~cut
         done.append((src[keep], s[keep], e[keep]))
         src = np.concatenate((src[cut], src[cut]))
