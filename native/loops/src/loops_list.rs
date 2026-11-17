@@ -101,6 +101,11 @@ py_loops! {
     cut_rows(s: &[i64], e: &[i64], k: &[i64], ok: &[i64], os: &[i64], oe: &[i64], out: NdMut<i64, 2>)
              => crate::fills::cut_rows;
     box_rows(xs: &[f64], ys: &[f64], lo: &[i64], cnt: &[i64], out: NdMut<i64, 2>) => crate::fills::box_rows;
+    edge_rows(ms: &[i64], me: &[i64], mr: &[i64], run: &mut [i64], full: &[i64], sp_row: &[i64], sp_a: &[i64],
+              sp_b: &[i64], most: i64, least: i64, stretch: bool, n_in: &mut [i64], out: NdMut<i64, 2>)
+              => crate::fills::edge_rows;
+    sliver_hosts(s: &mut [i64], e: &mut [i64], r: &[i64], fp: &[i64], most: i64, g: &mut [i64], gf: &mut [i64],
+                 h: &mut [i64], keep: &mut [i64]) => crate::fills::sliver_hosts;
     warp_bend(p: Nd<f64, 3>, kind: i64, lx: &[f64], ly: &[f64], x: &[f64], y: &[f64], ox: &mut [f64],
               oy: &mut [f64], many: bool) => crate::recolour::warp_bend;
     short_pieces(bs: &[i64], be: &[i64], bk: &[i64], rs: &[i64], re: &[i64], rk: &[i64], rd: &[i64], least: i64)

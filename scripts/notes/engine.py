@@ -1541,7 +1541,7 @@ def shape_tabs_done(sh, ppq, keys, get):
             if got == PULL or any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
                 raise Folded
             if not as_notes and first is not None:  # (a drawn shape cut where bent: its edge from the bent outline)
-                made, tracks, full = note_boxes_bent(made, tracks, bend_tk, ppq, look, lengths=True)
+                made, tracks, full = note_boxes_bent(made, tracks, bend_tk, ppq, look, lengths=True, raw=True)
                 made, tracks = _outline_edge(sh, ppq, keys, get, made, tracks, full)
             else:
                 made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
@@ -1623,7 +1623,7 @@ def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, be
         # unticked + a Warp ticked))
         if any(isinstance(b, StirBend) and (b.st.get("polar") or b.st.get("kaleido", 0) >= 2) for b in rest):
             raise Folded
-        made, tracks, full = note_boxes_bent(made, tracks, bend_tk, ppq, look, lengths=True)
+        made, tracks, full = note_boxes_bent(made, tracks, bend_tk, ppq, look, lengths=True, raw=True)
         made, tracks = _outline_edge(sh, ppq, keys, get, made, tracks, full)
     except Folded:
         made, tracks = pulled(made, tracks, look, box, ppq, joined=False, within=within)
@@ -1636,9 +1636,11 @@ def _outline_edge(sh, ppq, keys, get, made, tracks, full=None):
     outline way (every Shape step's Cut notes where bent off) gives each row's spans; pieces are clipped to them, the
     first / last piece of a span reaches its ends: a plain Fill. Other fills (Spam, outlines, patterns: their row ends
     are real notes) are only CLIPPED to the solid outline: pieces past it gone, nothing stretched (user 2026-11-17,
-    test29's previews). Shapes without a fill (lines): left as cut."""
+    test29's previews). Shapes without a fill (lines): left as cut. made: as note_boxes_bent(raw=True) left them
+    (not sorted yet)."""
     if not sh.get("fill") or not len(made):
-        return made, tracks
+        from notes.shape_bend import _by_start
+        return _by_start(made, tracks) if len(made) else (made, tracks)
     stretch = sh.get("fill") == "fill"
     import copy as _copy
     r = _copy.deepcopy(sh["recolour"])

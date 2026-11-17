@@ -22,7 +22,7 @@ NEEDS = {
     "warp_soft2": ("warp_soft2",),
     "midi_events": ("midi_events", "take_bytes"), "midi_track": ("midi_track", "take_bytes"), "nearest": ("nearest",),
     "spread_line": ("spread_line",), "area_spots": ("area_spots",),
-    "band_rows": ("band_rows",), "short_pieces": ("short_pieces",), "cut_rows": ("cut_rows",), "box_rows": ("box_rows",), "rows_fill": ("rows_fill",), "band_all": ("band_all",), "field_dist": ("field_dist",), "blend_heat": ("blend_heat",),
+    "band_rows": ("band_rows",), "short_pieces": ("short_pieces",), "cut_rows": ("cut_rows",), "box_rows": ("box_rows",), "edge_rows": ("edge_rows",), "sliver_hosts": ("sliver_hosts",), "rows_fill": ("rows_fill",), "band_all": ("band_all",), "field_dist": ("field_dist",), "blend_heat": ("blend_heat",),
     "dc_block": ("dc_block",),
     "wave_fill": ("wave_fill",), "bez_solve": ("bez_solve",), "note_ends": ("note_ends",), "hz_expand": ("hz_expand",), "hz_late": ("hz_late",),
     "hz_order": ("hz_order",), "hz_finish": ("hz_finish", "hz_finish_i"),
@@ -355,6 +355,20 @@ class Wraps:
         got = self.x.box_rows(*args)
         if got < 0 and (got := self._again("box_rows", got, args)) < 0:
             return self.base.box_rows(*args)
+        return got
+
+    def edge_rows(self, ms, me, mr, run, full, sp_row, sp_a, sp_b, most, least, stretch, n_in, out):
+        args = (ms, me, mr, run, full, sp_row, sp_a, sp_b, most, least, stretch, n_in, out)
+        got = self.x.edge_rows(*args)
+        if got < 0 and (got := self._again("edge_rows", got, args)) < 0:
+            return self.base.edge_rows(*args)
+        return got
+
+    def sliver_hosts(self, s, e, r, fp, most, g, gf, h, keep):
+        args = (s, e, r, fp, most, g, gf, h, keep)
+        got = self.x.sliver_hosts(*args)
+        if got < 0 and (got := self._again("sliver_hosts", got, args)) < 0:
+            return self.base.sliver_hosts(*args)
         return got
 
     def short_pieces(self, bs, be, bk, rs, re, rk, rd, least):

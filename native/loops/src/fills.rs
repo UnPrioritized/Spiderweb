@@ -1288,6 +1288,243 @@ pub fn short_pieces(bs: &[i64], be: &[i64], bk: &[i64], rs: &[i64], re: &[i64], 
     Ok(vec![Out::I64(a, 0), Out::I64(b, 0), Out::I64(c, 0), Out::I64(d, 0)])
 }
 
+/// fastloops.sliver_hosts (notes/shape_bend._slivers_joined, Cut notes where bent): pieces (s, e, row r) by row,
+/// then start; slivers (shorter than `most` and than their note's own length fp) joined into a longer piece of
+/// their touching run (before, else after, else the run's first; a lone one dropped): s / e widened in place. g,
+/// gf, h: work space. -> how many kept (their places in keep); n = none was short.
+#[allow(clippy::too_many_arguments)]
+pub fn sliver_hosts(s: &mut [i64], e: &mut [i64], r: &[i64], fp: &[i64], most: i64, g: &mut [i64], gf: &mut [i64],
+                    h: &mut [i64], keep: &mut [i64]) -> i64 {
+    let n = s.len();
+    if e.len() != n || r.len() != n || fp.len() != n || g.len() != n || gf.len() != n || h.len() != n
+        || keep.len() != n {
+        return FAILED;
+    }
+    for (i, k) in keep.iter_mut().enumerate() {
+        *k = i as i64;
+    }
+    if n < 2 {
+        return n as i64;
+    }
+    #[inline(always)]
+    fn short(s: &[i64], e: &[i64], fp: &[i64], most: i64, i: usize) -> bool {
+        let l = e[i] - s[i];
+        l < most && l < fp[i]
+    }
+    if !(0..n).any(|i| short(s, e, fp, most, i)) {
+        return n as i64;
+    }
+    let (mut gid, mut first, mut rowrun) = (0i64, 0i64, 0i64);
+    for i in 0..n {
+        if i > 0 && r[i] == r[i - 1] && s[i] <= rowrun {
+            rowrun = rowrun.max(e[i]);
+        } else {
+            rowrun = if i == 0 || r[i] != r[i - 1] { e[i] } else { rowrun.max(e[i]) };
+            gid += 1;
+            first = i as i64;
+        }
+        g[i] = gid;
+        gf[i] = first;
+    }
+    let mut last_long = -1i64;
+    for i in 0..n {
+        if !short(s, e, fp, most, i) {
+            last_long = i as i64;
+            h[i] = i as i64;
+        } else if last_long >= 0 && g[last_long as usize] == g[i] {
+            h[i] = last_long;
+        } else {
+            h[i] = -2;
+        }
+    }
+    let (mut next_long, mut glast) = (n, n - 1);
+    for i in (0..n).rev() {
+        if i == n - 1 || g[i + 1] != g[i] {
+            glast = i;
+        }
+        if h[i] == i as i64 {
+            next_long = i;
+        } else if h[i] == -2 {
+            h[i] = if next_long < n && g[next_long] == g[i] {
+                next_long as i64
+            } else if glast as i64 - gf[i] + 1 == 1 {
+                -1
+            } else {
+                gf[i]
+            };
+        }
+    }
+    for i in 0..n {
+        let k = h[i];
+        if k >= 0 && k != i as i64 {
+            let k = k as usize;
+            s[k] = s[k].min(s[i]);
+            e[k] = e[k].max(e[i]);
+        }
+    }
+    let mut m = 0usize;
+    for i in 0..n {
+        if h[i] == i as i64 {
+            keep[m] = i as i64;
+            m += 1;
+        }
+    }
+    m as i64
+}
+
+/// fastloops._edge_find: pieces a0 .. a1 (one row, by start; run = running end) that can touch span (a, b) ->
+/// (lo, hi); me > a still to test inside.
+#[inline(always)]
+fn edge_find(ms: &[i64], run: &[i64], a0: usize, a1: usize, a: i64, b: i64) -> (usize, usize) {
+    let (mut lo, mut hi) = (a0, a1);
+    while lo < hi {
+        let m = (lo + hi) / 2;
+        if run[m] > a {
+            hi = m;
+        } else {
+            lo = m + 1;
+        }
+    }
+    let (mut h0, mut h1) = (lo, a1);
+    while h0 < h1 {
+        let m = (h0 + h1) / 2;
+        if ms[m] >= b {
+            h1 = m;
+        } else {
+            h0 = m + 1;
+        }
+    }
+    (lo, h0)
+}
+
+/// fastloops.edge_rows (notes/shape_bend.edge_from_rows, Cut notes where bent: each row's edge from the outline):
+/// pieces (ms, me, mr) by row, then start (run: work space), spans (sp_row, sp_a, sp_b) by row, then start. Each
+/// span's touching pieces clipped, then stretched / joined (stretch) or trimmed (clip) as the twin says; n_in = each
+/// span's pieces before drops. -> how many (piece, start, end) in out[0..2] (2^40 + the count needed when out is too
+/// small: nothing written).
+#[allow(clippy::too_many_arguments)]
+pub fn edge_rows(ms: &[i64], me: &[i64], mr: &[i64], run: &mut [i64], full: &[i64], sp_row: &[i64], sp_a: &[i64],
+                 sp_b: &[i64], most: i64, least: i64, stretch: bool, n_in: &mut [i64], out: NdMut<i64, 2>) -> i64 {
+    let (n, ns, cap) = (ms.len(), sp_a.len(), out.sh[1]);
+    if me.len() != n || mr.len() != n || run.len() != n || (full.len() != n && !full.is_empty()) || sp_row.len() != ns
+        || sp_b.len() != ns || n_in.len() != ns || out.sh[0] != 3 || out.d.len() < 3 * cap {
+        return FAILED;
+    }
+    let has_full = full.len() == n && n > 0;
+    let mut i = 0;
+    while i < n {
+        let mut j = i;
+        let mut top = me[i];
+        while j < n && mr[j] == mr[i] {
+            top = top.max(me[j]);
+            run[j] = top;
+            j += 1;
+        }
+        i = j;
+    }
+    let mut total = 0i64;
+    let mut r0 = 0usize;
+    for k in 0..ns {
+        let row = sp_row[k];
+        while r0 < n && mr[r0] < row {
+            r0 += 1;
+        }
+        let mut r1 = r0;
+        while r1 < n && mr[r1] == row {
+            r1 += 1;
+        }
+        let (a, b) = (sp_a[k], sp_b[k]);
+        let (lo, hi) = edge_find(ms, run, r0, r1, a, b);
+        let mut c = 0i64;
+        for p in lo..hi {
+            if me[p] > a {
+                c += 1;
+            }
+        }
+        n_in[k] = c;
+        total += c;
+    }
+    if total as usize > cap {
+        return (1i64 << 40) + total;
+    }
+    let (o0, rest) = out.d.split_at_mut(cap);
+    let (o1, o2) = rest.split_at_mut(cap);
+    let mut no = 0usize;
+    r0 = 0;
+    for k in 0..ns {
+        let m = n_in[k];
+        if m == 0 {
+            continue;
+        }
+        let row = sp_row[k];
+        while r0 < n && mr[r0] < row {
+            r0 += 1;
+        }
+        let mut r1 = r0;
+        while r1 < n && mr[r1] == row {
+            r1 += 1;
+        }
+        let (a, b) = (sp_a[k], sp_b[k]);
+        let (lo, hi) = edge_find(ms, run, r0, r1, a, b);
+        let f0 = no;
+        for p in lo..hi {
+            if me[p] > a {
+                o0[no] = p as i64;
+                o1[no] = ms[p].max(a);
+                o2[no] = me[p].min(b);
+                no += 1;
+            }
+        }
+        if !stretch {
+            let mut w = f0;
+            for q in f0..no {
+                let p = o0[q] as usize;
+                let l = o2[q] - o1[q];
+                let mut keep = 2 * l >= me[p] - ms[p];
+                if q == f0 || q == no - 1 {
+                    let mut short = l < least;
+                    if has_full {
+                        short = short && l < full[p];
+                    }
+                    if short {
+                        keep = false;
+                    }
+                }
+                if keep {
+                    (o0[w], o1[w], o2[w]) = (o0[q], o1[q], o2[q]);
+                    w += 1;
+                }
+            }
+            no = w;
+            continue;
+        }
+        let last = no - 1;
+        o1[f0] = a;
+        o2[last] = b;
+        for q in f0..last {
+            o2[q] = o2[q].max(o1[q + 1]);
+        }
+        let dropf = m > 1 && o2[f0] - o1[f0] < most;
+        if dropf {
+            o1[f0 + 1] = o1[f0];
+        }
+        let dropl = last != f0 && o2[last] - o1[last] < most && m - (dropf as i64) > 1;
+        if dropl {
+            o2[last - 1] = o2[last];
+        }
+        let mut w = f0;
+        for q in f0..no {
+            if (q == f0 && dropf) || (q == last && dropl) {
+                continue;
+            }
+            (o0[w], o1[w], o2[w]) = (o0[q], o1[q], o2[q]);
+            w += 1;
+        }
+        no = w;
+    }
+    no as i64
+}
+
 /// fastloops.box_rows (notes/shape_bend._boxes_rows, Stir Shape tabs on notes): bent note boxes (corners xs, ys:
 /// 4 a box, round it, flat) cut by key rows lo[i] .. lo[i] + cnt[i] - 1 (y = r; an edge counts from its low end up
 /// to, not at, its high end). Each row's crossings sorted (NaN last); pair 0-1 -> out[.., 0..], pair 2-3 -> out[..,
@@ -1307,8 +1544,103 @@ pub fn box_rows(xs: &[f64], ys: &[f64], lo: &[i64], cnt: &[i64], out: NdMut<i64,
     let (o0, rest) = out.d.split_at_mut(w);
     let (o1, rest) = rest.split_at_mut(w);
     let (o2, o3) = rest.split_at_mut(w);
-    let (mut na, mut nb) = (0usize, half);
-    for i in 0..n {
+    if let Some(pool) = crate::pool_for(true, total as usize, 2) {
+        // (boxes in groups of about the same number of rows; each group writes its pieces from its own first row's
+        // place (a row gives at most one piece a pair), then the groups' pieces are moved down together: the very
+        // same order as one pass)
+        let groups = pool.current_num_threads() * 4;
+        let mut cuts = Vec::new(); // (box from, box to, first row)
+        let (mut i0, mut row0, mut acc) = (0usize, 0usize, 0usize);
+        for g in 1..=groups {
+            let want = total as usize * g / groups;
+            let mut i1 = i0;
+            let mut rows = acc;
+            while i1 < n && (rows < want || g == groups) {
+                rows += cnt[i1].max(0) as usize;
+                i1 += 1;
+            }
+            if i1 > i0 {
+                cuts.push((i0, i1, row0));
+                row0 = rows;
+                acc = rows;
+                i0 = i1;
+            }
+        }
+        let mut parts = Vec::new();
+        {
+            let (mut a0, mut a1, mut a2, mut a3) = (&mut o0[..], &mut o1[..], &mut o2[..], &mut o3[..]);
+            let mut done = 0usize;
+            for (k, &(_, _, r0)) in cuts.iter().enumerate() {
+                let r1 = if k + 1 < cuts.len() { cuts[k + 1].2 } else { half };
+                let (_, t0) = a0.split_at_mut(r0 - done);
+                let (_, t1) = a1.split_at_mut(r0 - done);
+                let (_, t2) = a2.split_at_mut(r0 - done);
+                let (_, t3) = a3.split_at_mut(r0 - done);
+                let (p0, t0) = t0.split_at_mut(r1 - r0);
+                let (p1, t1) = t1.split_at_mut(r1 - r0);
+                let (p2, t2) = t2.split_at_mut(r1 - r0);
+                let (p3, t3) = t3.split_at_mut(r1 - r0);
+                parts.push([p0, p1, p2, p3]);
+                (a0, a1, a2, a3) = (t0, t1, t2, t3);
+                done = r1;
+            }
+            let mut b_parts = Vec::new();
+            let (mut b0, mut b1, mut b2, mut b3) = (a0, a1, a2, a3); // (from `half` on)
+            let mut done = half;
+            for (k, &(_, _, r0)) in cuts.iter().enumerate() {
+                let r1 = if k + 1 < cuts.len() { cuts[k + 1].2 } else { total as usize };
+                let (_, t0) = b0.split_at_mut(half + r0 - done);
+                let (_, t1) = b1.split_at_mut(half + r0 - done);
+                let (_, t2) = b2.split_at_mut(half + r0 - done);
+                let (_, t3) = b3.split_at_mut(half + r0 - done);
+                let (p0, t0) = t0.split_at_mut(r1 - r0);
+                let (p1, t1) = t1.split_at_mut(r1 - r0);
+                let (p2, t2) = t2.split_at_mut(r1 - r0);
+                let (p3, t3) = t3.split_at_mut(r1 - r0);
+                b_parts.push([p0, p1, p2, p3]);
+                (b0, b1, b2, b3) = (t0, t1, t2, t3);
+                done = half + r1;
+            }
+            let jobs: Vec<_> = cuts.iter().zip(parts.into_iter().zip(b_parts)).map(|(&(i0, i1, _), (a, b))| (i0, i1, a, b))
+                .collect();
+            let counts: Vec<(usize, usize)> = pool.install(|| {
+                jobs.into_par_iter().map(|(i0, i1, a, b)| {
+                    let [a0, a1, a2, a3] = a;
+                    let [b0, b1, b2, b3] = b;
+                    box_span(xs, ys, lo, cnt, i0, i1, [a0, a1, a2, a3], [b0, b1, b2, b3])
+                }).collect()
+            });
+            // (the groups' pieces moved down into one run each: pair 0-1 from 0, pair 2-3 from half)
+            let (mut na, mut nb) = (0usize, half);
+            for (k, &(_, _, r0)) in cuts.iter().enumerate() {
+                let (ca, cb) = counts[k];
+                for o in [&mut *o0, &mut *o1, &mut *o2, &mut *o3] {
+                    o.copy_within(r0..r0 + ca, na);
+                    o.copy_within(half + r0..half + r0 + cb, nb);
+                }
+                na += ca;
+                nb += cb;
+            }
+            return ((na as i64) << 32) | (nb - half) as i64;
+        }
+    }
+    let (a0, b0) = o0.split_at_mut(half);
+    let (a1, b1) = o1.split_at_mut(half);
+    let (a2, b2) = o2.split_at_mut(half);
+    let (a3, b3) = o3.split_at_mut(half);
+    let (na, nb) = box_span(xs, ys, lo, cnt, 0, n, [a0, a1, a2, a3], [b0, b1, b2, b3]);
+    ((na as i64) << 32) | nb as i64
+}
+
+/// box_rows' boxes i0 .. i1: pair 0-1 pieces into a (from its start), pair 2-3 into b -> (how many in a, in b).
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn box_span(xs: &[f64], ys: &[f64], lo: &[i64], cnt: &[i64], i0: usize, i1: usize, a: [&mut [i64]; 4],
+            b: [&mut [i64]; 4]) -> (usize, usize) {
+    let [a0, a1, a2, a3] = a;
+    let [b0, b1, b2, b3] = b;
+    let (mut na, mut nb) = (0usize, 0usize);
+    for i in i0..i1 {
         let (x, y) = (&xs[4 * i..4 * i + 4], &ys[4 * i..4 * i + 4]);
         for j in 0..cnt[i].max(0) {
             let rr = lo[i] + j;
@@ -1340,14 +1672,15 @@ pub fn box_rows(xs: &[f64], ys: &[f64], lo: &[i64], cnt: &[i64], out: NdMut<i64,
                 if t1 - t0 < 1 {
                     continue;
                 }
-                let k = if slot == 0 { &mut na } else { &mut nb };
-                o0[*k] = i as i64;
-                o1[*k] = rr;
-                o2[*k] = t0;
-                o3[*k] = t1;
-                *k += 1;
+                if slot == 0 {
+                    (a0[na], a1[na], a2[na], a3[na]) = (i as i64, rr, t0, t1);
+                    na += 1;
+                } else {
+                    (b0[nb], b1[nb], b2[nb], b3[nb]) = (i as i64, rr, t0, t1);
+                    nb += 1;
+                }
             }
         }
     }
-    ((na as i64) << 32) | (nb - half) as i64
+    (na, nb)
 }

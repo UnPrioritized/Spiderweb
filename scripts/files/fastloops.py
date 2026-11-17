@@ -50,6 +50,9 @@ Each gives exactly what that NumPy code gives (dev/tests/fast_loops.py compares 
   rows_fill      custom.rows_spans: closed loops' inside on key rows, in ticks (each Nested / Ripples copy)
   cut_rows       custom.cut_out: stretches with what others cover on their key taken out
   box_rows       shape_bend._boxes_rows (Stir Shape tabs on notes): bent note boxes cut by key rows
+  edge_rows      shape_bend.edge_from_rows (Cut notes where bent): each row's cut pieces clipped / stretched to the
+                 outline's spans
+  sliver_hosts   shape_bend._slivers_joined (Cut notes where bent): slivers the cutting made joined into a piece
   warp_bend      warp.bend_at: the Warp's bend forwards at each spot (the Warp set to Shape: note corners)
   short_pieces   nested.shortest_pieces (Nested's Shortest piece box): pieces on top, short ones merged, a heap
   band_all       nested.band_steps (Nested Even band): every step at once, key by key, a heap of the edges near
@@ -3755,6 +3758,199 @@ def box_rows(xs, ys, lo, cnt, out):
 
 
 @njit(nogil=True)
+def _edge_find(ms, me, run, a0, a1, a, b):
+    """edge_rows: the pieces a0 .. a1 (one row, by start; run = running end) touching span (a, b): (lo, hi), test
+    me > a inside."""
+    lo, hi = a0, a1
+    while lo < hi:  # (the first whose running end passes a)
+        m = (lo + hi) // 2
+        if run[m] > a:
+            hi = m
+        else:
+            lo = m + 1
+    h0, h1 = lo, a1
+    while h0 < h1:  # (the first starting at b or later)
+        m = (h0 + h1) // 2
+        if ms[m] >= b:
+            h1 = m
+        else:
+            h0 = m + 1
+    return lo, h0
+
+
+@njit(nogil=True)
+def edge_rows(ms, me, mr, run, full, sp_row, sp_a, sp_b, most, least, stretch, n_in, out):
+    """shape_bend.edge_from_rows' pieces x spans: pieces (ms, me, mr) sorted by row, then start (run: work space, the
+    running end per row); spans (sp_row, sp_a, sp_b) by row, then start, apart. Each span's pieces touching it (in
+    piece order) clipped; stretch: the first starts at the span's start, the last ends at its end, each reaches the
+    next, an end piece under `most` joined into its neighbour; else (clip): kept when at least half its own length,
+    a span's first / last one dropped when under `least` (and under full[p], when full is given). n_in = each span's
+    pieces before drops. -> how many (piece, start, end) went in out[0..2, :] (2 ** 40 + the count needed when out
+    is too small: nothing written)."""
+    n = len(ms)
+    ns = len(sp_a)
+    has_full = len(full) == n and n > 0
+    # (each row's running end)
+    i = 0
+    while i < n:
+        j = i
+        top = me[i]
+        while j < n and mr[j] == mr[i]:
+            top = max(top, me[j])
+            run[j] = top
+            j += 1
+        i = j
+    cap = out.shape[1]
+    total = 0
+    r0 = 0
+    for k in range(ns):  # (count first)
+        row = sp_row[k]
+        while r0 < n and mr[r0] < row:
+            r0 += 1
+        r1 = r0
+        while r1 < n and mr[r1] == row:
+            r1 += 1
+        a, b = sp_a[k], sp_b[k]
+        lo, hi = _edge_find(ms, me, run, r0, r1, a, b)
+        c = 0
+        for p in range(lo, hi):
+            if me[p] > a:
+                c += 1
+        n_in[k] = c
+        total += c
+    if total > cap:
+        return (1 << 40) + total
+    no = 0
+    r0 = 0
+    for k in range(ns):
+        m = n_in[k]
+        if m == 0:
+            continue
+        row = sp_row[k]
+        while r0 < n and mr[r0] < row:
+            r0 += 1
+        r1 = r0
+        while r1 < n and mr[r1] == row:
+            r1 += 1
+        a, b = sp_a[k], sp_b[k]
+        lo, hi = _edge_find(ms, me, run, r0, r1, a, b)
+        f0 = no
+        for p in range(lo, hi):
+            if me[p] > a:
+                out[0, no] = p
+                out[1, no] = max(ms[p], a)
+                out[2, no] = min(me[p], b)
+                no += 1
+        if not stretch:
+            w = f0
+            for q in range(f0, no):
+                p = out[0, q]
+                L = out[2, q] - out[1, q]
+                keep = 2 * L >= me[p] - ms[p]
+                if q == f0 or q == no - 1:
+                    short = L < least
+                    if has_full:
+                        short = short and L < full[p]
+                    if short:
+                        keep = False
+                if keep:
+                    out[0, w], out[1, w], out[2, w] = out[0, q], out[1, q], out[2, q]
+                    w += 1
+            no = w
+            continue
+        last = no - 1
+        out[1, f0] = a
+        out[2, last] = b
+        for q in range(f0, last):
+            out[2, q] = max(out[2, q], out[1, q + 1])
+        dropf = m > 1 and out[2, f0] - out[1, f0] < most
+        if dropf:
+            out[1, f0 + 1] = out[1, f0]
+        dropl = last != f0 and (out[2, last] - out[1, last] < most) and (m - (1 if dropf else 0)) > 1
+        if dropl:
+            out[2, last - 1] = out[2, last]
+        w = f0
+        for q in range(f0, no):
+            if (q == f0 and dropf) or (q == last and dropl):
+                continue
+            out[0, w], out[1, w], out[2, w] = out[0, q], out[1, q], out[2, q]
+            w += 1
+        no = w
+    return no
+
+
+@njit(nogil=True)
+def sliver_hosts(s, e, r, fp, most, g, gf, h, keep):
+    """shape_bend._slivers_joined: pieces (s, e, row r) sorted by row, then start; fp = each piece's note's own
+    length. A piece shorter than `most` and than fp (a sliver) joins the last longer piece before it in its touching
+    run (the next one after, else the run's first piece; a lone sliver is dropped): s / e of the pieces kept widened
+    in place. g, gf, h: work space. -> how many kept (their places in keep); n = none was short (nothing changed)."""
+    n = len(s)
+    for i in range(n):
+        keep[i] = i
+    if n < 2:
+        return n
+    found = False
+    for i in range(n):
+        L = e[i] - s[i]
+        if L < most and L < fp[i]:
+            found = True
+            break
+    if not found:
+        return n
+    gid = 0
+    first = 0
+    rowrun = 0
+    for i in range(n):  # (touching runs: a piece starting at or before its row's furthest end so far)
+        if i > 0 and r[i] == r[i - 1] and s[i] <= rowrun:
+            rowrun = max(rowrun, e[i])
+        else:
+            if i == 0 or r[i] != r[i - 1]:
+                rowrun = e[i]
+            else:
+                rowrun = max(rowrun, e[i])
+            gid += 1
+            first = i
+        g[i] = gid
+        gf[i] = first
+    last_long = -1
+    for i in range(n):
+        L = e[i] - s[i]
+        if not (L < most and L < fp[i]):
+            last_long = i
+            h[i] = i
+        elif last_long >= 0 and g[last_long] == g[i]:
+            h[i] = last_long
+        else:
+            h[i] = -2
+    next_long = n
+    glast = n - 1
+    for i in range(n - 1, -1, -1):
+        if i == n - 1 or g[i + 1] != g[i]:
+            glast = i
+        if h[i] == i:
+            next_long = i
+        elif h[i] == -2:
+            if next_long < n and g[next_long] == g[i]:
+                h[i] = next_long
+            elif glast - gf[i] + 1 == 1:
+                h[i] = -1
+            else:
+                h[i] = gf[i]
+    for i in range(n):
+        k = h[i]
+        if k >= 0 and k != i:
+            s[k] = min(s[k], s[i])
+            e[k] = max(e[k], e[i])
+    m = 0
+    for i in range(n):
+        if h[i] == i:
+            keep[m] = i
+            m += 1
+    return m
+
+
+@njit(nogil=True)
 def _short_emit(out, no, last, a, b, k, t):
     """Row (a, b, k, t) onto out[:, :no] (grown when full), joined to step t's last row when it touches it ->
     (out, the new count)."""
@@ -5279,6 +5475,9 @@ def warm():
     short_pieces(z1, z1 + 9, z1, z1 + 1, z1 + 3, z1, z1 + 1, 5)
     cut_rows(z1, z1 + 9, z1, z1, z1 + 2, z1 + 4, np.zeros((3, 2), np.int64))
     box_rows(np.array([0.0, 9.0, 9.0, 0.0]), np.array([-0.5, -0.5, 0.5, 0.5]), z1, z1 + 1, np.zeros((4, 4), np.int64))
+    edge_rows(z1, z1 + 9, z1, z1.copy(), z1[:0], z1, z1 + 2, z1 + 5, 1, 0, True, z1.copy(), np.zeros((3, 2), np.int64))
+    z2 = np.zeros(2, np.int64)
+    sliver_hosts(z2.copy(), z2 + 1, z2, z2 + 9, 5, z2.copy(), z2.copy(), z2.copy(), z2.copy())
     for kind, g in ((0, 2), (1, 2), (2, 4)):
         warp_bend(np.zeros((g, g, 2)), kind, np.zeros(0), np.zeros(0), np.full(1, 0.5), np.full(1, 0.5), np.zeros(1),
                   np.zeros(1))

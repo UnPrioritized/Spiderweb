@@ -939,7 +939,7 @@ CHOP_PART = 32  # (or 1/32 beat sideways)
 CHOP_DEPTH = 24  # (halvings at most: 2^24 pieces of a note; pieces under 1 tick stop sooner)
 
 
-def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None, lengths=False):
+def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None, lengths=False, raw=False):
     """notes (n, 4+: start, end, key, velocity, ...) + tracks (or None) bent forwards by bend_tk(t, k) -> (t, k)
     (floats; Folded when it can't): the new notes (sorted by start, key) and their tracks. look_back(t, k): the bend
     backwards; a hole inside a key row whose middle comes from inside a note is filled from that note (two rows'
@@ -947,7 +947,8 @@ def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None, lengths=False):
     stretched over it instead (one cut, not two: user 2026-11-17, test27's Warp made 648 slivers of 1-15 ticks). Two
     pieces from different key rows overlapping by at most CHOP_PART of a beat (the same seam, cut at different places
     each side) meet halfway instead. lengths: also each new note's own note's length as drawn (third item; the edge
-    step tells a note the cutting shortened from one drawn short, hunt 2026-11-17)."""
+    step tells a note the cutting shortened from one drawn short, hunt 2026-11-17). raw (with lengths): left unsorted
+    (edge_from_rows / _by_start sort them: one whole sort less)."""
     notes = np.asarray(notes, np.int64)
     if not len(notes):
         got = _note_boxes_bent(notes, tracks, bend_tk, ppq)
@@ -963,6 +964,8 @@ def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None, lengths=False):
     out, tr = _slivers_joined(out, tr, notes[:, 1] - notes[:, 0], most)
     if not lengths:
         return _by_start(out[:, :-2], tr)
+    if raw:  # (edge_from_rows sorts them by row itself: the same notes as sorted by start first)
+        return out[:, :-2], (np.asarray(tr) if tr is not None else None), (notes[:, 1] - notes[:, 0])[out[:, -1]]
     o = _order(out[:, 2], out[:, 0])
     return out[o, :-2], (np.asarray(tr)[o] if tr is not None else None), (notes[:, 1] - notes[:, 0])[out[o, -1]]
 
@@ -975,6 +978,19 @@ def _slivers_joined(out, tr, full, most):
     n = len(out)
     if n < 2:
         return out, tr
+    fast = compiled("sliver_hosts") if n >= FAST_LEAST else None
+    if fast is not None:  # (the compiled join, files/fastloops.sliver_hosts: the very same pieces)
+        s, e = out[:, 0].copy(), out[:, 1].copy()
+        fp = np.ascontiguousarray(np.asarray(full, np.int64)[out[:, -1]])
+        keep = np.empty(n, np.int64)
+        m = fast.sliver_hosts(s, e, np.ascontiguousarray(out[:, 2]), fp, int(most), np.empty(n, np.int64),
+                              np.empty(n, np.int64), np.empty(n, np.int64), keep)
+        if m == n:
+            return out, tr
+        k = keep[:m]
+        out = out[k]
+        out[:, 0], out[:, 1] = s[k], e[k]
+        return out, (np.asarray(tr)[k] if tr is not None else None)
     L = out[:, 1] - out[:, 0]
     short = (L < most) & (L < full[out[:, -1]])
     if not short.any():
@@ -1059,9 +1075,9 @@ def edge_from_rows(made, tracks, line, most=1, stretch=True, full=None):
     row ends are real notes; user 2026-11-17 picked "clip to the outline" from test29's previews): only clipped, pieces
     past the outline gone, nothing stretched, no gap filled, no span given a note. full: each piece's own note's length
     as drawn (note_boxes_bent lengths=): an end note is dropped as short only when it was SHORTENED (an Outline fill's
-    one-tick walls are drawn that short: hunt 2026-11-17 #1)."""
+    one-tick walls are drawn that short: hunt 2026-11-17 #1). made may come unsorted (note_boxes_bent raw)."""
     if not len(made) or not len(line):
-        return made, tracks
+        return _by_start(made, np.asarray(tracks) if tracks is not None else None) if len(made) else (made, tracks)
     tr = np.asarray(tracks) if tracks is not None else None
     o = _order(made[:, 0], made[:, 2])
     made, tr = made[o], (tr[o] if tr is not None else None)
@@ -1076,59 +1092,16 @@ def edge_from_rows(made, tracks, line, most=1, stretch=True, full=None):
     r0 = int(min(made[:, 2].min(), sp_row.min()))
     if (int(max(made[:, 2].max(), sp_row.max())) - r0 + 1) * W >= 1 << 62:
         return _edge_from_rows_plain(made, tr, line, most, stretch, full)
-    ka = (sp_row - r0) * W + (sp_a - t0)
-    kb = (sp_row - r0) * W + (sp_b - t0)
     rk = (made[:, 2] - r0) * W
-    first = np.searchsorted(kb, rk + made[:, 0] - t0, "right")  # (the first span ending after the piece starts)
-    last = np.searchsorted(ka, rk + made[:, 1] - t0, "left") - 1  # (the last span starting before it ends)
-    cnt = np.maximum(last - first + 1, 0)
-    total = int(cnt.sum())
-    pi = np.repeat(np.arange(len(made)), cnt)
-    si = np.repeat(first, cnt) + (np.arange(total) - np.repeat(np.cumsum(cnt) - cnt, cnt))
-    if len(si) > 1 and not (np.diff(si) >= 0).all():  # (by span, then start; already so unless a piece spans two)
-        o = _order(pi, si)
-        pi, si = pi[o], si[o]
-    q = made[pi]
-    qt = tr[pi] if tr is not None else None
-    q[:, 0] = np.maximum(q[:, 0], sp_a[si])
-    q[:, 1] = np.minimum(q[:, 1], sp_b[si])
-    if not stretch:  # (a note the outline trims below half its own length: dropped, no slivers at the edge; user
-        # 2026-11-17 after trying the clip alone)
-        # (+ a row's first / last note shorter than half a usual note of the shape (the median: Spam's gate) dropped,
-        # pieces the bend cut short at the edge too; inside they stay, they're the bend's own cuts)
-        L = q[:, 1] - q[:, 0]
-        keep = 2 * L >= made[pi, 1] - made[pi, 0]
-        if len(q):
-            least = int(np.median(made[:, 1] - made[:, 0])) // 2
-            end = np.r_[True, si[1:] != si[:-1]] | np.r_[si[1:] != si[:-1], True]
-            short = L < least
-            if full is not None:
-                short &= L < full[pi]  # (only notes the cutting / trimming shortened)
-            keep &= ~end | ~short
-        return _by_start(q[keep], qt[keep] if qt is not None else None)
-    if len(q):
-        fs = np.r_[True, si[1:] != si[:-1]]
-        lst = np.r_[si[1:] != si[:-1], True]
-        q[fs, 0] = sp_a[si[fs]]
-        q[lst, 1] = sp_b[si[lst]]
-        nl = np.flatnonzero(~lst)  # (a solid Fill row: no gaps inside a span)
-        q[nl, 1] = np.maximum(q[nl, 1], q[nl + 1, 0])
-        n_in = np.bincount(si, minlength=len(sp_a))
-        L = q[:, 1] - q[:, 0]
-        dropf = fs & (L < most) & (n_in[si] > 1)  # (an end piece shorter than `most`: into its neighbour)
-        f = np.flatnonzero(dropf)
-        q[f + 1, 0] = q[f, 0]
-        had = np.zeros(len(sp_a), bool)
-        had[si[f]] = True
-        L = q[:, 1] - q[:, 0]
-        dropl = lst & ~dropf & (L < most) & ((n_in - had)[si] > 1)
-        g = np.flatnonzero(dropl)
-        q[g - 1, 1] = q[g, 1]
-        keep = ~(dropf | dropl)
-        q = q[keep]
-        qt = qt[keep] if qt is not None else None
+    fast = compiled("edge_rows") if len(made) >= FAST_LEAST else None
+    if fast is not None:  # (the compiled pieces x spans, files/fastloops.edge_rows: the very same notes)
+        q, qt, n_in = _edge_fast(fast, made, tr, full, sp_row, sp_a, sp_b, most, stretch)
+        if not stretch:
+            return _by_start(q, qt)
     else:
-        n_in = np.zeros(len(sp_a), np.int64)
+        q, qt, n_in = _edge_pairs(made, tr, full, sp_row, sp_a, sp_b, most, stretch, rk, r0, t0, W)
+        if not stretch:
+            return q, qt
     empty = np.flatnonzero(n_in == 0)
     if len(empty):  # (a span no piece reaches: one note there from the row's nearest piece)
         mid = (sp_a[empty] + sp_b[empty]) // 2
@@ -1156,6 +1129,84 @@ def edge_from_rows(made, tracks, line, most=1, stretch=True, full=None):
         if qt is not None:
             qt = np.concatenate((qt, tr[best[ok]]))
     return _by_start(q, qt)
+
+
+def _edge_fast(fast, made, tr, full, sp_row, sp_a, sp_b, most, stretch):
+    """edge_from_rows' pieces x spans by the compiled edge_rows (made sorted by row, then start) -> (pieces, their
+    tracks, each span's piece count before drops)."""
+    n_in = np.zeros(len(sp_a), np.int64)
+    least = int(np.median(made[:, 1] - made[:, 0])) // 2 if not stretch else 0
+    fl = np.ascontiguousarray(full, np.int64) if full is not None else np.zeros(0, np.int64)
+    ms, me, mr = (np.ascontiguousarray(made[:, c]) for c in (0, 1, 2))
+    run = np.empty(len(made), np.int64)
+    sp = [np.ascontiguousarray(x, np.int64) for x in (sp_row, sp_a, sp_b)]
+    out = np.empty((3, len(made) + len(sp_a) + 16), np.int64)
+    m = fast.edge_rows(ms, me, mr, run, fl, *sp, int(most), least, bool(stretch), n_in, out)
+    if m >= 1 << 40:  # (more pairs than room: once more with the room it asked for)
+        out = np.empty((3, m - (1 << 40)), np.int64)
+        m = fast.edge_rows(ms, me, mr, run, fl, *sp, int(most), least, bool(stretch), n_in, out)
+    pi = out[0, :m]
+    q = made[pi]
+    q[:, 0], q[:, 1] = out[1, :m], out[2, :m]
+    return q, (tr[pi] if tr is not None else None), n_in
+
+
+def _edge_pairs(made, tr, full, sp_row, sp_a, sp_b, most, stretch, rk, r0, t0, W):
+    """edge_from_rows' pieces x spans, whole-array NumPy (edge_rows' twin) -> (pieces, tracks, each span's piece
+    count before drops); clip mode (stretch False): the finished notes sorted by start."""
+    ka = (sp_row - r0) * W + (sp_a - t0)
+    kb = (sp_row - r0) * W + (sp_b - t0)
+    first = np.searchsorted(kb, rk + made[:, 0] - t0, "right")  # (the first span ending after the piece starts)
+    last = np.searchsorted(ka, rk + made[:, 1] - t0, "left") - 1  # (the last span starting before it ends)
+    cnt = np.maximum(last - first + 1, 0)
+    total = int(cnt.sum())
+    pi = np.repeat(np.arange(len(made)), cnt)
+    si = np.repeat(first, cnt) + (np.arange(total) - np.repeat(np.cumsum(cnt) - cnt, cnt))
+    if len(si) > 1 and not (np.diff(si) >= 0).all():  # (by span, then start; already so unless a piece spans two)
+        o = _order(pi, si)
+        pi, si = pi[o], si[o]
+    q = made[pi]
+    qt = tr[pi] if tr is not None else None
+    q[:, 0] = np.maximum(q[:, 0], sp_a[si])
+    q[:, 1] = np.minimum(q[:, 1], sp_b[si])
+    if not stretch:  # (a note the outline trims below half its own length: dropped, no slivers at the edge; user
+        # 2026-11-17 after trying the clip alone)
+        # (+ a row's first / last note shorter than half a usual note of the shape (the median: Spam's gate) dropped,
+        # pieces the bend cut short at the edge too; inside they stay, they're the bend's own cuts)
+        L = q[:, 1] - q[:, 0]
+        keep = 2 * L >= made[pi, 1] - made[pi, 0]
+        if len(q):
+            least = int(np.median(made[:, 1] - made[:, 0])) // 2
+            end = np.r_[True, si[1:] != si[:-1]] | np.r_[si[1:] != si[:-1], True]
+            short = L < least
+            if full is not None:
+                short &= L < full[pi]  # (only notes the cutting / trimming shortened)
+            keep &= ~end | ~short
+        return (*_by_start(q[keep], qt[keep] if qt is not None else None), None)
+    if len(q):
+        fs = np.r_[True, si[1:] != si[:-1]]
+        lst = np.r_[si[1:] != si[:-1], True]
+        q[fs, 0] = sp_a[si[fs]]
+        q[lst, 1] = sp_b[si[lst]]
+        nl = np.flatnonzero(~lst)  # (a solid Fill row: no gaps inside a span)
+        q[nl, 1] = np.maximum(q[nl, 1], q[nl + 1, 0])
+        n_in = np.bincount(si, minlength=len(sp_a))
+        L = q[:, 1] - q[:, 0]
+        dropf = fs & (L < most) & (n_in[si] > 1)  # (an end piece shorter than `most`: into its neighbour)
+        f = np.flatnonzero(dropf)
+        q[f + 1, 0] = q[f, 0]
+        had = np.zeros(len(sp_a), bool)
+        had[si[f]] = True
+        L = q[:, 1] - q[:, 0]
+        dropl = lst & ~dropf & (L < most) & ((n_in - had)[si] > 1)
+        g = np.flatnonzero(dropl)
+        q[g - 1, 1] = q[g, 1]
+        keep = ~(dropf | dropl)
+        q = q[keep]
+        qt = qt[keep] if qt is not None else None
+    else:
+        n_in = np.zeros(len(sp_a), np.int64)
+    return q, qt, n_in
 
 
 def _edge_from_rows_plain(made, tracks, line, most=1, stretch=True, full=None):
@@ -1282,7 +1333,16 @@ def _order(*keys):
         part = (k - lo).astype(np.int64)
         key = part if key is None else key + part * width
         width *= span
+    if n >= RADIX_LEAST and not (key[1:] < key[:-1]).any():  # (in order already: a stable sort keeps it)
+        return np.arange(n)
+    if n >= RADIX_LEAST:
+        fast = compiled("radix_order")
+        if fast is not None:  # (the compiled stable radix sort: the very same order, ~4x quicker at 3 M)
+            return fast.radix_order(key, max(int(width - 1).bit_length(), 1))  # (key: our own copy, used up)
     return np.argsort(key, kind="stable")
+
+
+RADIX_LEAST = 4096  # (pieces: fewer = NumPy's sort, no call cost)
 
 
 def _by_start(out, tr):
