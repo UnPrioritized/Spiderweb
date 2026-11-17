@@ -917,8 +917,59 @@ def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None):
     by_row = look_back is not None and len(out) >= 2
     if by_row:
         out, tr = _holes_filled(tagged, tracks, out, tr, look_back)
-    out, tr = _seams_met(out, tr, max(int(ppq) // CHOP_PART, 1), by_row)
+    most = max(int(ppq) // CHOP_PART, 1)
+    out, tr = _seams_met(out, tr, most, by_row)
+    out, tr = _slivers_joined(out, tr, notes[:, 1] - notes[:, 0], most)
     return _by_start(out[:, :-2], tr)
+
+
+def _slivers_joined(out, tr, full, most):
+    """out (sorted by row + start; last column = each piece's note number) with every piece the CUTTING made shorter
+    than `most` ticks (shorter than its note too: a short note as drawn stays) joined into the piece it touches on its
+    row (the one before, else the one after); a run of such slivers touching nothing longer = one piece, a lone one
+    dropped (user 2026-11-17, test28: slivers along the edge). full: each note's own length."""
+    n = len(out)
+    if n < 2:
+        return out, tr
+    L = out[:, 1] - out[:, 0]
+    short = (L < most) & (L < full[out[:, -1]])
+    if not short.any():
+        return out, tr
+    run = _running_max(out[:, 1], out[:, 2])
+    link = np.r_[False, (out[1:, 2] == out[:-1, 2]) & (out[1:, 0] <= run[:-1])]  # (touching / overlapping the one before)
+    grp = np.cumsum(~link)
+    idx = np.arange(n)
+    before = np.maximum.accumulate(np.where(~short, idx, -1))  # (the last long piece so far)
+    after = np.minimum.accumulate(np.where(~short, idx, n)[::-1])[::-1]  # (the next long piece)
+    host = idx.copy()
+    ok_b = short & (before >= 0) & (grp[np.maximum(before, 0)] == grp)
+    host[ok_b] = before[ok_b]
+    rest = short & ~ok_b
+    ok_a = rest & (after < n) & (grp[np.minimum(after, n - 1)] == grp)
+    host[ok_a] = after[ok_a]
+    alone = rest & ~ok_a  # (a run of slivers touching no longer piece: joined into its first one)
+    if alone.any():
+        first = np.r_[0, np.flatnonzero(np.diff(grp)) + 1]
+        gfirst = first[grp - 1]
+        host[alone] = gfirst[alone]
+        size = np.bincount(grp)[grp]
+        host[alone & (size == 1)] = -1  # (lone: dropped)
+    keep_rows = np.flatnonzero(host >= 0)
+    h = host[keep_rows]
+    s = out[:, 0].copy()
+    e = out[:, 1].copy()
+    if len(h) and (np.diff(h) >= 0).all():  # (each host's pieces lie together: one reduce per run, not ufunc.at)
+        at = np.flatnonzero(np.r_[True, h[1:] != h[:-1]])
+        hh = h[at]
+        s[hh] = np.minimum.reduceat(out[keep_rows, 0], at)
+        e[hh] = np.maximum.reduceat(out[keep_rows, 1], at)
+    else:
+        np.minimum.at(s, h, out[keep_rows, 0])
+        np.maximum.at(e, h, out[keep_rows, 1])
+    keep = host == idx
+    out = out[keep].copy()
+    out[:, 0], out[:, 1] = s[keep], e[keep]
+    return out, (np.asarray(tr)[keep] if tr is not None else None)
 
 
 def _holes_filled(notes, tracks, out, tr, look_back):
@@ -952,6 +1003,146 @@ def _holes_filled(notes, tracks, out, tr, look_back):
             tr = np.concatenate((tr, np.asarray(tracks)[j[new]]))
     o = _order(out[:, 0], out[:, 2])
     return out[o], (tr[o] if tr is not None else None)
+
+
+def edge_from_rows(made, tracks, line, most=1):
+    """Cut notes `made` (+ tracks) given each key row's ends of `line` (the same shape made the outline way): every
+    row's merged spans of line's notes; pieces clipped to them, the first piece of a span starting at its start, the
+    last ending at its end, no gap inside a span, an end piece shorter than `most` joined into its neighbour; pieces
+    outside every span dropped; a span no piece reaches = one note from the row's nearest piece (whole span). Rows line
+    doesn't have are dropped (stray pieces past the outline). Whole-array work (a Twist 50 outline has thousands of
+    spans); _edge_from_rows_plain = the same rules one span at a time."""
+    if not len(made) or not len(line):
+        return made, tracks
+    tr = np.asarray(tracks) if tracks is not None else None
+    o = _order(made[:, 0], made[:, 2])
+    made, tr = made[o], (tr[o] if tr is not None else None)
+    line = line[_order(line[:, 0], line[:, 2])]
+    lr, ls = line[:, 2], line[:, 0]
+    le = _running_max(line[:, 1], lr)
+    at = np.flatnonzero(np.r_[True, (lr[1:] != lr[:-1]) | (ls[1:] > le[:-1])])
+    sp_row, sp_a, sp_b = lr[at], ls[at], np.maximum.reduceat(line[:, 1], at)
+    t0 = int(min(made[:, 0].min(), sp_a.min()))
+    W = int(max(made[:, 1].max(), sp_b.max())) - t0 + 2
+    r0 = int(min(made[:, 2].min(), sp_row.min()))
+    if (int(max(made[:, 2].max(), sp_row.max())) - r0 + 1) * W >= 1 << 62:
+        return _edge_from_rows_plain(made, tr, line, most)
+    ka = (sp_row - r0) * W + (sp_a - t0)
+    kb = (sp_row - r0) * W + (sp_b - t0)
+    rk = (made[:, 2] - r0) * W
+    first = np.searchsorted(kb, rk + made[:, 0] - t0, "right")  # (the first span ending after the piece starts)
+    last = np.searchsorted(ka, rk + made[:, 1] - t0, "left") - 1  # (the last span starting before it ends)
+    cnt = np.maximum(last - first + 1, 0)
+    total = int(cnt.sum())
+    pi = np.repeat(np.arange(len(made)), cnt)
+    si = np.repeat(first, cnt) + (np.arange(total) - np.repeat(np.cumsum(cnt) - cnt, cnt))
+    if len(si) > 1 and not (np.diff(si) >= 0).all():  # (by span, then start; already so unless a piece spans two)
+        o = _order(pi, si)
+        pi, si = pi[o], si[o]
+    q = made[pi]
+    qt = tr[pi] if tr is not None else None
+    q[:, 0] = np.maximum(q[:, 0], sp_a[si])
+    q[:, 1] = np.minimum(q[:, 1], sp_b[si])
+    if len(q):
+        fs = np.r_[True, si[1:] != si[:-1]]
+        lst = np.r_[si[1:] != si[:-1], True]
+        q[fs, 0] = sp_a[si[fs]]
+        q[lst, 1] = sp_b[si[lst]]
+        nl = np.flatnonzero(~lst)  # (a solid Fill row: no gaps inside a span)
+        q[nl, 1] = np.maximum(q[nl, 1], q[nl + 1, 0])
+        n_in = np.bincount(si, minlength=len(sp_a))
+        L = q[:, 1] - q[:, 0]
+        dropf = fs & (L < most) & (n_in[si] > 1)  # (an end piece shorter than `most`: into its neighbour)
+        f = np.flatnonzero(dropf)
+        q[f + 1, 0] = q[f, 0]
+        had = np.zeros(len(sp_a), bool)
+        had[si[f]] = True
+        L = q[:, 1] - q[:, 0]
+        dropl = lst & ~dropf & (L < most) & ((n_in - had)[si] > 1)
+        g = np.flatnonzero(dropl)
+        q[g - 1, 1] = q[g, 1]
+        keep = ~(dropf | dropl)
+        q = q[keep]
+        qt = qt[keep] if qt is not None else None
+    else:
+        n_in = np.zeros(len(sp_a), np.int64)
+    empty = np.flatnonzero(n_in == 0)
+    if len(empty):  # (a span no piece reaches: one note there from the row's nearest piece)
+        mid = (sp_a[empty] + sp_b[empty]) // 2
+        j = np.searchsorted(rk + made[:, 0] - t0, (sp_row[empty] - r0) * W + mid - t0)
+        cands = np.stack((np.clip(j - 1, 0, len(made) - 1), np.clip(j, 0, len(made) - 1)), 1)
+        same = made[cands, 2] == sp_row[empty][:, None]
+        dist = np.where(same, np.abs((made[cands, 0] + made[cands, 1]) // 2 - mid[:, None]), np.iinfo(np.int64).max)
+        best = cands[np.arange(len(empty)), np.argmin(dist, 1)]
+        ok = same.any(1)
+        add = made[best[ok]].copy()
+        add[:, 0], add[:, 1] = sp_a[empty[ok]], sp_b[empty[ok]]
+        q = np.concatenate((q, add))
+        if qt is not None:
+            qt = np.concatenate((qt, tr[best[ok]]))
+    return _by_start(q, qt)
+
+
+def _edge_from_rows_plain(made, tracks, line, most=1):
+    """edge_from_rows one row / span at a time (when the ticks are too far apart for one sort key)."""
+    if not len(made) or not len(line):
+        return made, tracks
+    tr = np.asarray(tracks) if tracks is not None else None
+    o = _order(made[:, 0], made[:, 2])
+    made, tr = made[o], (tr[o] if tr is not None else None)
+    lo_ = _order(line[:, 0], line[:, 2])
+    line = line[lo_]
+    rows_m, at_m = np.unique(made[:, 2], return_index=True)
+    end_m = np.r_[at_m[1:], len(made)]
+    where = dict(zip(rows_m.tolist(), zip(at_m.tolist(), end_m.tolist())))
+    rows_l, at_l = np.unique(line[:, 2], return_index=True)
+    end_l = np.r_[at_l[1:], len(line)]
+    outs, trs = [], []
+    for k, a0, a1 in zip(rows_l.tolist(), at_l.tolist(), end_l.tolist()):
+        if k not in where:
+            continue
+        m0, m1 = where[k]
+        P = made[m0:m1]
+        T = tr[m0:m1] if tr is not None else None
+        # (the outline's spans on this row, touching / overlapping notes merged)
+        s, e = line[a0:a1, 0], np.maximum.accumulate(line[a0:a1, 1])
+        new = np.r_[True, s[1:] > e[:-1]]
+        starts = s[new]
+        ends = np.maximum.reduceat(line[a0:a1, 1], np.flatnonzero(new))
+        for a, b in zip(starts.tolist(), ends.tolist()):
+            hit = np.flatnonzero((P[:, 1] > a) & (P[:, 0] < b))
+            if not len(hit):
+                j = int(np.argmin(np.abs((P[:, 0] + P[:, 1]) / 2 - (a + b) / 2)))
+                piece = P[j:j + 1].copy()
+                piece[0, 0], piece[0, 1] = a, b
+                outs.append(piece)
+                if T is not None:
+                    trs.append(T[j:j + 1])
+                continue
+            q = P[hit].copy()
+            qt = T[hit] if T is not None else None
+            q[:, 0] = np.maximum(q[:, 0], a)
+            q[:, 1] = np.minimum(q[:, 1], b)
+            q[0, 0] = a
+            q[-1, 1] = b
+            if len(q) > 1:  # (a solid Fill row: no gaps inside a span, each piece reaches the next one)
+                q[:-1, 1] = np.maximum(q[:-1, 1], q[1:, 0])
+            keep = q[:, 1] > q[:, 0]
+            q = q[keep]
+            qt = qt[keep] if qt is not None else None
+            # (an end piece clipped shorter than `most`: joined into its neighbour, no stray sliver at the edge)
+            if len(q) > 1 and q[0, 1] - q[0, 0] < most:
+                q[1, 0] = q[0, 0]
+                q, qt = q[1:], (qt[1:] if qt is not None else None)
+            if len(q) > 1 and q[-1, 1] - q[-1, 0] < most:
+                q[-2, 1] = q[-1, 1]
+                q, qt = q[:-1], (qt[:-1] if qt is not None else None)
+            outs.append(q)
+            if qt is not None:
+                trs.append(qt)
+    out = np.concatenate(outs) if outs else made[:0]
+    tro = (np.concatenate(trs) if trs else tr[:0]) if tr is not None else None
+    return _by_start(out, tro)
 
 
 def _seams_met(out, tr, most, by_row=False):

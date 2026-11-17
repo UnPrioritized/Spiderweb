@@ -1515,7 +1515,7 @@ def shape_tabs_done(sh, ppq, keys, get):
             return _chopped_after(got, base, notes, before, benders[:first], note_benders[first:], box, ppq, keys, get,
                                   any(st["bend_colours"] for st in lead_tabs)
                                   or (lead_wp is not None and lead_wp.get("bend_colours", True))
-                                  or (lead_lq is not None and lead_lq.get("bend_colours", True)), out)
+                                  or (lead_lq is not None and lead_lq.get("bend_colours", True)), out, sh)
     if got is None:
         return out
     # (COLOURS BEND TOO, user 2026-11-17, a tick per tab, on by default: each note of the bent shape takes the
@@ -1538,6 +1538,8 @@ def shape_tabs_done(sh, ppq, keys, get):
             if got == PULL or any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
                 raise Folded
             made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
+            if not as_notes and first is not None:  # (a drawn shape cut where bent: its edge from the bent outline)
+                made, tracks = _outline_edge(sh, ppq, keys, get, made, tracks)
         except Folded:
             laid = None
             if got == PULL and not bend and tracks is not None and len(made) and base.get("cycle"):
@@ -1564,7 +1566,7 @@ def shape_tabs_done(sh, ppq, keys, get):
     return dict(got, _bent=bent_token(made, tracks))
 
 
-def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, bend, out):
+def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, bend, out, sh):
     """shape_tabs_done when a later Shape step cuts notes and the ones before it don't: got = the shape with its
     outline bent by the steps before (benders lead), its notes made (colours carried back through lead when bend),
     then bent + cut by the rest (benders rest) like pasted notes. Returns out with its "_bent" notes."""
@@ -1601,9 +1603,35 @@ def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, be
         if any(isinstance(b, StirBend) and (b.st.get("polar") or b.st.get("kaleido", 0) >= 2) for b in rest):
             raise Folded
         made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
+        made, tracks = _outline_edge(sh, ppq, keys, get, made, tracks)
     except Folded:
         made, tracks = pulled(made, tracks, look, box, ppq, joined=False, within=within)
     return dict(out, _bent=bent_token(*_on_keys(made, tracks, keys)))
+
+
+def _outline_edge(sh, ppq, keys, get, made, tracks):
+    """A drawn shape's cut notes (made, tracks) with each key row's EDGE taken from its bent outline (user 2026-11-17,
+    test28: the cut rows' starts wobbled round a smooth curve; picked "edge from the outline"): the shape made the
+    outline way (every Shape step's Cut notes where bent off) gives each row's spans; pieces are clipped to them, the
+    first / last piece of a span reaches its ends. Only a plain Fill (Spam, outlines, patterns: their row ends are real
+    notes, left as cut)."""
+    if sh.get("fill") != "fill" or not len(made):
+        return made, tracks
+    import copy as _copy
+    r = _copy.deepcopy(sh["recolour"])
+    st = r.get("stir")
+    for x in (st if isinstance(st, list) else [st] if isinstance(st, dict) else []):
+        if isinstance(x, dict):
+            x["chop"] = False
+    for k in ("warp", "liquify"):
+        if isinstance(r.get(k), dict):
+            r[k]["chop"] = False
+    res = shape_tabs_done(dict(sh, recolour=r), ppq, keys, get)
+    line, _ = get(_steps_off(without_recolour(res)))
+    from notes.shape_bend import edge_from_rows
+    from notes.shape_bend import CHOP_PART
+    return edge_from_rows(np.asarray(made, np.int64), tracks, np.asarray(line, np.int64),
+                          max(int(ppq) // CHOP_PART, 1))
 
 
 STEP_KEYS = ("fx", "_m", "glue", "sustain", "extend", "subtract", "gate_flip", "order", "off", "_upto")
