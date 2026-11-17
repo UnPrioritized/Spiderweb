@@ -1716,12 +1716,17 @@ class StirWindow(HeldKnobs, tk.Toplevel):
 def outline_kept(app, tgts, has):
     """Whether every selected shape tgts with a Shape step (has(its recolour, it): Stir tabs / the Warp set to Shape)
     makes the same notes as without its Shape steps (to 1/32 beat): the bend leaves the outline as it was (the
-    orange line in the Stir / Warp window). Shapes past OUTLINE_KEPT_MOST notes aren't checked."""
+    orange line in the Stir / Warp window). Shapes past OUTLINE_KEPT_MOST notes aren't checked. Shapes whose notes
+    are CUT where bent (pastes, Cut notes where bent) aren't either: no outline to keep, and it made all their notes
+    on the window's thread (2.6 M at Twist 50: 1.4 s a change before the background thread began; user 2026-11-17)."""
+    from notes.shape_bend import cuts_notes
     seen = False
     for t in tgts:
         r = t.get("recolour")
         if not isinstance(r, dict) or not has(r, t):
             continue
+        if cuts_notes(r, t):
+            return False
         notes = app.notes_of(t)
         if len(notes) > OUTLINE_KEPT_MOST:
             return False
