@@ -126,6 +126,7 @@ def put_own(sh, part):
 
 
 class SubtractWindow(PointGraph, tk.Toplevel):
+    notes_pass = True  # (its clicks / drags don't wait for notes made in the background: notes_wait.pass_window)
     use, bys, touches, varies, owns, g, g_all = (_side_list(k) for k in SIDE_LISTS)
 
     KEY = "subtract"  # the shape's key (sh["subtract"])
