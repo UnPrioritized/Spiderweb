@@ -18,6 +18,7 @@ from notes.convert import (CAN_TURN, has_edge_strum, losses, originals, shared_s
                            without_edge_strums)
 from notes.bezier import nearest, split
 from notes.custom import notes_shape, pack_notes, unpack_notes
+from notes.even_steps import even_joined
 from notes.fillgaps import fill_gaps as filled, needs_fill
 from notes.lines import flipped_lines, lined_up, note_lines, overlap_losers
 from notes.passengers import has_cc, pack_cc, split_cc, unpack_cc
@@ -295,6 +296,7 @@ class JoinSplit:
             return
         new = to_live(olds, [cached_strokes(sh) for sh in olds], self.defaults, self.custom_defaults,
                       self.roll.sy / self.roll.sx if self.roll.sx else None)
+        regridded = even_joined(new, olds, self.ppq)
         self.keep_into([new], laid, olds[0])
         carry_stops(self, olds, [new])  # (Sustain's stops put by hand: on the same ticks)
         self.roll.cancel_draft()
@@ -307,9 +309,10 @@ class JoinSplit:
         self.select(at)
         self.shapes_changed()
         n = len(olds)
-        self.status.config(text=tr("join_split.turned_the_shape_into_a_live")
-                           if n == 1 else
-                           tr("join_split.turned_shapes_into_a_live_shape", n=n))
+        self.status.config(text=(tr("join_split.turned_the_shape_into_a_live")
+                                 if n == 1 else
+                                 tr("join_split.turned_shapes_into_a_live_shape", n=n))
+                           + (tr("join_split.even_regridded") if regridded else ""))
         self.tips.show("turn_live", wait=True)
 
     def join_problem(self):

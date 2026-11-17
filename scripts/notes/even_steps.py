@@ -8,6 +8,7 @@ Units here: x in gates from the grid's start (Aligned: tick 0, Auto: the shape's
 with whole numbers on the lines BETWEEN rows (y = pitch + 0.5): a clean line crosses those lines on gate lines,
 so its rows' ends are whole gates and step evenly. Curved strokes stay as drawn (only their rows are widened)."""
 
+import json
 import math
 
 from notes.custom import even_on, frame_to_bp, frame_to_uv
@@ -170,6 +171,24 @@ def hugging_box(pts, strokes, g):
     if hi_p - lo_p < 1e-9:
         return pts
     return _moved_sides(pts, old, (xl, xr, lo_p, hi_p))  # (flips / quarter turns kept)
+
+
+def even_joined(new, olds, ppq):
+    """Turn into live shape (Ctrl+R) made new (a live shape) of olds: with Symmetrical steps on it's stored snapped
+    at once, and the drawing Split compares against (new["from"]) is that snapped one, so Split still gives the old
+    shapes back after a click (hunt 2026-11-17). True = some notes moved: a shape wasn't on the joined shape's gate
+    grid (Auto counts from the joined box's left edge) or wasn't ticked (user picked: tell, don't refuse)."""
+    if not (even_on(new) and stores_snap(new)) or "from" not in new:
+        return False
+    g = gate_ticks(new["gate"], ppq)
+    o = grid_start(new, ppq)
+    moved = any(not (even_on(sh) and gate_ticks(sh["gate"], ppq) == g and (grid_start(sh, ppq) - o) % g == 0)
+                for sh in olds if sh.get("kind") == "custom")
+    new["pts"], new["strokes"] = snapped_shape(new, ppq)
+    new["from"]["pts"] = [list(p) for p in new["pts"]]
+    new["from"]["strokes"] = json.loads(json.dumps(new["strokes"]))
+    new.pop("even_free", None)  # (the first shape's: it doesn't fit the joined drawing)
+    return moved
 
 
 def drawing_mark(strokes):
