@@ -101,14 +101,44 @@ def moved_to(shapes, owners, slots, ids, slot):
     """The track (slot) now holding most notes of the shapes with these ids (shape_ids): slot itself while it holds
     any of them (user 2026-10-26: a 15-colour shape's highlighted track holding fewer than its others made the
     highlight jump at every edit), None when none of them has notes. owners / slots: each note's shape / track."""
+    return moved_on(notes_on(shapes, owners, slots, ids), slot)
+
+
+def notes_on(shapes, owners, slots, ids):
+    """(tracks, how many notes on each, sorted) of the shapes with these ids: moved_to's work done once, so many
+    tracks asking about the same shapes don't each go through every note."""
     known = [i for i, sh in enumerate(shapes) if id(sh) in ids]
     on = slots[np.isin(owners, known)] if known else slots[:0]
-    if not len(on):
+    return np.unique(on, return_counts=True)
+
+
+def moved_on(got, slot):
+    """moved_to's answer from notes_on's (tracks, counts)."""
+    where, counts = got
+    if not len(where):
         return None
-    if (on == slot).any():
+    if slot in set(where.tolist()):
         return slot
-    where, counts = np.unique(on, return_counts=True)
     return int(where[counts.argmax()])
+
+
+def old_owners(old, muted, behind):
+    """{track: the shapes' numbers holding notes on it} in the notes before (old: rows, track in column 4, shape in 5)
+    for every automatic track muted or picked (behind): one pass for all of them, not one per track."""
+    want = {m[0] if isinstance(m, tuple) else m for m in muted}
+    for k, v in behind.items():
+        want |= set(v) | ({k} if k is not None else set())
+    want = sorted(s for s in want if 0 <= s < (1 << 32))  # (automatic tracks only: the ones handed out again)
+    if not want or not len(old):
+        return {}
+    sub = old[np.isin(old[:, 4], want)]
+    if not len(sub):
+        return {}
+    key = np.unique(sub[:, 4].astype(np.int64) * (1 << 31) + sub[:, 5])  # (shape numbers stay far below 2^31)
+    out = {}
+    for s, i in zip((key >> 31).tolist(), (key & ((1 << 31) - 1)).tolist()):
+        out.setdefault(s, []).append(i)
+    return out
 
 
 def build_onion(app, parent):

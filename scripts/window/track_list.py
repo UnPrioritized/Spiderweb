@@ -42,8 +42,8 @@ from roll.tiles import see_through
 from window import look
 from window.notes_wait import stale_ok
 from window.track_windows import AddTracksBox, PropertiesBox
-from window.track_pictures import (SQUARE, TILE, BehindWindow, RowJob, build_onion, build_strip, cut_text, moved_to,
-                                    row_mask, shape_ids, small_mask, squares, sync_onion)
+from window.track_pictures import (SQUARE, TILE, BehindWindow, RowJob, build_onion, build_strip, cut_text, moved_on,
+                                    moved_to, notes_on, old_owners, row_mask, shape_ids, small_mask, squares, sync_onion)
 from window.widgets import Scrub, Tooltip, bad, good, read_number, remember_place
 
 NAME_W = 150    # the names' column (x scale)
@@ -287,14 +287,22 @@ class TrackList(tk.Canvas):
             shapes = self.app.shapes
             if made is not None and (self.muted or self._behind):
                 old, ids = made[0], self._ids
+                owners = old_owners(old, self.muted, self._behind)
+                new_tracks, went = None, {}
 
                 def keep(s):
+                    nonlocal new_tracks
                     if s < 0 or s >= HAND:  # (a loaded MIDI's / an own track: never handed out again)
                         return s
-                    had = {ids[i] for i in np.unique(old[old[:, 4] == s, 5]).tolist() if i < len(ids)}
+                    had = {ids[i] for i in owners.get(s, ()) if i < len(ids)}
                     if not any(id(sh) in had for sh in shapes):  # (an empty track, or shapes made anew by undo:
                         return s                                   # kept on its number, like the highlight)
-                    return moved_to(shapes, n[:, 5], track_ids(n[:, 4]), had, s)
+                    if new_tracks is None:  # (worked out once for every mute, not per track: user 2026-11-18,
+                        new_tracks = track_ids(n[:, 4])  # a solo over 256 tracks took 0.4-6 s after each edit)
+                    key = frozenset(had)
+                    if key not in went:  # (shapes with the same ids: where their notes are now, once)
+                        went[key] = notes_on(shapes, n[:, 5], new_tracks, had)
+                    return moved_on(went[key], s)
                 self.map_muted(keep)
                 self.map_behind(keep)
             self._ids = [id(sh) for sh in shapes]
