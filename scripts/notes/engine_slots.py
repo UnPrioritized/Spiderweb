@@ -664,11 +664,17 @@ def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
         now = ids.tolist()  # (the shape's tracks' slots: moved ones' new slots, the rest as they are)
         order = np.argsort(which, kind="stable")  # (each track's notes in their own order, without a mask each)
         at = np.searchsorted(which[order], np.arange(len(now) + 1))
+        used = {}  # (how many of the shape's tracks are on each slot now: no set of them per track, tracks x tracks)
+        for x in now:
+            used[x] = used.get(x, 0) + 1
         for k, s in enumerate(ids.tolist()):
             mine = sorted_spans(lst[order[at[k]:at[k + 1]]], split)
-            others, bad, tried = set(now) - {s}, None, 0
-            while s in others or (placed.clashes(mine, s) if bad is None else s in bad):
-                tried += s not in others  # (only real clashes count: stepping over the shape's own slots is free)
+            s0, bad, tried = s, None, 0
+
+            def taken(x):  # (another of the shape's tracks is on slot x)
+                return x != s0 and used.get(x, 0) > 0
+            while taken(s) or (placed.clashes(mine, s) if bad is None else s in bad):
+                tried += not taken(s)  # (only real clashes count: stepping over the shape's own slots is free)
                 if bad is None and tried >= 8:
                     bad = placed.clashing(mine)
                 u = unmapped_slot(s, use10) if step == 1 else None
@@ -679,6 +685,8 @@ def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
                 while step == 1 and unmapped_slot(s, use10) is None:
                     s += 1
             placed.add(mine, s)
+            used[s0] -= 1
+            used[s] = used.get(s, 0) + 1
             now[k] = s
         out[i] = np.asarray(now, pin.dtype)[which]
     return out
