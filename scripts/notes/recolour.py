@@ -3422,7 +3422,20 @@ def torn(p, w, own, u):
 def settled(notes, t):
     """notes and their tracks with each track's overlaps on a key fixed as render does (engine.resolve_overlaps,
     the track as the slot); the notes' other columns kept."""
-    from notes.engine import resolve_overlaps
+    from notes.engine import OVERLAP_GROUPS_MOST, resolve_overlaps
+    fast = loops()
+    if fast is not None and len(notes) > 1 and notes.dtype == np.int64 and notes.flags.c_contiguous:
+        # (nothing overlapping on a track + key and every note longer than 0 = resolve_overlaps changes nothing:
+        # one compiled pass instead of the whole fix; 3 M notes ~110 -> ~15 ms. It can only tell when each track +
+        # key's notes come in start order: else the fix below)
+        k = notes[:, 2]
+        lo, hi = int(k.min()), int(k.max())
+        nk = hi - lo + 1
+        tt = np.asarray(t, np.int64)
+        if int(tt.min()) >= 0 and (int(tt.max()) + 1) * nk <= OVERLAP_GROUPS_MOST \
+                and bool((notes[:, 1] > notes[:, 0]).all()) and fast.any_overlap(notes, tt * nk + (k - lo),
+                                                                                (int(tt.max()) + 1) * nk) == 0:
+            return notes, t
     vel = notes[:, 3] if notes.shape[1] > 3 else np.full(len(notes), 100)  # ((start, end, key) only: all alike)
     rows = np.column_stack([np.asarray(notes[:, :3], np.int64), np.asarray(vel, np.int64), t, np.arange(len(notes))])
     got = resolve_overlaps(rows)
