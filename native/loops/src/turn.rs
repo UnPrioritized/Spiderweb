@@ -362,12 +362,53 @@ pub fn turn_sample(flat: &[f64], skey: &[i64], send: &[i64], g: &[f64], lo_k: i6
 
 /// fastloops.turn_layers: notes sorted by key, then start (s, e, k), first / over = overlap_layers' marks ->
 /// each note's layer into lay (the first free one; notes outside the overlapping stretches stay 0) -> 0.
+/// Stretches of overlapping notes start afresh (every layer free), so the notes are shared out on half the cores in
+/// runs cut where a stretch starts (NOTES ON SEVERAL CORES 2026-11-18): the very same layers.
 #[inline(always)]
 pub fn turn_layers(s: &[i64], e: &[i64], k: &[i64], first: &[u8], over: &[u8], lay: &mut [i64]) -> i64 {
     let n = s.len();
     if e.len() < n || k.len() < n || first.len() < n || over.len() < n || lay.len() < n {
         return crate::FAILED;
     }
+    let pool = match crate::pool_for(true, n, 4) {
+        None => return layers_inner(s, e, k, first, over, lay),
+        Some(p) => p,
+    };
+    // (cuts: a note outside a stretch or a stretch's first note, the nearest at or after each even share)
+    let parts = pool.current_num_threads() * 4;
+    let mut jobs = Vec::new();
+    if jobs.try_reserve(parts).is_err() {
+        return NO_MEMORY;
+    }
+    let mut rest: &mut [i64] = &mut lay[..n];
+    let mut a = 0usize;
+    for p in 1..=parts {
+        let mut z = if p == parts { n } else { (n * p / parts).max(a) };
+        while z < n && first[z] != 0 && over[z] != 0 {
+            z += 1;
+        }
+        if z > a {
+            let (mine, more) = std::mem::take(&mut rest).split_at_mut(z - a);
+            jobs.push((a, z, mine));
+            rest = more;
+            a = z;
+        }
+    }
+    let worst = pool.install(|| {
+        jobs.into_par_iter().map(|(a, z, part)| layers_l(&s[a..z], &e[a..z], &k[a..z], &first[a..z], &over[a..z], part))
+            .min()
+    });
+    worst.unwrap_or(0).min(0)
+}
+
+// (the pool's work built at the processor's level: a closure handed to the pool is built at the plain level)
+level_builds!(fn layers_l(s: &[i64], e: &[i64], k: &[i64], first: &[u8], over: &[u8], lay: &mut [i64]) -> i64
+              => layers_inner);
+
+/// turn_layers for one run of notes (starting outside a stretch or at a stretch's first note).
+#[inline(always)]
+fn layers_inner(s: &[i64], e: &[i64], k: &[i64], first: &[u8], over: &[u8], lay: &mut [i64]) -> i64 {
+    let n = s.len();
     let mut free: BinaryHeap<Reverse<i64>> = BinaryHeap::new();
     let mut ends: BinaryHeap<Reverse<(i64, i64)>> = BinaryHeap::new();
     let mut key = i64::MIN;

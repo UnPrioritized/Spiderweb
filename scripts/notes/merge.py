@@ -854,8 +854,12 @@ def _layered(sh, rows, t_all, k_all, ppq):
     if layer is None:
         return _sampled(sh, rows, t_all, k_all, ppq, src=True)
     outs, srcs = [np.zeros((0, 5), np.int64)], [np.zeros(0, np.int64)]
-    for k in range(int(layer.max()) + 1):
-        idx = np.flatnonzero(layer == k)
+    # (every layer's notes in their order, from one sort: a pass over all the notes per layer was 63 passes on a
+    # paste with many overlaps)
+    by_layer = key_sort(layer, layer)
+    ends = np.cumsum(np.bincount(layer))
+    for k in range(len(ends)):
+        idx = by_layer[ends[k - 1] if k else 0:ends[k]]
         out, src = _sampled(sh, rows[idx], t_all, k_all, ppq, src=True)
         outs.append(out)
         srcs.append(idx[src])
