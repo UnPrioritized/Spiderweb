@@ -1445,6 +1445,8 @@ def forget_kept():
     _BEFORE_STIR.clear()
     _SORTED.clear()
     _ROWS.clear()
+    from notes import shape_bend
+    shape_bend._LQ_KEPT[0] = None  # (a Liquify set to Shape's kept pieces)
 
 
 def _before_stir(notes, tracks, rc, held, gate, own):

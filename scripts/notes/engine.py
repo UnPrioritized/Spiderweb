@@ -809,20 +809,40 @@ def shape_notes(sh, ppq, keys=128):
     return shape_notes_tracks(sh, ppq, keys)[0]
 
 
+BIG_TEXT = 65536  # (characters: a shape's text this long (a paste's packed notes) is keyed by which text it is)
+
+
+def _maker(ppq, keys_in):
+    """get(shape) -> fx_notes of it, each shape made once per job (the steps ask for the same base again and again).
+    Keyed by the shape as JSON, but a long text in it (a paste's packed notes, 12 M characters at 1 M notes: ~15 ms
+    a key, ~60 ms a Liquify update) by WHICH text it is: held here while the job runs, so no other text can take
+    its place; the same notes in another text object = only made again."""
+    done, held = {}, []
+
+    def get(s):
+        if isinstance(s, dict):
+            big = [k for k, v in s.items() if isinstance(v, str) and len(v) >= BIG_TEXT]
+            if big:
+                held.extend(s[k] for k in big)
+                s_key = dict(s, **{k: "\0text:%d" % id(s[k]) for k in big})
+            else:
+                s_key = s
+        else:
+            s_key = s
+        key = json.dumps(s_key, sort_keys=True)
+        if key not in done:
+            done[key] = fx_notes(s, ppq, keys_in, get)
+        return done[key]
+    return get
+
+
 def shape_notes_tracks(sh, ppq, keys=128):
     """shape_notes, and for pasted notes which track each note came from, for a custom shape made of other shapes
     which of them (one number per row; None for every other shape)."""
     sh = made_from(sh)
 
     def make(s, keys_in):
-        done = {}
-
-        def get(s):
-            key = json.dumps(s, sort_keys=True)
-            if key not in done:
-                done[key] = fx_notes(s, ppq, keys_in, get)
-            return done[key]
-        return get(s)
+        return _maker(ppq, keys_in)(s)
     got = edge_made(sh, ppq, keys, make)  # (reaching past the keys / before beat 0: made whole, cut at the end)
     return got if got is not None else make(sh, keys)
 
@@ -836,18 +856,8 @@ def whole_notes_tracks(sh, ppq, keys=128, over_top=None):
     if out is None:
         return shape_notes_tracks(sh, ppq, keys)
     lifted, up, room, later = out
-
-    def make(s, keys_in):
-        done = {}
-
-        def get(s):
-            key = json.dumps(s, sort_keys=True)
-            if key not in done:
-                done[key] = fx_notes(s, ppq, keys_in, get)
-            return done[key]
-        return get(s)
     with rows_up_to(room - 1):
-        notes, tracks = make(lifted, room)
+        notes, tracks = _maker(ppq, room)(lifted)
     notes = np.array(notes, copy=True)
     if up:
         notes[:, 2] -= up
@@ -1541,6 +1551,8 @@ def shape_tabs_done(sh, ppq, keys, get):
         # polyline with Last note per dot): each note a tiny box bent forwards, chopped where the bend curves it.
         # Folding bends: pulled (a drawn shape's touching pieces joined, notes' pieces kept apart))
         made, tracks = get(dict(base, _free=True) if "pts" in base else base)  # (past the edges too: cut after)
+        # (a Liquify set to Shape alone: its pieces kept between brush updates, only notes under changed cells bent)
+        lone_lq = benders[0] if len(benders) == 1 and lq is not None else None
 
         def bend_tk(t, k):
             p = np.column_stack((t, k))
@@ -1551,10 +1563,11 @@ def shape_tabs_done(sh, ppq, keys, get):
             if got == PULL or any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
                 raise Folded
             if not as_notes and first is not None:  # (a drawn shape cut where bent: its edge from the bent outline)
-                made, tracks, full = note_boxes_bent(made, tracks, bend_tk, ppq, look, lengths=True, raw=True)
+                made, tracks, full = note_boxes_bent(made, tracks, bend_tk, ppq, look, lengths=True, raw=True,
+                                                     kept=lone_lq)
                 made, tracks = _outline_edge(sh, ppq, keys, get, made, tracks, full)
             else:
-                made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
+                made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look, kept=lone_lq)
         except Folded:
             laid = None
             if got == PULL and not bend and tracks is not None and len(made) and base.get("cycle"):

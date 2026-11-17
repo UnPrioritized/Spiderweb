@@ -945,7 +945,80 @@ CHOP_PART = 32  # (or 1/32 beat sideways)
 CHOP_DEPTH = 24  # (halvings at most: 2^24 pieces of a note; pieces under 1 tick stop sooner)
 
 
-def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None, lengths=False, raw=False):
+KEEP_LEAST = 20000  # (notes: fewer = bent whole every time, nothing kept)
+_LQ_KEPT = [None]  # (the last Liquify-only bend's pieces: see _lq_kept)
+
+
+def _lq_kept(tagged, notes, tracks, bend_tk, ppq, lb):
+    """_note_boxes_bent for a Liquify set to Shape alone (lb), keeping its pieces between updates while brushing: a
+    note whose box covers no map cell the brush changed is bent exactly as before (the map's look-up there reads the
+    very same numbers), so only the notes under changed cells are bent again (leftover 2026-11-17: every note was
+    bent again at each update, ~0.3 s of 0.75 at 1 M pasted notes). The very same pieces in the very same order."""
+    if lb is None or len(notes) < KEEP_LEAST or not rc.keeping():
+        _LQ_KEPT[0] = None
+        return _note_boxes_bent(tagged, tracks, bend_tk, ppq)
+    gy, gx = lb.A.shape[:2]
+    # (where three spots go: the notes' place on the map is a straight-line (affine) one, so these pin it down)
+    ref = np.array(lb._to(*lb.to_unit(np.array([0.0, 1000.0, 0.0]), np.array([0.0, 0.0, 10.0]))), np.float64)
+    old = _LQ_KEPT[0]
+    same = (old is not None and old["ppq"] == ppq and old["A"].shape == lb.A.shape and np.array_equal(old["ref"], ref)
+            and old["notes"].shape == notes.shape and np.array_equal(old["notes"], notes)  # (own copy: never the
+            # caller's array, which may change)
+            and ((tracks is None and old["tracks"] is None) or (tracks is not None and old["tracks"] is not None
+                 and np.array_equal(np.asarray(old["tracks"]), np.asarray(tracks)))))
+    if same:
+        changed = (old["A"] != lb.A).any(2)
+        if not changed.any():
+            return old["out"], old["tr"]
+        # (cells with a changed corner, as sums from the corner: a note's span of cells is asked in one go)
+        cell = changed[:-1, :-1] | changed[1:, :-1] | changed[:-1, 1:] | changed[1:, 1:]
+        sums = np.zeros((gy, gx), np.int64)
+        sums[1:, 1:] = cell.astype(np.int64).cumsum(0).cumsum(1)
+        i0, i1, j0, j1 = old["cells"]
+        hit = (sums[j1, i1] - sums[j0, i1] - sums[j1, i0] + sums[j0, i0]) > 0
+        sub = np.flatnonzero(hit)
+        if len(sub) * 2 < len(notes):  # (most notes kept: else bending them all is as quick)
+            o2, t2 = _note_boxes_bent(tagged[sub], None if tracks is None else np.asarray(tracks)[sub], bend_tk,
+                                      ppq)
+            prev = old["out"]
+            keep = ~hit[prev[:, -1]]
+            rows = prev[keep]
+            # (both in note order (_pieces_made sorts by note, row, start) and each note's pieces all from one side:
+            # the new ones go in by note number, the very order bending them all gives)
+            at = np.searchsorted(rows[:, -1], o2[:, -1], "left")
+            out = np.insert(rows, at, o2, axis=0)
+            tr = None if tracks is None else np.insert(old["tr"][keep], at, np.asarray(t2))
+            _LQ_KEPT[0] = dict(old, A=lb.A.copy(), out=out, tr=tr)
+            return out, tr
+    out, tr = _note_boxes_bent(tagged, tracks, bend_tk, ppq)
+    tr = np.asarray(tr) if tr is not None else None
+    _LQ_KEPT[0] = {"notes": notes.copy(), "tracks": None if tracks is None else np.asarray(tracks).copy(), "ppq": ppq,
+                   "ref": ref, "A": lb.A.copy(), "out": out, "tr": tr, "cells": _note_cells(notes, lb, gx, gy)}
+    return out, tr
+
+
+def _note_cells(notes, lb, gx, gy):
+    """Each note's span of map cells (i0, i1, j0, j1: corners for _lq_kept's sums) its bend's look-ups can read:
+    its box's corners on the map, the cells liquify.sample picks there, one more each way (round-off); a note
+    nowhere (not finite) = every cell."""
+    s, e = notes[:, 0].astype(np.float64), notes[:, 1].astype(np.float64)
+    k = notes[:, 2].astype(np.float64)
+    mx, my = lb._to(*lb.to_unit(np.concatenate((s, e, e, s)), np.concatenate((k - 0.5, k - 0.5, k + 0.5, k + 0.5))))
+    n = len(notes)
+    mx, my = np.asarray(mx).reshape(4, n), np.asarray(my).reshape(4, n)
+    bad = ~(np.isfinite(mx).all(0) & np.isfinite(my).all(0))
+
+    def cell(v, g):
+        return np.minimum((np.clip(np.nan_to_num(v), 0.0, 1.0) * (g - 1)).astype(np.int64), g - 2)
+
+    i0 = np.where(bad, 0, np.maximum(cell(mx.min(0), gx) - 1, 0))
+    i1 = np.where(bad, gx - 1, np.minimum(cell(mx.max(0), gx) + 1, gx - 2) + 1)
+    j0 = np.where(bad, 0, np.maximum(cell(my.min(0), gy) - 1, 0))
+    j1 = np.where(bad, gy - 1, np.minimum(cell(my.max(0), gy) + 1, gy - 2) + 1)
+    return tuple(v.astype(np.int32) for v in (i0, i1, j0, j1))  # (half the memory: a grid is never that big)
+
+
+def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None, lengths=False, raw=False, kept=None):
     """notes (n, 4+: start, end, key, velocity, ...) + tracks (or None) bent forwards by bend_tk(t, k) -> (t, k)
     (floats; Folded when it can't): the new notes (sorted by start, key) and their tracks. look_back(t, k): the bend
     backwards; a hole inside a key row whose middle comes from inside a note is filled from that note (two rows'
@@ -954,15 +1027,19 @@ def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None, lengths=False, 
     pieces from different key rows overlapping by at most CHOP_PART of a beat (the same seam, cut at different places
     each side) meet halfway instead. lengths: also each new note's own note's length as drawn (third item; the edge
     step tells a note the cutting shortened from one drawn short, hunt 2026-11-17). raw (with lengths): left unsorted
-    (edge_from_rows / _by_start sort them: one whole sort less)."""
+    (edge_from_rows / _by_start sort them: one whole sort less). kept: the LiquifyBend when it is the only bend (its
+    pieces kept between brush updates: _lq_kept)."""
     notes = np.asarray(notes, np.int64)
     if not len(notes):
         got = _note_boxes_bent(notes, tracks, bend_tk, ppq)
         return (*got, np.zeros(0, np.int64)) if lengths else got
     # (each note's own key + number carried along as two last columns through every copy, dropped at the end)
     tagged = np.column_stack((notes, notes[:, 2], np.arange(len(notes))))
-    out, tr = _note_boxes_bent(tagged, tracks, bend_tk, ppq)
+    out, tr = _lq_kept(tagged, notes, tracks, bend_tk, ppq, kept)
     by_row = look_back is not None and len(out) >= 2
+    if kept is not None and not by_row:  # (the kept pieces are shared: the steps below may change them in place;
+        # _holes_filled starts with a sorted copy)
+        out, tr = out.copy(), (tr.copy() if tr is not None else None)
     if by_row:
         out, tr = _holes_filled(tagged, tracks, out, tr, look_back)
     most = max(int(ppq) // CHOP_PART, 1)
