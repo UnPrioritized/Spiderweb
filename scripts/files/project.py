@@ -26,7 +26,7 @@ from notes.loaded import (clean_link, conductor_line, extract_groups, extract_po
 from notes.merge import has_colours
 from notes.hz_cc import slot_events
 from notes.hz_fine import fine_owners, finer_notes, swapped
-from notes.passengers import STAY, USUAL, event_kind, midi_messages, pack_cc, placed, unpack_cc
+from notes.passengers import STAY, USUAL, event_kind, midi_messages, pack_cc, placed, strip_parts, unpack_cc
 from notes.mask import as_used, picture_like, slot_rule
 from notes.mask import MASK_DEFAULTS, THICKNESS, clean_mask
 from notes.nested import clean_nested
@@ -1799,22 +1799,16 @@ class ProjectFiles:
             strips = voice_slots.get(("strips", i))
             if strips:  # (Channel per strip: each later strip's channel gets its track's values in effect at its
                 # start, then its events while it sounds, hunt 2026-10-23)
+                by_track = {}  # (each track's events in their order: one pass, not one per track)
+                for e in events:
+                    by_track.setdefault(e[1], []).append(e)
                 for track, slot in slots.items():
-                    mine = [e for e in events if e[1] == track]
-                    for s, s0, s1 in (strips.get(int(slot)) or ())[1:]:
-                        before = {}  # (the latest of each kind before the strip starts, kept in their order)
-                        for e in mine:
-                            if e[0] >= s0:
-                                break
-                            k = event_kind(e[2], e[3])
-                            if k is not None:
-                                before.pop(k, None)
-                                before[k] = e
-                        for e in before.values():
+                    mine = by_track.get(track, [])
+                    for s, s0, s1, before, during in strip_parts(mine, (strips.get(int(slot)) or ())[1:]):
+                        for e in before:  # (the latest of each kind before the strip starts, kept in their order)
                             add(s, s0, e[2], e[3])
-                        for e in mine:
-                            if s0 <= e[0] <= s1:
-                                add(s, e[0], e[2], e[3])
+                        for e in during:
+                            add(s, e[0], e[2], e[3])
         for us, last in groups.values():
             self.cc_put_back(us, last, out, only)
         for slot in added:

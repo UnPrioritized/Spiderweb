@@ -139,6 +139,41 @@ def event_kind(tag, body):
     return ("cc", a) if s == 0xB0 else {0xC0: "program", 0xE0: "bend", 0xD0: "pressure"}.get(s)
 
 
+def strip_parts(mine, strips):
+    """Channel per strip: for each later strip (s, s0, s1) of a track whose passengers are mine (placed's
+    (tick, track, tag, body), in time order) -> (s, s0, s1, the latest of each kind before s0 (in the order they last
+    came), the ones from s0 to s1). In time order: one sweep + binary searches (a pass over every event per strip:
+    1 M events took seconds); not (never seen): the plain way, the same answers."""
+    import bisect
+    times = [e[0] for e in mine]
+    if any(b < a for a, b in zip(times, times[1:])):
+        for s, s0, s1 in strips:
+            before = {}
+            for e in mine:
+                if e[0] >= s0:
+                    break
+                k = event_kind(e[2], e[3])
+                if k is not None:
+                    before.pop(k, None)
+                    before[k] = e
+            yield s, s0, s1, list(before.values()), [e for e in mine if s0 <= e[0] <= s1]
+        return
+    strips = list(strips)
+    snaps, before, at = {}, {}, 0
+    for j in sorted(range(len(strips)), key=lambda j: strips[j][1]):
+        stop = bisect.bisect_left(times, strips[j][1])
+        while at < stop:  # (the events before this strip's start, each looked at once)
+            e = mine[at]
+            k = event_kind(e[2], e[3])
+            if k is not None:
+                before.pop(k, None)
+                before[k] = e
+            at += 1
+        snaps[j] = list(before.values())
+    for j, (s, s0, s1) in enumerate(strips):
+        yield s, s0, s1, snaps[j], mine[bisect.bisect_left(times, s0):bisect.bisect_right(times, s1)]
+
+
 def with_value(body, v):
     """A control event's body with its value (the first f32 of its value list) set to v."""
     out, i = bytearray(body), 0
