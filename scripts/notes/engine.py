@@ -1630,6 +1630,9 @@ def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, be
     return dict(out, _bent=bent_token(*_on_keys(made, tracks, keys)))
 
 
+NESTED_SOLID = True  # (_outline_edge's solid rows skip a Nested fill with no empty step: same rows)
+
+
 def _outline_edge(sh, ppq, keys, get, made, tracks, full=None):
     """A drawn shape's cut notes (made, tracks) with each key row's EDGE taken from its bent outline (user 2026-11-17,
     test28: the cut rows' starts wobbled round a smooth curve; picked "edge from the outline"): the shape made the
@@ -1651,7 +1654,18 @@ def _outline_edge(sh, ppq, keys, get, made, tracks, full=None):
     for k in ("warp", "liquify"):
         if isinstance(r.get(k), dict):
             r[k]["chop"] = False
-    res = shape_tabs_done(dict(sh, recolour=r, fill="fill"), ppq, keys, get)  # (the outline's solid rows)
+    solid = dict(sh, recolour=r, fill="fill")
+    if NESTED_SOLID:
+        from notes.custom import has_areas, has_nested
+        if has_nested(solid) and not sh["nested"].get("skip"):
+            # (no step left empty: the steps fill exactly the plain shape; heavy sweep 2026-11-17, 480 steps were
+            # worked out again on the bent outline only to be merged back: 5 s. Tiles / Ripples / areas the
+            # Nested fill was hiding go too: dropping it alone switched them on)
+            for k in ("nested", "tiles", "ripples", "areas"):
+                solid.pop(k, None)
+        elif has_areas(solid) and all(len(a) > 2 and a[2] for a in sh["areas"]):
+            solid.pop("areas")  # (coloured areas, none emptied: they only colour the plain fill's rows; 1.6 s)
+    res = shape_tabs_done(solid, ppq, keys, get)  # (the outline's solid rows)
     line, _ = get(_steps_off(without_recolour(res)))
     from notes.shape_bend import CHOP_PART, edge_from_rows
     return edge_from_rows(np.asarray(made, np.int64), tracks, np.asarray(line, np.int64),
