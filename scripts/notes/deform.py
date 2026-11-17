@@ -293,7 +293,44 @@ def too_heavy(old, new):
 
 def _thin(p, tol):
     """Points p (n, 2) of a fine line with the ones left out that it doesn't need: what's left strays at most tol
-    from every point (Ramer-Douglas-Peucker; both ends kept)."""
+    from every point (Ramer-Douglas-Peucker; both ends kept). Every piece of one level split in one go (the very
+    same points kept as _thin_plain, one piece at a time: a bent ellipse took ~45 ms there, hunt 2026-11-17 #4)."""
+    p = np.asarray(p, np.float64)
+    n = len(p)
+    if n < 3:
+        return p
+    keep = np.zeros(n, bool)
+    keep[[0, -1]] = True
+    si, sj = np.array([0]), np.array([n - 1])
+    while len(si):
+        big = sj - si >= 2
+        si, sj = si[big], sj[big]
+        if not len(si):
+            break
+        lens = sj - si - 1
+        first = np.cumsum(lens) - lens
+        seg = np.repeat(np.arange(len(si)), lens)
+        idx = np.repeat(si + 1, lens) + (np.arange(int(lens.sum())) - np.repeat(first, lens))
+        a = p[si][seg]
+        e = (p[sj] - p[si])[seg]
+        m = p[idx]
+        ee = (e * e).sum(1)
+        flat = ee <= 1e-300
+        s = np.clip(((m - a) * e).sum(1) / np.where(flat, 1.0, ee), 0, 1)
+        off = np.where(flat, np.hypot(*(m - a).T), np.hypot(*(a + s[:, None] * e - m).T))
+        top = np.maximum.reduceat(off, first)
+        # (the first spot of each piece at its largest stray, as argmax picks)
+        at = np.flatnonzero(off == top[seg])
+        firsts = at[np.r_[True, seg[at][1:] != seg[at][:-1]]]
+        k = idx[firsts]
+        split = top > tol
+        keep[k[split]] = True
+        si, sj = np.r_[si[split], k[split]], np.r_[k[split], sj[split]]
+    return p[keep]
+
+
+def _thin_plain(p, tol):
+    """_thin one piece at a time (the reference: dev/scratch/thin_same.py)."""
     if len(p) < 3:
         return p
     keep = np.zeros(len(p), bool)
