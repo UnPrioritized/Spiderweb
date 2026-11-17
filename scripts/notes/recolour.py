@@ -2940,6 +2940,13 @@ def repeat_ends(at, keys, starts, ends):
     k = np.asarray(at[:, 2], np.int64)
     s = np.asarray(at[:, 0])
     whole = s.dtype == np.int64
+    fast = getattr(loops(), "repeat_rows", None)
+    if fast is not None and len(k) and (not whole or -(1 << 53) < int(s.min()) and int(s.max()) < 1 << 53):
+        # (compiled: each key row sorted on its own, rows on several cores; the same numbers. Whole-number starts as
+        # floats: exact below 2^53)
+        got = fast(k, s, at[:, 1], keys, starts, ends)
+        if got is not None:
+            return got[0], (got[1], got[2], got[3], got[4])
     o = key_sort(k, s) if whole else np.lexsort((np.asarray(s, np.float64), k))
     ks, ss = k[o], s[o]
     row = np.searchsorted(keys, ks)  # (each note's key row, in keys' order)

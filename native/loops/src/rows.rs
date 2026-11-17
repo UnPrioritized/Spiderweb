@@ -229,6 +229,170 @@ pub fn unique_keep(a: crate::Nd<i64, 2>, kc: i64, keep: &mut [u8], many: bool) -
     keep.iter().map(|&x| x as i64).sum()
 }
 
+/// Places sorted by start, NaN last, ties by place (np.lexsort's stable order on one row).
+#[inline(always)]
+fn by_start(s: &[f64], idx: &mut [usize]) {
+    idx.sort_unstable_by(|&x, &y| {
+        let (a, b) = (s[x], s[y]);
+        let o = match (a.is_nan(), b.is_nan()) {
+            (false, false) => a.partial_cmp(&b).unwrap(),
+            (true, false) => std::cmp::Ordering::Greater,
+            (false, true) => std::cmp::Ordering::Less,
+            (true, true) => std::cmp::Ordering::Equal,
+        };
+        o.then(x.cmp(&y))
+    });
+}
+
+/// One key row of repeat_ends: its notes' places idx (sorted here), steps = room for its start steps; writes the
+/// row's (bw, lo, hi, lo2, hi2) into out[0..5] (from start / end as given). -> true = its lowest / highest middle is
+/// a zero: NumPy's reduce picks 0.0 or -0.0 by its own inner order there (the caller then uses the NumPy way).
+#[inline(always)]
+fn repeat_inner(s: &[f64], e: &[f64], idx: &mut [usize], steps: &mut [f64], start: f64, end: f64, out: &mut [f64])
+                -> bool {
+    by_start(s, idx);
+    let mut last = f64::NEG_INFINITY;
+    let mut m = 0usize;
+    for j in 0..idx.len() {
+        last = npmax(last, s[idx[j]]);
+        if j > 0 {
+            let st = s[idx[j]] - s[idx[j - 1]];
+            if st > 0.0 {
+                steps[m] = st;
+                m += 1;
+            }
+        }
+    }
+    out[0] = end;
+    out[1] = start;
+    out[2] = end;
+    out[3] = start;
+    out[4] = end;
+    if m == 0 {
+        return false;
+    }
+    let steps = &mut steps[..m];
+    steps.sort_unstable_by(|a, b| a.partial_cmp(b).unwrap()); // (all > 0: no NaN)
+    let med = steps[(m - 1) / 2];
+    out[0] = npmax(end, last + med);
+    let (mut m0, mut m1) = (f64::INFINITY, f64::NEG_INFINITY);
+    let mut first = true;
+    for &i in idx.iter() {
+        let mid = (s[i] + e[i]) / 2.0;
+        if first {
+            m0 = mid;
+            m1 = mid;
+            first = false;
+        } else {
+            m0 = npmin(m0, mid);
+            m1 = npmax(m1, mid);
+        }
+    }
+    out[1] = m0;
+    out[2] = m1;
+    out[3] = m0 - med / 2.0;
+    out[4] = m1 + med / 2.0;
+    m0 == 0.0 || m1 == 0.0
+}
+level_builds!(fn repeat_l(s: &[f64], e: &[f64], idx: &mut [usize], steps: &mut [f64], start: f64, end: f64,
+                          out: &mut [f64]) -> bool => repeat_inner);
+
+/// recolour.repeat_ends: notes' key rows k, starts s, ends e (floats; whole-number starts below 2^53 give the same
+/// steps), keys = the rows present (sorted, every k among them), starts / ends = each row's first start / last
+/// end -> out (5 x rows: bw, lo, hi, lo2, hi2) -> 0. Rows shared out on half the cores.
+#[inline(always)]
+pub fn repeat_rows(k: &[i64], s: &[f64], e: &[f64], keys: &[i64], starts: &[f64], ends: &[f64],
+                   out: crate::NdMut<f64, 2>, many: bool) -> i64 {
+    let (n, nr) = (k.len(), keys.len());
+    if s.len() < n || e.len() < n || starts.len() < nr || ends.len() < nr || out.sh[0] != 5 || out.sh[1] != nr
+        || out.d.len() < 5 * nr || nr == 0 {
+        return FAILED;
+    }
+    let (k0, k1) = (keys[0], keys[nr - 1]);
+    if k1 - k0 >= MOST_SPAN {
+        return FAILED;
+    }
+    let span = (k1 - k0 + 1) as usize;
+    let mut row_of: Vec<usize> = match crate::filled(span, usize::MAX) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    for (r, &key) in keys.iter().enumerate() {
+        if key < k0 || key > k1 || (r > 0 && key <= keys[r - 1]) {
+            return FAILED;
+        }
+        row_of[(key - k0) as usize] = r;
+    }
+    let mut start: Vec<usize> = match zeros(nr + 1) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    for &x in k {
+        if x < k0 || x > k1 || row_of[(x - k0) as usize] == usize::MAX {
+            return FAILED;
+        }
+        start[row_of[(x - k0) as usize] + 1] += 1;
+    }
+    for r in 0..nr {
+        start[r + 1] += start[r];
+    }
+    let (mut idx, mut steps): (Vec<usize>, Vec<f64>) = match (zeros(n), zeros(n)) {
+        (Ok(a), Ok(b)) => (a, b),
+        _ => return crate::NO_MEMORY,
+    };
+    let mut at: Vec<usize> = match crate::copied(&start[..nr]) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    for (i, &x) in k.iter().enumerate() {
+        let r = row_of[(x - k0) as usize];
+        idx[at[r]] = i;
+        at[r] += 1;
+    }
+    // (each row: its places, its step room, its 5 numbers; out is written row-wise then laid out 5 x rows)
+    let mut res: Vec<f64> = match zeros(nr * 5) {
+        Ok(v) => v,
+        Err(e) => return e,
+    };
+    let mut jobs = Vec::new();
+    if jobs.try_reserve_exact(nr).is_err() {
+        return crate::NO_MEMORY;
+    }
+    let (mut ri, mut rs, mut ro): (&mut [usize], &mut [f64], &mut [f64]) = (&mut idx, &mut steps, &mut res);
+    for r in 0..nr {
+        let c = start[r + 1] - start[r];
+        let (a, b) = std::mem::take(&mut ri).split_at_mut(c);
+        let (sa, sb) = std::mem::take(&mut rs).split_at_mut(c);
+        let (oa, ob) = std::mem::take(&mut ro).split_at_mut(5);
+        jobs.push((r, a, sa, oa));
+        ri = b;
+        rs = sb;
+        ro = ob;
+    }
+    let (s, e) = (&s[..n], &e[..n]);
+    let zero = match pool_for(many, n, 1) {
+        None => {
+            let mut z = false;
+            for (r, a, sa, oa) in jobs {
+                z |= repeat_l(s, e, a, sa, starts[r], ends[r], oa);
+            }
+            z
+        }
+        Some(pool) => pool.install(|| {
+            jobs.into_par_iter().map(|(r, a, sa, oa)| repeat_l(s, e, a, sa, starts[r], ends[r], oa)).reduce(|| false, |x, y| x || y)
+        }),
+    };
+    if zero {
+        return FAILED;
+    }
+    for r in 0..nr {
+        for c in 0..5 {
+            out.d[c * nr + r] = res[r * 5 + c];
+        }
+    }
+    0
+}
+
 #[inline(always)]
 fn wrap_inner(key: &[f64], base: f64, h: f64, out: &mut [f64]) {
     for (o, &x) in out.iter_mut().zip(key) {

@@ -89,6 +89,8 @@ py_loops! {
     row_bounds(k: &[i64], a: &[f64], b: &[f64], d: &[f64], many: bool) -> arrays => crate::rows::row_bounds;
     key_wrap(key: &[f64], base: f64, h: f64, out: &mut [f64], many: bool) => crate::rows::key_wrap;
     unique_keep(a: Nd<i64, 2>, kc: i64, keep: &mut [u8], many: bool) => crate::rows::unique_keep;
+    repeat_rows(k: &[i64], s: &[f64], e: &[f64], keys: &[i64], starts: &[f64], ends: &[f64], out: NdMut<f64, 2>,
+                many: bool) => crate::rows::repeat_rows;
     // ---- pasted notes in a stretched box (block.rs)
     block_count(rows: Nd<i64, 2>, g: &[f64], cnt: &mut [i64], many: bool) => crate::block::block_count;
     block_fill(rows: Nd<i64, 2>, g: &[f64], offs: &[i64], out: NdMut<i64, 2>, many: bool) => crate::block::block_fill;

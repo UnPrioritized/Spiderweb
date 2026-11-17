@@ -357,6 +357,19 @@ class Wraps:
             return None
         return np.arange(len(a)) if got == len(a) else np.flatnonzero(keep)
 
+    def repeat_rows(self, k, s, e, keys, starts, ends):
+        """recolour.repeat_ends' (bw, lo, hi, lo2, hi2) rows as one (5, rows) array, or None = not run (its NumPy
+        way, the same numbers)."""
+        if not hasattr(self.x, "repeat_rows") or not len(keys):
+            return None
+        f = np.float64
+        out = np.empty((5, len(keys)), f)
+        got = self.x.repeat_rows(np.ascontiguousarray(k, np.int64), np.ascontiguousarray(s, f),
+                                 np.ascontiguousarray(e, f), np.ascontiguousarray(keys, np.int64),
+                                 np.ascontiguousarray(starts, f), np.ascontiguousarray(ends, f), out,
+                                 len(k) >= ROWS_MANY)
+        return out if got >= 0 else None
+
     def key_wrap(self, key, base, h):
         """recolour.Rows.key_wrapped's numbers, or None = not run (its NumPy way)."""
         if not hasattr(self.x, "key_wrap"):
