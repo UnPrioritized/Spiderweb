@@ -3040,14 +3040,114 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.shapes_changed(now="late" if late else True)
 
     def late_ok(self):
-        """The notes can be made in the background (shapes_changed): the last making took longer than LATE_S, and the
-        notes on screen still belong to these shapes (the same ones in the same places, maybe more after them)."""
+        """The notes can be made in the background (shapes_changed): the last making took longer than LATE_S. The notes
+        on screen stay meanwhile: the same shapes in the same places (maybe more after them) = as they are, else
+        renumbered to the new list (renumber_shown: Delete, undo / redo, History, Join, Split...)."""
         if self._make_time + self._mask_time <= LATE_S or self._merges_owed:
             return False
         if self.companion is not None or getattr(self, "fold_window", None):  # (Draw on Domino / Fold tracks: their
             return False                                                       # own notes, made at once)
         made = self._made_shapes
-        return len(self.shapes) >= len(made) and all(a is b for a, b in zip(self.shapes, made))
+        if len(self.shapes) >= len(made) and all(a is b for a, b in zip(self.shapes, made)):
+            return True
+        self.renumber_shown()
+        return True
+
+    def renumber_shown(self):
+        """The shape list changed under the notes on screen: those notes (and what's counted per shape from them)
+        renumbered to the new list, so they stay on screen while the new ones are made in the background. Each old
+        shape is found again as the same object, else as a shape with the same settings (undo / redo make new
+        ones); one not found (deleted) = its notes left out."""
+        made, shapes = self._made_shapes, self.shapes
+        where = {id(sh): j for j, sh in enumerate(shapes)}
+        m = np.full(len(made), -1, np.int64)
+        left = []
+        for i, sh in enumerate(made):
+            j = where.pop(id(sh), None)
+            if j is None:
+                left.append(i)
+            else:
+                m[i] = j
+        if left and where:
+            by_key = {}
+            for j in sorted(where.values()):
+                by_key.setdefault(shape_key(shapes[j]), []).append(j)
+            for i in left:
+                js = by_key.get(shape_key(made[i]))
+                if js:
+                    m[i] = js.pop(0)
+        self.stale_ok += 1  # (the notes as they are on screen, never waited for)
+        try:
+            self._renumber(m)
+        finally:
+            self.stale_ok -= 1
+        self._made_shapes = list(shapes)
+
+    def _renumber(self, m):
+        shapes, done = self.shapes, {}
+        old = self.rendered
+
+        def moved(arr):
+            if not isinstance(arr, np.ndarray) or arr.ndim != 2 or arr.shape[1] < 6 or not len(arr):
+                return arr
+            got = done.get(id(arr))
+            if got is None:
+                o = arr[:, 5].astype(np.int64)
+                ok = (o >= 0) & (o < len(m))
+                to = np.full(len(o), -1, np.int64)
+                to[ok] = m[o[ok]]
+                keep = to >= 0
+                if keep.all() and np.array_equal(to, o):
+                    got = arr
+                else:
+                    got = arr[keep]
+                    got[:, 5] = to[keep]
+                done[id(arr)] = got
+                done[("keep", id(arr))] = keep
+            return got
+
+        for name in ("rendered", "drawn", "drawn_all", "pattern"):
+            setattr(self, name, moved(getattr(self, name)))
+        for name in ("off_all", "off_masked"):
+            if getattr(self, name, None) is not None:
+                setattr(self, name, moved(getattr(self, name)))
+        new = self.rendered
+        back = {int(j): i for i, j in enumerate(m.tolist()) if j >= 0}  # (new shape -> old)
+        counts = [0] * len(shapes)
+        for i, c in enumerate(self.note_counts):
+            if i < len(m) and m[i] >= 0:
+                counts[m[i]] = c
+        self.note_counts = counts
+        self.mask_covered = {int(m[i]) for i in self.mask_covered if 0 <= i < len(m) and m[i] >= 0}
+        wanted = self.colours_wanted
+        self.colours_wanted = [wanted[back[j]] if j in back and back[j] < len(wanted) else 0
+                               for j in range(len(shapes))]
+        pts = self.rendered_pts
+        self.rendered_pts = [pts[back[j]] if j in back and back[j] < len(pts) else list(shapes[j]["pts"][0])
+                             for j in range(len(shapes))]
+        self.picture_owners_all = np.array([picture_like(sh) for sh in shapes], bool)
+        self.picture_owners = self.picture_owners_all if self.behind_owner is None else np.append(
+            self.picture_owners_all, False)  # (as track_view)
+        pairs = self._pairs  # (the counts from them: the old notes' pairs renumbered, no pass over the notes)
+        if pairs is not None and pairs[0]() is old and new is not old:
+            o = pairs[1]
+            ok = (o >= 0) & (o < len(m))
+            to = np.full(len(o), -1, np.int64)
+            to[ok] = m[o[ok]]
+            keep = to >= 0
+            self._pairs = (weakref.ref(new), to[keep], pairs[2][keep])
+        got = self.roll._start_order  # (the piano roll's start order kept: the notes left keep theirs)
+        keep = done.get(("keep", id(old)))
+        if got is not None and got[0] is old and new is not old and keep is not None:
+            start = got[1]
+            at = np.cumsum(keep) - 1
+            self.roll._start_order = (new, at[start[keep[start]]])
+        if len(new):
+            chans = np.bincount(self.slot_pairs()[0], minlength=len(shapes)).tolist()
+        else:
+            chans = [1] * len(shapes)
+        self.fill_shape_list(counts, chans, most_colours(self.all16()), self.colours_used())
+        self.sync_list_selection()
 
     def finish_notes(self):
         """Notes still being made in the background (shapes_changed): waited for and taken in now."""
