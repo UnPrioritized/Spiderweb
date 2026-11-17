@@ -99,6 +99,18 @@ def lone_keys(notes, keys, at):
     return np.searchsorted(srt, want, "right") - np.searchsorted(srt, want, "left") == 1
 
 
+def lone_among(keys, at):
+    """lone_keys for many notes at once (several mutes' notes): one pass over every note. The same answer: a
+    note_keys number holds its shape, so only notes of the same shape can share it."""
+    if not len(at):
+        return np.zeros(0, bool)
+    want = np.unique(keys[at])
+    i = np.minimum(np.searchsorted(want, keys), len(want) - 1)
+    hit = want[i] == keys
+    count = np.bincount(i[hit], minlength=len(want))
+    return count[np.searchsorted(want, keys[at])] == 1
+
+
 class TrackList(tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.TRACK_ROW, highlightthickness=0, takefocus=True)
@@ -504,7 +516,7 @@ class TrackList(tk.Canvas):
         r, rows, chans = self.app.rendered, self.note_rows(), self.row_chans()
         ch = channels_of(r[:, 4], self.app.picture_use10) if len(r) else r[:0, 0]
         keys = note_keys(r) if len(r) else np.zeros(0, np.int64)
-        out = []
+        out, want = [], []
         for m in self.muted:
             s, c = m if isinstance(m, tuple) else (m, None)
             row = self.row_of_id(s)
@@ -513,12 +525,24 @@ class TrackList(tk.Canvas):
             elif s < 0 and self.app.loaded is not None:
                 out.append((m, ("file", self.file_part(s)[0], chans[row] if c is None else (c,))))
             else:
-                pick = rows == row if len(r) else np.zeros(0, bool)
-                if c is not None and len(r):
-                    pick &= ch == c
-                at = np.flatnonzero(pick)
-                got = at[:MARK_NOTES * 4]  # (only notes found on this row alone: lone_keys)
-                got = got[lone_keys(r, keys, got)][:MARK_NOTES]
+                want.append((m, row, c))
+        if want:
+            # (every muted row's notes in one pass, not a pass over every note per mute: undo with 500 mutes over
+            # 2,000 tracks took seconds; the same marks as row by row)
+            on = np.flatnonzero(np.isin(rows, [row for _, row, _ in want])) if len(r) else np.zeros(0, np.int64)
+            on = on[np.argsort(rows[on], kind="stable")]
+            ends = rows[on]
+            heads = []
+            for m, row, c in want:
+                at = on[np.searchsorted(ends, row, "left"):np.searchsorted(ends, row, "right")]
+                if c is not None:
+                    at = at[ch[at] == c]
+                heads.append(at)
+            first = [at[:MARK_NOTES * 4] for at in heads]  # (only notes found on this row alone: lone_keys)
+            lone = lone_among(keys, np.concatenate(first)) if first else np.zeros(0, bool)
+            k = 0
+            for (m, row, c), at, got in zip(want, heads, first):
+                got, k = got[lone[k:k + len(got)]][:MARK_NOTES], k + len(got)
                 if not len(got) and len(at) > MARK_NOTES * 4:
                     got = at[lone_keys(r, keys, at)][:MARK_NOTES]
                 out.append((m, ("notes", keys[got]) if len(got) else None))
@@ -531,21 +555,29 @@ class TrackList(tk.Canvas):
         r, rows, chans = self.app.rendered, self.note_rows(), self.row_chans()
         keys = note_keys(r) if len(r) else np.zeros(0, np.int64)
         ch = channels_of(r[:, 4], self.app.picture_use10) if len(r) else r[:0, 0]
-        whole, pairs = set(), set()
+        whole, pairs, files, notes = set(), set(), None, []
         for m, key in marks:
             if key is None:
                 (pairs.add(m) if isinstance(m, tuple) else whole.add(m))
             elif key[0] == "file":
-                pairs |= {(int(s), c) for row, s in enumerate(self._all.tolist()) if s < 0
-                          and self.file_part(s)[0] == key[1] for c in key[2] if c in chans[row]}
+                if files is None:  # (the loaded rows by file track, once for every mute)
+                    files = {}
+                    for row, s in enumerate(self._all.tolist()):
+                        if s < 0:
+                            files.setdefault(self.file_part(s)[0], []).append((row, s))
+                pairs |= {(int(s), c) for row, s in files.get(key[1], ()) for c in key[2] if c in chans[row]}
             else:
-                at = np.flatnonzero(np.isin(keys, key[1]) & (rows >= 0))
-                at = at[lone_keys(r, keys, at)]  # (a note now on two tracks shows neither: lone_keys)
-                pairs |= {(int(self._all[rows[i]]), int(ch[i])) for i in at.tolist()}
-        for s in {s for s, _ in pairs}:  # (every channel of a track muted: the track's own mute)
-            got = {c for x, c in pairs if x == s}
+                notes.append(key[1])
+        if notes:  # (every mute's notes in one pass: the same pairs as one mute at a time)
+            at = np.flatnonzero(np.isin(keys, np.concatenate(notes)) & (rows >= 0))
+            at = at[lone_among(keys, at)]  # (a note now on two tracks shows neither: lone_keys)
+            pairs |= set(zip(self._all[rows[at]].tolist(), ch[at].tolist()))
+        got = {}
+        for s, c in pairs:
+            got.setdefault(s, set()).add(c)
+        for s, cs in got.items():  # (every channel of a track muted: the track's own mute)
             row = self.row_of_id(s)
-            if row is not None and chans[row] and got >= set(chans[row]):
+            if row is not None and chans[row] and cs >= set(chans[row]):
                 whole.add(s)
         self.muted = whole | {p for p in pairs if p[0] not in whole}
         self.request_redraw()
