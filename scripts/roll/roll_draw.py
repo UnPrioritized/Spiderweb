@@ -37,6 +37,7 @@ from window.notes_wait import stale_ok
 
 CARRY_REST_S = 0.15  # notes made in the background: their carried picture waits this long after a zoom (carried_pic)
 MAKING_SHOW_S = 0.15  # notes made in the background this long: the "Making notes…" box shows (draw_making_label)
+MAKING_LOOK_MOST = 200  # nothing selected: up to this many shapes looked at for the ones being made (making_shapes)
 ROUGH_STRENGTH = 0.5  # the old notes stretched into a resized shape's new box: this much colour (stretched_pic)
 
 
@@ -1061,26 +1062,29 @@ class RollDrawing:
 
     def draw_making_label(self, w, h):
         """Notes being made in the background for longer than MAKING_SHOW_S: a small "Making notes…" box (the
-        picture label's look, user 2026-11-17: the status line alone is easy to miss) under the selected shapes'
-        lines (above them at the bottom edge), else in the piano roll's top left corner."""
+        picture label's look, user 2026-11-17: the status line alone is easy to miss) ON THE SHAPES BEING MADE,
+        above their top left corner like the picture label (user 2026-11-17), kept inside the piano roll (it
+        slides along the edge when they're off screen); under them when a selected picture's label is there; none
+        found (e.g. a Delete) = the piano roll's top left corner."""
         app = self.app
         since = getattr(app, "_bg_since", None)
         if not app._bg_notes or since is None or time.perf_counter() - since < MAKING_SHOW_S:
             return
-        boxes = [self.bbox(f"lines{i}") for i in app.sels]
-        boxes = [b for b in boxes if b]
         left, top = self.kb_w + 8, self.ruler_h + 4
         t = self.create_text(0, 0, text=tr("app.making_notes"), anchor="nw", font=look.font(9, family=look.TK))
         bx = self.bbox(t)
         if not bx:
             return
         tw, th = bx[2] - bx[0], bx[3] - bx[1]
-        if boxes:
-            x0, y0 = min(b[0] for b in boxes), min(b[1] for b in boxes)
-            y1 = max(b[3] for b in boxes)
-            x, y = x0 + 5, y1 + 6
-            if y + th + 4 > h - 4:  # (no room under them: above)
-                y = y0 - 6 - th
+        making = self.making_shapes()
+        if making:
+            boxes = [pts_box(sh) for sh in making]
+            x0, y0 = self.t2x(min(b[0] for b in boxes)), self.p2y(max(b[3] for b in boxes) + 0.5)
+            y1 = self.p2y(min(b[2] for b in boxes) - 0.5)
+            x, y = x0 + 5, y0 - 6 - th
+            if any(sh.get("picture") for sh in making if any(sh is app.shapes[i] for i in app.sels
+                                                             if i < len(app.shapes))):
+                y = y1 + 6  # (the picture's own label is above it)
         else:
             x, y = left, top
         x = min(max(x, left), max(left, w - tw - 12))
@@ -1088,6 +1092,29 @@ class RollDrawing:
         self.move(t, x, y)
         r = self.create_rectangle(x - 4, y - 2, x + tw + 4, y + th + 2, fill=look.LABEL_BG, outline=look.LABEL_EDGE)
         self.tag_lower(r, t)
+
+    def making_shapes(self):
+        """The shapes whose notes are being made now (draw_making_label): the selected ones that need theirs made,
+        else any that do (up to MAKING_LOOK_MOST shapes looked at); worked out once per background run + edit."""
+        app = self.app
+        mark = (app._bg_since, app.shapes_gen, len(app.shapes), tuple(app.sels))
+        got = getattr(self, "_making", None)
+        if got is not None and got[0] == mark:
+            return got[1]
+        cache, shapes = app._notes_cache, app.shapes
+
+        def owed(sh):
+            try:
+                return app.notes_cache_key(sh)[2] not in cache
+            except Exception:  # (an odd shape: not where the label goes)
+                return False
+        sel = [shapes[i] for i in app.sels if i < len(shapes)]
+        found = [sh for sh in sel if owed(sh)]
+        if not found and len(shapes) <= MAKING_LOOK_MOST:
+            found = [sh for sh in shapes if owed(sh)]
+        found = found or sel
+        self._making = (mark, found)
+        return found
 
     def off_selected(self, off):
         """The selected shapes' rows of off (kept notes past the edges), None when there are none; remembered per
