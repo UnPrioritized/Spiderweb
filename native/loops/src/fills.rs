@@ -126,7 +126,7 @@ pub fn band_rows(ax: &[f64], ay: &[f64], bx: &[f64], by: &[f64], length: &[f64],
                     r0 = r1;
                 }
             }
-            pool.install(|| parts.into_par_iter().for_each(|(r0, r1, b, k)| d.lines(r0, r1, b, k)));
+            pool.install(|| parts.into_par_iter().for_each(|(r0, r1, b, k)| band_lines(&d, r0, r1, b, k)));
         }
     }
     let mut m = 0usize;
@@ -251,7 +251,7 @@ pub fn field_dist(ax: &[f64], ay: &[f64], bx: &[f64], by: &[f64], xs: &[f64], ys
         Some(pool) => pool.install(|| {
             dist.d.par_chunks_mut(nx).enumerate().map(|(j, d)| match zeros::<usize>(ne) {
                 Ok(mut near) => {
-                    g.row(j, d, &mut near);
+                    grid_row(&g, j, d, &mut near);
                     0
                 }
                 Err(code) => code,
@@ -347,17 +347,46 @@ pub fn blend_heat(nodes: &[f64], dl: &[f64], mu: &[f64], wsc: &[f64], wec: &[f64
     }
     let h = Heat { nodes, dl, mu, wsc, wec, mode_at, run_m, run_p, w, j0, q, cx };
     match crate::pool_for(true, n, 4) {
-        None => {
-            for i in 0..n {
-                out[i] = h.at(j[i] as usize, r[i] as usize, xs[i]);
-            }
+        None => heat_range_inner(&h, j, r, xs, &mut out[..n]),
+        Some(pool) => {
+            let chunk = (n / (pool.current_num_threads() * 8)).max(256);
+            pool.install(|| {
+                out[..n].par_chunks_mut(chunk).enumerate()
+                    .for_each(|(c, o)| heat_range(&h, &j[c * chunk..], &r[c * chunk..], &xs[c * chunk..], o));
+            })
         }
-        Some(pool) => pool.install(|| {
-            out.par_iter_mut().enumerate().for_each(|(i, o)| *o = h.at(j[i] as usize, r[i] as usize, xs[i]));
-        }),
     }
     0
 }
+
+// (the pool's work built at the processor's level, NOTES ON SEVERAL CORES 2026-11-18: a closure handed to the pool
+// is built at the plain level, where floor / round and the helpers it calls are library calls, many times slower)
+#[inline(always)]
+fn heat_range_inner(h: &Heat<'_>, j: &[i64], r: &[i64], xs: &[f64], out: &mut [f64]) {
+    for (i, o) in out.iter_mut().enumerate() {
+        *o = h.at(j[i] as usize, r[i] as usize, xs[i]);
+    }
+}
+level_builds!(fn heat_range(h: &Heat<'_>, j: &[i64], r: &[i64], xs: &[f64], out: &mut [f64]) => heat_range_inner);
+#[inline(always)]
+fn band_lines_inner(d: &Band<'_>, r0: usize, r1: usize, b: &mut [(f64, f64)], k: &mut [usize]) {
+    d.lines(r0, r1, b, k)
+}
+level_builds!(fn band_lines(d: &Band<'_>, r0: usize, r1: usize, b: &mut [(f64, f64)], k: &mut [usize])
+              => band_lines_inner);
+#[inline(always)]
+fn grid_row_inner(g: &Grid<'_>, j: usize, d: &mut [f64], near: &mut [usize]) {
+    g.row(j, d, near)
+}
+level_builds!(fn grid_row(g: &Grid<'_>, j: usize, d: &mut [f64], near: &mut [usize]) => grid_row_inner);
+#[inline(always)]
+fn band_keys_inner(d: &BandAll<'_>, q0: usize, q1: usize, out: &mut [Vec<i64>; 4]) -> Result<(), i64> {
+    d.keys(q0, q1, out)
+}
+level_builds!(fn band_keys(d: &BandAll<'_>, q0: usize, q1: usize, out: &mut [Vec<i64>; 4]) -> Result<(), i64>
+              => band_keys_inner);
+level_builds!(fn box_span_l(xs: &[f64], ys: &[f64], lo: &[i64], cnt: &[i64], i0: usize, i1: usize, a: [&mut [i64]; 4],
+              b: [&mut [i64]; 4]) -> (usize, usize) => box_span);
 
 /// blend_heat's inputs.
 struct Heat<'a> {
@@ -377,6 +406,7 @@ struct Heat<'a> {
 
 impl Heat<'_> {
     /// The heat at x on row r of piece j (the twin's sums, one mode after another).
+    #[inline(always)]
     fn at(&self, j: usize, r: usize, x: f64) -> f64 {
         let at = j * self.w + r;
         let (m, p, first) = (self.run_m[at], self.run_p[at] as f64, self.mode_at[at] as usize);
@@ -503,6 +533,7 @@ struct BandAll<'a> {
 
 impl BandAll<'_> {
     /// fastloops._band_key for keys q0..q1: their rows onto out (start, end, key, step).
+    #[inline(always)]
     fn keys(&self, q0: usize, q1: usize, out: &mut [Vec<i64>; 4]) -> Result<(), i64> {
         let (ne, per) = (self.ax.len(), self.per);
         let mut klo: Vec<Vec<f64>> = room(per)?;
@@ -704,7 +735,7 @@ pub fn band_all(ax: &[f64], ay: &[f64], bx: &[f64], by: &[f64], length: &[f64], 
             let got: Vec<Result<[Vec<i64>; 4], i64>> = pool.install(|| {
                 cuts.par_iter().map(|&(a, b)| {
                     let mut out: [Vec<i64>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
-                    d.keys(a, b, &mut out).map(|_| out)
+                    band_keys(&d, a, b, &mut out).map(|_| out)
                 }).collect()
             });
             let mut parts = room(got.len())?;
@@ -1814,7 +1845,7 @@ pub fn box_rows(xs: &[f64], ys: &[f64], lo: &[i64], cnt: &[i64], out: NdMut<i64,
                 jobs.into_par_iter().map(|(i0, i1, a, b)| {
                     let [a0, a1, a2, a3] = a;
                     let [b0, b1, b2, b3] = b;
-                    box_span(xs, ys, lo, cnt, i0, i1, [a0, a1, a2, a3], [b0, b1, b2, b3])
+                    box_span_l(xs, ys, lo, cnt, i0, i1, [a0, a1, a2, a3], [b0, b1, b2, b3])
                 }).collect()
             });
             // (the groups' pieces moved down into one run each: pair 0-1 from 0, pair 2-3 from half)

@@ -291,6 +291,11 @@ const JUMP_SPARSE: usize = 512;
 /// fastloops.JUMP_ROOM: steps kept short of a worked-out change (rounding in u, v and the keys' numbers).
 const JUMP_ROOM: f64 = 4.0;
 
+// (the pool's work built at the processor's level: a closure handed to the pool is built at the plain level)
+level_builds!(#[allow(clippy::too_many_arguments)]
+              fn rows_pieces_l(flat: &[f64], skey: &[i64], send: &[i64], g: &Frame, k0: i64, lo: i64, hi: i64, n: usize,
+                               jump: bool) -> Result<[Vec<i64>; 4], i64> => rows_pieces);
+
 /// The rows lo .. hi's pieces, row after row.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
@@ -331,7 +336,7 @@ pub fn turn_sample(flat: &[f64], skey: &[i64], send: &[i64], g: &[f64], lo_k: i6
             let per = ((rows as usize) / (pool.current_num_threads() * 4)).max(1) as i64;
             let cuts: Vec<i64> = (0..rows).step_by(per as usize).collect();
             let got: Vec<Result<[Vec<i64>; 4], i64>> = pool.install(|| {
-                cuts.par_iter().map(|&a| rows_pieces(flat, skey, send, &g, lo_k, a, (a + per).min(rows), n, jump)).collect()
+                cuts.par_iter().map(|&a| rows_pieces_l(flat, skey, send, &g, lo_k, a, (a + per).min(rows), n, jump)).collect()
             });
             let mut parts = Vec::new();
             parts.try_reserve_exact(got.len()).map_err(|_| NO_MEMORY)?;

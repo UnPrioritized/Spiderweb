@@ -153,21 +153,39 @@ fn sort_all(ps: &mut [P], start: &[usize], many: bool) -> Result<(), i64> {
         Some(pl) => {
             let cuts = block_cuts(start, pl.current_num_threads() * 4)?;
             let blocks = split_blocks(ps, start, &cuts)?;
-            pl.install(|| {
-                blocks.into_par_iter().for_each(|(a, b, part)| {
-                    let base = start[a];
-                    for s in a..b {
-                        sort_slab(&mut part[start[s] - base..start[s + 1] - base]);
-                    }
-                })
-            });
+            pl.install(|| blocks.into_par_iter().for_each(|(a, b, part)| sort_block(start, a, b, part)));
         }
     }
     Ok(())
 }
 
+// (the pool's work built at the processor's level, NOTES ON SEVERAL CORES 2026-11-18: a closure handed to the pool
+// is built at the plain level)
+#[inline(always)]
+fn sort_block_inner(start: &[usize], a: usize, b: usize, part: &mut [P]) {
+    let base = start[a];
+    for s in a..b {
+        sort_slab(&mut part[start[s] - base..start[s + 1] - base]);
+    }
+}
+level_builds!(fn sort_block(start: &[usize], a: usize, b: usize, part: &mut [P]) => sort_block_inner);
+level_builds!(fn crossings_l(ps: &[P], start: &[usize], lv: &[f64], eps: f64, a: usize, b: usize)
+              -> Result<(bool, Vec<f64>), i64> => crossings_in);
+#[inline(always)]
+fn split_block_inner(sp: &Split<'_>, a: usize, b: usize, part: &mut [P], base: usize) {
+    for s in a..b {
+        sp.one(s, part, base);
+    }
+}
+level_builds!(fn split_block(sp: &Split<'_>, a: usize, b: usize, part: &mut [P], base: usize) => split_block_inner);
+level_builds!(#[allow(clippy::too_many_arguments, clippy::type_complexity)]
+              fn level_joins_l(ps: &[P], start: &[usize], off: &[i64], out: i64, hfirst: &[usize], hx: &[(f64, f64)],
+                               eps: f64, lo: usize, hi: usize) -> Result<(Vec<(i64, i64)>, Vec<(i64, i64, i64)>), i64>
+              => level_joins);
+
 /// Heights where neighbours in a slab cross inside it (fastloops.face_build's round), and whether any are "bad"
 /// (further apart than eps at either end, the wrong way round).
+#[inline(always)]
 fn crossings_in(ps: &[P], start: &[usize], lv: &[f64], eps: f64, a: usize, b: usize) -> Result<(bool, Vec<f64>), i64> {
     let base = start[a];
     let mut ys = Vec::new();
@@ -198,7 +216,7 @@ fn crossings(ps: &[P], start: &[usize], lv: &[f64], eps: f64, many: bool) -> Res
         Some(pl) => {
             let cuts = block_cuts(start, pl.current_num_threads() * 4)?;
             let got: Vec<Result<(bool, Vec<f64>), i64>> = pl.install(|| {
-                cuts.par_windows(2).map(|w| crossings_in(&ps[start[w[0]]..start[w[1]]], &start[w[0]..=w[1]], &lv[w[0]..=w[1]], eps, 0, w[1] - w[0])).collect()
+                cuts.par_windows(2).map(|w| crossings_l(&ps[start[w[0]]..start[w[1]]], &start[w[0]..=w[1]], &lv[w[0]..=w[1]], eps, 0, w[1] - w[0])).collect()
             });
             let mut bad = false;
             let mut all = Vec::new();
@@ -299,12 +317,8 @@ fn split(ln: &Lines, ps: &[P], start: &[usize], lv: &[f64], new: &[f64], many: b
             }
             let blocks = split_blocks(&mut out, &nstart, &ncut)?;
             pl.install(|| {
-                blocks.into_par_iter().zip(cuts.par_windows(2)).for_each(|((ka, _, part), w)| {
-                    let base = nstart[ka];
-                    for s in w[0]..w[1] {
-                        sp.one(s, part, base);
-                    }
-                })
+                blocks.into_par_iter().zip(cuts.par_windows(2))
+                    .for_each(|((ka, _, part), w)| split_block(&sp, w[0], w[1], part, nstart[ka]))
             });
         }
     }
@@ -313,6 +327,7 @@ fn split(ln: &Lines, ps: &[P], start: &[usize], lv: &[f64], new: &[f64], many: b
 
 /// Joins found at the levels lo .. hi: (pieces that are one area, depth steps (a, b, lines crossed)).
 #[allow(clippy::too_many_arguments, clippy::type_complexity)]
+#[inline(always)]
 fn level_joins(ps: &[P], start: &[usize], off: &[i64], out: i64, hfirst: &[usize], hx: &[(f64, f64)], eps: f64,
                lo: usize, hi: usize) -> Result<(Vec<(i64, i64)>, Vec<(i64, i64, i64)>), i64> {
     let ns = start.len() - 1;
@@ -451,7 +466,7 @@ pub fn face_build(x0: &[f64], y0: &[f64], x1: &[f64], y1: &[f64], levels: &[f64]
                 *l = nl; // (the top level too)
             }
             pl.install(|| {
-                cuts.par_windows(2).map(|w| level_joins(&ps, &start, &off, out, &hfirst, &hx, eps, w[0], w[1])).collect()
+                cuts.par_windows(2).map(|w| level_joins_l(&ps, &start, &off, out, &hfirst, &hx, eps, w[0], w[1])).collect()
             })
         }
     };
