@@ -13,7 +13,7 @@ from notes.areas import most_colours
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, drawing_in_box,
                           edge_gate, even_can, even_kind, even_on, fit_upright, gap_lines, gate_ticks, join_strokes, map_stroke, normalize_areas,
                           normalize_strokes, open_paths, shelve_patterns)
-from notes.even_steps import gate_stretched, snapped_shape
+from notes.even_steps import gate_stretched, remarked, ticked, unticked
 from window import look
 from window.drawer import Drawer, clean_name, library_lists, library_names, load_drawing, save_shape, shape_stamp
 from window.panel_funnel import GATE_STEPS
@@ -358,12 +358,16 @@ class CustomPanel:
         for t in tgts:
             if value:
                 t["even"] = True
-                if t is not self.custom_defaults:  # (ticking snaps it, each corner moving least: user)
-                    t["pts"], t["strokes"] = snapped_shape(t, self.ppq)
+                if t is not self.custom_defaults:  # (ticking snaps it, each corner moving least: user; the
+                    t.update(ticked(t, self.ppq))  # drawing as it was kept for unticking)
             elif t is self.custom_defaults:
                 t["even"] = False
             else:
                 t.pop("even", None)  # (shapes only have it when it's on)
+                back = unticked(t)  # (the drawing as it was before the tick, user)
+                if back:
+                    t["pts"], t["strokes"] = back
+                t.pop("even_free", None)
         self.shapes_changed()
         self.sync_custom()
         self.roll.focus_set()
@@ -647,6 +651,8 @@ class CustomPanel:
             if key == "gate" and t is not self.custom_defaults and even_on(t) and not t.get("range"):
                 t["pts"], t["strokes"] = gate_stretched(t, value, self.ppq)  # (Symmetrical steps: the shape
                 # stretches, every step the same number of gates; user)
+                if t.get("even_free"):  # (unticking still gives the drawing back, stretched too)
+                    t["even_free"] = remarked(t, t["strokes"])
             t[key] = value
             if key == "fill":  # (another Inside fill picked: no Nested steps / tiles / rings, kept for later)
                 shelve_patterns(t)

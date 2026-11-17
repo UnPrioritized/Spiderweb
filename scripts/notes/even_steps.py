@@ -61,6 +61,54 @@ def snapped_shape(sh, ppq):
     return pts, out
 
 
+def drawing_mark(strokes):
+    """A short fingerprint of strokes (has the drawing been edited since it was snapped?); numbers to 6 places, so
+    saving (numbers trimmed) and opening again keeps it."""
+    import hashlib
+    import json
+
+    def rounded(x):
+        if isinstance(x, float):
+            return round(x, 6) + 0.0
+        if isinstance(x, (list, tuple)):
+            return [rounded(y) for y in x]
+        if isinstance(x, dict):
+            return {k: rounded(v) for k, v in x.items()}
+        return x
+    return hashlib.sha1(json.dumps(rounded(strokes), sort_keys=True).encode()).hexdigest()[:16]
+
+
+def ticked(sh, ppq):
+    """The changes ticking Symmetrical steps makes to sh: snapped, and the drawing as it was kept in "even_free"
+    (pts / strokes before, "at" = the snapped box, "mark" = the snapped strokes' fingerprint) so unticking gives it
+    back (user 2026-11-17: unticking left it snapped, with leftovers)."""
+    pts, strokes = snapped_shape(dict(sh, even=True), ppq)
+    import copy
+    free = {"pts": [list(p) for p in sh["pts"]], "strokes": copy.deepcopy(sh["strokes"]), "at": [list(p) for p in pts],
+            "mark": drawing_mark(strokes)}  # (own lists: a move changing the box in place mustn't move these)
+    return {"pts": pts, "strokes": strokes, "even_free": free}
+
+
+def unticked(sh):
+    """The drawing ticking replaced, given back on untick: (pts, strokes), or None when there's none or its strokes
+    were edited since (those edits win). Moves / resizes / flips / gate stretches made since carry over: the box's
+    change since the tick (snapped box -> box now) is laid on the old box too."""
+    free = sh.get("even_free")
+    if not isinstance(free, dict) or free.get("mark") != drawing_mark(sh["strokes"]):
+        return None
+    to_uv = frame_to_uv(free["at"])
+    if to_uv is None:
+        return None
+    now, was = frame_to_bp(sh["pts"]), frame_to_bp(free["pts"])
+    return [list(now(*to_uv(*was(u, v)))) for u, v in ((0, 0), (1, 0), (0, 1))], free["strokes"]
+
+
+def remarked(sh, strokes):
+    """even_free after a change WE made to the stored strokes (a gate stretch): its fingerprint follows them."""
+    free = sh.get("even_free")
+    return dict(free, mark=drawing_mark(strokes)) if isinstance(free, dict) else None
+
+
 def whole_width(new, orig, sh, ppq):
     """Frame points new (a resize of orig) with the moved left / right side put a whole number of gates from the
     side that stayed (Symmetrical steps: resizing jumps in whole steps, user). Turned boxes / both sides moved:

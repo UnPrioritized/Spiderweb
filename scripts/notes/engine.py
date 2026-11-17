@@ -416,6 +416,16 @@ def clean_shape(sh):
             out["patterns_kept"] = kept
         if sh.get("gate_flip") is True:  # its gates laid from the right (gateflip.py)
             out["gate_flip"] = True
+        free = sh.get("even_free") if out.get("even") else None
+        if isinstance(free, dict):  # (Symmetrical steps: the drawing before the tick, given back on untick)
+            try:
+                fp, at = [[float(a), float(b)] for a, b in free["pts"]], [[float(a), float(b)] for a, b in free["at"]]
+                fs = clean_strokes(free["strokes"])
+                if (len(fp) == len(at) == 3 and fs and isinstance(free.get("mark"), str)
+                        and all(math.isfinite(x) for p in fp + at for x in p)):
+                    out["even_free"] = {"pts": fp, "strokes": fs, "at": at, "mark": free["mark"]}
+            except (TypeError, ValueError, KeyError):
+                pass
         try:  # the smallest outline gate in beats (custom.grow_inward)
             edge = float(sh.get("edge") or 0)
         except (TypeError, ValueError):
