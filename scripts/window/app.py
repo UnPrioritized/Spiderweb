@@ -251,6 +251,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     _recolour_owed = False  # the panel's Recolour row waits for those notes (panel_recolour.sync_recolour)
     _bg_serial = None  # (the event that started it: its other bindings don't wait for it)
     _bg_since = None  # (perf_counter when this run of background makings began: the "Making notes…" box)
+    _counting = None  # (a "lots of notes" count being made in the background: confirm_big, count_done)
     _bg_carry = None  # (the selected shapes whose old notes go along meanwhile: roll_draw.carry_from)
     _job_stash = None  # (all_notes' stash from the notes made in the background: notes_made, for lay_again)
     stale_ok = 0  # > 0: the view is being drawn: the notes as they are on screen, not waited for
@@ -2229,13 +2230,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self._late_notes = self.after(120 if moving else 250, self.notes_rested, not (moving and slow))
             self.roll.request_redraw()
             return
-        if now in (False, "late") and self.late_ok():
+        if now in (False, "late") and (self._counting and self.keep_shown() or self.late_ok()):
             if not self._bg_notes:  # (the "Making notes…" box: from the first edit of a run, roll_draw)
                 self._bg_since = time.perf_counter()
                 self.after(int(MAKING_SHOW_S * 1000) + 10, self.roll.request_redraw)
             self.notes_late = self._bg_notes = True
             self._bg_serial, self._bg_carry = notes_wait.last_event, None
-            self._make_coming(True)  # (made already at a mid-drag rest: shown at once, shapes_changed(now=True))
+            if self._counting:  # (held back until the "lots of notes" count is in: count_done)
+                if self._coming:
+                    self._coming["stop"] = True
+                    self._coming = None
+            else:
+                self._make_coming(True)  # (made already at a mid-drag rest: shown at once, shapes_changed(now=True))
             if self._bg_notes:
                 self.roll.request_redraw()
                 self.update_status()
@@ -3066,8 +3072,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         renumbered to the new list (renumber_shown: Delete, undo / redo, History, Join, Split...)."""
         if self._merges_owed or self._make_time + self._mask_time <= LATE_S and not self.slow_shape_owed():
             return False
-        if self.companion is not None or getattr(self, "fold_window", None):  # (Draw on Domino / Fold tracks: their
-            return False                                                       # own notes, made at once)
+        return self.keep_shown()
+
+    def keep_shown(self):
+        """The notes on screen can stay while the new ones are made in the background (late_ok, count_big): as they
+        are when the shape list is the same (maybe more after it), else renumbered. False with Draw on Domino /
+        Fold tracks (their own notes, made at once)."""
+        if self.companion is not None or getattr(self, "fold_window", None) or self._merges_owed:
+            return False
         made = self._made_shapes
         if len(self.shapes) >= len(made) and all(a is b for a, b in zip(self.shapes, made)):
             return True
@@ -3186,7 +3198,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_list_selection()
 
     def finish_notes(self):
-        """Notes still being made in the background (shapes_changed): waited for and taken in now."""
+        """Notes still being made in the background (shapes_changed): waited for and taken in now (a "lots of notes"
+        count still going: finished and asked first, count_done)."""
+        if self._counting:
+            self._counting["thread"].join()
+            self.count_done(self._counting)
         if self._bg_notes:
             self._bg_notes = False
             self.shapes_changed(now=True)
@@ -3692,8 +3708,97 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return sum(self.notes_about(p, ppq) for p in sh["merge"]["parts"])
         return self.note_count(sh, ppq)
 
-    def confirm_big(self, shapes):
-        return self.ask_notes(sum(self.notes_about(sh) for sh in shapes))
+    def quick_count(self, sh):
+        """notes_about without making any notes: None when they'd have to be made (not remembered)."""
+        if sh.get("merge"):
+            parts = [self.quick_count(p) for p in sh["merge"]["parts"]]
+            return None if None in parts else sum(parts)
+        n = (custom_note_count(sh, self.ppq) if sh["kind"] == "custom" else
+             funnel_note_count(sh, self.ppq) if sh["kind"] == "funnel" else None)
+        if n is not None:
+            return n
+        if sh.get("by_snap") and sh["kind"] in LINE_KINDS:
+            plain = {k: v for k, v in sh.items() if k not in ("by_snap", "by_snap_name", "by_snap_end")}
+            return None if self.remembered_count(plain) is None else self.note_count(sh)
+        return self.remembered_count(sh)
+
+    def remembered_count(self, sh):
+        """How many notes sh makes, if they're remembered (notes cache), else None."""
+        got = self._notes_cache.get(self.notes_cache_key(sh)[2])
+        return None if got is None else len(got[0])
+
+    def confirm_big(self, shapes, back=None):
+        """True = go ahead with a change making these shapes' notes (asked past big_ask.BIG). Shapes whose count
+        needs their notes made: counted in the background (user 2026-11-17: the control changes at once, the notes
+        are held back meanwhile; too many = asked a moment later, No = taken back: back(), else the undo steps
+        since). Draw on Domino / Fold tracks: counted here, as before."""
+        counts = [self.quick_count(sh) for sh in shapes]
+        if None in counts and not self._counting and self.count_later_ok():
+            known = sum(c for c in counts if c is not None)
+            if known <= big_ask.BIG:
+                self.count_later([sh for sh, c in zip(shapes, counts) if c is None], known, back)
+                return True
+        return self.ask_notes(sum(self.notes_about(sh) if c is None else c for sh, c in zip(shapes, counts)))
+
+    def count_later_ok(self):
+        return (self.companion is None and not getattr(self, "fold_window", None) and not self._merges_owed
+                and threading.current_thread() is threading.main_thread())
+
+    def count_later(self, shapes, known, back):
+        """confirm_big's count of shapes made in a background thread (their notes kept for the making after it)."""
+        key = (None, self.ppq, self.keys)
+        job = self.thread_job(key, known=known, n=None, back=back, undo=len(self.undo_stack))
+        make = self.thread_maker(job, key)
+        trials = [copy.deepcopy(sh) for sh in shapes]
+
+        def work():
+            try:
+                job["n"] = sum(len(make(s)[0]) for s in trials)
+            except Exception:  # (MemoryError too: the making after it tells about it)
+                job["n"] = None
+            job["done"] = True
+        job["thread"] = threading.Thread(target=work, daemon=True, name="notes")
+        self._counting = job
+        job["thread"].start()
+        self.after(15, self._count_check, job)
+
+    def _count_check(self, job):
+        if job is not self._counting:
+            return
+        if not job["done"]:
+            self.after(15, self._count_check, job)
+            return
+        self.count_done(job)
+
+    def count_done(self, job):
+        """The background count is in: its notes remembered, asked if too many (No = the change taken back), then
+        the notes held back are made."""
+        if job is not self._counting:
+            return
+        self._counting = None
+        cache = self._notes_cache
+        for k, v in job["own"].items():  # (the making after it finds them: made once)
+            cache[k] = shared_arrays(v, cache)
+            self._notes_used[k] = self.shapes_gen
+        self._notes_deps.update(job["deps"])
+        self._notes_top.update(job["top"])
+        self.trim_notes()
+        bg, self._bg_notes = self._bg_notes, False  # (the question's own clicks: nothing being made to wait for)
+        try:
+            ok = self.ask_notes(job["known"] + (job["n"] or 0))
+        finally:
+            self._bg_notes = bg
+        if not ok:
+            if job["back"] is not None:
+                job["back"]()
+            else:
+                steps = max(0, len(self.undo_stack) - job["undo"])
+                for _ in range(steps):
+                    self.undo_roll()
+                del self.redo_stack[len(self.redo_stack) - steps:]  # (never redone: it was said No to)
+        if self._bg_notes and not self._coming:
+            self._make_coming(True)
+            self.roll.request_redraw()
 
     def ask_notes(self, n):
         """True = go ahead making n notes (asked past big_ask.BIG)."""

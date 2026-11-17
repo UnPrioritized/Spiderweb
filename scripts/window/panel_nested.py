@@ -246,10 +246,13 @@ class NestedPanel:
         """A number box's label let go (widgets.Scrub.release): a Nested / Ripples box dragged asks "lots of notes"
         now, once (user 2026-11-16: dragging Steps got slower the higher it went); No = the whole drag taken back."""
         shapes, self._scrub_ask = getattr(self, "_scrub_ask", None), None
-        if shapes and not self.confirm_big(shapes):
+
+        def back():
             self.take_back_scrub(gesture)
             self.shapes_changed(now=True)
             self.sync_custom()
+        if shapes and not self.confirm_big(shapes, back=back):
+            back()
         elif self.count_owed and not self._bg_notes:  # (the panel's count waited for the let go: counted now)
             self.sync_custom()
 
