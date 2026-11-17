@@ -454,24 +454,35 @@ class LiquifyBrush:
                     st["masked"] = True
                 elif job.get("shape"):  # (Shape: "where each point goes", in place, in the map's own units: only
                     # the points under the brush written, so a grown map's others keep their very numbers)
+                    S = lq.map_scale(job["span"])
+                    lines = None
+                    if tool in ("restore", "smooth"):  # (its stretched grid lines: found once a stroke, they only
+                        # get shorter; again when the map grew or the brush changed)
+                        key = (rj, job["span"], job["a"].shape, tool)
+                        if job.get("lines_key") != key:
+                            job["lines"] = lq.long_lines(job["a"], J, rj, job.get("strength", 100.0), S)
+                            job["lines_key"] = key
+                        lines = job["lines"]
+                    info = {}
                     job["a"] = lq.dab_fwd(job["a"], tool, c, rj, J, pressure, density, vec=vec, turn=turn,
-                                          frozen=job["m"], strength=job.get("strength", 100.0),
-                                          scale=lq.map_scale(job["span"]), copy=False)
-                    st["changed"] = True
+                                          frozen=job["m"], strength=job.get("strength", 100.0), scale=S,
+                                          copy=False, lines=lines, info=info)
+                    if info["changed"]:  # (nothing changed as saved: no notes made again)
+                        st["changed"] = st["dirty"] = True
                 elif span == lq.SPAN and job.get("span", lq.SPAN) == lq.SPAN:
                     job["a"] = lq.dab(job["a"], tool, c, rj, J, pressure, density, vec=vec, turn=turn,
                                       frozen=job["m"])
-                    st["changed"] = True
+                    st["changed"] = st["dirty"] = True
                 else:  # (a grown map: the dab in its own units, its pushes kept in the box's)
                     S = lq.map_scale(job["span"])
                     job["a"] = lq.dab(job["a"] / S, tool, c, rj, J, pressure, density, vec=vec, turn=turn,
                                       frozen=job["m"]) * S
-                    st["changed"] = True
+                    st["changed"] = st["dirty"] = True
         if mask:
             if st["masked"] and not st["mask_job"]:
                 st["mask_job"] = self.after_idle(self.liquify_mask_shown)
             return
-        if not st["changed"]:
+        if not st.get("dirty"):  # (these dabs changed nothing since the notes were last made: none made again)
             return
         if st["way"] == "mask":  # (a mask tool's stroke went on with another tool: Alt can't, the window can)
             st["way"] = "full"
@@ -510,6 +521,7 @@ class LiquifyBrush:
         if not st:
             return
         st["job"] = None
+        st["dirty"] = False  # (what was brushed so far goes into the notes now)
         t0 = time.perf_counter()
         if st["way"] == "later":  # (its first Recolour: the notes made once, then shown live)
             if not any(job["a"].any() for job in st["jobs"]):  # (nothing pushed yet (a Push's press): no Recolour
@@ -556,7 +568,8 @@ class LiquifyBrush:
                 settings["span"] = list(job["span"])
             if settings.get("moves") == "shape":  # (a "where each point goes" map: PLAN.md Liquify Shape rebuild)
                 settings["forward"] = True
-            got = lq.with_arrays(settings, job["a"], job["m"])
+            # (mid-stroke the map's text is made every update: packed quickly; the let go packs it small)
+            got = lq.with_arrays(settings, job["a"], job["m"], level=1 if self.drag == ("liquify",) else 6)
             if got:
                 base["liquify"] = got
             else:

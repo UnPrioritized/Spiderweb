@@ -78,9 +78,17 @@ def _steps(a):
     return np.clip(np.rint(np.asarray(a, np.float64) * SCALE), -32767, 32767)
 
 
-def encode(a):
-    """A map array (up, across, 2) -> its text (rounded to 1 / SCALE, at most MOST_PUSH boxes)."""
-    text = base64.b64encode(zlib.compress(_steps(a).astype("<i2").tobytes(), 6)).decode("ascii")
+def encode(a, level=6):
+    """A map array (up, across, 2) -> its text (rounded to 1 / SCALE, at most MOST_PUSH boxes). level = zlib's
+    (1 while a stroke goes on: a big map's text made every update, user 2026-11-17 "restore is stuttery"). The
+    array it stands for is kept for decode (no unpacking it straight back)."""
+    st = _steps(a)
+    text = base64.b64encode(zlib.compress(st.astype("<i2").tobytes(), level)).decode("ascii")
+    got = st / SCALE
+    got.setflags(write=False)
+    if len(_DECODED) > 16:
+        _DECODED.pop(next(iter(_DECODED)))
+    _DECODED[text] = got
     return text
 
 
@@ -130,13 +138,13 @@ def mask_of(lq):
     return decode_mask(lq["grid"], lq["frozen"]) if lq and lq.get("frozen") else None
 
 
-def with_arrays(lq, a, m):
+def with_arrays(lq, a, m, level=6):
     """lq (a clean Liquify or {}: its settings kept) with the map a and the mask m (None = nothing frozen) -> clean
-    form, or None."""
+    form, or None. level: encode's."""
     keep = {k: v for k, v in (lq or {}).items() if k not in ("grid", "map", "frozen")}
     out = dict(keep, grid=[a.shape[1], a.shape[0]])
     if np.rint(a * SCALE).any():
-        out["map"] = encode(a)
+        out["map"] = encode(a, level)
     if m is not None and mask_steps(m).any():
         out["frozen"] = encode_mask(m)
     return clean_liquify(out)
@@ -1208,14 +1216,40 @@ def _seg_dist(ax, ay, bx, by):
     return np.hypot(ax + t * ex, ay + t * ey)
 
 
-def _fwd_points(a, c, r, J, Ji, s, S, more=(0.0, 0.0), lines=False):
+def long_lines(a, J, r, strength=100.0, scale=None):
+    """The grid lines a push stretched longer than half a brush of radius r px on screen (at least one end moved):
+    (rows a, cols a, rows b, cols b). Restore / Smooth count a point whose such line runs under the brush (a long
+    push stretches a cell into a spike with no point in its middle; user 2026-11-17). Found once a stroke
+    (roll_liquify): Restore and Smooth only make lines shorter."""
+    gy, gx = a.shape[:2]
+    J = np.asarray(J, np.float64)
+    try:
+        Ji = np.linalg.inv(J)
+    except np.linalg.LinAlgError:
+        z = np.zeros(0, np.int64)
+        return z, z, z, z
+    S = np.ones(2) if scale is None else np.asarray(scale, np.float64)
+    s = strength / 100.0 if strength > 1e-6 else 1.0
+    X = np.arange(gx)[None, :] / (gx - 1) + s * a[..., 0] / S[0]
+    Y = np.arange(gy)[:, None] / (gy - 1) + s * a[..., 1] / S[1]
+    SX, SY = Ji[0, 0] * X + Ji[0, 1] * Y, Ji[1, 0] * X + Ji[1, 1] * Y
+    moved = (a[..., 0] != 0) | (a[..., 1] != 0)
+    out = [[], [], [], []]
+    for sa, sb, dj, di in (((slice(None), slice(None, -1)), (slice(None), slice(1, None)), 0, 1),
+                           ((slice(None, -1), slice(None)), (slice(1, None), slice(None)), 1, 0)):
+        dx, dy = SX[sb] - SX[sa], SY[sb] - SY[sa]
+        jj, ii = np.nonzero((dx * dx + dy * dy > (0.5 * r) ** 2) & (moved[sa] | moved[sb]))
+        for k, v in enumerate((jj, ii, jj + dj, ii + di)):
+            out[k].append(v)
+    return tuple(np.concatenate(v).astype(np.int64) for v in out)
+
+
+def _fwd_points(a, c, r, J, Ji, s, S, more=(0.0, 0.0), lines=None):
     """The grid points a brush of radius r px at c may touch now: (rows, cols, how far each is from the brush's
-    middle in screen px, counting its grid lines too when lines). Only where they SHOW counts: the points drawn
-    near (not moved) and the moved points showing near (looked at alone: a far push no longer makes every dab look
-    at the whole grid, user 2026-11-17 "restore brush is stuttery"). more = map units a Push may still carry them.
-    lines (Restore / Smooth): a moved point counts when one of its grid lines runs under the brush too (a long push
-    stretches a cell into a spike with no point in its middle; brushing the spike must take it back, user
-    2026-11-17)."""
+    middle in screen px). Only where they SHOW counts: the points drawn near (not moved) and the moved points showing
+    near (a far push no longer makes every dab look at the whole grid, user 2026-11-17 "restore brush is
+    stuttery"). more = map units a Push may still carry them. lines = long_lines' (Restore / Smooth): a point also
+    counts by its stretched grid lines running under the brush."""
     gy, gx = a.shape[:2]
     hx, hy = 1.0 / (gx - 1), 1.0 / (gy - 1)
     ex = r * float(np.hypot(J[0, 0], J[0, 1])) + abs(more[0])
@@ -1232,54 +1266,34 @@ def _fwd_points(a, c, r, J, Ji, s, S, more=(0.0, 0.0), lines=False):
         uy = j * hy + s * a[j, i, 1] / S[1] - c[1]
         return Ji[0, 0] * ux + Ji[0, 1] * uy, Ji[1, 0] * ux + Ji[1, 1] * uy
     reach = r + float(np.hypot(*(Ji @ np.asarray(more, np.float64))))
-    if lines:  # (the whole grid at once: every point and every grid line between two points, side by side)
-        X = np.arange(gx)[None, :] * hx + s * a[..., 0] / S[0] - c[0]
-        Y = np.arange(gy)[:, None] * hy + s * a[..., 1] / S[1] - c[1]
-        SX, SY = Ji[0, 0] * X + Ji[0, 1] * Y, Ji[1, 0] * X + Ji[1, 1] * Y
-        near = (np.abs(SX) <= reach) & (np.abs(SY) <= reach)
-        bx, by = SX > reach, SY > reach  # (a grid line wholly past one side of the brush's box: skipped)
-        sx_, sy_ = SX < -reach, SY < -reach
-        best = {}
-        for sa, sb in (((slice(None), slice(None, -1)), (slice(None), slice(1, None))),
-                       ((slice(None, -1), slice(None)), (slice(1, None), slice(None)))):
-            # (only lines stretched longer than half the brush: a shorter one's own end points are near enough;
-            # user 2026-11-17: Restore lagged most in the middle of a busy shape)
-            dx_, dy_ = SX[sb] - SX[sa], SY[sb] - SY[sa]
-            long_ = dx_ * dx_ + dy_ * dy_ > (0.5 * r) ** 2
-            far = (bx[sa] & bx[sb]) | (by[sa] & by[sb]) | (sx_[sa] & sx_[sb]) | (sy_[sa] & sy_[sb])
-            jj, ii = np.nonzero(long_ & ~far)
-            if not len(jj):
-                continue
-            o = (jj + (sb[0].start or 0), ii + (sb[1].start or 0))
-            e = _seg_dist(SX[sa][jj, ii], SY[sa][jj, ii], SX[sb][jj, ii], SY[sb][jj, ii])
-            ok = e <= reach
-            for (q, w) in ((np.ravel_multi_index((jj[ok], ii[ok]), (gy, gx)), e[ok]),
-                           (np.ravel_multi_index((o[0][ok], o[1][ok]), (gy, gx)), e[ok])):
-                best.setdefault("i", []).append(q)
-                best.setdefault("d", []).append(w)
-        idx = np.flatnonzero(near)
-        d = np.hypot(SX.ravel()[idx], SY.ravel()[idx])
-        if best:
-            idx = np.concatenate([idx] + best["i"])
-            d = np.concatenate([d] + best["d"])
-            o = np.lexsort((d, idx))  # (each point once, at its nearest: itself or one of its grid lines)
-            idx, d = idx[o], d[o]
-            first = np.r_[True, idx[1:] != idx[:-1]]
-            idx, d = idx[first], d[first]
-        keep = d <= reach
-        j, i = np.divmod(idx[keep], gx)
-        return j, i, d[keep]
     if len(moved):
         mx, my = screen(mj, mi)
         moved = moved[np.hypot(mx, my) <= reach]
     idx = np.union1d(base, moved)
     j, i = np.divmod(idx, gx)
     dx, dy = screen(j, i)
-    return j, i, np.hypot(dx, dy)
+    d = np.hypot(dx, dy)
+    if lines is not None and len(lines[0]):
+        ja, ia, jb, ib = lines
+        ax, ay = screen(ja, ia)
+        bx, by = screen(jb, ib)
+        e = _seg_dist(ax, ay, bx, by)
+        ok = e <= reach
+        if ok.any():
+            add = np.concatenate((ja[ok] * gx + ia[ok], jb[ok] * gx + ib[ok]))
+            idx = np.concatenate((idx, add))
+            d = np.concatenate((d, e[ok], e[ok]))
+            o = np.lexsort((d, idx))  # (each point once, at its nearest: itself or one of its grid lines)
+            idx, d = idx[o], d[o]
+            first = np.r_[True, idx[1:] != idx[:-1]]
+            idx, d = idx[first], d[first]
+            j, i = np.divmod(idx, gx)
+    keep = d <= reach
+    return j[keep], i[keep], d[keep]
 
 
 def dab_fwd(a, tool, c, r, J, pressure=50.0, density=50.0, vec=(0.0, 0.0), turn=1, frozen=None, strength=100.0,
-            scale=None, copy=True):
+            scale=None, copy=True, lines=None, info=None):
     """A Shape map a ("where each point goes") after one brush dab. The same brushes as dab (same arguments;
     strength = the Liquify's Strength %: the points move where they SHOW), forwards: Push carries the points under
     the brush along the mouse's move, Twirl turns them round the middle (+1 = anticlockwise on screen, as dab turns
@@ -1287,7 +1301,12 @@ def dab_fwd(a, tool, c, r, J, pressure=50.0, density=50.0, vec=(0.0, 0.0), turn=
     whose grid line runs under it too), Smooth evens the moves out; frozen points move less. c, J in the map's own
     units; a's moves in the colour box's units, scale = how many of those one map unit is (map_scale; None = the
     same). Only the points under the brush are written (the rest keep their very numbers). copy False: a itself
-    changed (the brush's own copy: no whole-map copy each dab on a big grid) and returned."""
+    changed (the brush's own copy: no whole-map copy each dab on a big grid) and returned. lines: the stroke's
+    long_lines (Restore / Smooth; None = found now). info (a dict): info["changed"] = whether the map changed as
+    saved (whole 1 / SCALE steps): nothing to make again otherwise (user 2026-11-17: Restore held in a busy shape's
+    middle made every note again 19 times a second)."""
+    if info is not None:
+        info["changed"] = False
     a = np.array(a, np.float64) if copy else a
     S = np.ones(2) if scale is None else np.asarray(scale, np.float64)
     J = np.asarray(J, np.float64)
@@ -1308,26 +1327,36 @@ def dab_fwd(a, tool, c, r, J, pressure=50.0, density=50.0, vec=(0.0, 0.0), turn=
             n = int(min(MOST_SUBSTEPS, max(1, math.ceil(math.hypot(*vec) * min(p, 1.0) * slope / FOLD_SAFE))))
     v = J @ np.asarray(vec, np.float64) * min(p, 1.0) if tool == "push" else np.zeros(2)  # (map units, whole dab)
     # (the points it may touch: found once a dab, the whole Push's move taken in)
-    j, i, d = _fwd_points(a, c, r, J, Ji, s, S, more=tuple(v), lines=tool in ("restore", "smooth"))
+    if tool in ("restore", "smooth") and lines is None:
+        lines = long_lines(a, J, r, strength, S)
+    j, i, d = _fwd_points(a, c, r, J, Ji, s, S, more=tuple(v), lines=lines if tool in ("restore", "smooth") else None)
     if not len(j):
         return a
     gy, gx = a.shape[:2]
     px, py = i / (gx - 1), j / (gy - 1)
     free = 1.0 if frozen is None else 1.0 - np.clip(frozen[j, i], 0.0, 1.0)
+    before = a[j, i].copy()
+
+    def done():
+        if info is not None:
+            info["changed"] = bool((np.rint(a[j, i] * SCALE) != np.rint(before * SCALE)).any())
+        return a
     if tool in ("restore", "smooth"):
         w = weight(d / max(r, 1e-9), density) * free
         on = w > 0
         if not on.any():
             return a
-        j, i, w = j[on], i[on], w[on]
-        old = a[j, i]
-        if tool == "restore":
-            a[j, i] = old * (1.0 - (w * min(0.25 * p, 1.0))[:, None])
+        j, i, w, before = j[on], i[on], w[on], before[on]
+        old = before
+        if tool == "restore":  # (what's left under half a saved step = none: Restore really ends)
+            new = old * (1.0 - (w * min(0.25 * p, 1.0))[:, None])
+            new[np.abs(new) < 0.5 / SCALE] = 0.0
+            a[j, i] = new
         else:  # (each point toward the mean of the 3 x 3 round it, the grid's edge repeated)
             blur = sum(a[np.clip(j + dj, 0, gy - 1), np.clip(i + di, 0, gx - 1)]
                        for dj in (-1, 0, 1) for di in (-1, 0, 1)) / 9
             a[j, i] = old + (blur - old) * (w * min(0.5 * p, 1.0))[:, None]
-        return a
+        return done()
     step = v / n
     for _ in range(n):
         old = a[j, i]
@@ -1337,7 +1366,7 @@ def dab_fwd(a, tool, c, r, J, pressure=50.0, density=50.0, vec=(0.0, 0.0), turn=
         w = weight(np.hypot(sx, sy) / max(r, 1e-9), density) * free
         on = w > 0  # (only the points under the brush rewritten: the rest keep their very numbers, no round-off)
         if not on.any():
-            return a
+            return done()
         if tool == "push":
             NX, NY = X + w * step[0], Y + w * step[1]
         elif tool == "twirl":  # (dab turns where the colours come FROM by +ang: they show turned by -ang)
@@ -1352,7 +1381,7 @@ def dab_fwd(a, tool, c, r, J, pressure=50.0, density=50.0, vec=(0.0, 0.0), turn=
             NX, NY = c[0] + ux * g, c[1] + uy * g
         a[j[on], i[on], 0] = ((NX - px) / s * S[0])[on]
         a[j[on], i[on], 1] = ((NY - py) / s * S[1])[on]
-    return a
+    return done()
 
 
 def straight(a, b, spacing):
