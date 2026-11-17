@@ -912,7 +912,7 @@ def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None):
 
 
 def _holes_filled(notes, tracks, out, tr, look_back):
-    o = np.lexsort((out[:, 0], out[:, 2]))
+    o = _order(out[:, 0], out[:, 2])
     out = out[o]
     tr = np.asarray(tr)[o] if tr is not None else None
     run = _running_max(out[:, 1], out[:, 2])
@@ -934,8 +934,28 @@ def _holes_filled(notes, tracks, out, tr, look_back):
     return _by_start(out, tr)
 
 
+def _order(*keys):
+    """np.lexsort(keys) (the LAST key first), the very same order, but as one stable sort of a single int64 key when
+    the keys' ranges fit (Cut notes where bent: a strong Twist's 2.6 M pieces sorted 3 times, 375 -> 110 ms each;
+    speed check 2026-11-17). Integer keys only."""
+    n = len(keys[0])
+    if n < 2:
+        return np.arange(n)
+    key = None
+    width = 1
+    for k in keys:  # (the first key changes fastest, as lexsort's)
+        lo, hi = int(k.min()), int(k.max())
+        span = hi - lo + 1
+        if width * span >= 1 << 62:
+            return np.lexsort(keys)
+        part = (k - lo).astype(np.int64)
+        key = part if key is None else key + part * width
+        width *= span
+    return np.argsort(key, kind="stable")
+
+
 def _by_start(out, tr):
-    o = np.lexsort((out[:, 2], out[:, 0]))
+    o = _order(out[:, 2], out[:, 0])
     return out[o], (tr[o] if tr is not None else None)
 
 
@@ -1031,7 +1051,7 @@ def _pieces_made(notes, tracks, src, b, rr, t0, t1):
     user 2026-11-17 "i expected it to get chopped at that area")."""
     srcs = src[b]
     if len(srcs) > 1:
-        o = np.lexsort((t0, rr, srcs))
+        o = _order(t0, rr, srcs)
         srcs, rr, t0, t1 = srcs[o], rr[o], t0[o], t1[o]
         new = np.r_[True, (srcs[1:] != srcs[:-1]) | (rr[1:] != rr[:-1]) | (t0[1:] != t1[:-1])]
         if not new.all():
