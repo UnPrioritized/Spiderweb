@@ -34,6 +34,64 @@ def even_version(sh, ppq):
     return dict(sh, strokes=strokes, _even=origin)
 
 
+def snapped_shape(sh, ppq):
+    """(pts, strokes) of sh stored even (the tick ticked, a gate change, a let go): an upright box made a whole
+    number of gates wide from its left edge (so a sideways flip lands on the same grid), the straight sides'
+    corners where the even version has them. Curves keep their place in the box (they move by under half a gate)."""
+    pts = [list(p) for p in sh["pts"]]
+    from notes.custom import frame_upright
+    if frame_upright(pts):
+        g = gate_ticks(sh["gate"], ppq) / ppq
+        w = pts[1][0] - pts[0][0]
+        whole = max(1, math.floor(abs(w) / g + 0.5)) * g
+        if w >= 0:  # (the left edge stays: Auto's grid counts from it)
+            pts[1][0] = pts[0][0] + whole
+        else:  # (flipped sideways: point 1 is the left edge)
+            pts[0][0] = pts[2][0] = pts[1][0] + whole
+    ev = even_version(dict(sh, even=True), ppq)
+    if ev is sh or "_even" not in ev:
+        return pts, sh["strokes"]
+    to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(pts)
+    out = []
+    for old, new in zip(sh["strokes"], ev["strokes"]):
+        if new is old or to_uv is None:
+            out.append(old)
+        else:
+            out.append(dict(new, pts=[list(to_uv(*to_bp(u, v))) for u, v in new["pts"]]))
+    return pts, out
+
+
+def whole_width(new, orig, sh, ppq):
+    """Frame points new (a resize of orig) with the moved left / right side put a whole number of gates from the
+    side that stayed (Symmetrical steps: resizing jumps in whole steps, user). Turned boxes / both sides moved:
+    new as it is."""
+    from notes.custom import frame_upright
+    if not (even_on(sh) and frame_upright(new) and frame_upright(orig)) or sh.get("fit"):
+        return new
+    g = gate_ticks(sh["gate"], ppq) / ppq
+    lo, hi = sorted((new[0][0], new[1][0]))
+    olo, ohi = sorted((orig[0][0], orig[1][0]))
+    whole = max(1, math.floor((hi - lo) / g + 0.5)) * g
+    if abs(lo - olo) < 1e-9:
+        hi = lo + whole
+    elif abs(hi - ohi) < 1e-9:
+        lo = hi - whole
+    else:
+        return new
+    a, b = (lo, hi) if new[1][0] >= new[0][0] else (hi, lo)
+    return [[a, new[0][1]], [b, new[1][1]], [a, new[2][1]]]
+
+
+def gate_stretched(sh, gate, ppq):
+    """sh's box stretched sideways for a new gate (beats) so every step stays the same number of gates (user: a
+    gate change = the shape stretches), from the box's left edge; then stored even again. -> (pts, strokes)."""
+    old, new = gate_ticks(sh["gate"], ppq), gate_ticks(gate, ppq)
+    (b0, _), (b1, _), (b2, _) = sh["pts"]
+    left = min(b0, b1, b2, b1 + b2 - b0)
+    pts = [[left + (b - left) * new / old, p] for b, p in sh["pts"]]
+    return snapped_shape(dict(sh, pts=pts, gate=gate), ppq)
+
+
 def grid_start(sh, ppq):
     """The tick the gate grid counts from: 0 for Aligned (the song's grid), else the left edge of the shape's box
     (Auto; Centred = Auto here: no leftover to share). The box, not the drawing's leftmost point: snapping moves

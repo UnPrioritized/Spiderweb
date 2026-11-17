@@ -13,6 +13,7 @@ from notes.areas import most_colours
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, drawing_in_box,
                           edge_gate, even_can, even_on, fit_upright, gap_lines, gate_ticks, join_strokes, map_stroke, normalize_areas,
                           normalize_strokes, open_paths, shelve_patterns)
+from notes.even_steps import gate_stretched, snapped_shape
 from window import look
 from window.drawer import Drawer, clean_name, library_lists, library_names, load_drawing, save_shape, shape_stamp
 from window.panel_funnel import GATE_STEPS
@@ -352,6 +353,8 @@ class CustomPanel:
         for t in tgts:
             if value:
                 t["even"] = True
+                if t is not self.custom_defaults:  # (ticking snaps it, each corner moving least: user)
+                    t["pts"], t["strokes"] = snapped_shape(t, self.ppq)
             elif t is self.custom_defaults:
                 t["even"] = False
             else:
@@ -636,6 +639,9 @@ class CustomPanel:
         if placed:
             self.push_undo(name=CUSTOM_NAMES.get(key, key))
         for t in tgts:
+            if key == "gate" and t is not self.custom_defaults and even_on(t) and not t.get("range"):
+                t["pts"], t["strokes"] = gate_stretched(t, value, self.ppq)  # (Symmetrical steps: the shape
+                # stretches, every step the same number of gates; user)
             t[key] = value
             if key == "fill":  # (another Inside fill picked: no Nested steps / tiles / rings, kept for later)
                 shelve_patterns(t)

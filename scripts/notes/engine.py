@@ -55,7 +55,7 @@ from notes.sustain import auto_gap, clean_sustain, cut_by, held, is_sustained, s
 from notes.bezier import anchor_count, sample
 from notes.paths import SNAP_ENDS, dedupe, dot_segment_notes, path_notes, rows_up_to, snap_steps
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
-from notes.custom import ROUND, block_shift, frame_upright, notes_resampled, pack_notes, path_colours, unpack_notes
+from notes.custom import ROUND, block_shift, even_on, frame_upright, notes_resampled, pack_notes, path_colours, unpack_notes
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.mask import clean_mask, is_mask
@@ -1444,8 +1444,8 @@ def shape_tabs_done(sh, ppq, keys, get):
             out["off"] = off
         else:
             out.pop("off", None)
-    if (not tabs and wp is None and lq is None) or not can_recolour(sh):
-        return out
+    if (not tabs and wp is None and lq is None) or not can_recolour(sh) or even_on(sh):
+        return out  # (Symmetrical steps: its Shape steps bend nothing while ticked, they'd break the even steps)
     if sh.get("cut") and not sh["cut"].get("mould"):
         # (A SLICED PIECE of a bent shape, hunt 2026-11-17, user took A: the WHOLE bent, then cut by the knife where it
         # was drawn over the bent notes; the piece keeps its Shape tab, its pages / colour steps run on its part)

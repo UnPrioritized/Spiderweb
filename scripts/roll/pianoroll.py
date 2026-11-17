@@ -16,7 +16,8 @@ import numpy as np
 from files.lang import tr, trn
 from files.system import double_click_ms
 from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
-from notes.custom import box_frame, box_pts, fill_plan, fill_test, frame_in_box
+from notes.custom import box_frame, box_pts, even_on, fill_plan, fill_test, frame_in_box
+from notes.even_steps import whole_width
 from notes.engine import SPACE_KEYS as engine_space_keys, cached_reach, make_shape, shape_key
 from notes.meter import bar_beat_tick, sigs_of
 from notes.joined import all_tumours
@@ -1751,8 +1752,12 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             pt = self.resize_point(orig, k, side, start, e)
             step = self.held_step([self.app.sel])
             later = self.grid_later  # (a step stopped at the edge: its snap for let go is dropped too)
-            self.app.selected()["pts"] = self.frame_for_box(self.resize_custom(orig, k, pt, e.state & CTRL, side))
-            if not e.state & SHIFT:
+            sh = self.app.selected()
+            sh["pts"] = self.frame_for_box(self.resize_custom(orig, k, pt, e.state & CTRL, side))
+            even = even_on(sh)
+            if even:  # (Symmetrical steps: the moved side whole gates from the other, even_steps.py)
+                sh["pts"] = whole_width(sh["pts"], orig, sh, self.app.ppq)
+            if not e.state & SHIFT and not even:
                 keep = e.state & CTRL
                 self.notes_onto_grid(
                     self.app.selected(), lambda b: self.frame_for_box(self.resize_custom(orig, k, [b, pt[1]], keep, side)),
