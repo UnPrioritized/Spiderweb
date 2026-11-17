@@ -397,6 +397,7 @@ class DrawerLayers:
             return
         rows = self.visible_rows()
         top_down = list(range(len(self.strokes) - 1, -1, -1))
+        place_of = {i: k for k, i in enumerate(top_down)}  # (top_down.index per stroke: 8,000 strokes = 0.2 s a drop)
         groups = {self.group_of(i) for i in moving}
         whole = whole or (None not in groups and moving == {i for g in groups for i in self.members(g)})
 
@@ -410,8 +411,8 @@ class DrawerLayers:
         def through(row):  # how many strokes (top down) are at or above this row
             mem = self.row_members(row)
             if row.startswith(GROUP) and self.layers.item(row, "open"):
-                return min(top_down.index(i) for i in mem)  # (the group's row is above its strokes)
-            return max(top_down.index(i) for i in mem) + 1
+                return min(place_of[i] for i in mem)  # (the group's row is above its strokes)
+            return max(place_of[i] for i in mem) + 1
 
         above_row = rows[place - 1] if place else None
         below_row = rows[place] if place < len(rows) else None
@@ -420,7 +421,7 @@ class DrawerLayers:
             target = None  # (below a group's last stroke: out of it)
         cut = through(above_row) if above_row else 0
         if whole and target:  # (no group in a group: above the one landed in)
-            cut, target = min(top_down.index(i) for i in self.members(target)), None
+            cut, target = min(place_of[i] for i in self.members(target)), None
         above = [i for i in top_down[:cut] if i not in moving]
         rest = [i for i in top_down if i not in moving]
         order = above + [i for i in top_down if i in moving] + rest[len(above):]
