@@ -349,7 +349,7 @@ class TrackList(tk.Canvas):
         sets = [set() for _ in range(len(self._all))]
         n = self._made[0]
         if len(n):  # (a note's row and channel go by its slot alone: worked out once per slot, not per note)
-            slots = np.unique(n[:, 4])
+            slots = np.unique(self.app.slot_pairs(n)[1])  # (worked out once per notes, App.slot_pairs)
             rows = self.rows_of(slots)
             ok = rows >= 0
             for p in np.unique(rows[ok] * 16 + channels_of(slots[ok], use10)).tolist():

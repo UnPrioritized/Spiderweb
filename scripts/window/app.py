@@ -13,6 +13,7 @@ import os
 import sys
 import threading
 import time
+import weakref
 import tkinter as tk
 from tkinter import ttk, messagebox
 
@@ -161,6 +162,22 @@ OLD_NOTES_MOST = 2 ** 30  # (bytes) ...and at most 1 GB (user 2026-11-10: a big 
 WINE_NOTES_SHARE = 16  # (Wine-like systems: 1/16, phones)
 OLD_NOTES_LEAST = 256 * 2 ** 20  # (bytes; at least this much: forget_old_notes)
 _old_notes_most = []
+
+
+def note_pairs(r):
+    """Every (shape, slot) pair the notes r hold, sorted: (owners, slots) arrays. The Shapes list's channel counts,
+    the tracks with notes and the track list's channels all come from these (one pass over the notes, made in the
+    notes thread for notes made there: App.slot_pairs)."""
+    if not len(r):
+        return np.zeros(0, np.int64), np.zeros(0, np.int64)
+    s, o = r[:, 4].astype(np.int64, copy=False), r[:, 5].astype(np.int64, copy=False)
+    lo = int(s.min())
+    span = int(s.max()) - lo + 1
+    if span > 1 << 31:  # (never with real slots: the plain way)
+        got = np.unique(np.stack([o, s], 1), axis=0)
+        return got[:, 0].copy(), got[:, 1].copy()
+    key = np.unique(o * span + (s - lo))
+    return key // span, key % span + lo
 
 
 def old_notes_most():
@@ -471,6 +488,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._late_notes = None  # while dragging: notes left until the mouse rests
         self.shapes_gen = 0  # +1 at every shapes_changed (windows working out something slow from the shapes: same?)
         self._coming = None  # notes being made in the background while a drag rests (notes_rested)
+        self._pairs = None  # (weak link to the notes, owners, slots): slot_pairs' last answer
         self._made_shapes = []  # app.shapes when the notes were last made (late_ok: the same shapes, maybe more)
         self._position = None
         self._normal_geometry = None
@@ -1757,8 +1775,23 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not self.rounds_apart() or not len(r):
             return None
         step = 16 if self.picture_use10 else 15
-        pairs = np.unique(r[:, 5] * step + r[:, 4] % step)
+        owners, slots = self.slot_pairs(r)
+        pairs = np.unique(owners * step + slots % step)
         return np.bincount(pairs // step, minlength=len(self.shapes)).tolist()
+
+    def slot_pairs(self, notes=None):
+        """note_pairs of these notes (the ones on screen: rendered), worked out once per notes; notes made in the
+        background come with theirs (notes_made)."""
+        r = self.rendered if notes is None else np.asarray(notes)
+        got = self._pairs
+        if got is not None and got[0]() is r:
+            return got[1], got[2]
+        owners, slots = note_pairs(r)
+        try:
+            self._pairs = (weakref.ref(r), owners, slots)
+        except TypeError:  # (a list: not kept)
+            pass
+        return owners, slots
 
     def pad_tracks(self):
         """True if the saved MIDI / .dms gets a track for every channel up to the last one used, empty ones too
@@ -1776,7 +1809,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def filled_slots(self, notes):
         """The automatic tracks counted as having notes (own_tracks.counted: where your tracks go) for these notes:
         theirs + the ones Remove overlaps emptied, so ticking it never moves your tracks (hunt 2026-11-06)."""
-        got = np.unique(np.asarray(notes)[:, 4]) if len(notes) else np.zeros(0, np.int64)
+        got = np.unique(self.slot_pairs(notes)[1]) if len(notes) else np.zeros(0, np.int64)
         return np.union1d(got, np.asarray(sorted(self.cut_emptied), np.int64)) if self.cut_emptied else got
 
     def rows_apart(self):
@@ -2299,9 +2332,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         counts = self.note_counts = np.bincount(self.rendered[:, 5], minlength=len(self.shapes)).tolist()
         chans = [1] * len(self.shapes)  # how many channels each shape spreads over (every mode: a paste keeps its
         if len(self.rendered):          # tracks in Single too; each track of yours counted, hunt 2026-11-01)
-            ids, which = np.unique(self.rendered[:, 4], return_inverse=True)
-            pairs = np.unique(self.rendered[:, 5] * len(ids) + which.ravel())
-            chans = np.bincount(pairs // len(ids), minlength=len(self.shapes)).tolist()
+            chans = np.bincount(self.slot_pairs()[0], minlength=len(self.shapes)).tolist()
         # (an Add between group is one row: between_window.py)
         self.fill_shape_list(counts, chans, most_colours(self.all16()), self.colours_used())
         if self.strips_window:  # (its count / Multi channel line from these notes: made late, Channels changed)
@@ -2912,6 +2943,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                     order = ((sels, pics.tobytes(), len(pics), bool(got[1]), None, rule),
                              painting_order(fast, rendered, start, sels, pics, key[2], got[1], None, rule))
                 job["drawn"] = (start, order)
+                job["pairs"] = note_pairs(rendered)  # (App.slot_pairs: the counts after they're taken in)
                 job["got"] = got
             except Exception:  # (MemoryError too: made again the normal way, which tells about it; Stopped)
                 job["got"] = None
@@ -2992,6 +3024,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self._notes_time = job["time"]
         self._make_time = job["time"]
         self.roll.ready_order(job["got"][2], *job["drawn"])
+        self._pairs = (weakref.ref(job["got"][2]), *job["pairs"])
         self._job_stash = job["stash"]
         self._job_off = (job["off_for"], job["got"][2], job.get("off"))  # (shapes_changed: used when still right)
         return job["got"]
