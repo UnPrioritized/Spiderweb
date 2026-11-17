@@ -826,6 +826,8 @@ LINE_DROP = ("k", "smooth", "shape", "pattern", "tumour", "tumours", "sharp")  #
 # points: what made the path from its points (arc, perfect freehand, formulas, tumours) is in them already; its Last
 # note setting stays, hunt 2026-11-17)
 TEXT_DROP = ("text", "polygon")
+TEXT_FILLS = ("nested", "tiles", "ripples", "areas")  # (custom.has_nested / has_tiles / has_ripples / has_areas:
+# never on text)
 
 
 PULL = "pull"  # (bent_shape: the lines can't show this bend (a fold), pull the notes instead)
@@ -891,8 +893,12 @@ def _bent_shape(sh, tabs, r, box, own, ppq, wp=None, lq=None):
         else:
             strokes = sh["strokes"]
         out = {k: v for k, v in sh.items() if k not in TEXT_DROP}
+        if sh.get("text"):  # (inside fills text never takes: its bent strokes must not start using them; heavy
+            # sweep 2026-11-17: a Nested 480 left on a text took 36 s here, and made other notes than the text)
+            for k in TEXT_FILLS:
+                out.pop(k, None)
         out["strokes"] = [deform.bent_stroke(st, board) for st in strokes]
-        if sh.get("areas"):  # (the drawer's coloured areas: each one's spot bent along, so it stays in its area)
+        if sh.get("areas") and not sh.get("text"):  # (the drawer's coloured areas: each one's spot bent along, so it stays in its area)
             a = np.asarray([p[:2] for p in sh["areas"]], np.float64)
             got = board.bend2(a)
             out["areas"] = [[float(u), float(v), p[2]] for (u, v), p in zip(got, sh["areas"])]
