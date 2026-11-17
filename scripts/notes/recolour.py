@@ -1648,6 +1648,10 @@ def _mode_step(notes, at, low, cur, rc, which, pals, pick, box, own):
         m = np.flatnonzero(which == s)
         if len(p) < 2 or not len(m):
             continue
+        if len(m) == len(cur):  # (one set holds every note: the arrays as they are, no copies picked out; the same
+            # numbers, and kept_apart finds its remembered plan for these notes)
+            got = np.where(change, take(p, weights(len(p), shares), cur, pick), cur)
+            return kept_apart(notes, cur, got, p, pick), pick
         got = np.where(change[m], take(p, weights(len(p), shares), cur[m], pick[m]), cur[m])
         new[m] = kept_apart(notes[m], cur[m], got, p, pick[m])
     return new, pick
