@@ -278,6 +278,68 @@ def shown_strokes(sh, ppq):
     return out
 
 
+# ---- Nested with Spam (stage F, a tester's picture dev/data/even_feedback.png: every band one row thick along flat
+# sides and one gate thick along the slopes). Each note cell's DEPTH = the fewer of: gates to its row's end, rows
+# to its column's end (counted from 1 at the edge); the Steps count spreads whole-number bands over the deepest
+# (user: "fill like now", each band the same whole number of cells).
+
+def nested_cells(sh, ppq, base):
+    """(depth grid, first row key, first gate column, gate, grid start) of base's (start, end, key) rows widened to
+    whole gates; depth 0 = outside."""
+    import numpy as np
+    from notes.custom import merged_rows
+    from notes.custom_chop import on_grid
+    g, o = gate_ticks(sh["gate"], ppq), int(sh["_even"])
+    st = merged_rows(on_grid(base, g, o))
+    k0, k1 = int(st[:, 2].min()), int(st[:, 2].max())
+    j0s, j1s = (st[:, 0] - o) // g, (st[:, 1] - o) // g
+    c0 = int(j0s.min())
+    inside = np.zeros((k1 - k0 + 1, int(j1s.max()) - c0), bool)
+    for k, a, b in zip((st[:, 2] - k0).tolist(), (j0s - c0).tolist(), (j1s - c0).tolist()):
+        inside[k, a:b] = True
+    depth = np.minimum(_edge_dist(inside, 1), _edge_dist(inside, 0))
+    return depth, k0, c0, g, o
+
+
+def _edge_dist(inside, axis):
+    """Each inside cell's count of cells to the nearest outside one along axis (either way; 1 = at the edge)."""
+    import numpy as np
+    a = np.moveaxis(inside, axis, -1)
+    n = a.shape[-1]
+    idx = np.arange(n)
+    last_out = np.maximum.accumulate(np.where(a, -1, idx), axis=-1)  # (the nearest outside cell before, -1 = none)
+    nxt = np.minimum.accumulate(np.where(a, n, idx)[..., ::-1], axis=-1)[..., ::-1]  # (after, n = none)
+    d = np.minimum(idx - last_out, nxt - idx)
+    return np.moveaxis(np.where(a, d, 0), -1, axis)
+
+
+def nested_even(sh, ppq, base, cfg):
+    """Nested's steps for an even shape: step i = every cell at least i x band deep, as (start, end, key) rows;
+    band = the deepest / Steps, at least one cell (Last size / Spacing / Turn / the centre point: not used)."""
+    import numpy as np
+    depth, k0, c0, g, o = nested_cells(sh, ppq, base)
+    most = int(depth.max())
+    n = cfg["steps"]
+    band = max(1, math.floor(most / n + 0.5))
+    row_most, col_most = depth.max(axis=1), depth.max(axis=0)
+    out = []
+    for i in range(n):
+        least = 1 + i * band
+        if least > most:  # (deeper than the shape goes: empty, no scan)
+            out.append(np.zeros((0, 3), np.int64))
+            continue
+        rs, cs = np.flatnonzero(row_most >= least), np.flatnonzero(col_most >= least)
+        r0, c1 = int(rs[0]), int(cs[0])  # (only the rows / columns still that deep: they shrink step by step)
+        on = depth[r0:int(rs[-1]) + 1, c1:int(cs[-1]) + 1] >= least
+        edge = np.diff(np.pad(on, ((0, 0), (1, 1))).astype(np.int8), axis=1)
+        at = np.flatnonzero(edge)  # (row by row, left to right: each run's start then its end)
+        w = edge.shape[1]
+        a, b = at[0::2], at[1::2]
+        out.append(np.column_stack([o + (c0 + c1 + a % w) * g, o + (c0 + c1 + b % w) * g, k0 + r0 + a // w])
+                   .astype(np.int64))
+    return out
+
+
 def grid_start(sh, ppq):
     """The tick the gate grid counts from: 0 for Aligned (the song's grid), else the left edge of the shape's box
     (Auto; Centred = Auto here: no leftover to share). The box, not the drawing's leftmost point: snapping moves
