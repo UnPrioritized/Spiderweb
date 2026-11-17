@@ -37,6 +37,14 @@ from window.notes_wait import stale_ok
 
 CARRY_REST_S = 0.15  # notes made in the background: their carried picture waits this long after a zoom (carried_pic)
 MAKING_SHOW_S = 0.15  # notes made in the background this long: the "Making notes…" box shows (draw_making_label)
+ROUGH_STRENGTH = 0.5  # the old notes stretched into a resized shape's new box: this much colour (stretched_pic)
+
+
+def pts_box(sh):
+    """(b0, b1, p0, p1): the box round a shape's points (beats, keys)."""
+    pts = sh.get("pts") or [[0.0, 0.0]]
+    bs, ps = [p[0] for p in pts], [p[1] for p in pts]
+    return min(bs), max(bs), min(ps), max(ps)
 TIP_MARKS = 10  # a ruler tempo mark's tip lists at most this many changes, then "+N more"
 CC_CROWD = 2000  # the ruler's CC row: past this many events only those on screen are laid out, and past this many
 #                  on screen plain marks (one per pixel) + a count per stretch (hunt 2026-10-29: 300,000 froze each
@@ -848,7 +856,7 @@ class RollDrawing:
         last, self._last_pic = self._last_pic, pic  # (only the view moved since the last redraw: scrolling)
         scrolled = last is not None and last[0] is pic[0] and last[1][0] == pic[1][0] and last[1][1:3] != pic[1][1:3]
         if carried is None:
-            self._carry = self._carry_view = None
+            self._carry = self._carry_view = self._rough = None
             if not (self.drag and self.drag[0] == "move"):  # (a rest: the same picture goes on after it)
                 self._carry_pic = None
         # (a drag called off: the notes catch up; a held knob / number box isn't one)
@@ -892,6 +900,8 @@ class RollDrawing:
             self.paint_time = time.perf_counter() - started
         if self._hide_sels and not carried[2] and w > self.kb_w and h > self.ruler_h:
             self.carried_pic(w, h, fixed, carried[0], carried[1])
+        elif self._hide_sels and carried[2] == "stretch" and w > self.kb_w and h > self.ruler_h:
+            self.stretched_pic(w, h)
         if self._tiles is not None and self._grid_key:  # (the grid is in the notes' picture)
             self.delete("grid")
             self._grid_key = None
@@ -2105,7 +2115,89 @@ class RollDrawing:
             got.add((round((b - b0) * self.sx), round((p0 - p) * self.sy)))
         if not got:
             return None
+        if not (self.drag and self.drag[0] == "move") and (len(got) > 1 or self.stretched()):
+            return 0, 0, "stretch"  # (made in the background, resized / moved apart: stretched_pic, rough)
         return (*min(got), len(got) > 1)
+
+    def stretched(self):
+        """A carried shape's points' box changed size since its notes on screen were made (resized)."""
+        app = self.app
+        boxes = getattr(app, "rendered_boxes", None) or []
+        for j in self.carry_from():
+            r = self.carry_ref(j)
+            if j >= len(app.shapes) or r >= len(boxes):
+                return False
+            (a0, a1, c0, c1), (b0, b1, d0, d1) = boxes[r], pts_box(app.shapes[j])
+            if abs((a1 - a0) - (b1 - b0)) > 1e-9 or abs((c1 - c0) - (d1 - d0)) > 1e-9:
+                return True
+        return False
+
+    def stretched_pic(self, w, h):
+        """Notes made in the background after a resize (or shapes moved by different amounts): each carried shape's
+        old notes stretched from its old points' box into its new one, painted at ROUGH_STRENGTH as one see-through
+        picture (user 2026-11-17: "rough (almost accurate) notes while it's still worked on"). Made again only when
+        the view or the shapes change."""
+        app = self.app
+        kb, top = int(self.kb_w), int(self.ruler_h)
+        orig = self.carry_from()
+        boxes = app.rendered_boxes
+        maps = {j: (boxes[self.carry_ref(j)], pts_box(app.shapes[j])) for j in orig
+                if j < len(app.shapes) and self.carry_ref(j) < len(boxes)}
+        key = (id(app.drawn), tuple(sorted(maps.items())), self.sx, self.sy, self.view_t, self.view_top, w, h)
+        got = getattr(self, "_rough", None)
+        if got is None or got[0] != key:
+            got = self._rough = (key, self.rough_photos(w, h, maps))
+        for photo, x0, y0 in got[1]:
+            self.create_image(x0, y0, image=photo, anchor="nw")
+
+    def rough_photos(self, w, h, maps):
+        app = self.app
+        kb, top = int(self.kb_w), int(self.ruler_h)
+        d = app.drawn
+        if not maps or not len(d):
+            return []
+        n = int(max(maps)) + 1
+        mine = np.zeros(n, bool)
+        st, ot, nt, sk, ok, nk = (np.ones(n) if i in (0, 3) else np.zeros(n) for i in range(6))
+        for j, ((a0, a1, c0, c1), (b0, b1, e0, e1)) in maps.items():
+            mine[j] = True
+            st[j] = (b1 - b0) / (a1 - a0) if a1 - a0 > 1e-9 else 1.0
+            sk[j] = (e1 - e0) / (c1 - c0) if c1 - c0 > 1e-9 else 1.0
+            ot[j], nt[j], ok[j], nk[j] = a0 * app.ppq, b0 * app.ppq, c0, e0
+        owner = d[:, 5]
+        sel = (owner >= 0) & (owner < n)
+        sel[sel] = mine[owner[sel]]
+        rows = d[sel]
+        if not len(rows):
+            return []
+        o = rows[:, 5]
+        start = nt[o] + (rows[:, 0] - ot[o]) * st[o]
+        out = rows.copy()
+        out[:, 0] = np.round(start)
+        out[:, 1] = out[:, 0] + np.maximum(np.round((rows[:, 1] - rows[:, 0]) * st[o]), 1)
+        out[:, 2] = np.clip(np.round(nk[o] + (rows[:, 2] - ok[o]) * sk[o]), 0, app.keys - 1)
+        got = self.row_rects(out, w, h)
+        if got is None:
+            return []
+        on, x0, y0, x1, y1 = got
+        slot = out[on, 4]
+        color = note_colours(slot, slot_colours(getattr(app, "picture_use10", False)))
+        pics = getattr(app, "picture_owners", ())
+        if len(pics) and pics.any():
+            color = np.where(pics[np.clip(out[on, 5], 0, len(pics) - 1)], PICTURE_GROUP + np.minimum(slot, 15), color)
+        code = color * 32 + np.clip(out[on, 3], 0, 127) // 4
+        rects = (x0, y0, x1, y1, code)
+        rx0, ry0 = max(int(x0.min()), kb), max(int(y0.min()), top)
+        rx1, ry1 = min(int(x1.max()) + 1, w), min(int(y1.max()) + 1, h)
+        if rx1 <= rx0 or ry1 <= ry0:
+            return []
+        at, rgb = self.note_pixels(rects, (rx0, ry0, rx1, ry1))
+        bg = np.array([int(look.ROLL_BG[i:i + 2], 16) for i in (1, 3, 5)], np.float64)  # (faded toward the rows)
+        px = np.zeros(((ry1 - ry0) * (rx1 - rx0), 4), np.uint8)
+        px[at, :3] = np.round(np.asarray(rgb, np.float64) * ROUGH_STRENGTH + bg * (1 - ROUGH_STRENGTH))
+        px[at, 3] = 255
+        return [(photo, rx0 + x, ry0 + y) for photo, x, y
+                in see_through_strips(self, px.reshape(ry1 - ry0, rx1 - rx0, 4))]
 
     def carry_from(self):
         """The shapes whose old notes are carried along (paint_carried): the dragged ones, or after an edit whose

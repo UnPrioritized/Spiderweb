@@ -109,7 +109,7 @@ from window.app_keys import AppKeys
 from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
-from roll.roll_draw import GHOST_FADE, MAKING_SHOW_S, STACK_MODES, list_order, painting_order, stack_rule, track_ranks
+from roll.roll_draw import GHOST_FADE, MAKING_SHOW_S, pts_box, STACK_MODES, list_order, painting_order, stack_rule, track_ranks
 from files import clipboard, errors, notes_clip, speed, system
 from files.about import ICONS, VERSION
 from files.playback import AHEAD, BUILTIN, DEFAULT_DEVICE, EDO_A_DEFAULT, KESTREL, MidiOut, Player
@@ -459,6 +459,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.held_scrub = None  # that Scrub (shortcuts / Delete wait, Ctrl+Z cancels it)
         self._trimmed = None  # the oldest steps the 300 limit dropped for the last step (add_undo_step)
         self.rendered_pts = []  # each shape's first point when rendered was made
+        self.rendered_boxes = []  # each shape's points' box (b0, b1, p0, p1) then (roll_draw.stretched_pic)
         self.ppq = 960
         self.undo_stack, self.redo_stack = [], []
         self._redo_kept = None  # (push_undo)
@@ -2244,6 +2245,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if not self.roll.drag:
             self.remake_pictures()
         self.rendered_pts = [list(sh["pts"][0]) for sh in self.shapes]  # (where each shape is in these notes)
+        self.rendered_boxes = [pts_box(sh) for sh in self.shapes]
         self.roll.copy_src = None  # (Ctrl+drag copies: their own notes now, roll_draw.on_top)
         started, worked = time.perf_counter(), self._notes_worked
         self.channel_split = SPLIT_CHOICES[max(self.split_box.current(), 0)][0]
@@ -3156,6 +3158,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         pts = self.rendered_pts
         self.rendered_pts = [pts[back[j]] if j in back and back[j] < len(pts) else list(shapes[j]["pts"][0])
                              for j in range(len(shapes))]
+        boxes = self.rendered_boxes
+        self.rendered_boxes = [boxes[back[j]] if j in back and back[j] < len(boxes) else pts_box(shapes[j])
+                               for j in range(len(shapes))]
         self.picture_owners_all = np.array([picture_like(sh) for sh in shapes], bool)
         self.picture_owners = self.picture_owners_all if self.behind_owner is None else np.append(
             self.picture_owners_all, False)  # (as track_view)
