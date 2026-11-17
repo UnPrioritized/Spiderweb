@@ -15,6 +15,7 @@ from files.lang import tr
 from files.system import free_memory
 
 BIG = 1_000_000  # notes: asked past this (making shapes, Copy to Domino)
+shown = 0  # questions shown so far (notes_wait: a click that brought one up is used up by it)
 # memory each note takes while it's done (measured: 20 M notes in the window ~6 GB in all, copying 4 M notes
 # 0.57 GB; 10 M notes, 1-300 tracks: Export MIDI 20-32 bytes a note, 51 on one track without the speed-ups,
 # Export to Domino 36-43)
@@ -81,6 +82,8 @@ def dialog(parent, title, text, strong, tick=None, danger=None, yes=None, no=Non
     """(Yes pressed, tick box ticked). strong = No is the default button (it may not fit in memory). tick = the
     tick box's text (default "Don't ask again until Spiderweb is closed"; False = no tick box). danger = a warning
     in red under the text; yes / no = the buttons' own words."""
+    global shown
+    shown += 1
     win = tk.Toplevel(parent)
     win.withdraw()
     win.title(title)
@@ -116,9 +119,28 @@ def dialog(parent, title, text, strong, tick=None, danger=None, yes=None, no=Non
     from window.widgets import centre_over, remember_place
     centre_over(win, parent.winfo_toplevel())
     remember_place(win, "big_ask")
+    root = parent._root()
+    held = getattr(root, "held_scrub", None)  # (a number box label / knob dragged when it came up)
     win.deiconify()
     win.grab_set()
     first.focus_set()
     win.bell()
     win.wait_window()
+    if held is not None and getattr(root, "held_scrub", None) is held:
+        let_go(held)
     return answer[0], skip.get()
+
+
+def let_go(held):
+    """A drag the question came up in the middle of: its let go went to the question, so it ends here as let go
+    (else it stayed "held": Delete waited and Ctrl+Z only put the box back, user 2026-11-17)."""
+    knob = getattr(held, "knob", None)
+    if knob is not None:  # (a knob in Shares / Stir...: shares_window.KnobHold)
+        knob.release()
+        return
+    box = getattr(held, "held", None)
+    if box:
+        box["box"][0].config(cursor="")
+        held.held = None
+    if getattr(held, "drag", None) is not None and hasattr(held, "release"):
+        held.release(None)

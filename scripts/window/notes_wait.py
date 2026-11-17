@@ -157,9 +157,15 @@ def _call_sorted(self, *args):
         if how == WAIT:
             if waits is not None:
                 waits.append(("input", repr(args[0]) if self.subst and args else repr(func)))
-            if _finish(app) is False and (not self.subst or _key(args[0])):
+            from window import big_ask
+            asked = big_ask.shown
+            said = _finish(app)
+            if said is False and (not self.subst or _key(args[0])):
                 return "break"  # (a key / button that raised "lots of notes" and got No: done, e.g. Ctrl+Z won't
                 # undo another step after the change was taken back)
+            if big_ask.shown != asked and self.subst and _press(args[0]):
+                return "break"  # (a press that brought up a question: its let go went to the question, so the
+                # press is used up by it; else the piano roll kept "holding" a shape and shortcuts waited)
         if timer:
             return func(*args)
         _depth += 1
@@ -179,6 +185,10 @@ def _call_sorted(self, *args):
 
 def _key(e):
     return str(getattr(e, "type", "")) in ("2", "KeyPress")
+
+
+def _press(e):
+    return str(getattr(e, "type", "")) in ("4", "ButtonPress")
 
 
 def view_widget(app, w):
