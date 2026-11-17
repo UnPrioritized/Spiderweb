@@ -1623,38 +1623,52 @@ def pulled(notes, tracks, look_back, box, ppq, joined=True, within=None):
     gaps = _row_gaps(notes)
     small = int(min(lens.min(), gaps.min() if len(gaps) else lens.min()))
     step = max(LEAST_STEP, min(int(ppq) // 32, small // 2))
-    out_n = []
-    for ri in np.nonzero(seen.any(1))[0]:
-        hit = np.nonzero(seen[ri])[0]
-        a = int(math.floor(cols[max(hit[0] - 1, 0)]))
-        b = int(math.ceil(cols[min(hit[-1] + 1, len(cols) - 1)])) + 1
-        xs = np.arange(a, b + step, step, dtype=np.int64)
-        key = float(rows[ri])
-        ids = which(*look_tk(xs.astype(np.float64) + 0.5, np.full(len(xs), key)))
-        ch = np.nonzero(ids[1:] != ids[:-1])[0]
-        if not len(ch) and ids[0] < 0:
-            continue
-        # (each change found to the tick: halving between the two spots)
-        lo_, hi_ = xs[ch].copy(), xs[ch + 1].copy()
-        left = ids[ch]
-        while True:
-            open_ = hi_ - lo_ > 1
-            if not open_.any():
-                break
-            mid = (lo_ + hi_) // 2
-            got = which(*look_tk(mid.astype(np.float64) + 0.5, np.full(len(mid), key)))
-            same = got == left
-            lo_ = np.where(open_ & same, mid, lo_)
-            hi_ = np.where(open_ & ~same, mid, hi_)
-        cuts = np.r_[xs[0], hi_, xs[-1] + step]
-        seg = np.r_[ids[0], ids[ch + 1]]
-        for j in range(len(seg)):
-            if seg[j] < 0 or cuts[j + 1] <= cuts[j]:
-                continue
-            out_n.append((cuts[j], cuts[j + 1], int(rows[ri]), seg[j]))
-    if not out_n:
+    # (every row that sees a note scanned in ONE look, each change then halved to the tick, all rows together: the
+    # same spots looked at as row by row, ~600-2,000 small looks a change before, speed leftover 2026-11-17)
+    live = np.nonzero(seen.any(1))[0]
+    if not len(live):
         return notes[:0], (tracks[:0] if tracks is not None else None)
-    o = np.asarray(out_n, np.int64)
+    sv = seen[live]
+    first = sv.argmax(1)
+    last = sv.shape[1] - 1 - sv[:, ::-1].argmax(1)
+    a = np.floor(cols[np.maximum(first - 1, 0)]).astype(np.int64)
+    b = np.ceil(cols[np.minimum(last + 1, len(cols) - 1)]).astype(np.int64) + 1
+    cnt = (b + step - a + step - 1) // step  # (np.arange(a, b + step, step)'s length)
+    row_of = np.repeat(np.arange(len(live)), cnt)
+    start_at = np.cumsum(cnt) - cnt  # (each row's first spot)
+    xs = a[row_of] + (np.arange(len(row_of)) - start_at[row_of]) * step
+    keys_f = rows[live].astype(np.float64)
+    ids = which(*look_tk(xs.astype(np.float64) + 0.5, keys_f[row_of]))
+    ch = np.nonzero((ids[1:] != ids[:-1]) & (row_of[1:] == row_of[:-1]))[0]
+    # (each change found to the tick: halving between the two spots)
+    lo_, hi_ = xs[ch].copy(), xs[ch + 1].copy()
+    left = ids[ch]
+    ch_key = keys_f[row_of[ch]]
+    while True:
+        open_ = hi_ - lo_ > 1
+        if not open_.any():
+            break
+        mid = (lo_ + hi_) // 2
+        got = which(*look_tk(mid.astype(np.float64) + 0.5, ch_key))
+        same = got == left
+        lo_ = np.where(open_ & same, mid, lo_)
+        hi_ = np.where(open_ & ~same, mid, hi_)
+    # (the runs: each row's first spot, then each change; a run ends where the next one of its row starts, the last
+    # one a step past the row's last spot)
+    pos = np.concatenate((start_at, ch + 1))
+    beg = np.concatenate((xs[start_at], hi_))
+    o = np.argsort(pos, kind="stable")
+    pos, beg = pos[o], beg[o]
+    r_of = row_of[pos]
+    row_end = xs[start_at + cnt - 1] + step
+    nxt = np.r_[beg[1:], 0]
+    same_row = np.r_[r_of[1:] == r_of[:-1], False]
+    end = np.where(same_row, nxt, row_end[r_of])
+    seg = ids[pos]
+    ok = (seg >= 0) & (end > beg)
+    if not ok.any():
+        return notes[:0], (tracks[:0] if tracks is not None else None)
+    o = np.column_stack((beg[ok], end[ok], rows[live][r_of[ok]].astype(np.int64), seg[ok])).astype(np.int64)
     src = o[:, 3]
     res = notes[src].copy()
     res[:, 0], res[:, 1], res[:, 2] = o[:, 0], o[:, 1], o[:, 2]
