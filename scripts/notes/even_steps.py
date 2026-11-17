@@ -109,6 +109,17 @@ def remarked(sh, strokes):
     return dict(free, mark=drawing_mark(strokes)) if isinstance(free, dict) else None
 
 
+def same_drawing(pts, strokes, pts2, strokes2):
+    """Two (frame points, strokes) the same within float noise (a snap that moves nothing changes nothing)."""
+    def flat(p, st):
+        out = [x for q in p for x in q]
+        for s in st:
+            out += [x for q in s.get("pts", ()) for x in q] + list(s.get("box", ()))
+        return out
+    a, b = flat(pts, strokes), flat(pts2, strokes2)
+    return len(a) == len(b) and all(abs(x - y) <= 1e-9 for x, y in zip(a, b))
+
+
 def whole_width(new, orig, sh, ppq):
     """Frame points new (a resize of orig) with the moved left / right side put a whole number of gates from the
     side that stayed (Symmetrical steps: resizing jumps in whole steps, user). Turned boxes / both sides moved:

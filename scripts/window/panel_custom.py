@@ -13,7 +13,8 @@ from notes.areas import most_colours
 from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame, custom_settings, drawing_in_box,
                           edge_gate, even_can, even_kind, even_on, fit_upright, gap_lines, gate_ticks, join_strokes, map_stroke, normalize_areas,
                           normalize_strokes, open_paths, shelve_patterns)
-from notes.even_steps import gate_stretched, remarked, ticked, unticked
+from notes.even_steps import (drawing_mark, gate_stretched, remarked, same_drawing, snapped_shape, ticked,
+                              unticked)
 from window import look
 from window.drawer import Drawer, clean_name, library_lists, library_names, load_drawing, save_shape, shape_stamp
 from window.panel_funnel import GATE_STEPS
@@ -371,6 +372,27 @@ class CustomPanel:
         self.shapes_changed()
         self.sync_custom()
         self.roll.focus_set()
+
+    def even_settle(self):
+        """A let go on the piano roll (move, resize, a point, a stroke drawn into it): selected shapes with
+        Symmetrical steps on have their corners snapped where the notes already show them (user: "let go = the
+        corners snap there"), in the drag's own undo step. Only a box change since the tick (no stroke edited) keeps
+        unticking able to give the drawing back."""
+        changed = False
+        for i in sorted(self.sels):
+            sh = self.shapes[i] if i < len(self.shapes) else None
+            if not sh or sh.get("kind") != "custom" or not even_on(sh):
+                continue
+            pts, strokes = snapped_shape(sh, self.ppq)
+            if same_drawing(pts, strokes, sh["pts"], sh["strokes"]):
+                continue
+            mine = (sh.get("even_free") or {}).get("mark") == drawing_mark(sh["strokes"])
+            sh["pts"], sh["strokes"] = pts, strokes
+            if mine:
+                sh["even_free"] = remarked(sh, strokes)
+            changed = True
+        if changed:
+            self.shapes_changed()
 
     def sync_custom(self):
         tgts = self.custom_targets()

@@ -11,7 +11,8 @@ import tkinter.font as tkfont
 
 import numpy as np
 
-from notes.custom import custom_note_count, edge_inner, gap_lines, role_of
+from notes.custom import custom_note_count, edge_inner, even_on, gap_lines, role_of
+from notes.even_steps import even_version, same_drawing
 from files import colours
 from files.lang import tr, trn
 from files.midi_index import CC_MOST
@@ -967,6 +968,7 @@ class RollDrawing:
         for _, tag, _ in lines.values():  # (lines no longer shown / drawn otherwise now)
             self.delete(tag)
         self.stack_lines(order)
+        self.draw_even_landing()
         for i in app.sels:
             if i < len(app.shapes) and "picture" in app.shapes[i]:
                 self.draw_picture_label(app.shapes[i])
@@ -2575,6 +2577,19 @@ class RollDrawing:
                      if sh["kind"] == "funnel" else (p for _, p in self.origin_strokes(sh))):
             self.create_line(*[v for b, p in path for v in (self.t2x(b), self.p2y(p))], width=1,
                              fill=look.ORIGIN_PICKED if picked else look.ORIGIN, dash=(6, 4), tags=tags)
+
+    def draw_even_landing(self):
+        """Symmetrical steps (PLAN.md "Even steps", user): a selected shape whose drawing isn't where its notes show
+        it (being dragged freely) gets a thin faded line in its line colour where its corners will land on let go."""
+        self.delete("even_landing")
+        app = self.app
+        for i in app.sels:
+            sh = app.shapes[i] if i < len(app.shapes) else None
+            if not sh or sh.get("kind") != "custom" or not even_on(sh):
+                continue
+            ev = even_version(sh, app.ppq)
+            if ev is not sh and not same_drawing(ev["pts"], ev["strokes"], sh["pts"], sh["strokes"]):
+                self.draw_path(dict(sh, strokes=ev["strokes"]), look.EVEN_LANDING, 1, tags="even_landing")
 
     def draw_path(self, sh, color, width, dash=None, tags=()):
         if "notes" in sh:  # pasted notes: their box, thin and dashed (the notes are the shape)

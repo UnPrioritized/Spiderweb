@@ -2041,6 +2041,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.app.sync_funnel()  # its note count
         if kind in ("handle", "move", "stretch", "resize", "turn", "skew"):
             self.app.let_go()  # (Hz bass warnings, the path window's boxes)
+        if not self.draft and kind in ("handle", "move", "stretch", "resize", "create", "free", "segment", "place"):
+            self.app.even_settle()  # (Symmetrical steps: the corners snap where the notes show them, even_steps.py)
         self.drag = None
         self.draw_select_box()  # (the box stays, see kept_box)
         if self.box_kept and getattr(self.app, "loaded", None) is not None:  # (the red outline round the loaded notes

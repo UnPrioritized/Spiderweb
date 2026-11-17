@@ -21,7 +21,8 @@ import numpy as np
 
 from files.lang import size as lang_size, tr, trn
 from notes.areas import ALL_COLOURS, most_colours
-from notes.custom import (ROUND, CENTRE_KEYS, CUSTOM_DEFAULTS, capped_colours, custom_note_count, has_pattern, set_key_top,
+from notes.even_steps import snapped_shape
+from notes.custom import (ROUND, CENTRE_KEYS, CUSTOM_DEFAULTS, even_on, capped_colours, custom_note_count, has_pattern, set_key_top,
                           tracks_apart)
 from window import big_ask, look, notes_wait
 from window.help import Tips, open_help
@@ -3294,6 +3295,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def add_shape(self, sh, name=None):
         if self.mask.get() and not is_mask(sh) and can_mask(sh):  # (drawn with the Mask tick on: a mask, mask.py)
             sh["mask"] = self.new_mask()
+        if sh.get("kind") == "custom" and even_on(sh):  # (drawn with Symmetrical steps on: stored even)
+            sh["pts"], sh["strokes"] = snapped_shape(sh, self.ppq)
         self.push_undo(name=name or tr("app.draw", shape_label=self.shape_label(sh)))
         left_out = self.put_into_current(sh)
         self.shapes.append(sh)

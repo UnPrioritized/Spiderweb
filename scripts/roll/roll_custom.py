@@ -6,7 +6,7 @@ import math
 import tkinter as tk
 
 from notes.basics import seg_dist
-from notes.custom import box_pts, frame_from_box
+from notes.custom import box_pts, even_on, frame_from_box
 from roll.roll_shared import SELECT_CURSOR, SHIFT
 from window import look
 
@@ -62,6 +62,8 @@ class CustomBox:
         inside = self.inside_box(corners, x, y)
         if inside and "notes" in sh and self.big_on_screen(sh) and self.note_owner(x, y, [self.app.sel]) is None:
             return None  # (big pasted notes: their gaps are empty space, hit_shape)
+        if not inside and even_on(sh):  # (Symmetrical steps: no free turn / skew, user; they'd break the steps)
+            return None
         if not inside:
             mids = [((corners[i][0] + corners[(i + 1) % 4][0]) / 2, (corners[i][1] + corners[(i + 1) % 4][1]) / 2)
                     for i in range(4)]
