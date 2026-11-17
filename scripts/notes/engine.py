@@ -1498,6 +1498,9 @@ def shape_tabs_done(sh, ppq, keys, get):
     # worth of ticks and lost its top row). The Warp grid / Liquify brush stay on the box as drawn)
     cell = (box[0], box[1], box[2] - 0.5, box[3] + 0.5), (own[0], own[1], own[2] - 0.5, own[3] + 0.5)
     note_benders = [StirBend(st, rule, cell[0], cell[1], ppq) for st in tabs] + benders[len(tabs):]
+    # (cut where bent, a drawn shape or pasted notes: touching pieces from different rows (one track + velocity)
+    # joined, user 2026-11-17: a square turned 90 = a grid of 85 pieces a row; pastes too, user)
+    cutting = as_notes or first is not None
     if as_notes or first == 0:
         got = AS_NOTES
         benders = note_benders  # (look / within / bend_tk below read it)
@@ -1537,7 +1540,7 @@ def shape_tabs_done(sh, ppq, keys, get):
         try:
             if got == PULL or any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
                 raise Folded
-            made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
+            made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look, joined=cutting)
         except Folded:
             laid = None
             if got == PULL and not bend and tracks is not None and len(made) and base.get("cycle"):
@@ -1551,7 +1554,7 @@ def shape_tabs_done(sh, ppq, keys, get):
                 made, _ = pulled(made, None, look, box, ppq, joined=True, within=within)
                 tracks = laid(base, made[:, :3], ppq) if len(made) else np.zeros(0, np.int64)
             else:
-                made, tracks = pulled(made, tracks, look, box, ppq, joined=got == PULL, within=within)
+                made, tracks = pulled(made, tracks, look, box, ppq, joined=got == PULL or cutting, within=within)
         return dict(out, _bent=bent_token(*_on_keys(made, tracks, keys)))
     if not bend or before is None or not len(before):
         return got
@@ -1598,9 +1601,9 @@ def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, be
     try:
         if any(isinstance(b, StirBend) and (b.st["polar"] or b.st["kaleido"] >= 2) for b in rest):
             raise Folded
-        made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look)
+        made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, look, joined=True)
     except Folded:
-        made, tracks = pulled(made, tracks, look, box, ppq, joined=False, within=within)
+        made, tracks = pulled(made, tracks, look, box, ppq, joined=True, within=within)
     return dict(out, _bent=bent_token(*_on_keys(made, tracks, keys)))
 
 

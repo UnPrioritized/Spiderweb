@@ -839,15 +839,54 @@ CHOP_PART = 32  # (or 1/32 beat sideways)
 CHOP_DEPTH = 24  # (halvings at most: 2^24 pieces of a note; pieces under 1 tick stop sooner)
 
 
-def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None):
+def note_boxes_bent(notes, tracks, bend_tk, ppq, look_back=None, joined=False):
     """notes (n, 4+: start, end, key, velocity, ...) + tracks (or None) bent forwards by bend_tk(t, k) -> (t, k)
     (floats; Folded when it can't): the new notes (sorted by start, key) and their tracks. look_back(t, k): the bend
     backwards; a hole inside a key row whose middle comes from inside a note is filled from that note (two rows'
-    boxes chopped at different places leave a sliver between their bent sides)."""
+    boxes chopped at different places leave a sliver between their bent sides). joined (pasted notes / a drawn
+    shape's with Cut notes where bent): touching pieces on one row from notes of DIFFERENT rows, one track + velocity = one note
+    (like pulled's; user 2026-11-17: a square turned 90 came out as a grid of 85 pieces a row)."""
+    notes = np.asarray(notes, np.int64)
+    if joined and len(notes):  # (each note's own row + its number carried along as two last columns, through every
+        # copy)
+        notes = np.column_stack((notes, notes[:, 2], np.arange(len(notes))))
     out, tr = _note_boxes_bent(notes, tracks, bend_tk, ppq)
-    if look_back is None or len(out) < 2:
-        return _by_start(out, tr)
-    return _holes_filled(np.asarray(notes, np.int64), tracks, out, tr, look_back)
+    if look_back is not None and len(out) >= 2:
+        out, tr = _holes_filled(notes, tracks, out, tr, look_back)
+    else:
+        out, tr = _by_start(out, tr)
+    if not joined or not len(notes):
+        return out, tr
+    return _joined_rows(out, tr)
+
+
+def _joined_rows(out, tr):
+    """out (sorted by start, key; its LAST two columns = each piece's note's own row + number) with touching pieces on
+    one row from different rows (or of one note), one track and the same other columns joined; those two columns
+    dropped. Sorted by start, key. Two touching notes of one row (a Spam row) stay apart."""
+    if len(out) > 1:
+        o = np.lexsort((out[:, 0], out[:, 2]))
+        out = out[o]
+        tr = np.asarray(tr)[o] if tr is not None else None
+        alike = (out[1:, 2] == out[:-1, 2]) & (out[1:, 3:-2] == out[:-1, 3:-2]).all(1)
+        if tr is not None:
+            alike &= tr[1:] == tr[:-1]
+        # (each run of alike pieces' furthest end so far: neighbouring rows are cut at different places, so their
+        # bent pieces overlap a little where they meet; one colour overlapping = one note too)
+        seg = np.cumsum(np.r_[True, ~alike])
+        span = int(out[:, 1].max() - out[:, 1].min()) + 1
+        far = np.maximum.accumulate(out[:, 1] - out[:, 1].min() + seg * span) - seg * span + out[:, 1].min()
+        same = alike & ((out[1:, 0] < far[:-1]) | ((out[1:, 0] == far[:-1]) & (
+            (out[1:, -2] != out[:-1, -2]) | (out[1:, -1] == out[:-1, -1]))))
+        if same.any():
+            first = np.r_[True, ~same]
+            grp = np.cumsum(first) - 1
+            ends = np.zeros(int(grp[-1]) + 1, np.int64)
+            np.maximum.at(ends, grp, out[:, 1])
+            out = out[first]
+            out[:, 1] = ends
+            tr = tr[first] if tr is not None else None
+    return _by_start(out[:, :-2], tr)
 
 
 def _holes_filled(notes, tracks, out, tr, look_back):
@@ -898,7 +937,12 @@ def _note_boxes_bent(notes, tracks, bend_tk, ppq):
         dk = bk[n:2 * n] - (bk[:n] + bk[2 * n:]) / 2
         # (never halved below CHOP_PART of a beat: a very strong Twist cut a square into millions of 1-tick slivers,
         # 2-3 s a change; user 2026-11-17. A piece that short is bent as a straight-sided box)
-        cut = ((np.abs(dk) > CHOP_KEYS) | (np.abs(dt) > tol_t)) & (e - s >= 2 * tol_t) & (depth < CHOP_DEPTH)
+        curves = (np.abs(dk) > CHOP_KEYS) | (np.abs(dt) > tol_t)
+        if depth and (curves & (e - s < 2 * tol_t)).any():
+            # (a piece already halved down to the least still curves: the bend is too tight for straight-sided
+            # boxes (they'd lie across the swirl): every row looks back instead (pulled, exact), like a fold)
+            raise Folded
+        cut = curves & (e - s >= 2 * tol_t) & (depth < CHOP_DEPTH)
         keep = ~cut
         done.append((src[keep], s[keep], e[keep]))
         src = np.concatenate((src[cut], src[cut]))
