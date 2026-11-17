@@ -11,7 +11,9 @@ Callbacks called from inside another one (a trace a click sets off, a dialog's o
 they read wait for themselves (late_attr). Tk isn't thread safe: everything here runs on Tk's thread; the notes'
 thread only works with its own copies (App._make_coming)."""
 
+import os
 import threading
+import time
 import tkinter as tk
 from tkinter import ttk
 
@@ -29,6 +31,15 @@ last_event = None  # the last event handled from Tk's loop (a making started by 
 _main = threading.main_thread()
 waits = None  # a list: what made the notes be waited for is added to it (checks in dev/)
 
+# Freeze timer (hidden; SPIDERWEB_FREEZE=<log file>): every callback from Tk's loop taking FREEZE_MS or more is
+# written down (how long, how much of it waited for notes, window, what), and a heartbeat logs every gap in the
+# window answering (Tk's own drawing too). Off = nothing timed.
+FREEZE_MS = 17.0
+freeze_log = os.environ.get("SPIDERWEB_FREEZE") or None
+_waited = 0.0  # (seconds the running callback waited for notes: finish_notes)
+_beat = None
+_timing = False  # (a callback is being timed: the ones inside it are part of it)
+
 
 def install(app):
     """Called once by App: from now on Tk's callbacks are sorted while app's notes are late (app._bg_notes)."""
@@ -37,6 +48,57 @@ def install(app):
     if not getattr(tk.CallWrapper, "_notes_wait", False):
         tk.CallWrapper.__call__ = _call
         tk.CallWrapper._notes_wait = True
+    if freeze_log:
+        _log("start", 0.0, 0.0, "", "")
+        app.after(5, _heartbeat)
+
+
+def _log(kind, ms, wait_ms, where, what):
+    try:
+        with open(freeze_log, "a", encoding="utf-8") as f:
+            f.write(f"{time.strftime('%H:%M:%S')}\t{kind}\t{ms:.1f}\t{wait_ms:.1f}\t{where}\t{what}\n")
+    except OSError:
+        pass
+
+
+def _heartbeat():
+    """Every 5 ms while the timer is on: a late beat = the window didn't answer for that long."""
+    global _beat
+    now = time.perf_counter()
+    if _beat is not None and (now - _beat) * 1000 - 5 >= FREEZE_MS:
+        _log("gap", (now - _beat) * 1000 - 5, 0.0, "", "")
+    _beat = time.perf_counter()
+    try:
+        _app.after(5, _heartbeat)
+    except Exception:  # noqa: BLE001 (window closed)
+        pass
+
+
+def _named(w):
+    try:
+        top = w.winfo_toplevel()
+        title = top.title() or type(top).__name__
+        return f"{title} / {type(w).__name__}"
+    except Exception:  # noqa: BLE001 (widget gone, a string, ...)
+        return str(w)
+
+
+def _what(wrapper, args):
+    func = wrapper.func
+    name = getattr(func, "__qualname__", repr(func))
+    if wrapper.subst and args:
+        e = args[0]
+        kind = getattr(getattr(e, "type", None), "name", str(getattr(e, "type", "")))
+        extra = getattr(e, "keysym", "") if kind.startswith("Key") else getattr(e, "num", "")
+        return f"{kind} {extra} -> {name}".replace("??", "").strip()
+    if _timer(func):
+        inner = getattr(func, "__closure__", None) or ()
+        for c in inner:
+            got = getattr(c.cell_contents, "__qualname__", None)
+            if got and not got.endswith("callit"):
+                return "after -> " + got
+        return "after"
+    return "command -> " + name
 
 
 def _timer(func):
@@ -44,7 +106,39 @@ def _timer(func):
 
 
 def _call(self, *args):
-    """tkinter.CallWrapper.__call__ (the same, plus sort)."""
+    """tkinter.CallWrapper.__call__ (the same, plus sort; plus the freeze timer when it's on)."""
+    global _waited, _timing
+    if not freeze_log or _timing or threading.current_thread() is not _main:
+        return _call_sorted(self, *args)
+    _waited, _timing = 0.0, True
+    t = time.perf_counter()
+    try:
+        return _call_sorted(self, *args)
+    finally:
+        _timing = False
+        ms = (time.perf_counter() - t) * 1000
+        if ms >= FREEZE_MS:
+            subst_args = args
+            try:
+                if self.subst:
+                    subst_args = self.subst(*args)
+            except Exception:  # noqa: BLE001
+                subst_args = ()
+            _log("step", ms, _waited * 1000, _named(self.widget), _what(self, subst_args))
+
+
+def _finish(app):
+    global _waited
+    if not freeze_log:
+        return app.finish_notes()
+    t = time.perf_counter()
+    try:
+        return app.finish_notes()
+    finally:
+        _waited += time.perf_counter() - t
+
+
+def _call_sorted(self, *args):
     global _depth, last_event
     try:
         if self.subst:
@@ -63,7 +157,7 @@ def _call(self, *args):
         if how == WAIT:
             if waits is not None:
                 waits.append(("input", repr(args[0]) if self.subst and args else repr(func)))
-            app.finish_notes()
+            _finish(app)
         if timer:
             return func(*args)
         _depth += 1
@@ -174,7 +268,7 @@ def late_attr(name):
             if waits is not None:
                 import traceback
                 waits.append(("read " + name, "".join(traceback.format_stack(limit=8)[:-1])))
-            self.finish_notes()
+            _finish(self)
         try:
             return self.__dict__[raw]
         except KeyError:
