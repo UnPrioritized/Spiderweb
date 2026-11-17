@@ -85,6 +85,9 @@ py_loops! {
                eps: f64, out: &mut [i64]) => crate::misc::area_spots;
     face_build(x0: &[f64], y0: &[f64], x1: &[f64], y1: &[f64], levels: &[f64], hy: &[f64], hx0: &[f64], hx1: &[f64],
                eps: f64, many: bool) -> arrays => crate::faces::face_build;
+    // ---- pasted notes in a stretched box (block.rs)
+    block_count(rows: Nd<i64, 2>, g: &[f64], cnt: &mut [i64], many: bool) => crate::block::block_count;
+    block_fill(rows: Nd<i64, 2>, g: &[f64], offs: &[i64], out: NdMut<i64, 2>, many: bool) => crate::block::block_fill;
     // ---- Inside fills' distances to the outline (fills.rs)
     band_rows(ax: &[f64], ay: &[f64], bx: &[f64], by: &[f64], length: &[f64], ys: &[f64], first: &[i64], n: &[i64],
               r: f64, row_out: &mut [i64], lo_out: &mut [f64], hi_out: &mut [f64]) => crate::fills::band_rows;

@@ -63,6 +63,7 @@ macro_rules! level_builds {
 
 mod draw;
 mod engine;
+mod block;
 mod faces;
 mod fills;
 mod hz;

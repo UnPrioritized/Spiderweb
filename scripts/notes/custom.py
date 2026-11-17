@@ -22,7 +22,7 @@ from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, forme
                            moved_formulas)
 from notes.polygon import MIXES, clean_corners, formed_sides
 from notes.smooth import clean_level, smooth_path
-from notes.paths import (top_key, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
+from notes.paths import (ROW_EDGE, top_key, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
 from notes.hzbass import (HZ_DEFAULTS, KeyGrid, even_squares, heard_layers, left_edge, off_cents, own_channels,
                           shifted_hz, squares, threshold)  # (Hz bass: hzbass.py)
@@ -3367,6 +3367,11 @@ def block_notes(sh, ppq):
         if got is not None:
             T0, K0 = got
             return np.column_stack([rows[:, 0] + T0, rows[:, 1] + T0, rows[:, 2] + K0, rows[:, 3], rows[:, 4]])
+    fast = compiled("block_fill")
+    if fast is not None and hasattr(fast, "block_notes"):  # (compiled, notes on several cores: the same notes)
+        got = fast.block_notes(rows, np.array([b0, p0, ub, up, vb, vp, t_all, k_all, ppq, ROW_EDGE], np.float64))
+        if got is not None:
+            return got
     v = (rows[:, 2] + 0.5) / k_all
     ends = []
     for u in (rows[:, 0] / t_all, rows[:, 1] / t_all):

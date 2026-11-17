@@ -44,6 +44,7 @@ NEEDS = {
 NOT_IN_ORDER = -10  # (note_stretches: the notes aren't in key / start order; Numba's -1)
 BIG_GAPS = 4096  # (gap_ticks: anchors past this = written into arrays made in Python)
 FACES_MANY = 2048  # (face_build: lines from which its slabs are shared out on half the cores)
+BLOCK_MANY = 20000  # (block_notes: notes from which they're shared out on half the cores)
 
 
 def rows_of(out, m):
@@ -332,6 +333,23 @@ class Wraps:
         if not hasattr(self.x, "face_build"):
             return None
         return self._tuple("face_build", (x0, y0, x1, y1, levels, hy, hx0, hx1, eps, len(x0) >= FACES_MANY))
+
+    def block_notes(self, rows, g):
+        """custom.block_notes' pieces of (start, end, key, velocity, track) rows in the box g -> (pieces, 5) rows, or
+        None = not run (odd input, or a library without it): custom.py's NumPy way, the same notes. Not in NEEDS
+        (no plain twin: NumPy's way is the twin)."""
+        if not hasattr(self.x, "block_fill"):
+            return None
+        rows = np.ascontiguousarray(rows, np.int64)
+        g = np.ascontiguousarray(g, np.float64)
+        many = len(rows) >= BLOCK_MANY
+        cnt = np.empty(len(rows), np.int64)
+        total = self.x.block_count(rows, g, cnt, many)
+        if total < 0:
+            return None
+        offs = np.cumsum(cnt) - cnt
+        out = np.empty((total, 5), np.int64)
+        return out if self.x.block_fill(rows, g, offs, out, many) >= 0 else None
 
     def band_all(self, ax, ay, bx, by, length, ys, shift, lkey, in_off, in_lo, in_hi, rs, ppq, per):
         args = (ax, ay, bx, by, length, ys, shift, lkey, in_off, in_lo, in_hi, rs, ppq, per)
