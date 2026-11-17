@@ -875,6 +875,13 @@ class VelocityPane(KeepsItems, tk.Canvas):
 
     def bars(self, w, kb):
         """Visible notes -> {(x, layer): top y} for the bars and {(y, x0, x1, layer)} for the gate caps."""
+        (tx, tl, ty), caps = self.bar_arrays(w, kb)
+        caps = np.unique(np.column_stack(caps), axis=0) if len(caps[0]) else np.zeros((0, 4), np.int64)
+        return dict(zip(zip(tx.tolist(), tl.tolist()), ty.tolist())), set(map(tuple, caps.tolist()))
+
+    def bar_arrays(self, w, kb):
+        """bars as arrays: ((x, layer, top y) one per column and layer, (y, x0, x1, layer) of the gate caps, repeats
+        left in)."""
         app, roll, ppq = self.app, self.app.roll, self.app.ppq
         iw = w - kb
         ax, bx = roll.sx / ppq, roll.kb_w - roll.view_t * roll.sx - kb  # image x = tick * ax + bx
@@ -931,11 +938,9 @@ class VelocityPane(KeepsItems, tk.Canvas):
         top = np.full(iw * n, 1 << 30, np.int64)
         np.minimum.at(top, x0[bar] * n + layer[bar], y[bar])
         found = np.nonzero(top < 1 << 30)[0]
-        tops = dict(zip(zip((found // n).tolist(), (found % n).tolist()), top[found].tolist()))
         long = x1 - x0 >= 2
-        caps = np.unique(np.column_stack([y[long], np.maximum(x0[long], 0), np.minimum(x1[long], iw - 1),
-                                          layer[long]]), axis=0)
-        return tops, set(map(tuple, caps.tolist()))
+        return ((found // n, found % n, top[found]),
+                (y[long], np.maximum(x0[long], 0), np.minimum(x1[long], iw - 1), layer[long]))
 
     @staticmethod
     def off_fade():
@@ -1103,37 +1108,48 @@ class VelocityPane(KeepsItems, tk.Canvas):
                     line[:dark * 3] = shaded
             rows[color] = line
 
-        tops, caps = self.bars(w, kb)
-        starts, cap_rows = {}, {}
-        for (x, layer), y in tops.items():
-            starts.setdefault(max(y, 0), []).append((x, layer))
-        for y, x0, x1, layer in sorted(caps, key=lambda c: c[3]):
-            cap_rows.setdefault(y, []).append((x0, x1, layer))
+        # (the whole picture at once, the same pixels as going down it row by row did: 1 M long notes 780 -> 95 ms;
+        # dev/scratch/vel_paint_same.py)
+        colors = list(rows)
+        img = np.frombuffer(b"".join(rows[c] for c in colors), np.uint8).reshape(len(colors), iw, 3)
+        which = np.full(h, colors.index(look.ROLL_BG), np.int64)
+        for y, c in row_color.items():
+            if y == int(y) and 0 <= int(y) < h:
+                which[int(y)] = colors.index(c)
+        img = img[which]  # (h, iw, 3): each row's colour, grid lines, the dark part before beat 0
+        fill_rgb = np.frombuffer(b"".join(fills), np.uint8).reshape(-1, 3)
+        border_rgb = np.frombuffer(b"".join(borders), np.uint8).reshape(-1, 3)
 
-        active = [-1] * iw  # the top layer of bar in each column so far
-        out = []
-        for y in range(h):
-            new = starts.get(y, ())
-            for x, layer in new:
-                if layer > active[x]:
-                    active[x] = layer
-                    for line in rows.values():
-                        line[x * 3:x * 3 + 3] = fills[layer]
-            row = bytearray(rows[row_color.get(y, look.ROLL_BG)])
-            for x, layer in new:
-                if active[x] == layer:
-                    row[x * 3:x * 3 + 3] = borders[layer]  # dark top of the bar
-            for x0, x1, layer in cap_rows.get(y, ()):
-                b = borders[layer]
-                if max(active[x0:x1 + 1]) <= layer:
-                    row[x0 * 3:x1 * 3 + 3] = b * (x1 - x0 + 1)
-                else:
-                    for x in range(x0, x1 + 1):
-                        if active[x] <= layer:
-                            row[x * 3:x * 3 + 3] = b
-            out.append(row)
+        (tx, tl, ty), (cy, c0, c1, cl) = self.bar_arrays(w, kb)
+        ty = np.maximum(ty, 0)
+        on = ty < h
+        tx, tl, ty = tx[on], tl[on], ty[on]
+        # the top layer of bar in each column, going down: a bar fills its column from its top to the bottom
+        active = np.full((h, iw), -1, np.int64)
+        np.maximum.at(active, (ty, tx), tl)
+        active = np.maximum.accumulate(active, axis=0)
+        bar = active >= 0
+        img[bar] = fill_rgb[active[bar]]
+        top = active[ty, tx] == tl  # dark top of the bar (only the top layer's, where it starts)
+        img[ty[top], tx[top]] = border_rgb[tl[top]]
+        # gate caps: in each pixel the highest layer's cap, drawn where no higher bar is
+        on = (cy >= 0) & (cy < h)
+        cy, c0, c1, cl = cy[on], c0[on], c1[on], cl[on]
+        cap = np.full((h, iw), -1, np.int64)
+        W = iw + 1
+        for layer in np.unique(cl).tolist():  # (lowest first: a higher one drawn over it)
+            k = cl == layer
+            ys, r = np.unique(cy[k], return_inverse=True)
+            m = len(ys) * W
+            d = np.bincount(r * W + c0[k], minlength=m) - np.bincount(r * W + c1[k] + 1, minlength=m)
+            got = np.cumsum(d.reshape(-1, W), axis=1)[:, :iw] > 0
+            part = cap[ys]
+            part[got] = layer
+            cap[ys] = part
+        show = (cap >= 0) & (cap >= active)
+        img[show] = border_rgb[cap[show]]
 
-        data = b"P6 %d %d 255\n" % (iw, h) + b"".join(out)
+        data = b"P6 %d %d 255\n" % (iw, h) + img.tobytes()
         if self.img is None or (self.img.width(), self.img.height()) != (iw, h):
             self.img = tk.PhotoImage(master=self, width=iw, height=h)
         self.img.configure(data=data, format="ppm")

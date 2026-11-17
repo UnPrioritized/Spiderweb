@@ -32,6 +32,7 @@ What's new:
 • Faster: more of the note making now uses several processor cores. A big paste in a stretched box makes its notes up to 3.5 times faster, Stir and Shuffle / Split on shapes with millions of notes about 1.5 times faster, and most filled shapes 1.2 to 1.5 times faster. The notes come out exactly the same.
 • Faster: editing while a track is soloed or muted in a project with many tracks. With 256 tracks and one soloed, each change took up to several seconds; now it's instant.
 • Faster: the Hz bass window with many slides. Moving the mouse, scrolling and dragging notes are several times quicker on a long Hz bass.
+• Faster: the velocity pane on big projects. Drawing a velocity line, scrolling and zooming over millions of notes is up to 8 times quicker.
 
 • Fixed: Kestrel (GPU) could freeze when you switched MIDI outs quickly, or when several things used the graphics card at once (Rendered ahead, the Hz bass preview, playback, changing soundfonts). Everything that uses the graphics card now takes turns, one at a time.
 
