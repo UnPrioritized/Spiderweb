@@ -1005,13 +1005,15 @@ def _holes_filled(notes, tracks, out, tr, look_back):
     return out[o], (tr[o] if tr is not None else None)
 
 
-def edge_from_rows(made, tracks, line, most=1):
+def edge_from_rows(made, tracks, line, most=1, stretch=True):
     """Cut notes `made` (+ tracks) given each key row's ends of `line` (the same shape made the outline way): every
     row's merged spans of line's notes; pieces clipped to them, the first piece of a span starting at its start, the
     last ending at its end, no gap inside a span, an end piece shorter than `most` joined into its neighbour; pieces
     outside every span dropped; a span no piece reaches = one note from the row's nearest piece (whole span). Rows line
     doesn't have are dropped (stray pieces past the outline). Whole-array work (a Twist 50 outline has thousands of
-    spans); _edge_from_rows_plain = the same rules one span at a time."""
+    spans); _edge_from_rows_plain = the same rules one span at a time. stretch False (Spam, outlines, patterns: their
+    row ends are real notes; user 2026-11-17 picked "clip to the outline" from test29's previews): only clipped, pieces
+    past the outline gone, nothing stretched, no gap filled, no span given a note."""
     if not len(made) or not len(line):
         return made, tracks
     tr = np.asarray(tracks) if tracks is not None else None
@@ -1026,7 +1028,7 @@ def edge_from_rows(made, tracks, line, most=1):
     W = int(max(made[:, 1].max(), sp_b.max())) - t0 + 2
     r0 = int(min(made[:, 2].min(), sp_row.min()))
     if (int(max(made[:, 2].max(), sp_row.max())) - r0 + 1) * W >= 1 << 62:
-        return _edge_from_rows_plain(made, tr, line, most)
+        return _edge_from_rows_plain(made, tr, line, most, stretch)
     ka = (sp_row - r0) * W + (sp_a - t0)
     kb = (sp_row - r0) * W + (sp_b - t0)
     rk = (made[:, 2] - r0) * W
@@ -1043,6 +1045,8 @@ def edge_from_rows(made, tracks, line, most=1):
     qt = tr[pi] if tr is not None else None
     q[:, 0] = np.maximum(q[:, 0], sp_a[si])
     q[:, 1] = np.minimum(q[:, 1], sp_b[si])
+    if not stretch:
+        return _by_start(q, qt)
     if len(q):
         fs = np.r_[True, si[1:] != si[:-1]]
         lst = np.r_[si[1:] != si[:-1], True]
@@ -1083,7 +1087,7 @@ def edge_from_rows(made, tracks, line, most=1):
     return _by_start(q, qt)
 
 
-def _edge_from_rows_plain(made, tracks, line, most=1):
+def _edge_from_rows_plain(made, tracks, line, most=1, stretch=True):
     """edge_from_rows one row / span at a time (when the ticks are too far apart for one sort key)."""
     if not len(made) or not len(line):
         return made, tracks
@@ -1111,6 +1115,14 @@ def _edge_from_rows_plain(made, tracks, line, most=1):
         ends = np.maximum.reduceat(line[a0:a1, 1], np.flatnonzero(new))
         for a, b in zip(starts.tolist(), ends.tolist()):
             hit = np.flatnonzero((P[:, 1] > a) & (P[:, 0] < b))
+            if not stretch:  # (only clipped)
+                q = P[hit].copy()
+                q[:, 0] = np.maximum(q[:, 0], a)
+                q[:, 1] = np.minimum(q[:, 1], b)
+                outs.append(q)
+                if T is not None:
+                    trs.append(T[hit])
+                continue
             if not len(hit):
                 j = int(np.argmin(np.abs((P[:, 0] + P[:, 1]) / 2 - (a + b) / 2)))
                 piece = P[j:j + 1].copy()

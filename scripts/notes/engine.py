@@ -1613,10 +1613,12 @@ def _outline_edge(sh, ppq, keys, get, made, tracks):
     """A drawn shape's cut notes (made, tracks) with each key row's EDGE taken from its bent outline (user 2026-11-17,
     test28: the cut rows' starts wobbled round a smooth curve; picked "edge from the outline"): the shape made the
     outline way (every Shape step's Cut notes where bent off) gives each row's spans; pieces are clipped to them, the
-    first / last piece of a span reaches its ends. Only a plain Fill (Spam, outlines, patterns: their row ends are real
-    notes, left as cut)."""
-    if sh.get("fill") != "fill" or not len(made):
+    first / last piece of a span reaches its ends: a plain Fill. Other fills (Spam, outlines, patterns: their row ends
+    are real notes) are only CLIPPED to the solid outline: pieces past it gone, nothing stretched (user 2026-11-17,
+    test29's previews). Shapes without a fill (lines): left as cut."""
+    if not sh.get("fill") or not len(made):
         return made, tracks
+    stretch = sh.get("fill") == "fill"
     import copy as _copy
     r = _copy.deepcopy(sh["recolour"])
     st = r.get("stir")
@@ -1626,12 +1628,11 @@ def _outline_edge(sh, ppq, keys, get, made, tracks):
     for k in ("warp", "liquify"):
         if isinstance(r.get(k), dict):
             r[k]["chop"] = False
-    res = shape_tabs_done(dict(sh, recolour=r), ppq, keys, get)
+    res = shape_tabs_done(dict(sh, recolour=r, fill="fill"), ppq, keys, get)  # (the outline's solid rows)
     line, _ = get(_steps_off(without_recolour(res)))
-    from notes.shape_bend import edge_from_rows
-    from notes.shape_bend import CHOP_PART
+    from notes.shape_bend import CHOP_PART, edge_from_rows
     return edge_from_rows(np.asarray(made, np.int64), tracks, np.asarray(line, np.int64),
-                          max(int(ppq) // CHOP_PART, 1))
+                          max(int(ppq) // CHOP_PART, 1), stretch)
 
 
 STEP_KEYS = ("fx", "_m", "glue", "sustain", "extend", "subtract", "gate_flip", "order", "off", "_upto")
