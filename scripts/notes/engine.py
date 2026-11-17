@@ -2494,6 +2494,11 @@ def free_box(sh, notes, get, keys):
     b = box_of(notes)  # (remembered for big notes: asked at every mouse move with the Stir window open)
     if b[0] > 0 and b[2] > 0 and b[3] < keys - 1:
         return None
+    if (not sh.get("fx") and sh.get("kind") != "gliss" and not grows_free(sh)
+            and past_edges(sh, keys, 960, True) is None):
+        # (its drawing stays inside the edges: made again it gives these very notes, the same box. Not with note
+        # tool pages / Ripples rings, which reach past the drawing, nor a Glissando's picked keys)
+        return None
     plain = dict(without_recolour(sh), _free=True)
     up = 0
     if notes[:, 2].min() == 0 and "pts" in sh:  # (rows below the lowest key aren't made at all: lifted, counted back)
