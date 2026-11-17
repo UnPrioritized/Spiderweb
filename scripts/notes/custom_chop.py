@@ -227,6 +227,9 @@ def chop(sh, stretches, g, count=False):
     doesn't fit a whole gate: ENDS. count: just how many notes each stretch gets."""
     if sh.get("_even") is not None and isinstance(g, (int, np.integer)):  # Symmetrical steps (even_steps.py)
         stretches = on_grid(stretches, int(g), int(sh["_even"]))
+    elif sh.get("_even_keys") and isinstance(g, RangeKeys):  # (... with a Range by keys: each row its own gates)
+        from notes.even_steps import keys_chop
+        return keys_chop(stretches, g, int(sh["_even_keys"]), int(sh["_even"]), count)
     keep = bool(sh.get("range")) and not sh.get("hz")
     fit = keep and stretched(sh["range"])
     if isinstance(g, RangeRows):

@@ -12,7 +12,7 @@ import tkinter.font as tkfont
 import numpy as np
 
 from notes.custom import custom_note_count, edge_inner, even_on, gap_lines, role_of
-from notes.even_steps import even_version, same_drawing
+from notes.even_steps import even_version, same_drawing, shown_strokes
 from files import colours
 from files.lang import tr, trn
 from files.midi_index import CC_MOST
@@ -2587,9 +2587,11 @@ class RollDrawing:
             sh = app.shapes[i] if i < len(app.shapes) else None
             if not sh or sh.get("kind") != "custom" or not even_on(sh):
                 continue
-            ev = even_version(sh, app.ppq)
-            if ev is not sh and not same_drawing(ev["pts"], ev["strokes"], sh["pts"], sh["strokes"]):
-                self.draw_path(dict(sh, strokes=ev["strokes"]), look.EVEN_LANDING, 1, tags="even_landing")
+            if "_even" not in even_version(sh, app.ppq):
+                continue
+            strokes = shown_strokes(sh, app.ppq)  # (a Range by keys: the bent sides)
+            if not same_drawing(sh["pts"], strokes, sh["pts"], sh["strokes"]):
+                self.draw_path(dict(sh, strokes=strokes), look.EVEN_LANDING, 1, tags="even_landing")
 
     def draw_path(self, sh, color, width, dash=None, tags=()):
         if "notes" in sh:  # pasted notes: their box, thin and dashed (the notes are the shape)

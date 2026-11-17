@@ -17,7 +17,7 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
-from notes.custom import SPAM_FILLS, gate_ticks, range_gates
+from notes.custom import SPAM_FILLS, even_on, gate_ticks, range_gates
 from notes.funnel import funnel_gates, funnel_range
 from notes.gaterange import (DIRS, ENDS, STRAIGHT, clean_range, ends_of, exact_ok, few_steps, gate_steps, halved,
                              steps_to, with_ends, y_gate)
@@ -68,6 +68,11 @@ class RangeGraph(PointGraph, tk.Toplevel):
         for i, t in enumerate(self.tgts[1:], 1):  # (shapes without a Range on take the one shown: the first's)
             if not t.get("range"):
                 self.memo[i] = json.loads(json.dumps(self.memo[0]))
+        # Symmetrical steps: Keys only (the gate changing along a row breaks the steps, user), a Time range = Keys
+        self.dirs = DIRS[1:] if not self.funnel and any(even_on(t) for t in self.tgts) else DIRS
+        for m in self.memo:
+            if m and m["dir"] not in self.dirs:
+                m["dir"] = self.dirs[0]
         self.closed = False
         self.drag, self.hover, self.bar_hover, self.counts = None, None, None, None
         self.held, self.drag_from = False, None  # (a drag's graph that would make too many notes: not used yet)
@@ -97,9 +102,10 @@ class RangeGraph(PointGraph, tk.Toplevel):
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(4, 0))
         ttk.Label(row, text=tr("range_window.across")).pack(side="left")
-        self.dir_box = ttk.Combobox(row, values=[tr(f"range_window.{d}") for d in DIRS], state="readonly", width=24)
+        self.dir_box = ttk.Combobox(row, values=[tr(f"range_window.{d}") for d in self.dirs], state="readonly",
+                                    width=24)
         self.dir_box.pack(side="left", padx=4)
-        self.dir_box.bind("<<ComboboxSelected>>", lambda e: self.change("dir", DIRS[self.dir_box.current()]))
+        self.dir_box.bind("<<ComboboxSelected>>", lambda e: self.change("dir", self.dirs[self.dir_box.current()]))
         Tooltip(self.dir_box, tr("range_window.dir_tip"))
         if self.funnel:  # (always from the line start to the wall)
             row.pack_forget()
@@ -340,7 +346,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
         for key, beats in (("from", self.tgts[0]["gate"]), ("to", self.memo[0]["to"])):
             self.gate_vars[key].set(fmt(gate_ticks(beats, self.app.ppq)))  # (whole ticks, as the notes use)
             self.gate_boxes[key].config(style="TEntry", state="normal" if on else "disabled")
-        self.dir_box.current(DIRS.index(self.memo[0]["dir"]))
+        self.dir_box.current(self.dirs.index(self.memo[0]["dir"]) if self.memo[0]["dir"] in self.dirs else 0)
         self.dir_box.config(state="readonly" if on else "disabled")
         time = on and self.memo[0]["dir"] == "time"  # (each key row by itself: left to right only)
         self.rows_var.set(self.memo[0]["rows"])

@@ -22,9 +22,13 @@ NOISE = 1e-6  # float noise of a snapped corner taken to the shape's box and bac
 
 def even_version(sh, ppq):
     """sh as its notes are made with Symmetrical steps on (sh itself when off or nothing to do): straight sides
-    snapped to clean lines, hidden "_even" = the grid's start tick for chop."""
-    if not even_on(sh) or sh.get("range"):  # (a gate Range: its own rows, stage E)
+    snapped to clean lines, hidden "_even" = the grid's start tick for chop. A gate Range by keys: keys_version
+    (its strokes then lie in the stand-in space, see there); by time: as it is (hidden in its window)."""
+    if not even_on(sh):
         return sh
+    if sh.get("range"):
+        grid = keys_grid(sh, ppq)
+        return keys_version(sh, ppq, grid) if grid is not None else sh
     g = gate_ticks(sh["gate"], ppq)
     to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(sh["pts"])
     if to_uv is None:
@@ -40,7 +44,7 @@ def snapped_shape(sh, ppq):
     corners where the even version has them. Curves keep their place in the box (they move by under half a gate)."""
     pts = [list(p) for p in sh["pts"]]
     from notes.custom import frame_upright
-    if frame_upright(pts):
+    if frame_upright(pts) and not sh.get("range"):  # (a Range's rows have gates of their own: box as it is)
         g = gate_ticks(sh["gate"], ppq) / ppq
         w = pts[1][0] - pts[0][0]
         whole = max(1, math.floor(abs(w) / g + 0.5)) * g
@@ -48,12 +52,12 @@ def snapped_shape(sh, ppq):
             pts[1][0] = pts[0][0] + whole
         else:  # (flipped sideways: point 1 is the left edge)
             pts[0][0] = pts[2][0] = pts[1][0] + whole
-    ev = even_version(dict(sh, even=True), ppq)
-    if ev is sh or "_even" not in ev:
+    on = dict(sh, even=True)
+    if "_even" not in even_version(on, ppq):
         return pts, sh["strokes"]
     to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(pts)
     out = []
-    for old, new in zip(sh["strokes"], ev["strokes"]):
+    for old, new in zip(sh["strokes"], shown_strokes(on, ppq)):
         if new is old or to_uv is None:
             out.append(old)
         else:
@@ -151,6 +155,129 @@ def gate_stretched(sh, gate, ppq):
     return snapped_shape(dict(sh, pts=pts, gate=gate), ppq)
 
 
+# ---- Gate Range by keys (user 2026-11-17: "smooth bend": each row steps by ITS OWN gate, the sides bend along the
+# Range graph, still whole notes, mirror halves exact). The STAND-IN SPACE: every row's ticks from the box's left
+# edge t0 scaled by a / that row's gate (a = the first gate), so every row has gate a there; the sides snap there as
+# usual, each row's stretch is widened to whole gates of a, then taken back to the row's own gate (chop,
+# "_even_keys"). The real outline = those straight sides taken back row by row: bent (shown_strokes).
+
+def keys_grid(sh, ppq):
+    """sh's gate Range by keys (gaterange.RangeKeys; keys_down too), else None."""
+    from notes.gaterange import RangeKeys, keys_up, range_grid
+    if not sh.get("range") or keys_up(sh["range"])["dir"] != "keys":
+        return None
+    grid = range_grid(sh, ppq)
+    return grid if isinstance(grid, RangeKeys) else None
+
+
+def row_gates(grid):
+    """key -> that key row's gate in ticks (remembered per grid)."""
+    from notes.gaterange import gate_at
+    memo = {}
+
+    def gate(key):
+        got = memo.get(key)
+        if got is None:
+            u = (key - grid.k0) / (grid.k1 - grid.k0) if grid.k1 > grid.k0 else 0.0
+            got = memo[key] = gate_at(grid.graph, grid.a, grid.b, min(1.0, max(0.0, u)), grid.halves)
+        return got
+    return gate
+
+
+def _row(p):
+    return math.floor(p + 0.5)
+
+
+def keys_middle(sh, ppq):
+    """The tick every row's gates count from with a Range by keys: the box's middle (counted from its left edge, a
+    drawing mirrored round its middle got lopsided steps: the far side's gates add up faster)."""
+    from notes.gaterange import frame_span
+    lo, hi, _, _ = frame_span(sh)
+    return math.floor((lo + hi) / 2 * ppq + 0.5)
+
+
+def keys_version(sh, ppq, grid):
+    """even_version for a Range by keys: strokes in the stand-in space (in the shape's own box), "_even" = the tick
+    the rows count from (keys_middle), "_even_keys" = the stand-in gate a."""
+    from notes.custom import stroke_points
+    to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(sh["pts"])
+    if to_uv is None:
+        return sh
+    gate, t0, a = row_gates(grid), keys_middle(sh, ppq), grid.a
+
+    def stand_in(u, v):  # (stroke u, v -> stand-in (x in gates of a, y = pitch + 0.5))
+        b, p = to_bp(u, v)
+        return ((b * ppq - t0) / gate(_row(p)), p + 0.5)
+
+    def back(x, y):  # (stand-in -> u, v in the box)
+        return list(to_uv((t0 + x * a) / ppq, y - 0.5))
+
+    out = []
+    for st in sh["strokes"]:
+        pts = st.get("pts") or []
+        if plain_poly(st) and len(pts) >= 4 and all(abs(c - d) <= SAME for c, d in zip(pts[0], pts[-1])):
+            got = even_loop([stand_in(u, v) for u, v in pts[:-1]])
+            if got is not None:
+                loop = [back(x, y) for x, y in got]
+                out.append(dict(st, pts=loop + [list(loop[0])], _snapped=True))
+                continue
+        loop = [back(*stand_in(u, v)) for u, v in stroke_points(st)]
+        out.append({**{k: v for k, v in st.items() if k in ("role", "colour")}, "kind": "poly", "pts": loop,
+                    "free": True})  # (a curve as drawn, in the stand-in space: never snapped)
+    return dict(sh, strokes=out, _even=t0, _even_keys=a)
+
+
+def keys_chop(stretches, grid, a, t0, count=False):
+    """chop for a Range by keys with Symmetrical steps: stand-in stretches widened to whole gates of a from t0,
+    taken to each row's own gates (from t0 too), then cut into that row's gates back to back (count: how many
+    each)."""
+    import numpy as np
+    from notes.custom_chop import on_grid
+    st = on_grid(stretches, a, t0)
+    if not len(st):
+        return np.zeros(0, np.int64) if count else np.zeros((0, 3), np.int64)
+    keys = np.unique(st[:, 2])
+    gates = np.array([row_gates(grid)(int(k)) for k in keys.tolist()], np.int64)[np.searchsorted(keys, st[:, 2])]
+    j0, j1 = (st[:, 0] - t0) // a, (st[:, 1] - t0) // a
+    n = j1 - j0
+    if count:
+        return n
+    k = np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+    g = np.repeat(gates, n)
+    starts = t0 + (np.repeat(j0, n) + k) * g
+    return np.column_stack([starts, starts + g, np.repeat(st[:, 2], n)])
+
+
+def shown_strokes(sh, ppq):
+    """The strokes where the notes show the shape (the landing line; what a let go stores): even_version's, but a
+    Range by keys' straight stand-in sides taken back row by row (a point at every row's middle: the bent edge)."""
+    ev = even_version(sh, ppq)
+    if ev is sh or "_even_keys" not in ev:
+        return ev["strokes"]
+    grid = keys_grid(sh, ppq)
+    gate, t0, a = row_gates(grid), ev["_even"], ev["_even_keys"]
+    to_bp, to_uv = frame_to_bp(sh["pts"]), frame_to_uv(sh["pts"])
+
+    def real(b, p):  # (stand-in beats / pitch -> u, v of the real spot)
+        return list(to_uv((t0 + (b * ppq - t0) * gate(_row(p)) / a) / ppq, p))
+
+    out = []
+    for old, st in zip(sh["strokes"], ev["strokes"]):
+        if not st.get("_snapped"):
+            out.append(old)  # (curves: as drawn)
+            continue
+        pts = [to_bp(u, v) for u, v in st["pts"]]
+        bent = []
+        for (b0, p0), (b1, p1) in zip(pts, pts[1:]):
+            bent.append(real(b0, p0))
+            lo, hi = sorted((p0, p1))
+            fs = sorted((q - p0) / (p1 - p0) for q in range(math.floor(lo), math.ceil(hi) + 1) if lo < q < hi)
+            bent += [real(b0 + f * (b1 - b0), p0 + f * (p1 - p0)) for f in fs]  # (each row's middle it crosses)
+        bent.append(real(*pts[-1]))
+        out.append({k: v for k, v in dict(st, pts=bent).items() if k != "_snapped"})
+    return out
+
+
 def grid_start(sh, ppq):
     """The tick the gate grid counts from: 0 for Aligned (the song's grid), else the left edge of the shape's box
     (Auto; Centred = Auto here: no leftover to share). The box, not the drawing's leftmost point: snapping moves
@@ -227,13 +354,31 @@ AGAIN = 8  # snapped again until nothing moves (a side squeezed short by its nei
 
 def even_loop(pts):
     """A closed loop's corners [(x, y)] (not repeated at the end) -> the even loop's corners, or None if it
-    folds away to nothing. Snapped until nothing moves: the stored even shape snaps to itself."""
+    folds away to nothing. Snapped until nothing moves: the stored even shape snaps to itself. Points on a straight
+    line between their neighbours go first (a Range by keys' stored bent side has one at every row's middle: alone
+    each piece is too short to tell its angle)."""
+    pts = _straight_dropped(pts)
     for _ in range(AGAIN):
         got = _snapped_loop(pts)
         if got is None or len(got) == len(pts) and all(_length(p, q) <= 1e-9 for p, q in zip(got, pts)):
             return got
         pts = got
     return pts
+
+
+def _straight_dropped(pts):
+    """The loop without corners lying on the straight line between their neighbours (within NOISE)."""
+    out = list(pts)
+    i = 0
+    while len(out) > 3 and i < len(out):
+        (ax, ay), (bx, by), (cx, cy) = out[i - 1], out[i], out[(i + 1) % len(out)]
+        ln = math.hypot(cx - ax, cy - ay)
+        if ln > SAME and abs((cx - ax) * (by - ay) - (cy - ay) * (bx - ax)) / ln <= NOISE and (
+                (bx - ax) * (cx - bx) + (by - ay) * (cy - by)) >= 0:  # (on the line AND between them)
+            del out[i]
+        else:
+            i += 1
+    return out
 
 
 def _snapped_loop(pts):
