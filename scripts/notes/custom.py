@@ -2392,6 +2392,9 @@ def custom_note_count(sh, ppq):
     """How many notes a custom shape makes, without making them (spam can be millions)."""
     if "notes" in sh:
         return len(unpack_notes(sh["notes"]))
+    if sh.get("even"):  # Symmetrical steps: counted on the even version (even_steps.py)
+        from notes.even_steps import even_version
+        sh = even_version(sh, ppq)
     if sh.get("apart") and sh["fill"] == "fill":
         return None  # (made to count them: the outline cuts the long notes. Spam "Outline" = the same notes)
     if (sh.get("hz") or {}).get("layers") and not sh.get("cut"):  # each layer heard makes its own (engine)
@@ -2464,6 +2467,9 @@ def custom_notes(sh, ppq):
 def custom_notes_groups(sh, ppq):
     """custom_notes, and which group each note belongs to (None = all one: see outline_groups). "Colours"
     (sh["cycle"]): every group split into its turns (cycle_turns); with "Outline" the outline stays one group."""
+    if sh.get("even"):  # Symmetrical steps: made from the even version (even_steps.py)
+        from notes.even_steps import even_version
+        sh = even_version(sh, ppq)
     notes, groups = _notes_groups(sh, ppq)
     if not cycling(sh) or not len(notes):
         return notes, (paint_rounds(sh, notes, groups, ppq) if sh.get("_rounds") else groups)
