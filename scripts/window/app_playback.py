@@ -17,7 +17,7 @@ from files.mathexpr import calc
 from files.ahead_play import FOLLOW_S
 from files.playback import AHEAD, BUILTIN, EDO_LANE, KESTREL, MAESTRO, cc_list
 from files.synth import FONT_TYPES, LIVE_DRUMS_CODE, LIVE_PORTS, RATE, Live, Synth, SynthError, silent_list
-from notes.engine import slot_track_channel
+from notes.engine import channels_of, slot_track_channel
 from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
 from notes.hzbass import RING_MOST, has_cc
 from notes import loaded_map
@@ -83,6 +83,29 @@ def edo_place(ch):
     """A channel as right-drag listening tells 31-EDO rows apart: its place in its group (0-2: channels 1 and 4 sound
     a row alike, so one key; "Overlaps keep their pitch" puts overlaps there), channel 10 as itself (drums)."""
     return 9 if ch == 9 else int(EDO_LANE[ch & 15])
+
+
+def swept_keys(notes, tuned, use10):
+    """Right-drag listening: {(channel, key): (start, velocity)} of the latest note to start on each key among these
+    rows (the first of them when several start together), keys in the order they first come; a faint track's copy
+    (velocity -2 - v) at its own velocity; tuned (31-EDO) = the channel's place in its group (edo_place). All at once:
+    one note at a time took 24-82 ms a mouse step over millions of notes."""
+    if not len(notes):
+        return {}
+    notes = np.asarray(notes, np.int64)
+    s, p, v = notes[:, 0], notes[:, 2], notes[:, 3]
+    v = np.where(v <= -2, -2 - v, v)
+    ch = channels_of(notes[:, 4], use10)
+    if tuned:
+        ch = -1 - np.where(ch == 9, 9, np.asarray(EDO_LANE, np.int64)[ch & 15])
+    code = (ch + 64) * (1 << 20) + (p + (1 << 19))  # (one number per (channel, key))
+    at = np.arange(len(notes))
+    o = np.lexsort((at, -s, code))  # (each key: latest start first, then the first of those)
+    head = np.flatnonzero(np.r_[True, code[o][1:] != code[o][:-1]])
+    win = o[head]
+    first = np.minimum.reduceat(at[o], head)  # (where each key first comes)
+    win = win[np.argsort(first, kind="stable")]
+    return dict(zip(zip(ch[win].tolist(), p[win].tolist()), zip(s[win].tolist(), v[win].tolist())))
 
 
 def readable(n):
@@ -1251,13 +1274,8 @@ class Playback:
                 near = np.concatenate([np.asarray(near, np.int64), np.asarray(wrapped, np.int64)])
         s_, e_ = near[:, 0], near[:, 1]
         tuned = out.tuned  # (31-EDO: a row + its channel's place in its group: scrub_note)
-        for s, e, p, v, slot, _ in near[((lo <= s_) & (s_ <= hi)) | ((s_ <= t_to) & (t_to < e_))].tolist():
-            if v <= -2:  # (a faint track's copy: -2 - its velocity)
-                v = -2 - v
-            ch = slot_track_channel(slot, self.picture_use10)[1]
-            k = (-1 - edo_place(ch) if tuned else ch, p)
-            if k not in now or s > now[k][0]:
-                now[k] = (s, v)
+        now.update(swept_keys(near[((lo <= s_) & (s_ <= hi)) | ((s_ <= t_to) & (t_to < e_))], tuned,
+                              self.picture_use10))
         held = self._scrub_held
         # (a loaded MIDI's notes drawn on top there; Spiderweb's own win a key both sound; 31-EDO: its notes played
         # as written, like playback plays them, Spiderweb's own rows tuned beside them; Loaded MIDI ticked: tuned too)
