@@ -227,7 +227,7 @@ With PyNaCl installed (pip install pynacl), the update popup can also
 download the new source zip and check its signature for you.
 
 Tested with Python 3.14.7, NumPy 2.5.4, Pillow 13.0.0, uharfbuzz 0.57.0,
-python-bidi 0.6.12 and Numba 0.68.0. If something misbehaves with other
+python-bidi 0.6.12 and Numba 0.68.1. If something misbehaves with other
 versions, these are known to work:
   pip install numpy==2.5.4 pillow==13.0.0 uharfbuzz==0.57.0 python-bidi==0.6.12
 
