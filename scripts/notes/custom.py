@@ -22,7 +22,7 @@ from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, forme
                            moved_formulas)
 from notes.polygon import MIXES, clean_corners, formed_sides
 from notes.smooth import clean_level, smooth_path
-from notes.pen import THICK_MIN, band_of, clean_pen, clean_thick, clean_times
+from notes.pen import THICK_MIN, band_of, clean_pen, clean_thick, clean_ink
 from notes.paths import (ROW_EDGE, top_key, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
 from notes.hzbass import (HZ_DEFAULTS, KeyGrid, even_squares, heard_layers, left_edge, off_cents, own_channels,
@@ -226,11 +226,11 @@ def clean_strokes(strokes):
                         out[-1].update(free=True, smooth=clean_level(st.get("smooth", 0)), k=arc_k(st))
                         if "thick" in st and clean_thick(st["thick"]) > THICK_MIN:  # (a wide pen: pen.py)
                             out[-1]["thick"] = clean_thick(st["thick"])
-                        pen, times = clean_pen(st.get("pen")), clean_times(st.get("times"), len(pts))
+                        pen, ink = clean_pen(st.get("pen")), clean_ink(st.get("ink"), len(pts))
                         if pen:
                             out[-1]["pen"] = pen
-                        if times:
-                            out[-1]["times"] = times
+                        if ink:
+                            out[-1]["ink"] = ink
                     else:  # a line / polyline, or a polygon's (polygon.py: the shape / pattern on each side)
                         if st.get("sides"):
                             out[-1]["sides"] = True

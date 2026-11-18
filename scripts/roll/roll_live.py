@@ -105,7 +105,7 @@ class LiveDrawing:
                   "k": sh.get("k", 1.0)}
             if (sh.get("thick") or 0) > 1:  # (a wide pen: its band's notes in the live shape too, pen.py)
                 st["thick"] = sh["thick"]
-            for key in ("pen", "times"):  # (its shape + drawing speed along)
+            for key in ("pen", "ink"):  # (its shape + the width its drawing speed gave each point)
                 if sh.get(key):
                     st[key] = sh[key]
             return st

@@ -29,7 +29,7 @@ from notes.pen import band_of, thick_of
 # what makes a line kind's path (besides its points): changed = no longer the piece it was (end_dot too: "Last note"
 # changed on a piece is about its own last note)
 OUTLINE = ("kind", "pts", "k", "smooth", "tumour", "tumours", "gaps", "splits", "sharp", "sym", "shape", "pattern",
-           "end_dot", "thick", "pen", "times")
+           "end_dot", "thick", "pen", "ink")
 CUSTOM_OUTLINE = ("kind", "pts", "strokes", "areas", "round")  # a custom shape's (its strokes are in its frame)
 FUNNEL_OUTLINE = ("kind", "pts", "starts")  # a funnel's (its curves are in "starts"; cut through its notes, knife_in_two)
 VELOCITY = ("vel0", "vel1", "vel_env")

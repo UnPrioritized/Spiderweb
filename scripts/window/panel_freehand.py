@@ -6,7 +6,7 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import refit, uv_k
-from notes.pen import (ENDS, PEN_DEFAULT, TAPER_MAX, THICK_MAX, THICK_MIN, clean_pen, clean_thick, clean_times,
+from notes.pen import (ENDS, PEN_DEFAULT, TAPER_MAX, THICK_MAX, THICK_MIN, clean_pen, clean_thick, clean_ink,
                        pen_of)
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged, unit_word
@@ -105,7 +105,7 @@ class FreehandPanel:
 
     def sync_pen(self, tgts):
         """The pen's shape row: the first target's (or the new strokes'), greyed while the Thickness shown is 1;
-        Width from speed greyed for strokes drawn before it existed (no times: pen.py)."""
+        Width from speed greyed for strokes drawn before it existed (no ink: pen.py)."""
         pens = [pen_of(d) for d, _ in tgts] or [dict(PEN_DEFAULT, **self.free_pen)]
         pen = pens[0]
         wide = clean_thick(tgts[0][0].get("thick", THICK_MIN) if tgts else self.free_thick) > THICK_MIN
@@ -118,7 +118,7 @@ class FreehandPanel:
         for w in (self.pen_ends_word, self.pen_taper_word, self.pen_taper_unit):
             w.config(foreground="" if wide else look.FAINT_TEXT)
         self.pen_taper_unit.config(foreground=look.HINT if wide else look.FAINT_TEXT)
-        timed = not tgts or all(clean_times(d.get("times"), len(d.get("pts") or ())) for d, _ in tgts)
+        timed = not tgts or all(clean_ink(d.get("ink"), len(d.get("pts") or ())) for d, _ in tgts)
         self.pen_speed_on.set(all(p["speed"] for p in pens))
         self.pen_speed_tick.state(["!disabled" if wide and timed else "disabled"])
         self.pen_speed_tip.set_text(tr("panel_freehand.speed_tip") if timed else tr("panel_freehand.speed_no_times"))

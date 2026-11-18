@@ -6,8 +6,9 @@ Straighten / arcs), so up-and-down parts get wider in time too. A stroke crossin
 
 The pen's shape (sh["pen"], user 2026-11-19, stage D): "ends" round (default) / flat (the band stops square across
 the stroke at its ends); "taper" 0-50 = % of the stroke's length at each end where it thins to nothing (one number,
-both ends alike: user); "speed" True = faster drawing thinner, from sh["times"] (ms since the first point, one per
-drawn point: only strokes drawn since this exists have them; without them the tick does nothing).
+both ends alike: user); "speed" True = faster drawing thinner, from sh["ink"] (each drawn point's width share,
+worked out WHILE DRAWING from the hand's speed, ink_at: fixed once drawn, like ink; only strokes drawn since this
+exists have it; without it the tick does nothing).
 Round + no taper / speed = shrink.near_rows (compiled); anything else = band_rows here (exact: the band between
 two points whose widths differ is the convex hull of their two circles)."""
 
@@ -23,7 +24,8 @@ ENDS = ("round", "flat")
 TAPER_MAX = 50
 PEN_DEFAULT = {"ends": "round", "taper": 0, "speed": False}
 SPEED_LEAST = 0.25  # the thinnest share of the width a fast part gets
-SPEED_SMOOTH = 5  # drawn points each side averaged for the speed (the mouse's own jitter)
+SPEED_SMOOTH = 5  # drawn pieces before a point its speed is measured over (the mouse's own jitter)
+INK_FULL = 400.0  # hand speed (logical px / s) up to which the full width is drawn (my pick)
 FINE = 2000  # a varying band: the stroke cut into at most this many pieces (widths change smoothly along it)
 
 
@@ -70,45 +72,43 @@ def pen_of(sh):
     return dict(PEN_DEFAULT, **(clean_pen(sh.get("pen")) or {}))
 
 
-def clean_times(value, n):
-    """sh["times"] from a file: n whole ms, never going back; else None."""
+def ink_at(xy, t):
+    """The width share of the point just drawn, from the HAND'S SPEED (user 2026-11-19: compared with the stroke's
+    own usual speed, widths already drawn kept changing while drawing): xy = the drawn points so far on screen
+    (logical pixels, the window's scaling taken out), t = their times (ms). Over the last SPEED_SMOOTH pieces (the
+    mouse's own jitter), never the ones after it: a point's share is fixed once it's drawn. Share 1 up to
+    INK_FULL px / s, sqrt(INK_FULL / speed) faster, at least SPEED_LEAST."""
+    i = len(xy) - 1
+    j = max(0, i - SPEED_SMOOTH)
+    dt = t[i] - t[j]
+    if i < 1 or dt <= 0:
+        return 1.0
+    dist = sum(math.dist(xy[q], xy[q + 1]) for q in range(j, i))
+    speed = dist / dt * 1000.0
+    return round(min(1.0, max(SPEED_LEAST, math.sqrt(INK_FULL / speed))) if speed > INK_FULL else 1.0, 3)
+
+
+def clean_ink(value, n):
+    """sh["ink"] from a file: n width shares (SPEED_LEAST .. 1), one per drawn point; else None."""
     if not isinstance(value, list) or len(value) != n or n < 2:
         return None
     try:
-        t = [int(round(float(x))) for x in value]
-    except (TypeError, ValueError, OverflowError):
+        out = [round(min(1.0, max(SPEED_LEAST, float(x))), 3) for x in value]
+    except (TypeError, ValueError):
         return None
-    if not all(0 <= x < 1 << 40 for x in t):
-        return None
-    return np.maximum.accumulate(np.asarray(t, np.int64)).tolist()
+    return out if all(math.isfinite(x) for x in out) else None
 
 
-def speed_share(pts, times, k):
-    """For drawn points (beats, keys) and their times: (place along the stroke 0..1, width share) where a part drawn
-    faster than the stroke's usual speed is thinner (share 1 at the usual speed and slower, sqrt(usual / speed)
-    faster, at least SPEED_LEAST). None when there's nothing to go by."""
+def ink_share(pts, ink, k):
+    """(place along the drawn stroke 0..1, width share) for its points (beats, keys; k = beats per key as drawn) and
+    their ink. None when there's nothing to go by."""
     p = np.asarray(pts, float).reshape(-1, 2)
-    t = np.asarray(times, float)
-    if len(p) < 3 or len(t) != len(p):
+    if len(p) < 2 or len(ink) != len(p):
         return None
-    d = np.hypot(np.diff(p[:, 0]) / max(k, 1e-9), np.diff(p[:, 1]))  # (as on screen, keys)
-    s = np.r_[0.0, np.cumsum(d)]
+    s = np.r_[0.0, np.cumsum(np.hypot(np.diff(p[:, 0]) / max(k, 1e-9), np.diff(p[:, 1])))]  # (as on screen)
     if s[-1] <= 0:
         return None
-    w = SPEED_SMOOTH
-    v = np.empty(len(p))
-    for i in range(len(p)):  # (distance / time over a few points each side)
-        a, b = max(0, i - w), min(len(p) - 1, i + w)
-        dt = t[b] - t[a]
-        v[i] = (s[b] - s[a]) / dt if dt > 0 else np.nan
-    if np.isnan(v).all():
-        return None
-    v = np.where(np.isnan(v), np.nanmax(v), v)
-    usual = float(np.median(v[v > 0])) if (v > 0).any() else 0.0
-    if usual <= 0:
-        return None
-    share = np.clip(np.sqrt(usual / np.maximum(v, 1e-12)), SPEED_LEAST, 1.0)
-    return s / s[-1], share
+    return s / s[-1], np.asarray(ink, float)
 
 
 def taper_share(f, taper):
@@ -125,8 +125,8 @@ def taper_share(f, taper):
 def band_notes(path, thick, k, ppq, pen=None, speed=None):
     """(tick, key) points of the stroke -> (start, end, key) notes of the band thick keys wide around it.
     k = beats per key as drawn (the band is round there). A key row counts along its middle: a flat stroke on a
-    key with Thickness 3 covers that key and one each side. pen: pen_of's settings; speed: speed_share's (place,
-    share) when "speed" is on and the stroke has times."""
+    key with Thickness 3 covers that key and one each side. pen: pen_of's settings; speed: ink_share's (place,
+    share) when "speed" is on and the stroke has ink."""
     path = np.asarray(path, float).reshape(-1, 2)
     if not len(path):
         return np.zeros((0, 3), np.int64)
@@ -157,15 +157,15 @@ def band_notes(path, thick, k, ppq, pen=None, speed=None):
 
 
 def band_of(path, st, k, ppq, k_drawn=None):
-    """band_notes for shape / stroke st (its "thick", "pen", "times" on its drawn "pts"): path = its line in
+    """band_notes for shape / stroke st (its "thick", "pen", "ink" on its drawn "pts"): path = its line in
     (tick, key), k = beats per key where it's round. k_drawn: the k its own points are in (a live shape's stroke:
     its u / v), else k."""
     pen = pen_of(st)
     speed = None
     if pen["speed"]:
-        times = clean_times(st.get("times"), len(st.get("pts") or ()))
-        if times:
-            speed = speed_share(st["pts"], times, k if k_drawn is None else k_drawn)
+        ink = clean_ink(st.get("ink"), len(st.get("pts") or ()))
+        if ink:
+            speed = ink_share(st["pts"], ink, k if k_drawn is None else k_drawn)
     return band_notes(path, st["thick"], k, ppq, pen, speed)
 
 

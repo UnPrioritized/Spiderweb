@@ -51,6 +51,7 @@ from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, 
                               note_name, ruler_boxes)
 from roll.roll_lasso import LassoDrawing
 from roll.roll_pen import PenCircle
+from notes.pen import ink_at
 from roll.roll_loaded import LoadedNotes
 from roll.roll_sustain import SustainStops
 from roll.roll_text import TextTyping
@@ -1589,9 +1590,10 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.draft = make_shape("free", [self.draw_pt(e, snap=False)], app.defaults)
             trail = mouse_trail(e.x_root, e.y_root, None)
             self.drag = ("free", e.x, e.y, trail[-1][2] if trail else None)
-            # (when each point was drawn, ms: the pen's Width from speed, pen.py; Windows' mouse trail when it has
-            # one, else the events' own times)
-            self.draft["times"] = [trail[-1][2] if trail else e.time]
+            # (each point's width from the hand's speed, worked out as it's drawn and never again: the pen's Width
+            # from speed, pen.ink_at; where + when the mouse was, Windows' mouse trail when it has one)
+            self._ink_way = ([(e.x / self.scale, e.y / self.scale)], [trail[-1][2] if trail else e.time])
+            self.draft["ink"] = [1.0]
             if app.free_thick > 1:  # (the wide pen already while drawing: its notes show as they'll be, user)
                 self.draft.update(thick=app.free_thick, k=self.sy / self.sx)
                 if app.free_pen:
@@ -1858,15 +1860,18 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         else:
             spots = [(e.x, e.y, e.time)]
         pts = self.draft["pts"]
-        times = self.draft.get("times")
+        ink = self.draft.get("ink")
+        way = getattr(self, "_ink_way", None)
         for x, y, t in spots:
             if math.hypot(x - lx, y - ly) >= 3:
                 pt = self.event_pt(SimpleNamespace(x=x, y=y, state=e.state), snap=False)
                 self.create_line(self.t2x(pts[-1][0]), self.p2y(pts[-1][1]), self.t2x(pt[0]), self.p2y(pt[1]),
                                  fill=look.DRAFT_LINE, width=look.LINES + 1)  # (as the draft's redraw)
                 pts.append(pt)
-                if times is not None:
-                    times.append(t)
+                if ink is not None and way is not None:
+                    way[0].append((x / self.scale, y / self.scale))
+                    way[1].append(t)
+                    ink.append(ink_at(*way))
                 lx, ly = x, y
         self.drag = ("free", lx, ly, since)
         self.request_redraw(delay=100)
@@ -2035,12 +2040,12 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                     self.draft["thick"] = self.app.free_thick
                 if self.app.free_pen:  # (the pen's shape picked last)
                     self.draft["pen"] = dict(self.app.free_pen)
-                times = self.draft.pop("times", None)
-                if times and len(times) == len(pts) - 1:  # (a loop closed at the let go: its end as its last point)
-                    times.append(times[-1])
-                if times and len(times) == len(pts):  # (ms from the first point)
-                    t0 = times[0]
-                    self.draft["times"] = [max(0, int(t - t0)) for t in times]
+                ink = self.draft.pop("ink", None)
+                self._ink_way = None
+                if ink and len(ink) == len(pts) - 1:  # (a loop closed at the let go: its end as its last point)
+                    ink.append(ink[-1])
+                if ink and len(ink) == len(pts):
+                    self.draft["ink"] = ink
                 self.commit_draft()
             else:
                 self.cancel_draft()
