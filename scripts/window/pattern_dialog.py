@@ -28,7 +28,7 @@ from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_
 from notes.pattern import (AROUND, LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, SLICES_MAX,
                            SLICES_MIN, SOFT_DEFAULT, around_centre, clean_loop, clean_pattern_graphs, formula_loop,
                            formula_shape, formula_slice, formula_slice_way, formula_slice_ways, keep_sym, own_slices,
-                           pinned_ends, most_loops, new_pattern, new_shape, pattern_name,
+                           pinned_ends, refit_slice, most_loops, new_pattern, new_shape, pattern_name,
                            pattern_names, polar_of, polar_ok, polar_xy, shape_name, shape_names, shape_points,
                            shape_slices, span_numbers, t_span)
 from files.clipboard import put_text
@@ -294,9 +294,12 @@ class FormulaDialog(tk.Toplevel):
         e.pack(side="left", padx=(4, 0))
         e.bind("<Return>", lambda ev: (self.on_slices(), "break")[1])
         e.bind("<FocusOut>", lambda ev: self.on_slices())
-        Scrub(self.host.app, [(e, self.slices_var, self.on_slices)], (1, 5, 1), SLICES_MIN, SLICES_MAX, label=lb)
-        for w in (lb, e):
+        self.slices_scrub = Scrub(self.host.app, [(e, self.slices_var, self.on_slices)], (1, 5, 1), SLICES_MIN,
+                                  SLICES_MAX, label=lb)
+        self.slices_owed = None  # (a label / box drag over unlinked slices: the pattern at its first step; asked
+        for w in (lb, e):        # once at the let go, hunt 2026-11-19)
             Tooltip(w, tr("pattern_dialog.slices_tip", least=SLICES_MIN, most=SLICES_MAX))
+            w.bind("<ButtonRelease-1>", lambda ev: self.after_idle(self.slices_let_go), add="+")
         self.slices_after = cb
         self.type_box = None  # a shape: typed as x(t) and y(t), or as one polar line r(t)
         if shape:
@@ -406,6 +409,7 @@ class FormulaDialog(tk.Toplevel):
             for seq, kind in ((f"<ButtonPress-{b}>", "press"), (f"<B{b}-Motion>", "drag"),
                               (f"<ButtonRelease-{b}>", "release")):
                 self.bind(seq, lambda e, k=kind, b=b: self.pass_view(e, k, b), add="+")
+        self.bind("<Destroy>", lambda e: self.end_passed_pan() if e.widget is self else None, add="+")
         self.focus_set()
 
     def pass_view(self, e, kind, button):
@@ -417,6 +421,8 @@ class FormulaDialog(tk.Toplevel):
         roll = self.app.roll
         if kind == "press":
             self.passing = None
+            if not self.main_on_top(e.x_root, e.y_root):  # (another Spiderweb window over it there: the drawer, Hz
+                return  # window, Help... a middle-drag on it panned the piano roll hidden behind, hunt 2026-11-19)
             spots = [roll] if button == "2" else list(getattr(roll, "bars", ()))
             for w in spots:
                 if w.winfo_viewable() and 0 <= e.x_root - w.winfo_rootx() < w.winfo_width() \
@@ -441,6 +447,35 @@ class FormulaDialog(tk.Toplevel):
             (w.on_press if kind == "press" else w.on_drag if kind == "drag" else w.on_release)(ev)
         if kind == "release":
             self.passing = None
+
+    def main_on_top(self, x, y, order=None):
+        """The main window is the topmost of the program's windows at screen spot x, y (Tk's own stacking order:
+        works on every system; order = window paths bottom to top, for tests: theirs stay under the main one)."""
+        app = self.app
+        try:
+            order = [app.nametowidget(p) for p in order or app.tk.splitlist(app.tk.call("wm", "stackorder", "."))]
+        except (tk.TclError, KeyError):
+            return True
+        for w in reversed(order):  # (topmost first; this window's own presses never come here)
+            if w is self:
+                continue
+            try:
+                if w.winfo_viewable() and 0 <= x - w.winfo_rootx() < w.winfo_width() \
+                        and 0 <= y - w.winfo_rooty() < w.winfo_height():
+                    return w is app
+            except tk.TclError:
+                continue
+        return True
+
+    def end_passed_pan(self):
+        """This window closing while a middle-drag it handed on is held: the piano roll's pan ends too (it went on
+        drawing in its quick moving way until the next middle click)."""
+        if self.passing and self.passing[0] is self.app.roll:
+            roll = self.app.roll
+            roll._panning = False
+            roll._pan = None
+            roll.request_redraw()
+        self.passing = None
 
     def presets(self):
         """(id, name, formulas {key: text}, numbers) of the built-in ones."""
@@ -870,13 +905,17 @@ class FormulaDialog(tk.Toplevel):
                 return
             value = int(value)
         good(self.slices_box)
-        if value == self.pat.get("slices") or value is not None and "slices" not in self.pat \
-                and value == shape_slices(self.pat):
+        # (a typed number is KEPT even when it's Petals' now: only an empty box follows Petals, hunt 2026-11-19)
+        if value == self.pat.get("slices") or value is None and "slices" not in self.pat:
             if value is None:
                 self.slices_var.set(str(shape_slices(self.pat)))
             return
+        before = shape_slices(self.pat)
         own = (self.pat.get("loop") or {}).get("own")
-        if own:  # (user 2026-11-19: ask first; yes = every slice follows again)
+        if own and self.app.held_scrub is self.slices_scrub:  # (dragged: asked once at the let go)
+            if self.slices_owed is None:
+                self.slices_owed = copy.deepcopy(self.pat)
+        elif own:  # (user 2026-11-19: ask first; yes = every slice follows again)
             if not messagebox.askyesno(tr("pattern_dialog.slices_title"), trn("pattern_dialog.slices_unlink_ask",
                                                                                 len(own), n=len(own)), parent=self):
                 self.slices_var.set(str(shape_slices(self.pat)))
@@ -886,7 +925,28 @@ class FormulaDialog(tk.Toplevel):
             self.pat.pop("slices", None)
         else:
             self.pat["slices"] = value
+        if shape_slices(self.pat) != before:
+            refit_slice(self.pat)  # (a slice edited by hand: the whole shape between A and B again, user took A)
         self.pat.pop("name", None)  # (not the saved one any more)
+        self.view = None
+        self.refresh()
+        self.mark(("slices",))
+
+    def slices_let_go(self):
+        """A Slices label / box drag over unlinked slices let go: asked now, once. Yes = every slice follows again
+        (the shape fitted between A and B again); No = the pattern as at the drag's first step."""
+        owed, self.slices_owed = self.slices_owed, None
+        if owed is None or self.app.held_scrub is self.slices_scrub:
+            return
+        n = len((owed.get("loop") or {}).get("own") or ())
+        if shape_slices(self.pat) == shape_slices(owed):
+            self.pat = owed  # (dragged back where it started: nothing to ask)
+        elif messagebox.askyesno(tr("pattern_dialog.slices_title"), trn("pattern_dialog.slices_unlink_ask", n, n=n),
+                                 parent=self):
+            self.pat["loop"].pop("own", None)
+            refit_slice(self.pat)
+        else:
+            self.pat = owed
         self.view = None
         self.refresh()
         self.mark(("slices",))

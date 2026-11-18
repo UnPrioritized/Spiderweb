@@ -69,7 +69,8 @@ def clean_slices(v):
         v = float(v)
     except (TypeError, ValueError):
         return None
-    return int(max(SLICES_MIN, min(SLICES_MAX, round(v)))) if math.isfinite(v) else None
+    # (halves round UP: Python's round sent 4.5 to 4 and 5.5 to 6, hunt 2026-11-19)
+    return int(max(SLICES_MIN, min(SLICES_MAX, math.floor(v + 0.5)))) if math.isfinite(v) else None
 
 
 def shape_slices(p):
@@ -556,9 +557,9 @@ def _drawn(fx, fy, vals, lo, hi, count):
 def _shape(text_x, text_y, values, sym, lo=0.0, hi=1.0, slices=0):
     fx, fy = formula(text_x, named=True, var="t"), formula(text_y, named=True, var="t")
     vals = dict(values)
-    a = _drawn(fx, fy, vals, lo, hi, SHAPE_SAMPLES)
-    if sym == AROUND:
+    if sym == AROUND:  # (only its first slice is drawn from the formulas)
         return fitted_shape(_around(text_x, text_y, values, lo, hi, slices)[2])
+    a = _drawn(fx, fy, vals, lo, hi, SHAPE_SAMPLES)
     return symmetric_shape(a, sym) if sym else fitted_shape(a)
 
 
@@ -584,8 +585,11 @@ def _around(text_x, text_y, values, lo, hi, slices):
     fx, fy = formula(text_x, named=True, var="t"), formula(text_y, named=True, var="t")
     vals = dict(values)
     part = _slice_drawn(fx, fy, vals, lo, hi, slices)
-    way = way_of(_drawn(fx, fy, vals, lo, hi, SHAPE_SAMPLES))
-    if way is None:  # (a formula going nowhere round: the slice's own guess, once)
+    try:
+        way = way_of(_drawn(fx, fy, vals, lo, hi, SHAPE_SAMPLES))
+    except ValueError:  # (it breaks past the first slice: only that one counts, hunt 2026-11-19)
+        way = None
+    if way is None:  # (a formula going nowhere round / not all the way: the slice's own guess, once)
         way = 1 if around_centre(part, slices)[1] > 0 else -1
     return part, way, around_shape(part, slices, way)
 
@@ -601,6 +605,23 @@ def _slice(text_x, text_y, values, lo, hi, slices):
     part, _, whole = _around(text_x, text_y, values, lo, hi, slices)
     _, place = _fit_map(whole)
     return place(part)
+
+
+def refit_slice(p):
+    """A shape set to Around the centre with a slice edited by hand, after its slice count changed: the slice (and
+    the unlinked ones) slid, turned and sized together so the whole shape fits between A and B again, like the
+    formula's own (hunt 2026-11-19, user took A: 100 slices made it 20 times the curve's size). In place."""
+    loop = p.get("loop") or {}
+    if not loop.get("slice") or p.get("sym") != AROUND:
+        return
+    u, v = shape_points(dict(p, mirror=False))
+    try:
+        _, place = _fit_map(np.column_stack([u, v]))
+    except ValueError:  # (a dot: left as it is)
+        return
+    for c in [loop] + list((loop.get("own") or {}).values()):
+        a, b = place(np.asarray(c["pts"], float))
+        c["pts"] = [[float(x), float(y)] for x, y in zip(a, b)]
 
 
 def formula_slice_way(p):
