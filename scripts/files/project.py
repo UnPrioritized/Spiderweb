@@ -251,6 +251,8 @@ def short_shape(sh):
             return [{"line": st.get("line", 0), "at": short_num(st["at"]),
                      "ends": [c and dict(c, pts=[[short_num(a) for a in uf] for uf in c["pts"]]) for c in st["ends"]]}
                     for st in v]
+        if k in ("merge", "unmerge"):
+            return unnoted(v)
         if k == "tumour":
             return short_tumour(v)
         if k == "tumours":
@@ -262,6 +264,13 @@ def short_shape(sh):
         if k == "text":
             return {a: [short_num(x) for x in b] if a == "bbox" else short_num(b) for a, b in v.items()}
         return short_num(v) if k in ("gate", "gate0", "gate1", "k") else v
+    def unnoted(m):  # (merged shapes inside a merge's parts: their notes left out too, made again when loaded; user
+        # 2026-11-18: merging a merged shape again and again saved every earlier one's notes, 18 MB after 10)
+        if not isinstance(m, dict) or not isinstance(m.get("parts"), list):
+            return m
+        return dict(m, parts=[{k: unnoted(v) if k in ("merge", "unmerge") else v for k, v in p.items()
+                               if not (k == "notes" and isinstance(p.get("merge"), dict))} if isinstance(p, dict)
+                              else p for p in m["parts"]])
     # (a Gate sensitive merge's notes are made again from its recipe when loaded: merge.py)
     return json.dumps({k: short(k, v) for k, v in sh.items() if not (k == "notes" and "merge" in sh)})
 
