@@ -41,7 +41,6 @@ class DominoSettings:
                 self.lift_settings()
             try:
                 app.tk.call("wm", "deiconify", home)
-                app.tk.call("wm", "transient", home, self.bar)  # (hides with the bar: Domino minimised)
             except tk.TclError:
                 return
             self.place_settings()
@@ -69,6 +68,9 @@ class DominoSettings:
         self._settings_next = rows[rows.index(home) + 1] if home in rows and rows.index(home) + 1 < len(rows) else None
         app.tk.call("wm", "manage", home)
         app.tk.call("wm", "withdraw", home)
+        # (belongs to the bar: hides with it = Domino minimised. ONCE, while hidden: set again on an open window,
+        # Tk on Windows withdrew it after a Send, user 2026-11-18 "settings doesn't show anymore")
+        app.tk.call("wm", "transient", home, self.bar)
         app.tk.call("wm", "title", home, tr("companion.settings_title"))
         app.tk.call("wm", "resizable", home, 0, 0)
         app.tk.call("wm", "protocol", home, "WM_DELETE_WINDOW", app.register(lambda: self.show_settings(False)))

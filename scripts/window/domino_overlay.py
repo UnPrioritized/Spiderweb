@@ -133,9 +133,13 @@ class DominoOverlay:
 
         def send(e, seq):
             if seq == "ButtonPress-2" and system.WINDOWS:  # (Domino's own middle button: its pan, user 2026-11-18)
-                self.pass_middle()
+                if not self._middle:
+                    self.pass_middle()
                 return "break"
             if seq == "ButtonRelease-2" and self._middle:
+                if self._middle == "letting go":  # (our own release: Tk let the mouse go, now the press for Domino)
+                    self._middle = True
+                    self._press_middle(True)
                 return "break"
             if pressed and seq.startswith("ButtonPress"):
                 pressed()
@@ -157,20 +161,25 @@ class DominoOverlay:
         if wheel:
             m.bind("<MouseWheel>", wheel)
 
+    MIDDLE_WAIT_S = 0.5
+
     def pass_middle(self):
         """A middle press on the catcher goes to Domino (user 2026-11-18: its middle-drag pan while drawing): the
         catcher lets the mouse go and turns click-through, the press is made again for Windows, so Domino gets
-        it and keeps the drag + release; the catcher takes the mouse back once the middle button is up (_tick)."""
-        import ctypes
-        self._middle = True
-        ctypes.windll.user32.ReleaseCapture()  # (Tk holds the mouse for the catcher while a button is down)
+        it and keeps the drag + release; the catcher takes the mouse back once the middle button is up (_tick).
+        Tk holds the mouse for the catcher while its button is down, and Windows sends a press to whoever holds it
+        when the press is MADE: so first a release (Tk lets go when it gets it), then the press (send() above).
+        (Measured 2026-11-18 on our Domino copy, real mouse: press-only went back to the catcher.)"""
+        import time
+        self._middle = "letting go"
+        self._middle_at = time.monotonic()
         self._style(self.catch_hwnd, click_through=True)
-        self._press_middle()
+        self._press_middle(False)
 
     @staticmethod
-    def _press_middle():
+    def _press_middle(down):
         import ctypes
-        ctypes.windll.user32.mouse_event(0x20, 0, 0, 0, 0)  # MOUSEEVENTF_MIDDLEDOWN (the real one comes up later)
+        ctypes.windll.user32.mouse_event(0x20 if down else 0x40, 0, 0, 0, 0)  # MOUSEEVENTF_MIDDLEDOWN / UP
 
     @staticmethod
     def _middle_down():
@@ -178,8 +187,12 @@ class DominoOverlay:
         return bool(ctypes.windll.user32.GetAsyncKeyState(0x04) & 0x8000)  # VK_MBUTTON
 
     def middle_done(self):
-        """The middle button is up again: the catcher takes the mouse back (while drawing)."""
-        if self._middle and not self._middle_down():
+        """The middle button is up again: the catcher takes the mouse back (while drawing). Our release never came
+        back to Tk (MIDDLE_WAIT_S): given up, the catcher back too (never left click-through)."""
+        import time
+        if self._middle == "letting go" and time.monotonic() - self._middle_at > self.MIDDLE_WAIT_S:
+            self._middle = True
+        if self._middle is True and not self._middle_down():
             self._middle = False
             if self.drawing:
                 self._style(self.catch_hwnd, click_through=False)
