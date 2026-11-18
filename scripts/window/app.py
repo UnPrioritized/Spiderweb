@@ -105,7 +105,7 @@ from window.app_playback import GROUP_DEFAULT, Playback
 from window.app_kestrel import KestrelSetup
 from window.app_clip import AppClip
 from window.app_transform import AppTransform
-from window.app_offrange import AppOffrange, colour_slots_of, kept_rows
+from window.app_offrange import AppOffrange, colour_slots_of
 from window.app_keys import AppKeys
 from window.history import CH10_OFF, HistoryPanel
 from window.menubar import build_menu
@@ -341,17 +341,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.keep_offrange = tk.BooleanVar(self, value=False)
         self.offrange_opacity = tk.IntVar(self, value=50)  # (how see-through they're drawn, %: roll_draw.OFF_FADE)
         self.wrap_offrange = tk.BooleanVar(self, value=False)  # ("Wrap them around": App.outgoing)
-        # ("Exact colours past the keys", off: kept notes' channels worked out with the whole project in the
-        # background, app_offrange.exact_kept / App.exact_soon; user 2026-11-14)
-        self.exact_offrange = tk.BooleanVar(self, value=False)
-        self._exact_job = self._exact_retry = None
         # ("Show wrapped notes": settings.WRAP_SHOWN "selected" / "always" / "off"; App.wrapped_rows)
         self.show_wrapped = tk.StringVar(self, value="selected")
         self._wrapped = None  # (App.wrapped_rows' last answer, keyed)
         self.wrap_version = 0  # (+1 each time wrapped_rows' answer changes: the roll's picture key)
         self._outgoing = None  # (App.outgoing's last (key, notes))
         self.off_all = self.off_drawn = NO_NOTES  # (offrange_rows; off_drawn = the ones the piano roll shows)
-        self._job_off = None  # (offrange_rows made by the notes thread: notes_made -> shapes_changed)
         # (off_all as the masks' preview shows it: ghosts (velocity -1) + the parts that show; None = no mask over
         # them; off_paint = that, filtered like off_drawn: what roll_draw.off_rects paints; App.masked_offrange)
         self.off_masked = self.off_paint = None
@@ -2357,15 +2352,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         wanted, self.picture_use10, self.rendered, self.slot_count, self.voice_slots, _, self.cut_emptied = made
         self.edit_shown = shown is not self.shapes  # (these notes skip a colour step's later steps: App.outgoing)
         self.forget_old_notes()
-        # (before play_changed: App.outgoing reads them; made by the notes thread when these notes came from there,
-        # nothing changed since and they were made for these very notes, not laid again: lay_again)
-        job_off, self._job_off = self._job_off, None
-        if (job_off is not None and job_off[2] is not None and job_off[1] is self.rendered
-                and job_off[0] == self.offrange_wanted()):
-            self.off_all = job_off[2]
-        else:
-            self.off_all = self.offrange_rows()
-        self.after_idle(self.exact_soon)  # ("Exact colours past the keys": worked out in the background)
+        # (before play_changed: App.outgoing reads them. Laid out with every other note, so they have the channels
+        # they'd have inside the keys: all_notes' tall world, PLAN 2026-11-18)
+        self.off_all = self.offrange_rows(stash)
         self.made_version += 1
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
             self.tempo_pane.dense_now()
@@ -3008,7 +2997,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         real = self.edit_shapes()
         job["real"] = {id(c): r for c, r in zip(shapes, real)} if len(real) == len(shapes) else {}
         sels, fast, rule = frozenset(self.sels), speed.loops(), stack_rule(self)
-        job["off_for"] = off_for = self.offrange_wanted()  # (the notes kept past the edges made here too)
         notes_tracks = self.thread_maker(job, key)
 
         def work():
@@ -3024,15 +3012,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 job["time"] = time.perf_counter() - started
                 if job["stop"]:
                     raise Stopped
-                if off_for is not None:  # (App.offrange_rows' work, off Tk's thread: ~70 ms at 1 M kept notes)
-                    def alone(some, k, make=notes_tracks):  # (App.alone_maker's, with this job's settings)
-                        made = all_notes(some, key[1], k, *key[3:6], make, rounds=key[6], order=key[7],
-                                         own=own)
-                        return made[1], made[2]
-                    multi, rounds, _ = off_for  # (Exact colours: a job of its own afterwards, App.exact_soon; in
-                    # here every click after an edit on a big project waited for it too, hunt 2026-11-14)
-                    job["off"] = kept_rows(shapes, got[2], notes_tracks, key[2], key[1], multi, rounds, got[1],
-                                           alone)
                 # (the piano roll's orders for painting them too: roll_draw.start_order / paint_order)
                 rendered, order = got[2], None
                 start = np.argsort(np.ascontiguousarray(rendered[:, 0]), kind="stable")
@@ -3130,7 +3109,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.note_bent_timed(sh)
         self._key_took.update(job.get("key_took", {}))
         self._job_stash = job["stash"]
-        self._job_off = (job["off_for"], job["got"][2], job.get("off"))  # (shapes_changed: used when still right)
         return job["got"]
 
     def catch_up_notes(self, late=True):

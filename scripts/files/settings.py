@@ -180,7 +180,6 @@ APP_KEYS = {
     "keep_offrange": ("view", "keep_notes_made_there", bool),  # (App.offrange_tracks)
     "offrange_opacity": ("view", "kept_notes_opacity", int),  # (% 1-100; roll_draw.OFF_FADE)
     "wrap_offrange": ("view", "wrap_kept_notes_around", bool),  # (App.outgoing)
-    "exact_offrange": ("view", "exact_kept_colours", bool),  # (App.exact_soon)
     "show_wrapped": ("view", "show_wrapped_notes", str),  # (WRAP_SHOWN; App.wrapped_rows)
 }
 OFFRANGE_OPACITY = (1, 100, 50)  # Settings → Piano roll "Opacity" of the notes kept there: least, most, default (user)

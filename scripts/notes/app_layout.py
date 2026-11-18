@@ -254,6 +254,116 @@ def whole_tracks(sh, tracks, ppq, keys, notes_tracks):
     return np.unique(np.concatenate(parts))
 
 
+def with_kept(sh, notes, tracks, ppq, keys, make):
+    """sh's (notes, tracks) with its notes past the keys / before beat 0 added where they really are (keys under 0 or
+    over the top, ticks under 0), from the same remembered lifted notes as the cut ones (engine.edge_made /
+    off_part): the shape's notes as if the keys and the song went on. A note across beat 0 WHOLE (its cut piece
+    from beat 0 taken out of notes: two pieces met other shapes' notes starting on beat 0 unlike one note)."""
+    out = past_edges(sh, keys, ppq)
+    if out is None:
+        return notes, tracks
+    lifted, up, room, later = out
+    with rows_up_to(room - 1):
+        n, t = make(lifted, room)
+    if not len(n):
+        return notes, tracks
+    n = np.array(n, np.int64, copy=True)[:, :4]
+    n[:, 2] -= up
+    n[:, :2] -= round(later * ppq)
+    inkeys = (n[:, 2] >= 0) & (n[:, 2] < keys)
+    off = ~inkeys | (n[:, 0] < 0)
+    across = inkeys & (n[:, 0] < 0) & (n[:, 1] > 0)
+    a = np.asarray(notes, np.int64).reshape(-1, 4)[:, :4] if len(notes) else np.zeros((0, 4), np.int64)
+    ta = np.zeros(len(a), np.int64) if tracks is None else np.asarray(tracks, np.int64).ravel()
+    t = None if t is None else np.asarray(t, np.int64).ravel()
+    if across.any() and len(a):  # (their pieces from beat 0: start 0, same key / end / velocity / track)
+        want = {}
+        for r, tr_ in zip(n[across].tolist(), (t[across] if t is not None else np.zeros(int(across.sum()),
+                                                                                         np.int64)).tolist()):
+            k = (r[1], r[2], r[3], tr_ if tracks is not None else 0)
+            want[k] = want.get(k, 0) + 1
+        drop = np.zeros(len(a), bool)
+        for j in np.flatnonzero(a[:, 0] == 0).tolist():
+            k = (int(a[j, 1]), int(a[j, 2]), int(a[j, 3]), int(ta[j]))
+            if want.get(k):
+                want[k] -= 1
+                drop[j] = True
+        a, ta = a[~drop], ta[~drop]
+    n = n[off]
+    if not len(n):
+        return notes, tracks
+    both = np.concatenate([a, n])
+    if tracks is None and t is None:
+        tt = None
+    else:
+        tt = np.concatenate([ta, np.zeros(len(n), np.int64) if t is None else t[off]])
+    order = np.argsort(both[:, 0], kind="stable")
+    return both[order], None if tt is None else tt[order]
+
+
+def tall_world(shapes, ppq, keys, notes_tracks):
+    """"Keep notes made there" (PLAN 2026-11-18, user: "behave as if it's inside the valid key range"): the notes
+    past the keys / before beat 0 laid out WITH every other note, as if the piano roll were taller and the song began
+    earlier: (maker = notes_tracks giving each shape's notes with its kept ones, all moved up by `up` keys and
+    `later` ticks so none is under 0, up, later, keys that holds them all). None: no shape reaches past an edge (made
+    as always). Only moved, never spread: a shape far away costs nothing more (user: lay out only what holds notes)."""
+    lifts = [g for g in (past_edges(sh, keys, ppq) for sh in shapes) if g is not None]
+    if not lifts:
+        return None
+    up = max(g[1] for g in lifts)
+    up = -(-up // 12) * 12  # (whole octaves)
+    later = max(round(g[3] * ppq) for g in lifts)
+    room = up + max([keys] + [g[2] - g[1] for g in lifts])
+
+    def make(s, *more):
+        if more:  # (asked on other keys: as asked)
+            return notes_tracks(s, *more)
+        n, t = notes_tracks(s)
+        n, t = with_kept(s, n, t, ppq, keys, notes_tracks)
+        if up or later:
+            n = np.array(n, np.int64, copy=True).reshape(-1, 4) if len(n) else np.zeros((0, 4), np.int64)
+            n[:, 2] += up
+            n[:, :2] += later
+        return n, t
+    return make, up, later, room
+
+
+def tall_back(made, shapes, own, up, later, keys, stash, strips=True):
+    """all_notes' answer from the tall world (tall_world) put back where the notes are: (the answer with only the
+    notes inside the keys from beat 0 = what is heard / exported, the rest -> stash["off"]: app.off_all, the kept
+    notes with the channels they really got). strips: Channel per strip's times moved back too. Automatic tracks
+    holding only a laid shape's kept notes count as having notes (like lay_inside's only_kept did)."""
+    rows = made[2]
+    if up or later:
+        rows = rows.copy()
+        rows[:, 2] -= up
+        rows[:, :2] -= later
+    inkeys = (rows[:, 2] >= 0) & (rows[:, 2] < keys)
+    out = ~inkeys | (rows[:, 0] < 0)
+    across = inkeys & (rows[:, 0] < 0) & (rows[:, 1] > 0)  # (a fix stretched one over beat 0: its part from it heard)
+    off = rows[out].copy()
+    off[inkeys[out] & (off[:, 1] > 0), 1] = 0
+    keep = ~out | across
+    rendered = rows[keep]
+    if across.any():
+        rendered = rendered.copy()
+        rendered[across[keep], 0] = 0
+    vs = made[4]
+    if strips and later:
+        vs = {i: ({k: [(s, a - later, b - later) for s, a, b in v] for k, v in s_.items()}
+                  if isinstance(i, tuple) and i and i[0] == "strips" else s_) for i, s_ in vs.items()}
+    emptied = made[6]
+    laid = [i for i, sh in enumerate(shapes) if placed_on(sh, own)]
+    if laid and len(off):
+        there = np.unique(off[np.isin(off[:, 5], laid), 4])
+        there = there[(there >= 0) & (there < OWN0)]
+        if len(there):
+            emptied = emptied | frozenset(int(s) for s in np.setdiff1d(there, rendered[:, 4]).tolist())
+    if stash is not None:
+        stash["off"] = off
+    return made[0], made[1], rendered, made[3], vs, made[5], emptied
+
+
 def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,
               keep=False, busy=None, own=None, stash=None, overlaps=None, wrap=False, kept=False):
     """Every shape's notes together, overlaps / channels worked out: (colours each shape asks for, channel 10 used
@@ -270,7 +380,22 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     shapes never step round them (nor take tracks added by hand). Also returns {shape's number: how many colours
     it has} for those (App.fit_into). stash: a dict given = what lay_again needs kept in it. overlaps: how overlaps
     are fixed (App.overlap_rule: Single's split around, Multi's Remove overlaps; render overlaps). kept: "Keep notes
-    made there" on: a laid shape's colours counted with its notes past the keys too (whole_tracks)."""
+    made there" on: the notes past the keys / before beat 0 laid out WITH the others (tall_world: they take part
+    like any note, then stash["off"] holds them with their channels); with wrap, a laid shape's colours counted
+    with them too (whole_tracks)."""
+    if stash is not None:
+        stash.pop("off", None)
+        stash.pop("tall", None)
+    world = tall_world(shapes, ppq, keys, notes_tracks) if kept and not wrap else None
+    if world is not None:
+        make, up, later, room = world
+        if busy is not None and later:  # (the times CC lines keep a channel: moved later with the notes)
+            busy = [None if b is None else {t: (s + later, e + later) for t, (s, e) in b.items()} for b in busy]
+        made = all_notes(shapes, ppq, room, mode, split, all16, make, quiet, rounds, order, keep, busy, own, stash,
+                         overlaps)
+        if stash is not None:
+            stash["tall"] = (up, later, keys)
+        return tall_back(made, shapes, own, up, later, keys, stash)
     team_laps = []
     across = bool(overlaps and overlaps.get("across")) and mode == "auto"  # (Multi channel's Remove overlaps)
     teams = between_turns(shapes, team_laps)
@@ -487,7 +612,11 @@ def lay_again(made, stash, shapes, own):
     if stash.get("overlaps") and len(rendered):  # (Remove overlaps after laying again too: hunt 2026-11-06, the
         rendered, emptied = cut_across(rendered, shapes, stash["overlaps"])  # overlaps stayed till the next edit)
     emptied = emptied | only_kept
-    return made[0], made[1], rendered, slots, {**made[4], **laid}, need, emptied
+    got = made[0], made[1], rendered, slots, {**made[4], **laid}, need, emptied
+    if stash.get("tall"):  # (laid out tall: put back the same way, the kept notes too; made[4] is back already)
+        up, later, keys = stash["tall"]
+        return tall_back(got, shapes, own, up, later, keys, stash, strips=False)
+    return got
 
 
 def in_track(notes, slots, owner, fix, way="stretch"):
