@@ -6,17 +6,21 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import refit, uv_k
+from notes.pen import THICK_MAX, THICK_MIN, clean_thick
 from window import look
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged, unit_word
 
 TIP = tr("panel_freehand.makes_the_freehand_stroke_perfect_0")
+THICK_TIP = tr("panel_freehand.thickness_tip")
 
 
 class FreehandPanel:
     """Mixed into App."""
 
     def _build_freehand(self):
-        box = self.free_box = ttk.Frame(self.settings)
+        self.free_box = ttk.Frame(self.settings)
+        box = ttk.Frame(self.free_box)
+        box.pack(side="top", anchor="w")
         lb = ttk.Label(box, text=tr("panel_freehand.straighten"))
         lb.pack(side="left")
         self.free_var = tk.StringVar()
@@ -28,6 +32,20 @@ class FreehandPanel:
         ttk.Label(box, text=tr("panel_freehand.0_as_drawn_100_simplest"), foreground=look.HINT).pack(side="left")
         for w in (lb, e):
             Tooltip(w, TIP)
+        # Thickness: a wide pen (notes/pen.py); the stroke itself stays the thin line (user)
+        row = ttk.Frame(self.free_box)
+        row.pack(side="top", anchor="w", pady=(4, 0))
+        lb = ttk.Label(row, text=tr("panel_freehand.thickness"))
+        lb.pack(side="left")
+        self.thick_var = tk.StringVar()
+        e = self.thick_entry = ttk.Entry(row, textvariable=self.thick_var, width=5)
+        e.pack(side="left", padx=(5, 3))
+        e.bind("<Return>", lambda ev: self.on_thick_entry())
+        leave_box(self, e, self.thick_var, self.on_thick_entry)
+        Scrub(self, [(e, self.thick_var, self.on_thick_entry)], (1, 5, 0.25), THICK_MIN, THICK_MAX, label=lb)
+        unit_word(ttk.Label(row, foreground=look.HINT), self.thick_var, "unit.keys", "unit.key").pack(side="left")
+        for w in (lb, e):
+            Tooltip(w, THICK_TIP)
 
     def free_targets(self):
         """What the setting changes: [(the dict holding "smooth", its custom shape or None)] — the selected
@@ -49,7 +67,40 @@ class FreehandPanel:
         self._loading = True
         self.free_var.set(fmt(tgts[0][0].get("smooth", 0) if tgts else self.free_smooth))
         self.free_entry.config(style="TEntry")
+        # Thickness: freehand shapes only (strokes inside a live shape: not yet, my pick)
+        whole = [d for d, owner in tgts if owner is None]
+        self.thick_var.set(fmt(clean_thick(whole[0].get("thick", THICK_MIN)) if whole else self.free_thick))
+        self.thick_entry.config(style="TEntry", state="normal" if whole or not tgts else "disabled")
         self._loading = False
+
+    def on_thick_entry(self, left=False):
+        """The Thickness box (Enter, stepped, or left: widgets.leave_box)."""
+        if self._loading or left and unchanged(self.thick_entry):
+            return
+        try:
+            value = calc(self.thick_var.get())
+            if not THICK_MIN <= value <= THICK_MAX:
+                raise ValueError
+        except ValueError:
+            bad(self.thick_entry)
+            return
+        good(self.thick_entry)
+        value = clean_thick(value)
+        self.free_thick = value  # new strokes get it too
+        tgts = [d for d, owner in self.free_targets()
+                if owner is None and clean_thick(d.get("thick", THICK_MIN)) != value]
+        if not tgts:
+            return self.sync_freehand()
+        self.begin_edit(("thick", tuple(sorted(self.sels))))
+        k = self.roll.sy / self.roll.sx if self.roll.sx else 0.25  # (round as the roll looks now)
+        for d in tgts:
+            if value > THICK_MIN:
+                d["thick"] = value
+                d.setdefault("k", k)  # (one already drawn keeps its own: the pen round as it was drawn)
+            else:
+                d.pop("thick", None)
+        self.shapes_changed()
+        self.sync_freehand()
 
     def on_free_entry(self, left=False):
         """The Straighten box (Enter, stepped, or left: widgets.leave_box)."""

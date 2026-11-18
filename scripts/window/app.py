@@ -396,6 +396,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.custom_shape = "Circle"  # the library shape new custom shapes are made of
         self.funnel_defaults = dict(FUNNEL_DEFAULTS)  # settings for new funnels
         self.free_smooth = SMOOTH_DEFAULT  # how much new freehand strokes are made perfect (smooth.py)
+        self.free_thick = 1.0  # how wide new freehand strokes' pen is, keys (pen.py; 1 = the plain line)
         self.text_defaults = dict(TEXT_DEFAULTS)  # settings for new text (the last ones used)
         self.polygon_defaults = dict(POLYGON_DEFAULTS)  # points / kind of new polygons (polygon.py)
         self.gliss_defaults = dict(GLISS_DEFAULTS)  # grids new Glissando runs pick their step from (the last used)

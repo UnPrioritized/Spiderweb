@@ -69,6 +69,7 @@ from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_c
                           piece_knives, piece_notes, run_origins, snap_piece, source, spotted_notes, steps_kept,
                           whole_made)
 from notes.smooth import clean_level, smooth_path
+from notes.pen import THICK_MIN, band_notes, clean_thick, thick_of
 from notes.steps import RUNNER, expanded, whole_steps
 from notes.text import clean_text, strokes_of, strokes_token
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -548,6 +549,11 @@ def clean_shape(sh):
     if out["kind"] == "free" and "smooth" in sh:  # made perfect (smooth.py); k = beats per key on screen, like arcs
         out["smooth"] = clean_level(sh["smooth"])
         out["k"] = arc_k(sh)
+    if out["kind"] == "free" and "thick" in sh:  # a wide pen (pen.py), round as the roll looked: k too
+        thick = clean_thick(sh["thick"])
+        if thick > THICK_MIN:
+            out["thick"] = thick
+            out["k"] = arc_k(sh)
     if out["kind"] == "curve":  # anchor, handle, handle, anchor, ... (bezier.py)
         n = len(out["pts"])
         if n < 4:
@@ -2964,8 +2970,9 @@ def _kind_notes_tracks(sh, ppq, keys):
     got = moved_paste(sh, ppq, keys)  # (a big paste only moved: its notes shifted, without the copies below)
     if got is not None:
         return got
-    by_snap = sh.get("by_snap") if sh["kind"] in LINE_KINDS else None  # ("Notes by snap": one step each, paths.py)
-    end_dot = sh.get("end_dot", False) and not by_snap
+    thick = thick_of(sh)  # (a wide pen: its band's notes, pen.py; Notes by snap / Last note don't apply)
+    by_snap = sh.get("by_snap") if sh["kind"] in LINE_KINDS and not thick else None  # ("Notes by snap": one step
+    end_dot = sh.get("end_dot", False) and not by_snap and not thick  # each, paths.py)
     piece = source(sh) if sh["kind"] in LINE_KINDS and sh.get("cut") else None
     vel_sh = sh  # (whose velocities, over whose time)
     if piece:  # cut from another shape (sliced.py): its notes are made as that one's, then its own part kept
@@ -3023,6 +3030,8 @@ def _kind_notes_tracks(sh, ppq, keys):
         raw = funnel_notes(sh, ppq)
     elif sh["kind"] == "gliss":  # a Glissando run: one note per picked key, a grid step each (gliss.py)
         raw = gliss_notes(sh, ppq)
+    elif thick:
+        raw = band_notes(path, thick, sh.get("k", 1.0), ppq)
     elif sh["kind"] in LINE_KINDS and len(cached_arrays(sh)) > 1:  # a joined curve's pieces: each like a line
         pieces = []
         for a in cached_arrays(sh):

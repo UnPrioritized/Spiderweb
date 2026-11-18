@@ -196,6 +196,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     rebar.py         Change visual time signature: bars + tempo stretched together, the same sound
     fx.py            a shape's Claw machine / Strum / Chop pages in order, flips and velocities after them
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
+    pen.py           freehand Thickness: a wide pen, one long note per key in the band
     picture.py       image to notes: a picture file -> a grid of up to 16 colours (picking, blending, details)
   files/            saving, MIDI, sound
     project.py       project files (.spwb packed, old .json plain), autosave (+ its backup), MIDI export

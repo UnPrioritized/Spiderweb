@@ -2017,6 +2017,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             if len(pts) >= 2:
                 # made perfect with the last sensitivity picked (smooth.py), as the roll looks now
                 self.draft.update(smooth=self.app.free_smooth, k=self.sy / self.sx)
+                if self.app.free_thick > 1 and not self.live_drawing():  # (a wide pen: pen.py; live shapes' strokes
+                    self.draft["thick"] = self.app.free_thick  # not yet)
                 self.commit_draft()
             else:
                 self.cancel_draft()
