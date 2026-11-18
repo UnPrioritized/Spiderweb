@@ -9,6 +9,11 @@ What's new:
 • Fixed: in Draw on Domino, dragging with the middle button did nothing while a drawing tool was picked. It now moves Domino's view as in Domino.
 • Fixed: the side panel left a blank gap under the shape settings after picking a line and then a shape without point boxes.
 
+• Fixed: with Built-in BASSMIDI, playing from the play line right on a note started that note a little late.
+• Fixed: with Built-in BASSMIDI playing a loaded MIDI on several synths (Settings → Sound), the same note doubled on different channels sometimes sounded phased (hollow and swirly). Doubled notes now play exactly together.
+• Fixed: with Built-in BASSMIDI, very loud dense walls made the sound dip and then creep back up for seconds (Windows' own volume limiter doing that). Spiderweb now cuts the sound at full volume itself, so it stays steady.
+• Fixed: with Rendered ahead, notes held past the end of a rendered piece stopped there. They now keep playing to their end.
+
 ## Version 1.7.4
 ^^ 2026/11/18 15:03:55 UTC+07:00 · 0ada8871
 
