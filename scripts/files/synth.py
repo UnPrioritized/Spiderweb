@@ -911,6 +911,20 @@ class _Limited:
     handle: int
     _lock: threading.Lock
     dsp, st, _proc, slot = 0, None, None, None
+    _clip_proc = None
+
+    def _clip_on(self):
+        """Every sample past full volume cut to it, after the limiter (on or off), the rest as made: a dense wall went
+        ~40 dB over and Windows' own mixer limited it, then let it creep back up for seconds (user 2026-11-18,
+        dev/scratch/creep_check.py). Only the own loops' C function (BASS's sound thread never waits for Python);
+        without it the sound goes out as made, as before."""
+        from files import speed
+        fast = speed.loops()
+        clip = getattr(fast, "clip_dsp", None) if fast is not None else None
+        if clip is None or struct.calcsize("P") != 8:
+            return
+        self._clip_proc = _DSPPROC(clip.address)  # (kept: BASS calls it)
+        self.synth.bass.BASS_ChannelSetDSP(self.handle, self._clip_proc, None, -1000)  # (lowest: after the limiter)
 
     def _no_limiter(self):
         self.dsp, self.st, self._proc, self.slot = 0, None, None, None  # (_proc kept: BASS holds on to it)
@@ -1046,6 +1060,8 @@ class Live(_Limited):
         if not plain:  # (31-EDO's own channels, used by nothing else: tuned whether it's on or not)
             from files.playback import edo_tuning
             self.tune(edo_tuning())
+        if not plain:
+            self._clip_on()
         if not plain and not bass.BASS_ChannelPlay(h, 0):
             err = bass.BASS_ErrorGetCode()
             self.close()
@@ -1196,6 +1212,7 @@ class LiveGroup(_Limited):
                 live.mixer = h
             if limiter:
                 self.set_limiter(True)
+            self._clip_on()
             if not bass.BASS_ChannelPlay(h, 0):
                 raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())
         except SynthError:

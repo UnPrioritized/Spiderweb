@@ -423,6 +423,15 @@ def limiter(dll):
     return _lim[dll]
 
 
+def clipper(dll):
+    """The library's full-volume clip for BASS (sw_clip_dsp), None = not there (an older library: no clip, the sound
+    as made; never Python in BASS's sound thread)."""
+    try:
+        return CFunc(ctypes.cast(dll.sw_clip_dsp, ctypes.c_void_p).value) if dll is not None else None
+    except (AttributeError, OSError, TypeError, ctypes.ArgumentError):  # (not a C function: no clip)
+        return None
+
+
 _BYTES = np.dtype(np.uint8)
 
 
@@ -486,6 +495,7 @@ class Loops(Wraps):
             self._stir_f, self._winner_f, self._key_f = dll.sw_stir_spots, dll.sw_winner_pieces, dll.sw_key_order
         # (Built-in BASSMIDI's limiter: BASS's sound thread calls the library's C function; None = synth.py's own)
         self.__dict__["limit_dsp"] = limiter(dll)
+        self.__dict__["clip_dsp"] = clipper(dll)  # (... and its cut at full volume after it: synth._Limited._clip_on)
 
     @property
     def base(self):

@@ -130,6 +130,24 @@ pub unsafe extern "C" fn sw_limit_live(st: *mut f64, x: *mut f32, frames: i64, l
     if r.is_ok() { 0 } else { crate::FAILED }
 }
 
+/// BASS's DSPPROC for Built-in BASSMIDI's playing streams, after the limiter (synth._Limited._clip_on): every sample
+/// past full volume cut to it, the rest left exactly as made. Without it a dense wall went ~40 dB over full volume,
+/// Windows' own mixer limited it and let it creep back up for seconds (user 2026-11-18, dev/scratch/creep_check.py).
+#[no_mangle]
+pub unsafe extern "system" fn sw_clip_dsp(_dsp: u32, _channel: u32, buf: *mut f32, length: u32, _user: *mut f64) {
+    if buf.is_null() {
+        return;
+    }
+    let x = std::slice::from_raw_parts_mut(buf, length as usize / 4);
+    for v in x.iter_mut() {
+        if *v > 1.0 {
+            *v = 1.0;
+        } else if *v < -1.0 {
+            *v = -1.0;
+        }
+    }
+}
+
 /// BASS's DSPPROC (fastloops.limit_dsp): the stream's slot found by its handle (none = the sound left as made),
 /// user = synth._LIM_ALL (ALL numbers), buf = the piece's floats, length its bytes.
 #[no_mangle]
