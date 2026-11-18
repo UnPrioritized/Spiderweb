@@ -6,9 +6,11 @@ Free to use, share and change under the MIT License.
 
 New versions, the source code and problem reports: {WEBSITE}
 
-Spiderweb can look there for a new version by itself (set how often in [page:settings#General: how often|Settings], in the File menu, on the General tab; Never turns it off). When there is one, a small window says what's new in it and has a button to open the download page. When the new version comes with a safety signature, the window also has "Update and restart" (Spiderweb.exe: downloads the new one, checks it, swaps it in and starts it) or "Download and check" (running from the scripts: the checked zip goes to your Downloads folder, to unzip over your Spiderweb folder). A download that doesn't match its signature is thrown away. Nothing is downloaded until you press one of them. Your autosave and shapes stay.
+Spiderweb can look there for a new version by itself (set how often in [page:settings#General: how often|Settings], in the File menu, on the General tab; Never turns it off). When there is one, a small window says what's new in it and has a button to open the download page.
 
-The first time a new version starts, it packs the older version's settings, palettes, saved shapes and presets into one zip file in the backups folder inside the user folder (named after the older version, e.g. "1.7.2-5ec9217.zip") and says so in a small window. Every backup is kept, so you can always go back to how things were. Your projects and autosave aren't copied: they stay where they are.
+When the new version comes with a safety signature, the window also has "Update and restart" (Spiderweb.exe: downloads the new one, checks it, swaps it in and starts it) or "Download and check" (running from the scripts: the checked zip goes to your Downloads folder, to unzip over your Spiderweb folder). A download that doesn't match its signature is thrown away. Nothing is downloaded until you press one of them. Your autosave and shapes stay.
+
+The first time a new version starts, it packs the older version's settings, palettes, saved shapes, presets, patterns, curves, rhythms, colour formats, Hz bass presets and the look into one zip file in the backups folder inside the user folder (named after the older version, e.g. "1.7.2-5ec9217.zip"). A small window says so (Open folder shows the zip), then What's new opens. Every backup is kept, so you can always go back to how things were. Your projects and autosave aren't copied: they stay where they are.
 
 All of the code was written by an AI model (Claude Opus 5.5, by Anthropic). Kanade Tachibana directed the project: decided what it should do, tested it and asked for changes.
 

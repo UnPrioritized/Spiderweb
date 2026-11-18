@@ -14,6 +14,10 @@ What's new:
 • Flatten for patterns along a line: presses the bumps' tops flat like a balloon on a wall, with Softness for round or sharp edges. Patterns along lines are also made faster. See [page:formulas#Flatten|Formulas].
 • Symmetrical steps: a tick at the top of a Spam shape's settings for perfectly even staircases. Every key row moves by the same whole number of gates, or one gate every few rows, so diagonals are even and mirrored halves match exactly. Drag freely: the notes show the even version and the corners snap there when you let go; unticking gives the drawing back. Nested bands become one row thick along flat sides and one gate along slopes, and with a gate Range (across time or keys) you pick Straight sides or Bend with the gates, where the sides curve along the gates in perfectly even steps. See [page:even_steps|Symmetrical steps].
 • Nested now goes up to 480 steps (was 60) and Ripples up to 480 rings (was 120). Even band, Scaling, Ripples and the Shortest piece box are many times faster with lots of steps, and every filled shape is made a little faster. See [page:nested_tiles|Nested and Tiles].
+• Nested Blend is now exact: every ring's edge falls on the exact tick of each key row, also with the Round toward the centre slider. It works on very tall shapes, uses far less memory and follows the centre point faster. Projects with a Blend fill may look slightly different. The new Shortest piece box gives thin slivers the colour of the pieces beside them.
+• Nested, Tiles and Ripples now use all 16 colours when Use channel 10 is ticked (they stopped at 15).
+• Formulas: Paste formula… takes a formula copied from a website, a graphing site or a piece of code (LaTeX too) and finds its parts by itself, with a preview. Formulas typed or pasted as written on websites work too (3t, 2π, sin²…). Symbols… types math signs your keyboard doesn't have, a closed shape can be typed as Polar r(t), and Flower has a Sharpness box for pointed stars or fatter petals. See [page:formulas#Paste formula|Formulas].
+• Stir presets: keep stirs you like (the shown tab, or all tabs) and use them again on any shape, in any project. A preset looks the same on a flipped or turned shape. Stir's Ripple height can also go below 0, for a wave starting the other way. See [page:stir#Presets|Stir].
 
 • Big projects stay responsive: after a change, the notes are made in the background while you keep working. This now covers Delete, undo and redo, flips, resizing, the right-click menu, the side panel, and the Stir, Warp, Liquify, Properties, Settings, Gate Range, Gate subtract, Gate extend, Sustain, Shares and Strips windows. A small "Making notes…" box shows on the piano roll meanwhile, and a resized shape's old notes stay, faded, in its new box until the new ones arrive. A setting change on a shape that didn't move keeps the piano roll as it was, red selection line too, until then. When counting a change's notes takes long, the "lots of notes" question comes a moment later, and No takes the change back.
 
@@ -21,7 +25,7 @@ What's new:
 • Change visual time signature… now works over a loaded MIDI too: its notes move and play with the bars, and Export MIDI writes them exactly where the piano roll shows them (the file itself stays as it is until then). Extract boxes move with the bars. See Help → Change visual time signature.
 • Change visual time signature…: notes that would land between two ticks (going to 5/4, say) get their own "Short BPM changes for exact timing" tick in the box, so they can play exactly on time instead of up to half a tick off.
 
-• Fixed: notes kept past the keys (Settings → Piano roll → Keep notes made there) were all drawn in one colour. They now show the shape's own colours, faded, and so do the faint copies of wrapped notes. Shapes reaching past the keys are also quicker to move and change. See [page:offrange|Notes past the keys].
+• Fixed: notes kept past the keys (Settings → Piano roll → Keep notes made there) were all drawn in one colour. They now show the shape's own colours, faded, and so do the faint copies of wrapped notes. Shapes reaching past the keys are also quicker to move and change. A new Exact colours setting (slower) works their colours out with the whole shape, and Help explains why colours can swap there. See [page:offrange|Notes past the keys].
 
 • Fixed: funnels with bent curves. A funnel whose curves reach far back no longer freezes the program; the gate Range now runs to where the line meets the wall, so a leaning wall or a funnel turned on its side keeps a smooth Range; the wall can't be dragged so flat that the curves fly far away; and dragging a curve past the wall asks first when it would make more than a million notes. See [page:funnel|Funnel].
 
@@ -42,6 +46,10 @@ What's new:
 • Fixed: Kestrel (GPU) could freeze when you switched MIDI outs quickly, or when several things used the graphics card at once (Rendered ahead, the Hz bass preview, playback, changing soundfonts). Everything that uses the graphics card now takes turns, one at a time.
 
 • Changed: the settings backup made when a new version first starts is now one zip file (in the backups folder inside the user folder) instead of a copied folder. Open folder shows the zip. See [page:about|About].
+• Changed: the autosave waits while a song plays and saves a few seconds after Stop, so playback never stutters.
+• Changed: in the custom shape drawer, a point dropped near a line sticks first to where that line crosses a grid line.
+• Changed: the Stir and Clumps centre points show the move pointer under any tool.
+• Changed: the Help pages' longest paragraphs are split into shorter ones, lists and headings.
 
 ## Version 1.7.3
 ^^ 2026/11/14 01:46:38 UTC+07:00 · abaf527

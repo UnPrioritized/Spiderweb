@@ -35,4 +35,4 @@ Slicing: the [page:slice|Slice tool] cuts through the notes, like a knife throug
 
 [page:join|Join] keeps Notes by snap when every line has the same settings. [page:between|Add between] changes the step bit by bit from one end to the other. [page:turn_live|Turn into live shape] (Ctrl+R) turns it off: a custom shape can't step.
 
-A tiny step on a long line can make millions of notes: Spiderweb asks first, like other settings that make a lot of notes.
+A tiny step on a long line can make millions of notes: Spiderweb asks, like other settings that make a lot of notes (see [page:fill|Fill]).

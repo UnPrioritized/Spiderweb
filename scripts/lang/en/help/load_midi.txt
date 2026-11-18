@@ -40,6 +40,8 @@ The file's tempos and time signatures are in the Conductor pane, and everything 
 
 Export MIDI with the Conductor as it was loaded copies the file exactly. With a changed tempo, the file's tempo events are left out and the new tempo list goes into the track that had the first one. When the file has its tempo list in several tracks, Spiderweb asks: only the first of them, or every one.
 
+[page:rebar|Change visual time signature…] works over the loaded notes too: they move and play with the changed bars, and Export MIDI writes them where the piano roll shows them. Extract boxes move with the bars.
+
 ## Shapes on top
 
 Draw shapes over the loaded notes as usual. Export MIDI adds them as new tracks after the file's own, which stay copied exactly. With Keep timing they keep their time like the file's notes. Tracks you add yourself can sit above or between the file's tracks (see [page:tracks#Adding your own tracks|Track list]).

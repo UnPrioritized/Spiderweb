@@ -1,17 +1,53 @@
-Changes the bar lines without changing the sound: draw a Select box in the [page:conductor|Conductor pane] over the bars, right-click inside it → Change visual time signature…, and type the new one (6/4, 7/8…). The box takes the whole bars it touches, and each of them becomes one bar of the new signature. The notes stretch with the bars and the tempo changes by the same amount, so every note still plays at the same moment: 4/4 at 100 BPM turned into 6/4 becomes 150 BPM. After those bars, the old time signature and tempo come back, and everything later moves along. The box shows which bars it took and what the tempo becomes; with different signatures inside, each bar keeps its own length. A tempo ramp inside keeps its steps, stretched with the bars (an Interval of 24 ticks becomes 36 at 1.5 times as long, kept as that ramp's own Interval), so every note stays on its beat; where that wouldn't be a whole number of ticks, the notes on that ramp go to the tick where they sound.
+Changes the bar lines without changing the sound: draw a Select box in the [page:conductor|Conductor pane] over the bars, right-click inside it → Change visual time signature…, and type the new one (6/4, 7/8…). The box takes the whole bars it touches, and each of them becomes one bar of the new signature.
 
-Shapes inside the bars stretch with them (their gate, note tool pages, [page:sustain|Sustain], [page:extend|Gate extend] / subtract and [page:hz_bass|Hz bass] too, so a Hz bass stays in tune). A shape sticking out of the bars is cut at their edge into plain notes, each note moved exactly; Domino pastes stay one piece. [page:gliss|Glissando] runs and Hz basses with Fixed gates become plain notes too, as does anything that can't keep its sound stretched. The box counts these shapes as you type; when you press OK it first tries the change, and if more shapes would become plain notes it says so and OK becomes Change anyway. One Ctrl+Z takes the whole change back.
+The notes stretch with the bars and the tempo changes by the same amount, so every note still plays at the same moment: 4/4 at 100 BPM turned into 6/4 becomes 150 BPM. After those bars, the old time signature and tempo come back, and everything later moves along. The box shows which bars it took and what the tempo becomes; with different signatures inside, each bar keeps its own length.
 
-It isn't possible over a catch-up that reaches over the box's edge (move the box or the catch-up first), over bars that hold a [page:conductor#Keep timing|Keep timing] part (untick it there first: the two never share bars), over bars that already have a change you can still edit, over a mask sticking out of the bars, or with a damaged loaded MIDI. Shorter bars can bring notes under a tick apart. The box then says how many ("12 notes will be under a tick apart") and shows Short BPM changes for exact timing, ticked at first (it remembers your choice): those notes each keep a tick of their own, with extra BPM changes at just those spots, on top of the bars' own BPM change, so every one still plays exactly on time. Unticked, they go to the nearest tick, and notes on the same key can land together. A higher PPQ avoids both. When most notes in the bars would be under a tick apart (a 1-tick spam squashed), short BPM changes everywhere would only undo the change: the box says how many times the PPQ it needs instead ("2/4 needs twice the PPQ...") and OK puts them on the nearest tick; Cancel, raise the PPQ, and try again to keep every note on its own tick. Where a note has to land between two ticks it goes to the nearest one, up to half a tick off. The box then says how many ("8 notes will land between ticks") with its own Short BPM changes for exact timing, unticked at first (it remembers your choice too): ticked, those notes stay on their nearest tick and short BPM changes around them make each play exactly on time; a shape whose own rounding would put a note a tick away becomes plain notes. Otherwise the pane marks those places on the changed bars ("Notes moved by up to a tick", "Notes now under 1 tick apart", "CC moved by up to a tick") until your next change, as one band where many sit close together.
+A tempo ramp inside keeps its steps, stretched with the bars (an Interval of 24 ticks becomes 36 at 1.5 times as long, kept as that ramp's own Interval), so every note stays on its beat. Where that wouldn't be a whole number of ticks, the notes on that ramp go to the tick where they sound.
 
-It works over a [page:load_midi|loaded MIDI] too. The first time, its notes are read first (the status line shows how far), then the box opens. The loaded notes move and play with the bars, but the MIDI file itself stays as it is until Export MIDI writes the moved notes into the exported file, exactly where the piano roll showed them. Extract boxes move with the bars. If the loaded MIDI changes on disk and you pick Use it as it is now, your changed bars stay where they were.
+## Shapes inside the bars
+Shapes inside the bars stretch with them (their gate, note tool pages, [page:sustain|Sustain], [page:extend|Gate extend] / subtract and [page:hz_bass|Hz bass] too, so a Hz bass stays in tune).
+
+These become plain notes instead, each note moved exactly:
+• a shape sticking out of the bars (cut at their edge; Domino pastes stay one piece)
+• [page:gliss|Glissando] runs and Hz basses with Fixed gates
+• anything that can't keep its sound stretched
+
+The box counts these shapes as you type. When you press OK it first tries the change, and if more shapes would become plain notes it says so and OK becomes Change anyway. One Ctrl+Z takes the whole change back.
+
+## When it can't be used
+• over a catch-up that reaches over the box's edge (move the box or the catch-up first)
+• over bars that hold a [page:conductor#Keep timing|Keep timing] part (untick it there first: the two never share bars)
+• over bars that already have a change you can still edit
+• over a mask sticking out of the bars
+• with a damaged loaded MIDI
+
+## Notes closer than a tick
+Shorter bars can bring notes under a tick apart. The box then says how many ("12 notes will be under a tick apart") and shows Short BPM changes for exact timing, ticked at first (it remembers your choice). Ticked, those notes each keep a tick of their own, with extra BPM changes at just those spots, so every one still plays exactly on time. Unticked, they go to the nearest tick, and notes on the same key can land together. A higher PPQ avoids both.
+
+When most notes in the bars would be under a tick apart (a 1-tick spam squashed), short BPM changes everywhere would only undo the change. The box says how many times the PPQ it needs instead ("2/4 needs twice the PPQ...") and OK puts them on the nearest tick. To keep every note on its own tick: Cancel, raise the PPQ, and try again.
+
+## Notes between ticks
+Where a note has to land between two ticks (going to 5/4, say), it goes to the nearest one, up to half a tick off. The box then says how many ("8 notes will land between ticks") with its own Short BPM changes for exact timing, unticked at first (it remembers this choice too). Ticked, those notes stay on their nearest tick and short BPM changes around them make each play exactly on time; a shape whose own rounding would put a note a tick away becomes plain notes.
+
+Otherwise the pane marks those places on the changed bars ("Notes moved by up to a tick", "Notes now under 1 tick apart", "CC moved by up to a tick") until your next change, as one band where many sit close together.
+
+## Over a loaded MIDI
+It works over a [page:load_midi|loaded MIDI] too. The first time, its notes are read first (the status line shows how far), then the box opens.
+
+The loaded notes move and play with the bars, but the MIDI file itself stays as it is until Export MIDI writes the moved notes into the exported file, exactly where the piano roll showed them. Extract boxes move with the bars. If the loaded MIDI changes on disk and you pick Use it as it is now, your changed bars stay where they were.
 
 ## Changing it later
-The change stays editable. Its time signature mark becomes a dark purple line over the changed bars. Point at it to see what it did ("Bar 5: 4/4 → 6/4 · tempo × 1.25"): the piano roll tints those bars and a dotted purple line shows the tempo they had before ("was 144"). Right-click the line for Edit this change… (the same box, with its numbers filled in; typing the bars' own signature takes the change away), Remove this change, or Make permanent. Double-click it to edit.
+The change stays editable. Its time signature mark becomes a dark purple line over the changed bars. Point at it to see what it did ("Bar 5: 4/4 → 6/4 · tempo × 1.25"): the piano roll tints those bars and a dotted purple line shows the tempo they had before ("was 144").
 
-Drag an end of the line to cover more or fewer bars; it stops at another change or at a Keep timing part. Drag the line itself to move the whole change: it waits when another change is in the way, and jumps past it once it fits in the free bars beyond. Nothing changes until you let go, and Esc leaves it where it was. Every edit, move or removal starts from the bars as they were before the change, so nothing gets rounded twice, and one Ctrl+Z takes it back.
+Right-click the line for Edit this change… (the same box, with its numbers filled in; typing the bars' own signature takes the change away), Remove this change, or Make permanent. Double-click it to edit.
+
+Drag an end of the line to cover more or fewer bars; it stops at another change or at a Keep timing part. Drag the line itself to move the whole change: it waits when another change is in the way, and jumps past it once it fits in the free bars beyond. Nothing changes until you let go, and Esc leaves it where it was.
+
+Every edit, move or removal starts from the bars as they were before the change, so nothing gets rounded twice, and one Ctrl+Z takes it back.
 
 Editing notes, shapes or the tempo inside a change's bars makes the change permanent: a window asks first ("Make permanent and edit" or Cancel), and its tick hides that question until Spiderweb restarts. A permanent change is a plain time signature again. Exporting doesn't make it permanent: the exported MIDI has the change built in, and the project keeps it editable.
 
 ## Copy and paste
-Copying in the Conductor pane takes a time or key signature only when its own mark (the start of its bar) is inside the copied box. A change you can still edit is pasted as a new one on the bars it lands on, stretching their notes and tempo like a change made there by hand (the copied tempo inside its bars is left out). Landing on another editable change asks first, like an edit inside it.
+Copying in the Conductor pane takes a time or key signature only when its own mark (the start of its bar) is inside the copied box.
+
+A change you can still edit is pasted as a new one on the bars it lands on, stretching their notes and tempo like a change made there by hand (the copied tempo inside its bars is left out). Landing on another editable change asks first, like an edit inside it.

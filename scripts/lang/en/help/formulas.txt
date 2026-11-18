@@ -34,7 +34,7 @@ Every number of a pattern, Loops too, has a "…" button after its box, in the s
 The Loops graph says how crowded the loops are: they bunch up where it's high and spread out where it's low, and the number of loops stays the same. At 0 % there are no loops, only the plain line. With Each piece the graph runs over every piece on its own; with Across all, once over the whole line.
 [clip:formulas-graphs-loops]
 
-Height changes smoothly along the line; the other numbers (like Sharp or Waves) change from one loop to the next. Saved patterns keep their graphs.
+Height changes smoothly along the line (in your own formulas, only when Height just makes the loop taller); the other numbers (like Sharp or Waves) change from one loop to the next. Saved patterns keep their graphs. Shape formulas have no graphs.
 
 ## Changing it
 
@@ -53,13 +53,43 @@ Custom… (at the top of each list) shows every shape or pattern with its formul
 
 When its two halves match (like Wave, Bounce, S-curve or Circle), the points come as symmetric halves: moving a point moves its partner in the other half too. Double-click the line to add a point, right-click a point to remove it, Alt+drag for a sharp corner.
 
-The grid shows the numbers (x from 0 to 1 along one loop; y in keys); the mouse wheel zooms, dragging empty space (or middle-dragging) moves around, and Fit view shows all of it again. Save puts it in your list (patterns.json in the user folder next to Spiderweb), and from then on it's in the Formula menu too. Copy formula (next to Name) copies it as text with the numbers from the boxes filled in, to share or keep (changes made by hand aren't in it).
+The grid shows the numbers (x from 0 to 1 along one loop; y in keys); the mouse wheel zooms, dragging empty space (or middle-dragging) moves around, and Fit view shows all of it again. Save puts it in your list (patterns.json in the user folder next to Spiderweb), and from then on it's in the Formula menu too. Copy formula (next to Name) copies it as text with the numbers from the boxes filled in, to share or keep (changes made by hand and graphs aren't in it; a shape's "t from … to …" is).
 
-Paste formula… (next to Copy formula) opens a window to paste a formula into: from a website, a graphing site, a piece of code, or another user's Copy formula. Paste a whole block if you like: it finds x and y (or r, or a pattern's y), t's range (0 ≤ t ≤ 2π, t ∈ [0, 2π], t = np.linspace(0, 2*np.pi), t = 0:0.01:2*pi) and numbers (a = 1 becomes a's box), puts in parts written on lines of their own (r = 1 - sin(t), then x = r*cos(t)), and skips the rest (import, plot...). The Found list shows what each line gave (grey = skipped, red = can't be read), with a preview under it. Use it puts it in place of everything in the window (the symmetric halves and Flatten too; a pattern keeps its Loops); Ctrl+Z takes it back.
+## Paste formula
+Paste formula… (next to Copy formula) opens a window to paste a formula into: from a website, a graphing site, a piece of code, or another user's Copy formula.
 
-Your own formula: tick Edit formula. A pattern is y of x for one loop (x goes from 0 to 1, y = how far to the side); a shape is x(t) and y(t), t going from 0 to 1 while it's drawn. Any other name in it (like height) gets its own number box. A closed shape can also be typed as one line: Type as → Polar r(t), where r is how far from the middle the shape is as it goes once round (1 = a circle; Flower can be switched to it). Its x(t) and y(t) are made from it, so it's one or the other: change x(t) or y(t) by hand and the polar line is gone. A pattern's "along =" box can move the line forward or back along the curve, in loops; going back makes it run over itself, like Curls.
+Paste a whole block if you like. It finds:
+• x and y (or r, or a pattern's y)
+• t's range (0 ≤ t ≤ 2π, t ∈ [0, 2π], t = np.linspace(0, 2*np.pi), t = 0:0.01:2*pi)
+• numbers (a = 1 becomes a's box)
+• parts written on lines of their own (r = 1 - sin(t), then x = r*cos(t))
+and skips the rest (import, plot...).
 
-Formulas copied from websites and graphing sites work as they're written, LaTeX too (\frac{2}{3}\sin\left(3t\right)): 3t, 2pi, a t and t sin(t) multiply, a leading "x =" or "r(θ) =" is left out, π × ÷ − ² ⁴ ⁻¹ √ and |t| are understood, sin^2(t) is sin(t)², sin^-1(t) is arcsin(t), sin 3t is sin(3t), ** is a power, [ ] and { } are brackets, and np. or math. before sin or cos is dropped. In a shape, θ is t, and a pasted point (x, y) fills both x(t) and y(t). Letters stuck together stay one name: "at" gets its own box (write a t or a*t for a times t); π, θ and Greek letters always stand on their own (2πt, cosθ, kθ), and sin2t is sin(2t). Written together right after / or ^, a group stays together: t/2π is t/(2π), e^-2t is e^(−2t) (1/2 t with a space is t/2). log typed is the natural log; \log pasted from a graphing site is base 10, as it was there. Full-width signs like （ ） ＝ ， work too. Websites often run t from 0 to 2pi: type that in "t from … to …" (a shape's own, usually 0 to 1) and paste the formula as it is; Polar r(t) goes once round over it. Symbols… (after Edit formula) opens a small window of math symbols you may not have on your keyboard: click one to copy it, and with Edit formula ticked it's typed into the formula too. Greek letters like δ are names like any word, each with its own number box.
+The Found list shows what each line gave (grey = skipped, red = can't be read), with a preview under it. Use it puts it in place of everything in the window (the symmetric halves, Flatten and graphs too; a pattern keeps its Loops, Each piece and Loops graph); Ctrl+Z takes it back.
+
+## Your own formula
+Tick Edit formula. A pattern is y of x for one loop (x goes from 0 to 1, y = how far to the side); a shape is x(t) and y(t), t going from 0 to 1 while it's drawn. Any other name in it (like height) gets its own number box. Greek letters like δ are names like any word, each with its own number box.
+
+A closed shape can also be typed as one line: Type as → Polar r(t), where r is how far from the middle the shape is as it goes once round (1 = a circle; Flower can be switched to it). Its x(t) and y(t) are made from it, so it's one or the other: change x(t) or y(t) by hand and the polar line is gone.
+
+A pattern's "along =" box can move the line forward or back along the curve, in loops; going back makes it run over itself, like Curls.
+
+Symbols… (after Edit formula) opens a small window of math symbols you may not have on your keyboard: click one to copy it, and with Edit formula ticked it's typed into the formula too.
+
+## Formulas from websites
+Formulas copied from websites and graphing sites work as they're written, LaTeX too (\frac{2}{3}\sin\left(3t\right)):
+• 3t, 2pi, a t and t sin(t) multiply
+• a leading "x =" or "r(θ) =" is left out
+• π × ÷ − ² ⁴ ⁻¹ √ and |t| are understood; full-width signs like （ ） ＝ ， work too
+• sin^2(t) is sin(t)², sin^-1(t) is arcsin(t), sin 3t and sin2t are sin(3t) and sin(2t)
+• ** is a power, [ ] and { } are brackets, and np. or math. before sin or cos is dropped
+• in a shape, θ is t, and a pasted point (x, y) fills both x(t) and y(t)
+
+Letters stuck together stay one name: "at" gets its own box (write a t or a*t for a times t). π, θ and Greek letters always stand on their own (2πt, cosθ, kθ).
+
+Written together right after / or ^, a group stays together: t/2π is t/(2π), e^-2t is e^(−2t) (1/2 t with a space is t/2). log typed is the natural log; \log pasted from a graphing site is base 10, as it was there.
+
+Websites often run t from 0 to 2pi: type that in "t from … to …" (a shape's own, usually 0 to 1) and paste the formula as it is; Polar r(t) goes once round over it.
 
 Works: numbers, + - * / ^ % ( ), pi, e, sin cos tan asin acos atan sinh cosh tanh sqrt exp ln log log10 log2 abs min max floor ceil round pow, arcsin arccos arctan asinh acosh atanh sec csc cot. log is the same as ln (the natural log); use log10 for base 10.
 

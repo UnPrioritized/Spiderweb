@@ -30,7 +30,13 @@ A shape you draw stays on Spiderweb's layer until you're done with it, so you ca
 
 Keys: while drawing, Esc, Enter, Ctrl+Z / Ctrl+Y for what you did here, Delete for selected shapes and the drawing tools' letters are Spiderweb's. Every other key (Space, Ctrl+S, the arrows...) goes on to Domino.
 
-Your project's own shapes are hidden while you draw on Domino, and come back when you go back to Spiderweb. With [page:channels#Single channel: where two|Single channel], overlapping notes on a key are fixed the way Single channel always does it (cut and stretched, or split around with "Split around instead of stretching"), together with the notes already in that Domino track; Domino's notes elsewhere in the track stay as they are. With Multi channel, each channel goes on its own track, from the current one down, with the channels those tracks already have; with Remove overlaps ticked, the overlaps are fixed against the notes already in those tracks too, the track order deciding which note wins; when the track list runs out, Spiderweb adds new tracks at the bottom with Domino's own Add Track (channel 10 is skipped unless "Use channel 10" is ticked). Ctrl+Z right after takes the notes out of Domino again and gives you the shape back to change; press Send to put it in again. Once you work in Domino itself, Domino's own Ctrl+Z takes over.
+Your project's own shapes are hidden while you draw on Domino, and come back when you go back to Spiderweb.
+
+With [page:channels#Single channel: where two|Single channel], overlapping notes on a key are fixed the way Single channel always does it (cut and stretched, or split around with "Split around instead of stretching"), together with the notes already in that Domino track; Domino's notes elsewhere in the track stay as they are.
+
+With Multi channel, each channel goes on its own track, from the current one down, with the channels those tracks already have; with Remove overlaps ticked, the overlaps are fixed against the notes already in those tracks too, the track order deciding which note wins; when the track list runs out, Spiderweb adds new tracks at the bottom with Domino's own Add Track (channel 10 is skipped unless "Use channel 10" is ticked).
+
+Ctrl+Z right after takes the notes out of Domino again and gives you the shape back to change; press Send to put it in again. Once you work in Domino itself, Domino's own Ctrl+Z takes over.
 
 ## Changing Domino's notes
 
@@ -46,9 +52,13 @@ Take says no, and takes nothing, when Domino's Conductor track is selected too (
 
 ## Onion skin
 
-With Domino's onion skin on (View → Onion Skin), Take also takes the notes of the tracks it shows behind the current one: the previous or next track, the tracks you picked, or the tracks of the same colour. Only the notes inside your select boxes come: drag a box in Domino's piano roll as usual, and Ctrl+drag (or Shift+drag) to add more boxes. A note counts when it starts inside a box, the same way Domino's own box picks the current track's notes. A box over only onion skin notes takes them too. Without a dragged box (notes clicked, or Select All), only the current track's notes are taken and the line under the bar says so. The ↔ and ↕ flips on Domino's selection never take onion skin tracks.
+With Domino's onion skin on (View → Onion Skin), Take also takes the notes of the tracks it shows behind the current one: the previous or next track, the tracks you picked, or the tracks of the same colour. Only the notes inside your select boxes come: drag a box in Domino's piano roll as usual, and Ctrl+drag (or Shift+drag) to add more boxes. A note counts when it starts inside a box, the same way Domino's own box picks the current track's notes.
 
-Spiderweb takes the notes out of each onion track one after another, so Domino visibly switches tracks for a moment and then goes back to yours. The other notes and the controllers in those tracks stay as they are. In Domino each track is one more step to undo. Right after a Take the keyboard is Spiderweb's, so one Ctrl+Z puts every track back at once (until you click into Domino). A track whose notes can't be taken safely, or that you switch away from in Domino while its notes go out, is left as it was, and the line under the bar names it. Tracks set to the Automatic colour never match in "same colour" mode, just as Domino shows none behind them.
+A box over only onion skin notes takes them too. Without a dragged box (notes clicked, or Select All), only the current track's notes are taken and the line under the bar says so. The ↔ and ↕ flips on Domino's selection never take onion skin tracks.
+
+Spiderweb takes the notes out of each onion track one after another, so Domino visibly switches tracks for a moment and then goes back to yours. The other notes and the controllers in those tracks stay as they are. In Domino each track is one more step to undo. Right after a Take the keyboard is Spiderweb's, so one Ctrl+Z puts every track back at once (until you click into Domino).
+
+A track whose notes can't be taken safely, or that you switch away from in Domino while its notes go out, is left as it was, and the line under the bar names it. Tracks set to the Automatic colour never match in "same colour" mode, just as Domino shows none behind them.
 
 ## Shapes Spiderweb remembers
 
@@ -66,7 +76,9 @@ Spiderweb keeps this in a small file next to the song with the same name plus ".
 
 ## Good to know
 
-• It works with Domino 1.41b, 1.42, 1.43 and 1.44 (the official versions, translated ones too) and the 1.45 test builds (32-bit and 64-bit), the 256 keys mod among them (Spiderweb sees its 256 rows and draws on all of them). Spiderweb finds what it needs inside Domino by name and checks it all first: a Domino where something doesn't add up (a newer version that changed inside) is left alone, with a message, never guessed at. If Spiderweb found its way around that Domino and only the checks failed, the message offers "Try anyway": it's at your own risk (notes could land in the wrong place, or Domino could close), so save your song first. A renamed Domino (like "Domino (2).exe") is followed too.
+• It works with Domino 1.41b, 1.42, 1.43 and 1.44 (the official versions, translated ones too) and the 1.45 test builds (32-bit and 64-bit), the 256 keys mod among them (Spiderweb sees its 256 rows and draws on all of them). A renamed Domino (like "Domino (2).exe") is followed too.
+
+• Spiderweb finds what it needs inside Domino by name and checks it all first: a Domino where something doesn't add up (a newer version that changed inside) is left alone, with a message, never guessed at. If Spiderweb found its way around that Domino and only the checks failed, the message offers "Try anyway": it's at your own risk (notes could land in the wrong place, or Domino could close), so save your song first.
 
 • It doesn't work while a MIDI file is loaded in Spiderweb.
 

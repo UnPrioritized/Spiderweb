@@ -18,11 +18,17 @@ Dragging a dot turns the one on the other side of the point too, so the line run
 
 ## Picking several points
 
-Ctrl+click points to pick several: a picked point is filled; Ctrl+click it again to drop it. Or drag a box from an empty spot inside the grid to pick the points in it (Ctrl+box adds to the ones already picked). Drag any picked point and they all move together, as one undo step; Mirror still moves their twins. The arrow keys nudge the picked points (Shift moves them ten times further); quick presses in a row are one undo step. Delete removes the lines through every picked point. A click on an empty spot of the grid, or Esc, drops the picks; the next Esc deselects the shape. The curve handles show only while one point is picked.
+Ctrl+click points to pick several: a picked point is filled; Ctrl+click it again to drop it. Or drag a box from an empty spot inside the grid to pick the points in it (Ctrl+box adds to the ones already picked). Drag any picked point and they all move together, as one undo step; Mirror still moves their twins.
+
+The arrow keys nudge the picked points (Shift moves them ten times further); quick presses in a row are one undo step. Delete removes the lines through every picked point. A click on an empty spot of the grid, or Esc, drops the picks; the next Esc deselects the shape. The curve handles show only while one point is picked.
 
 ## Presets
 
-Preset lays a ready-made bend onto the grid: Arc, Arc lower, Arc upper, Arch, Bulge, Shell lower, Shell upper, Flag, Wave, Fish, Rise, Fisheye, Inflate, Squeeze or Twist. Bend sets how strong it is, from -100 to 100 % (a minus number bends the other way); Across or Up turns it to run along the time or along the keys (the round ones, Fisheye, Inflate and Twist, have no way). The points and their curve handles are set for you on the grid as it is, so a small grid already shows the whole bend and a finer one follows it more closely. A preset is a starting point: drag a point or a dot afterwards and Preset shows Custom. Picking a preset again lays it again over your changes (Ctrl+Z brings them back). Picking a preset, changing Bend and changing the way are each one undo step; dragging the Bend word sideways changes it live. Changing the grid size of an untouched preset lays it again on the new grid.
+Preset lays a ready-made bend onto the grid: Arc, Arc lower, Arc upper, Arch, Bulge, Shell lower, Shell upper, Flag, Wave, Fish, Rise, Fisheye, Inflate, Squeeze or Twist. Bend sets how strong it is, from -100 to 100 % (a minus number bends the other way); Across or Up turns it to run along the time or along the keys (the round ones, Fisheye, Inflate and Twist, have no way).
+
+The points and their curve handles are set for you on the grid as it is, so a small grid already shows the whole bend and a finer one follows it more closely. A preset is a starting point: drag a point or a dot afterwards and Preset shows Custom. Picking a preset again lays it again over your changes (Ctrl+Z brings them back).
+
+Picking a preset, changing Bend and changing the way are each one undo step; dragging the Bend word sideways changes it live. Changing the grid size of an untouched preset lays it again on the new grid.
 [clip:warp-preset]
 
 ## Grid size
@@ -61,7 +67,9 @@ The mirror lines (or Half turn's ring) are drawn over the grid, and the twins of
 
 Shape bends always run first, before every colour step: first the [page:stir|Stir] tabs set to Shape, then the Warp. While a point is dragged the notes are made again every moment instead of the colours being repainted, so on big shapes they follow a little behind the mouse.
 
-"Cut notes where bent" (under Moves, ticked at first) bends a drawn shape note by note: its notes are made first, then each one bends like a tiny box and is cut where the bend curves it, so Fill rows, Spam and patterns bend along like a picture. Unticked, only the outline bends and the notes are laid out again inside it: then a point in the middle of a filled square bends only its inside, which is all filled anyway, so nothing changes (the window says so in orange); drag points on or near the outline. Pasted notes and plain notes are always cut (the tick is greyed for them). Shapes without a Warp yet take the window's tick with their first drag.
+"Cut notes where bent" (under Moves, ticked at first) bends a drawn shape note by note: its notes are made first, then each one bends like a tiny box and is cut where the bend curves it, so Fill rows, Spam and patterns bend along like a picture.
+
+Unticked, only the outline bends and the notes are laid out again inside it: then a point in the middle of a filled square bends only its inside, which is all filled anyway, so nothing changes (the window says so in orange); drag points on or near the outline. Pasted notes and plain notes are always cut (the tick is greyed for them). Shapes without a Warp yet take the window's tick with their first drag.
 
 "Colours bend too" (beside Moves, ticked at first) is for the unticked way: it keeps the shape's colours on the notes they were on, so a Colours pattern or coloured areas bend along with the shape. Unticked, the colours are laid out again on the bent shape. Cut notes always keep their own colours, so it's greyed while "Cut notes where bent" is ticked. Colour edges, Folds and At the edges only choose colours, so they're greyed for Shape. It works in every Channels mode.
 
@@ -71,8 +79,10 @@ In the Warp window, untick "Show the bend" to hide a shape's Warp without losing
 
 ## Big shapes
 
-On shapes with millions of notes, letting go takes a moment while the notes are made. While dragging only the notes whose colour changes are worked out, so the grid stays live. 4-way and Half turn bend more of the shape at once, so they are a little slower.
+On shapes with millions of notes, after letting go the new notes take a moment to arrive (you can keep working meanwhile). While dragging only the notes whose colour changes are worked out, so the grid stays live. 4-way and Half turn bend more of the shape at once, so they are a little slower.
 
 ## Edits that change notes
 
 Some colours depend on the other notes in the shape: Stir, Warp and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes ([page:glue|Glue], [page:chop|Chop], [page:claw|Claw machine], [page:strum|Strum], [page:trim|Gate trim], [page:subtract|Gate subtract], [page:extend|Gate extend], [page:sustain|Sustain], [page:fill_gaps|Fill gaps]...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
+
+Bends can never be perfectly smooth: MIDI notes sit on whole keys and whole ticks. See [page:deform#How exact a bend can be|Deform: Colours or Shape].

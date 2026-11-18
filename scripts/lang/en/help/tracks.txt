@@ -82,9 +82,18 @@ Drag on the tracks' pictures to draw a [page:select|Select] box over some tracks
 
 ## Highlighting a track
 
-Click a track to highlight it. A click also puts the play line there, on the track list's snap. Pressing Tab into the track list scrolls it to the highlighted track and the play line when they're out of view, and pressing Tab back does the same for the play line on the piano roll. Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you go back to All tracks: click the All tracks row, press Esc in the track list, pick All tracks in the Multiple tracks ▾ list on the toolbar, or Ctrl+wheel up past the first track. The corner then says "All tracks". Shapes whose notes are all on hidden tracks hide too: their lines don't show and can't be clicked, Ctrl+A leaves them out, and [page:slice|Slice] and [page:lasso|Lasso] don't cut them. Hidden notes still play and still go into the files.
+Click a track to highlight it. A click also puts the play line there, on the track list's snap. Pressing Tab into the track list scrolls it to the highlighted track and the play line when they're out of view, and pressing Tab back does the same for the play line on the piano roll.
 
-Select several tracks like files in a folder: Ctrl+click more tracks to select them along with the highlighted one, Shift+click to select every track from the last one you clicked to this one, Ctrl+Shift+click to add those to what's selected. Selected tracks turn a fainter blue, and the highlighted track keeps its deep blue (the piano roll still shows that one). Ctrl+click a selected track again to drop it. A plain click or All tracks clears the selection. Right-click the name of one of the selected tracks and the menu works on them all: Remove Track removes them all, and Properties… is greyed while more than one is selected.
+Press Tab and the piano roll shows only that track's notes, its name in the piano roll's top left corner. Every other track is hidden until you go back to All tracks: click the All tracks row, press Esc in the track list, pick All tracks in the Multiple tracks ▾ list on the toolbar, or Ctrl+wheel up past the first track. The corner then says "All tracks".
+
+Shapes whose notes are all on hidden tracks hide too: their lines don't show and can't be clicked, Ctrl+A leaves them out, and [page:slice|Slice] and [page:lasso|Lasso] don't cut them. Hidden notes still play and still go into the files.
+
+Select several tracks like files in a folder:
+• Ctrl+click more tracks to select them along with the highlighted one
+• Shift+click to select every track from the last one you clicked to this one
+• Ctrl+Shift+click to add those to what's selected
+
+Selected tracks turn a fainter blue, and the highlighted track keeps its deep blue (the piano roll still shows that one). Ctrl+click a selected track again to drop it. A plain click or All tracks clears the selection. Right-click the name of one of the selected tracks and the menu works on them all: Remove Track removes them all, and Properties… is greyed while more than one is selected.
 
 When a shape you draw, paste or move lands on another track, the highlight moves to that track, so it never vanishes under the mouse (if it lands on several tracks, every track shows). When channels are handed out again (for example a shape drawn over others), the highlight stays with the music it was showing.
 

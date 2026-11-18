@@ -23,7 +23,9 @@ Shape steps always run first, before any colour step, in this order: the Stir ta
 
 ## Notes cut into pieces
 
-Pasted notes, plain notes, and drawn shapes with "Cut notes where bent" ticked bend note by note. Each note bends like a tiny box: where the bend moves part of a long note to another key it is cut into pieces, so a long note under a twist turns into a slanted run of short notes, while notes that stay on their key stay whole (only stretched or squeezed). Notes that touched still touch, and each piece keeps its note's velocity, colour and track. Pieces shorter than one tick are dropped. A very strong Twist can cut a shape into millions of pieces; they're made in the background, so the window stays free while they catch up. Notes bent past the top or bottom key or before beat 0 follow "Keep notes made there" like any others ([page:offrange|Notes past the keys]).
+Pasted notes, plain notes, and drawn shapes with "Cut notes where bent" ticked bend note by note. Each note bends like a tiny box: where the bend moves part of a long note to another key it is cut into pieces, so a long note under a twist turns into a slanted run of short notes, while notes that stay on their key stay whole (only stretched or squeezed).
+
+Notes that touched still touch, and each piece keeps its note's velocity, colour and track. Pieces shorter than one tick are dropped. A very strong Twist can cut a shape into millions of pieces; they're made in the background, so the window stays free while they catch up. Notes bent past the top or bottom key or before beat 0 follow "Keep notes made there" like any others ([page:offrange|Notes past the keys]).
 
 For pasted notes this is the only way, so the tick is greyed for them.
 
@@ -35,8 +37,17 @@ A strong bend can make a line cross another one. Where the shape then overlaps i
 
 Where a push or twirl squeezes notes together they bunch up, and where it pulls them apart they spread out: they follow the bend exactly, like a rubber sheet.
 
+## How exact a bend can be
+
+A MIDI note sits on one key and starts and ends on whole ticks, so no bend can be perfectly smooth:
+• Up and down, notes move by whole keys. A gentle slope turns into steps, and a very small bend may not move a note at all.
+• Along the time, notes start and end on whole ticks. At a low PPQ the bent edges come out coarser; a higher PPQ (under Project) follows the bend more closely.
+• Each note has one colour, so a colour bend is only as fine as the notes under it: thin stripes on long notes can look blocky.
+
+Zoomed far in, a smooth curve shows these steps. That's the MIDI format, not a mistake: the notes are as close to the bend as whole keys and ticks allow.
+
 ## Good to know
 
 With "Cut notes where bent" unticked only the outline matters: bending the inside of a filled shape changes nothing, and the window says so in orange. Pictures and Hz bass shapes can only bend their colours, so Shape is greyed for them.
 
-The bends are never baked in: come back any time, change a knob, a point or a brush stroke, and the notes are made again. On very big pastes (a million notes) each change takes about a second.
+The bends are never baked in: come back any time, change a knob, a point or a brush stroke, and the notes are made again. On very big pastes (a million notes) each change's notes take about a second to arrive.

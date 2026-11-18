@@ -49,7 +49,9 @@ A straight stroke takes two clicks: Shift+click where it starts (a dashed circle
 
 Shape bends always run first, before every colour step: the [page:stir|Stir] tabs set to Shape, then the [page:warp|Warp], then the Liquify. The brush bends exactly where its circle touches, like the Liquify of image editors: nothing outside the circle moves, and the same strokes always give the same shape.
 
-"Cut notes where bent" (under Moves, ticked at first) bends a drawn shape note by note: its notes are made first, then each one bends like a tiny box, cut into pieces only where the brush moves part of it to another key, so Fill rows, Spam and patterns bend along like a picture. Unticked, only the outline bends and the notes are laid out again inside it: then pushing inside a filled shape changes nothing (the window says so in orange), so brush across the outline. Pasted notes and plain notes are always cut (the tick is greyed for them). Shapes without a Liquify yet take the window's tick with their first stroke.
+"Cut notes where bent" (under Moves, ticked at first) bends a drawn shape note by note: its notes are made first, then each one bends like a tiny box, cut into pieces only where the brush moves part of it to another key, so Fill rows, Spam and patterns bend along like a picture.
+
+Unticked, only the outline bends and the notes are laid out again inside it: then pushing inside a filled shape changes nothing (the window says so in orange), so brush across the outline. Pasted notes and plain notes are always cut (the tick is greyed for them). Shapes without a Liquify yet take the window's tick with their first stroke.
 
 Where a push squeezes notes together they bunch up, and behind it they spread apart. A very strong push can make the outline cross itself; where the shape then overlaps itself, "Overlaps cancel out" leaves a hole, as with any shape drawn that way.
 
@@ -63,8 +65,10 @@ In the Liquify window, untick "Show the bends" to hide a shape's bends without l
 
 ## Big shapes
 
-On shapes with millions of notes, a shape's first stroke takes a moment (its colours are made ready once), and letting go takes a moment while the notes are made. While dragging only the notes whose colour changes are worked out, so the brush stays live.
+On shapes with millions of notes, a shape's first stroke takes a moment (its colours are made ready once), and after letting go the new notes take a moment to arrive (you can keep working meanwhile). While dragging only the notes whose colour changes are worked out, so the brush stays live.
 
 ## Edits that change notes
 
 Some colours depend on the other notes in the shape: Stir, Warp and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes ([page:glue|Glue], [page:chop|Chop], [page:claw|Claw machine], [page:strum|Strum], [page:trim|Gate trim], [page:subtract|Gate subtract], [page:extend|Gate extend], [page:sustain|Sustain], [page:fill_gaps|Fill gaps]...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
+
+Bends can never be perfectly smooth: MIDI notes sit on whole keys and whole ticks. See [page:deform#How exact a bend can be|Deform: Colours or Shape].
