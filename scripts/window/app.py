@@ -158,6 +158,7 @@ DRAW_TOOLS = [("line", tr("app.line"), "l"), ("poly", tr("app.polyline"), "p"), 
               ("circle", tr("app.circle"), "o"), ("polygon", tr("app.polygon"), "q"), ("funnel", tr("app.funnel"), "n"),
               ("text", tr("app.text"), "x"), ("hz", tr("app.hz_bass"), "h"), ("picture", tr("app.picture"), "i")]
 LATE_S = 0.15  # making the notes took longer than this (s): after an edit they're made in the background (late_ok)
+BEND_GUESS_NOTES = 100_000  # a shape bent for the first time with this many notes: made in the background (bend_untimed)
 COMBINE_BIG = 1_000_000  # notes: the shapes' remembered notes past this = putting them together is slow (late_ok)
 COMBINE_SHAPES = 300  # (shapes: more aren't counted for it, combine_big)
 OLD_NOTES_SHARE = 8  # the notes cache (shapes as they WERE = undo targets) may take 1/8 of the PC's memory...
@@ -491,6 +492,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._merge_keys = {}  # merged shapes' parts' settings when last seen (remake_merges)
         self._notes_time = 0.0  # how long that took the last time
         self._shape_took = {}  # id(shape) -> how long its own notes took the last time they were made (late_ok)
+        self._bent_timed = set()  # id(shape) whose time in _shape_took is of a BENT making (bend_untimed)
         self._key_took = {}  # notes cache key -> the same, so a new object for the same shape knows it
         self._make_time = 0.0  # how long the last making of every note took, remembered or not (late_ok)
         self._mask_time = 0.0  # ... and the masks' preview (mask.mask_view)
@@ -2089,6 +2091,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self._notes_worked += 1
             if top:  # (late_ok: this shape's notes are slow to make, whatever the last making took)
                 self._shape_took[id(own)] = self._key_took[key] = time.perf_counter() - started
+                self.note_bent_timed(own)
                 if len(self._key_took) > 4000:  # (only a guess per notes: the oldest half forgotten)
                     for k in list(itertools.islice(self._key_took, 2000)):
                         del self._key_took[k]
@@ -2244,6 +2247,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         slow = busy > 0.15 or self._merges_owed
         # (other drags make the notes AND repaint them all at every step: the repaint counts too)
         slow = slow or not moving and busy + self.roll.paint_time > 0.15
+        # (a drag starting to bend a big shape (Liquify / Warp set to Shape, a Shape Stir tab): its last time was of
+        # the plain notes, the first bent making is many times that: in the background like the ones after it)
+        slow = slow or not now and bool(self.roll.drag) and self.bend_untimed()
         # (moving: also whenever the piano roll shows its notes as one picture, which it can carry along)
         # (Nested's / Tiles' / Ripples' centre points: the notes are all they show, so they follow in the background,
         # user)
@@ -3106,6 +3112,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             sh = job["real"].get(c)
             if sh is not None:
                 self._shape_took[id(sh)] = took
+                self.note_bent_timed(sh)
         self._key_took.update(job.get("key_took", {}))
         self._job_stash = job["stash"]
         self._job_off = (job["off_for"], job["got"][2], job.get("off"))  # (shapes_changed: used when still right)
@@ -3126,7 +3133,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         on screen stay meanwhile: the same shapes in the same places (maybe more after them) = as they are, else
         renumbered to the new list (renumber_shown: Delete, undo / redo, History, Join, Split...)."""
         if self._merges_owed or self._make_time + self._mask_time <= LATE_S and not self.slow_shape_owed() and \
-                not self.combine_big():
+                not self.combine_big() and not self.bend_untimed():
             return False
         return self.keep_shown()
 
@@ -3157,6 +3164,35 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 n += len(got[0])
                 if n > COMBINE_BIG:
                     return True
+        return False
+
+    def note_bent_timed(self, sh):
+        """A shape's notes were just timed: whether that making was bent (a Shape step) is remembered with it."""
+        from notes.shape_bend import has_shape
+        if has_shape(sh.get("recolour")):
+            self._bent_timed.add(id(sh))
+        else:
+            self._bent_timed.discard(id(sh))
+
+    def bend_untimed(self):
+        """A shape bent by a Shape step whose notes need making, never timed bent, with BEND_GUESS_NOTES or more
+        notes on the piano roll now: its first bent making will be slow, whatever its plain notes took (Liquify
+        set to Shape's first stroke on 490 k notes: 37 ms plain, 0.3 s bent, on the window's thread)."""
+        drawn = self.__dict__.get("_notes_drawn")  # (the notes on screen now: never waits for ones being made)
+        if drawn is None or not len(drawn):
+            return False
+        from notes.shape_bend import can_bend, has_shape
+        timed = self._bent_timed
+        if len(timed) > 2 * len(self.shapes) + 16:  # (shapes gone: forgotten)
+            ids = {id(sh) for sh in self.shapes}
+            timed &= ids
+        for i, sh in enumerate(self.shapes):
+            if id(sh) in timed or not can_bend(sh) or not has_shape(sh.get("recolour")):
+                continue
+            if self.notes_cache_key(sh)[2] in self._notes_cache:
+                continue
+            if np.count_nonzero(drawn[:, 5] == i) >= BEND_GUESS_NOTES:
+                return True
         return False
 
     def slow_shape_owed(self):
