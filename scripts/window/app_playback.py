@@ -180,6 +180,7 @@ class Playback:
         rendered, ccs, ports = self.play_parts(ppq, bpm)
         end, tempo = self.end_and_tempo(ppq, bpm, beats, self.playhead)
         self.player.ready = None
+        self.player.head = 0.0  # (start_loaded sets it for Built-in BASSMIDI's synths)
         self.player.stop()
         self.player._clock = None  # (the loaded MIDI's feeder waits for the new line, never the last play's)
         self.player.map = None  # (its reader waits for this play's tempo: Player.start sets it)
@@ -374,6 +375,8 @@ class Playback:
                 self.loaded_group = LiveGroup(self.synth, self.loaded_synths, self.play_voices,
                                               limiter=self.play_limiter.get())
                 sinks, kind = self.loaded_group.lives, "group"
+                from files.synth import GROUP_BUFFER
+                self.player.head = GROUP_BUFFER  # (the feeder sends that far ahead: the first notes too)
             except SynthError as e:  # (its own shapes still play: told on the status line)
                 self.status.config(text=str(e))
                 if gate is not None:

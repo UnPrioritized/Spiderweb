@@ -297,7 +297,7 @@ pub fn hist(ms: &[i32], trk: &[i32], i0: i64, i1: i64, ticks: &[i64], t_late: i6
         } else if ports >= synths {
             fmodi(port + ch, synths)
         } else {
-            fmodi(port + ch, ports) * per + fmodi(((m >> 8) & 127) * 5 + ch * 3, per)
+            fmodi(port, ports) * per + fmodi(((m >> 8) & 127) * 5, per)
         };
         hd[u(r) * hw + u(v)] += 1;
     }
@@ -685,7 +685,8 @@ pub fn emit(ms: &[i32], trk: &[i32], i0: i64, i1: i64, ticks: &[i64], t_late: i6
             } else if ports >= synths {
                 fmodi(port + ch, synths)
             } else {
-                fmodi(port + ch, ports) * per + fmodi(key * 5 + ch * 3, per)
+                // (a key always the same synth of its port's block, whatever its channel: midi_play.emit)
+                fmodi(port, ports) * per + fmodi(key * 5, per)
             };
             let ru = u(r);
             if lens[ru] + 3 > cap {
@@ -748,7 +749,7 @@ pub fn emit(ms: &[i32], trk: &[i32], i0: i64, i1: i64, ticks: &[i64], t_late: i6
             let first = if exact {
                 port
             } else if ports < synths {
-                fmodi(port + ch, ports) * per
+                fmodi(port, ports) * per
             } else {
                 fmodi(port + ch, synths)
             };
