@@ -522,7 +522,7 @@ def _shape(text_x, text_y, values, sym, lo=0.0, hi=1.0, slices=0):
     vals = dict(values)
     a = _drawn(fx, fy, vals, lo, hi, SHAPE_SAMPLES)
     if sym == AROUND:
-        return fitted_shape(around_shape(_slice_drawn(fx, fy, vals, lo, hi, slices), slices))
+        return fitted_shape(_around(text_x, text_y, values, lo, hi, slices)[2])
     return symmetric_shape(a, sym) if sym else fitted_shape(a)
 
 
@@ -531,12 +531,46 @@ def _slice_drawn(fx, fy, vals, lo, hi, slices):
     return _drawn(fx, fy, vals, lo, lo + (hi - lo) / slices, max(16, SHAPE_SAMPLES // slices))
 
 
+def way_of(a):
+    """Which way a drawing (x, y rows) goes round: +1 anticlockwise, -1 clockwise (its outline's signed area, an
+    open one closed by a straight line), None when it encloses next to nothing."""
+    x, y = a[:, 0], a[:, 1]
+    area = 0.5 * float(np.dot(x, np.roll(y, -1)) - np.dot(np.roll(x, -1), y))
+    size = float(np.ptp(x) + np.ptp(y))
+    return None if abs(area) <= 1e-9 * size * size else (1 if area > 0 else -1)
+
+
+@functools.lru_cache(maxsize=64)
+def _around(text_x, text_y, values, lo, hi, slices):
+    """Around the centre from the formulas: (the first slice's points, the way round, the whole drawing), x / y
+    rows. The way round is the WHOLE formula's (user 2026-11-19: guessing it from the slice flipped with small
+    number changes when Slices doesn't match the petals, and an edit then jumped)."""
+    fx, fy = formula(text_x, named=True, var="t"), formula(text_y, named=True, var="t")
+    vals = dict(values)
+    part = _slice_drawn(fx, fy, vals, lo, hi, slices)
+    way = way_of(_drawn(fx, fy, vals, lo, hi, SHAPE_SAMPLES))
+    if way is None:  # (a formula going nowhere round: the slice's own guess, once)
+        way = 1 if around_centre(part, slices)[1] > 0 else -1
+    return part, way, around_shape(part, slices, way)
+
+
+def _around_of(p):
+    span = t_span(p)
+    lo, hi = span_numbers(span) if span else (0.0, 1.0)
+    return _around(p["x"], p["y"], tuple(sorted(p["vars"].items())), lo, hi, shape_slices(p)), lo, hi
+
+
 @functools.lru_cache(maxsize=64)
 def _slice(text_x, text_y, values, lo, hi, slices):
-    fx, fy = formula(text_x, named=True, var="t"), formula(text_y, named=True, var="t")
-    part = _slice_drawn(fx, fy, dict(values), lo, hi, slices)
-    _, place = _fit_map(around_shape(part, slices))
+    part, _, whole = _around(text_x, text_y, values, lo, hi, slices)
+    _, place = _fit_map(whole)
     return place(part)
+
+
+def formula_slice_way(p):
+    """The way round (+1 / -1) a shape set to Around the centre turns its slice (see _around): kept with a slice
+    edited by hand (loop["way"])."""
+    return _around_of(p)[0][1]
 
 
 def formula_slice(p):
@@ -551,13 +585,11 @@ def formula_slice_ways(p):
     """Which way the first slice leaves its start and arrives at its end, as placed in the whole: ((du, dv) out of
     the start, (du, dv) back from the end), from a tiny step of t (a sample's chord was degrees off on a tight petal
     tip: a smooth join between copies looked like a corner). ValueError if it can't be worked out."""
-    span = t_span(p)
-    lo, hi = span_numbers(span) if span else (0.0, 1.0)
+    (_, _, whole), lo, hi = _around_of(p)
     n = shape_slices(p)
     fx, fy = formula(p["x"], named=True, var="t"), formula(p["y"], named=True, var="t")
     vals = dict(p["vars"])
-    part = _slice_drawn(fx, fy, vals, lo, hi, n)
-    _, place = _fit_map(around_shape(part, n))
+    _, place = _fit_map(whole)
     end, tiny = lo + (hi - lo) / n, (hi - lo) / n * 1e-6
     u, v = place(_drawn(fx, fy, vals, lo, lo + tiny, 1))
     u2, v2 = place(_drawn(fx, fy, vals, end - tiny, end, 1))

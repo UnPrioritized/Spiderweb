@@ -26,7 +26,7 @@ from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_
                           held_axis, keep_symmetric, nearest, pen_handles, sample)
 from notes.pattern import (AROUND, LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, SLICES_MAX,
                            SLICES_MIN, SOFT_DEFAULT, around_centre, clean_loop, clean_pattern_graphs, formula_loop,
-                           formula_shape, formula_slice, formula_slice_ways, keep_sym, most_loops, new_pattern, new_shape, pattern_name,
+                           formula_shape, formula_slice, formula_slice_way, formula_slice_ways, keep_sym, most_loops, new_pattern, new_shape, pattern_name,
                            pattern_names, polar_of, polar_ok, polar_xy, shape_name, shape_names, shape_points,
                            shape_slices, span_numbers, t_span)
 from files.clipboard import put_text
@@ -1107,8 +1107,7 @@ class FormulaDialog(tk.Toplevel):
             out["sym"] = sym
         if around:
             out["slice"] = True
-            _, step = around_centre(np.column_stack([u, v]), shape_slices(self.pat))
-            out["way"] = 1 if step > 0 else -1  # (the formula's way round, kept: see around_centre)
+            out["way"] = formula_slice_way(self.pat)  # (the formula's way round, kept: see pattern._around)
             p = out["pts"]  # (the end handles along the formula's own way at the ends: the fit leaves them a few
             ways = formula_slice_ways(self.pat)  # degrees off, so a smooth join between copies looked like a corner)
             for end, handle, d in ((0, 1, ways[0]), (len(p) - 1, len(p) - 2, ways[1])):
@@ -1125,8 +1124,9 @@ class FormulaDialog(tk.Toplevel):
 
     def slice_centre(self, loop):
         """(centre, step angle) the slice turns round (pattern.around_centre: its ends make it)."""
+        way = loop.get("way") if self.pat.get("loop") else formula_slice_way(self.pat)
         return around_centre(np.asarray(sample([tuple(p) for p in loop["pts"]], 32), float), shape_slices(self.pat),
-                             loop.get("way"))
+                             way)
 
     def fit_view(self, loop):
         """Pixels per unit, the left edge, the middle line and the loop's length in units: as it looks on the
