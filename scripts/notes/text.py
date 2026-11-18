@@ -1111,6 +1111,7 @@ def text_name(text):
 BATCH = os.environ.get("SPIDERWEB_TEXT_BATCH", "1") != "0"  # (textfast: all letters in one pass; off = one by one)
 BATCH_FROM = 2  # (one outline: one by one, ~0.1 ms quicker; 2+ already quicker all at once, 10 letters 4.3 -> 1.7 ms)
 _em = {}  # (Strokes token, bbox) -> the strokes cut into steps in em units (textfast), for the last few texts
+_placed = {}  # (that + where the box is + grow / ppq) -> the finished Polys, for the last few
 
 
 def text_polys(sh):
@@ -1148,6 +1149,12 @@ def _batch_polys(sh):
     x0, y0, x1, y1 = tx["bbox"]
     w, h = x1 - x0, y1 - y0
     tok = strokes_token(sh["strokes"])
+    grow, ppq = tx.get("grow", 0.0), tx.get("ppq")
+    placed = (tok, x0, y0, x1, y1, tuple(map(tuple, sh["pts"])), grow, tx.get("k", 1.0) if grow else None,
+              tuple(tx.get("holes", ())) if grow else None, ppq)
+    done = _placed.get(placed) if tok else None  # (the same text in the same place: the notes' outline step asks
+    if done is not None:  # again right after the shape's lines did; Polys are never changed in place)
+        return done
     key = (tok, x0, y0, x1, y1)
     got = _em.get(key) if tok else None
     if got is None:
@@ -1164,14 +1171,20 @@ def _batch_polys(sh):
     O, X, Y = text_axes(sh)
     bx = O[0] + em[:, 0] * X[0] + em[:, 1] * Y[0]
     by = O[1] + em[:, 0] * X[1] + em[:, 1] * Y[1]
-    grow = tx.get("grow", 0.0)
     if grow:  # (offset, every outline at once)
         holes = set(tx.get("holes", ()))
         bx, by, counts = textfast.grow_many(bx, by, counts, [-grow if i in holes else grow
                                                              for i in range(len(counts))], tx.get("k", 1.0))
-    ppq = tx.get("ppq")
     bx = (np.floor(bx * ppq * TICK_STEPS + 0.5) / TICK_STEPS + TICK_LIFT) / ppq if ppq else textfast.round9(bx)
-    return textfast.polys_of(bx, textfast.round9(by), counts)
+    out = textfast.polys_of(bx, textfast.round9(by), counts)
+    if tok:
+        try:  # (the notes thread makes texts too)
+            while len(_placed) >= 4:
+                _placed.pop(next(iter(_placed)), None)
+        except (RuntimeError, StopIteration):
+            pass
+        _placed[placed] = out
+    return out
 
 
 def offset(poly, d):

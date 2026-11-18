@@ -15,6 +15,7 @@ from window import rebar_edit
 from notes.loaded import extract_groups
 from notes.engine import BIG_MARK, BIG_TEXT, with_big
 from notes.merge import merge_parts
+from notes.text import Strokes, strokes_token
 from notes.tempo import TempoSnap, changed as tempo_edited, snap_line, tempo_snap
 from window import look
 from window.widgets import ListTip, Tooltip, fit_screen, placed
@@ -44,20 +45,53 @@ class StateText(str):
     __slots__ = ()
 
 
+KEEP_STROKES = 16  # (a text with this many letter outlines or more: its strokes kept as they are, not written out)
+
+
+class KeptStrokes:
+    """A text's strokes kept by an undo step as they are (text.Strokes, never changed in place): writing out ~38,000
+    points took ~30 ms a change on an 800-letter text. Its own list (the shape's list may get new items later),
+    the same stroke dicts. Equal = the same fingerprint (a hash of the very numbers)."""
+    __slots__ = ("items", "fp")
+
+    def __init__(self, strokes):
+        self.items, self.fp = list(strokes), strokes.fp
+
+    def __eq__(self, other):
+        return isinstance(other, KeptStrokes) and other.fp == self.fp
+
+    def __hash__(self):
+        return hash(self.fp)
+
+    def strokes(self):
+        return Strokes(self.items, self.fp)
+
+
+def _kept_strokes(sh):
+    """(sh, "strokes") when sh is a text whose strokes can be kept as they are (KeptStrokes), else nothing."""
+    st = sh.get("strokes")
+    if (isinstance(sh.get("text"), dict) and type(st) is Strokes and len(st) >= KEEP_STROKES
+            and strokes_token(st)):
+        return [(sh, "strokes")]
+    return []
+
+
 def undo_state(shapes):
     """The shapes as an undo step keeps them: their JSON, or with big texts (JSON, the texts) where the JSON has
     a mark in each one's place. The texts are the shapes' own strings, shared, never copied (a 4 M-note paste is
-    60 MB: every step copying it ran out of memory). Equal states = equal shapes."""
-    places = [p for sh in shapes for p in _big_texts(sh)]
+    60 MB: every step copying it ran out of memory); long texts' letter strokes the same way (KeptStrokes). Equal
+    states = equal shapes."""
+    places = [p for sh in shapes for p in _big_texts(sh) + _kept_strokes(sh)]
     if not places:
         return StateText(json.dumps(shapes))
-    texts = tuple(d[k] for d, k in places)
-    for i, (d, k) in enumerate(places):
-        d[k] = BIG_MARK + str(i)
+    was = [d[k] for d, k in places]
+    texts = tuple(KeptStrokes(v) if k == "strokes" else v for (_, k), v in zip(places, was))
     try:
+        for i, (d, k) in enumerate(places):
+            d[k] = BIG_MARK + str(i)
         return json.dumps(shapes), texts
     finally:
-        for (d, k), text in zip(places, texts):
+        for (d, k), text in zip(places, was):
             d[k] = text
 
 
@@ -77,7 +111,11 @@ def load_state(state):
     """An undo state -> the shapes (big texts put back as the very strings kept)."""
     if isinstance(state, str):
         return json.loads(state)
-    return [with_big(sh, state[1]) for sh in json.loads(state[0])]
+    shapes = [with_big(sh, state[1]) for sh in json.loads(state[0])]
+    for sh in shapes:  # (kept strokes: a Strokes of its own each time, the same stroke dicts)
+        if isinstance(sh.get("strokes"), KeptStrokes):
+            sh["strokes"] = sh["strokes"].strokes()
+    return shapes
 
 START = tr("history.start")  # the first row: the oldest state still kept
 FUTURE = look.FUTURE  # steps undone (Ctrl+Y / clicking them brings them back; a new change drops them)
