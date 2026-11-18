@@ -48,6 +48,19 @@ def thick_of(sh):
     return t if isinstance(t, (int, float)) and t > THICK_MIN else None
 
 
+def pen_k(st):
+    """The pen's own beats per key where it's round (sh / stroke "pk", hunt 2026-11-19: Straighten re-reads "k" as
+    the roll looks now, which made the ribbon wider / thinner); strokes without it: their "k"."""
+    for key in ("pk", "k"):
+        try:
+            k = float(st.get(key))
+        except (TypeError, ValueError):
+            continue
+        if 1e-9 < k < 1e9 and math.isfinite(k):
+            return k
+    return 1.0
+
+
 def clean_pen(value):
     """sh["pen"] from a file: only what differs from PEN_DEFAULT, None when nothing does."""
     if not isinstance(value, dict):
@@ -109,6 +122,21 @@ def ink_share(pts, ink, k):
     if s[-1] <= 0:
         return None
     return s / s[-1], np.asarray(ink, float)
+
+
+def ink_moved(old, new, k):
+    """A bent / remade stroke's points new (beats, keys or u, v; k = beats per key there) given the ink of its old
+    points: each new point the share at its place along the stroke (the same share along, so the width a part
+    was drawn with stays with it). old = (points, ink). None when there's nothing to carry."""
+    pts, ink = old
+    got = ink_share(pts, ink, k) if ink and len(ink) == len(pts) else None
+    q = np.asarray(new, float).reshape(-1, 2)
+    if got is None or len(q) < 2:
+        return None
+    s = np.r_[0.0, np.cumsum(np.hypot(np.diff(q[:, 0]) / max(k, 1e-9), np.diff(q[:, 1])))]
+    if s[-1] <= 0:
+        return None
+    return [round(float(x), 3) for x in np.interp(s / s[-1], *got)]
 
 
 def taper_share(f, taper):
@@ -231,12 +259,21 @@ def _pen_edges(xy, r, ys, flat, s):
     clips = np.zeros((n, 10))
     if flat:  # (square ends: what's behind the start / past the end cut off, across the stroke there)
         total, far = s[-1], 2 * float(r.max())
+        # (the way into the stroke over about one pen width, never the first tiny mouse wobble: hunt 2026-11-19, a
+        # 3 px wiggle at the press cut the end slanted; a stroke shorter than that: over half of it)
+        reach = min(float(r.max()) * 2, total / 2)
         for c, end, near in ((0, 0, s[:-1] <= far), (5, n, s[1:] >= total - far)):
             ox, oy = xy[end]
-            step = range(1, n + 1) if end == 0 else range(n - 1, -1, -1)  # (into the stroke from that end)
-            j = next((j for j in step if xy[j, 0] != ox or xy[j, 1] != oy), None)
-            if j is None:
-                continue
+            if end == 0:
+                j = int(np.searchsorted(s, reach, "left"))
+            else:
+                j = int(np.searchsorted(s, total - reach, "right")) - 1
+            j = min(max(j, 0), n)
+            if xy[j, 0] == ox and xy[j, 1] == oy:
+                step = range(1, n + 1) if end == 0 else range(n - 1, -1, -1)  # (into the stroke from that end)
+                j = next((j for j in step if xy[j, 0] != ox or xy[j, 1] != oy), None)
+                if j is None:
+                    continue
             vx, vy = xy[j, 0] - ox, xy[j, 1] - oy
             m = math.hypot(vx, vy)
             clips[near, c:c + 5] = [1.0, ox, oy, vx / m, vy / m]  # (kept: the side where (p - end) . v >= 0)
@@ -252,11 +289,13 @@ def _pen_rows_np(edges, clips, ys, first, cnt):
     p, c = edges[e], clips[e]
     ax, ay, bx, by, ra, rb = (p[:, i] for i in range(6))
     lo, hi = np.full(len(e), np.inf), np.full(len(e), -np.inf)
+    # (a line the band only TOUCHES gets nothing, like shrink.near_rows' plain pen: circles strictly crossed, a
+    # tangent lying on the line left out; hunt 2026-11-19, a stroke on a key took a row more each side)
     for px, py, pr in ((ax, ay, ra), (bx, by, rb)):  # the two circles (a line can cross a tangent and the far
         h = pr * pr - (y - py) * (y - py)  # circle with hull between them)
         w = np.sqrt(np.maximum(h, 0))
-        lo = np.where(h >= 0, np.minimum(lo, px - w), lo)
-        hi = np.where(h >= 0, np.maximum(hi, px + w), hi)
+        lo = np.where(h > 0, np.minimum(lo, px - w), lo)
+        hi = np.where(h > 0, np.maximum(hi, px + w), hi)
     has = p[:, 6] != 0
     with np.errstate(divide="ignore", invalid="ignore"):
         for t in (7, 11):  # the two tangent lines
@@ -266,9 +305,6 @@ def _pen_rows_np(edges, clips, ys, first, cnt):
             x = px + (y - py) / np.where(on, span, 1.0) * (qx - px)
             lo = np.where(on, np.minimum(lo, x), lo)
             hi = np.where(on, np.maximum(hi, x), hi)
-            level = has & ~on & (np.abs(span) <= 1e-12) & (np.abs(py - y) <= 1e-12)  # (lying on the line)
-            lo = np.where(level, np.minimum(lo, np.minimum(px, qx)), lo)
-            hi = np.where(level, np.maximum(hi, np.maximum(px, qx)), hi)
         for k in (0, 5):  # the flat ends' square cuts
             cut = c[:, k] != 0
             if not cut.any():

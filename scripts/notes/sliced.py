@@ -24,12 +24,12 @@ import numpy as np
 
 from notes.custom import CENTRE_KEYS, frame_to_bp, frame_to_uv, moved_at
 from notes.paths import dedupe, dot_segment_notes, path_notes
-from notes.pen import band_of, thick_of
+from notes.pen import band_of, pen_k, thick_of
 
 # what makes a line kind's path (besides its points): changed = no longer the piece it was (end_dot too: "Last note"
 # changed on a piece is about its own last note)
 OUTLINE = ("kind", "pts", "k", "smooth", "tumour", "tumours", "gaps", "splits", "sharp", "sym", "shape", "pattern",
-           "end_dot", "thick", "pen", "ink")
+           "end_dot", "thick", "pk", "pen", "ink")
 CUSTOM_OUTLINE = ("kind", "pts", "strokes", "areas", "round")  # a custom shape's (its strokes are in its frame)
 FUNNEL_OUTLINE = ("kind", "pts", "starts")  # a funnel's (its curves are in "starts"; cut through its notes, knife_in_two)
 VELOCITY = ("vel0", "vel1", "vel_env")
@@ -302,6 +302,25 @@ def moved_by(sh):
     return float(d[0, 0]), float(d[0, 1])
 
 
+PEN_KEYS = ("thick", "pk", "pen")  # (a wide freehand pen's settings: what a piece may change and stay a piece)
+
+
+def pen_set(sh, key, value=None):
+    """Sets (None: takes away) a freehand pen setting on sh. A sliced piece stays a piece (user took A, hunt
+    2026-11-19: changing a piece's Thickness made it the whole stroke again, its notes doubled on the other side):
+    its "was" outline and its own copy of the whole change the same way, so the whole is made with the new pen and
+    cut where it was; the other pieces keep theirs."""
+    cut = sh.get("cut")
+    piece = isinstance(cut, dict) and cut.get("whole") is not None and moved_by(sh) is not None
+    if piece:  # (its own copies: the pieces of one cut share the very same "whole" until saved)
+        cut = sh["cut"] = dict(cut, was=json.loads(json.dumps(cut["was"])), whole=json.loads(json.dumps(cut["whole"])))
+    for d in [sh] + ([cut["was"], cut["whole"]] if piece else []):
+        if value is None:
+            d.pop(key, None)
+        else:
+            d[key] = json.loads(json.dumps(value))
+
+
 def moved(sh, d):
     """sh's points moved by d (beats, keys)."""
     return dict(sh, pts=[[b + d[0], p + d[1]] for b, p in sh["pts"]])
@@ -486,10 +505,12 @@ def paths_of(sh):
 
 def spotted_notes(sh, ppq, end_dot):
     """A line kind's (start, end, key) notes, as engine.kind_notes_tracks makes them, and each one's spot."""
-    paths = paths_of(sh)
     if thick_of(sh):  # (a wide pen's band: cut by the knife only, so every note on spot 0: the whole part)
-        notes = band_of(paths[0] * [ppq, 1], sh, sh.get("k", 1.0), ppq)  # (in drawing order, like engine's)
+        from notes.engine import cached_arrays  # (in DRAWING order, like engine's: never turned round, its width
+        drawn = dedupe(np.concatenate(cached_arrays(sh)))  # from speed goes along it; hunt 2026-11-19)
+        notes = band_of(drawn * [ppq, 1], sh, pen_k(sh), ppq)
         return notes, np.zeros(len(notes))
+    paths = paths_of(sh)
     if len(paths) > 1:  # a joined curve's pieces: each like a line
         got = [path_notes(a * [ppq, 1], end_dot, where=True) for a in paths]
         return (np.concatenate([np.asarray(n, np.int64).reshape(-1, 3) for n, _ in got]),

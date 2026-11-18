@@ -15,6 +15,8 @@ import math
 
 import numpy as np
 
+from notes.pen import thick_of
+
 from files.speed import compiled
 from notes import recolour as rc
 
@@ -930,6 +932,15 @@ def _bent_shape(sh, tabs, r, box, own, ppq, wp=None, lq=None):
         pts = np.column_stack((t0 / ppq + got[:, 0] * w, k0 + got[:, 1] * h))
         out = {k: v for k, v in sh.items() if k not in LINE_DROP}
         out.update(kind="free", pts=[[float(a), float(b)] for a, b in pts])
+        if thick_of(sh):  # (a wide pen keeps the zoom it's round in, and its widths from speed along the bent
+            from notes.pen import ink_moved, pen_k  # points; hunt 2026-11-19: it went round at 1 beat a key)
+            out["pk"] = pen_k(sh)
+            out["k"] = pen_k(sh)
+            ink = ink_moved((sh["pts"], sh["ink"]), out["pts"], pen_k(sh)) if sh.get("ink") else None
+            if ink:
+                out["ink"] = ink
+            else:
+                out.pop("ink", None)
         return out
     return None
 

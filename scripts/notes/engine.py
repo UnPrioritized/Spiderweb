@@ -69,7 +69,7 @@ from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_c
                           piece_knives, piece_notes, run_origins, snap_piece, source, spotted_notes, steps_kept,
                           whole_made)
 from notes.smooth import clean_level, smooth_path
-from notes.pen import THICK_MIN, band_of, clean_pen, clean_thick, clean_ink, thick_of
+from notes.pen import THICK_MIN, band_of, clean_pen, clean_thick, clean_ink, pen_k, thick_of
 from notes.steps import RUNNER, expanded, whole_steps
 from notes.text import clean_text, strokes_of, strokes_token
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -554,6 +554,8 @@ def clean_shape(sh):
         if thick > THICK_MIN:
             out["thick"] = thick
             out["k"] = arc_k(sh)
+            if "pk" in sh:  # (the pen's own zoom, pen.pen_k)
+                out["pk"] = pen_k(sh)
     if out["kind"] == "free":  # (the pen's shape + each point's width from the hand's speed: pen.py, kept with or
         pen = clean_pen(sh.get("pen"))  # without a width)
         if pen:
@@ -3039,7 +3041,7 @@ def _kind_notes_tracks(sh, ppq, keys):
     elif sh["kind"] == "gliss":  # a Glissando run: one note per picked key, a grid step each (gliss.py)
         raw = gliss_notes(sh, ppq)
     elif thick:  # (never turned round: its width from speed is in drawing order; user 2026-11-19, a stroke ending
-        raw = band_of(drawn, sh, sh.get("k", 1.0), ppq)  # earlier in time shifted it all)
+        raw = band_of(drawn, sh, pen_k(sh), ppq)  # earlier in time shifted it all)
     elif sh["kind"] in LINE_KINDS and len(cached_arrays(sh)) > 1:  # a joined curve's pieces: each like a line
         pieces = []
         for a in cached_arrays(sh):

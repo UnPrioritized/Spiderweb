@@ -105,7 +105,7 @@ class LiveDrawing:
                   "k": sh.get("k", 1.0)}
             if (sh.get("thick") or 0) > 1:  # (a wide pen: its band's notes in the live shape too, pen.py)
                 st["thick"] = sh["thick"]
-            for key in ("pen", "ink"):  # (its shape + the width its drawing speed gave each point)
+            for key in ("pk", "pen", "ink"):  # (its own zoom, shape + the width its drawing speed gave each point)
                 if sh.get(key):
                     st[key] = sh[key]
             return st
@@ -487,6 +487,8 @@ class LiveDrawing:
         new = map_stroke(st, fn)
         if turn and "k" in st:  # still round (arcs, straightened freehand), like turning a shape
             new["k"] = turn * turn / st["k"]
+        if turn and "pk" in st:  # (a wide freehand pen's own: pen.pen_k)
+            new["pk"] = turn * turn / st["pk"]
         app = self.app
         app.push_undo(name=name)
         areas = sh.get("areas") or []

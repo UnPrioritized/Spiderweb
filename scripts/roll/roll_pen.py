@@ -4,7 +4,7 @@ stays the thin line), and [ / ] = thinner / thicker (Shift: by 5), like paint pr
 Width. The keys go through the side panel's Thickness box, so selected freehand shapes change with it."""
 
 from files.lang import trn
-from files.mathexpr import calc, fmt
+from files.mathexpr import fmt
 from notes.pen import THICK_MAX, THICK_MIN, clean_thick
 from roll.roll_shared import SHIFT
 from window import look
@@ -54,11 +54,10 @@ class PenCircle:
         if step is None or app.tool.get() != "free" or self.drag:
             return False
         step *= 5 if e.state & SHIFT and abs(step) == 1 else 1
-        app.sync_freehand()  # (from what the box shows: a selected freehand shape's own, else the new-stroke one)
-        try:
-            now = float(calc(app.thick_var.get()))
-        except ValueError:
-            now = app.free_thick
+        # (from the selected freehand shape's own number, else the new-stroke one; never what the hidden box last
+        # held: another kind selected left it stale, hunt 2026-11-19)
+        tgts = app.free_targets()
+        now = clean_thick(tgts[0][0].get("thick", THICK_MIN)) if tgts else app.free_thick
         value = clean_thick(min(max(now + step, THICK_MIN), THICK_MAX))
         app.thick_var.set(fmt(value))
         app.on_thick_entry()

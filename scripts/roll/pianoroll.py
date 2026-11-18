@@ -1595,7 +1595,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self._ink_way = ([(e.x / self.scale, e.y / self.scale)], [trail[-1][2] if trail else e.time])
             self.draft["ink"] = [1.0]
             if app.free_thick > 1:  # (the wide pen already while drawing: its notes show as they'll be, user)
-                self.draft.update(thick=app.free_thick, k=self.sy / self.sx)
+                self.draft.update(thick=app.free_thick, k=self.sy / self.sx, pk=self.sy / self.sx)
                 if app.free_pen:
                     self.draft["pen"] = dict(app.free_pen)
             return

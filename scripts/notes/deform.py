@@ -444,6 +444,13 @@ def bent_stroke(st, d, tol=TOL):
     out = dict(keep, kind="poly", pts=[[float(u), float(v)] for u, v in got])
     if plain and st.get("free"):
         out.update(free=True, k=st.get("k", 1.0))
+    if st.get("ink"):  # (a wide pen's widths from speed: carried to the bent points, pen.ink_moved)
+        from notes.pen import ink_moved, pen_k
+        ink = ink_moved((st["pts"], st["ink"]), out["pts"], pen_k(st))
+        if ink:
+            out["ink"] = ink
+        else:
+            out.pop("ink", None)
     return out
 
 

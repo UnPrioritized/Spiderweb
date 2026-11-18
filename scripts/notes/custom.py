@@ -22,7 +22,7 @@ from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, forme
                            moved_formulas)
 from notes.polygon import MIXES, clean_corners, formed_sides
 from notes.smooth import clean_level, smooth_path
-from notes.pen import THICK_MIN, band_of, clean_pen, clean_thick, clean_ink
+from notes.pen import THICK_MIN, band_of, clean_pen, clean_thick, clean_ink, pen_k
 from notes.paths import (ROW_EDGE, top_key, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
 from notes.hzbass import (HZ_DEFAULTS, KeyGrid, even_squares, heard_layers, left_edge, off_cents, own_channels,
@@ -226,6 +226,8 @@ def clean_strokes(strokes):
                         out[-1].update(free=True, smooth=clean_level(st.get("smooth", 0)), k=arc_k(st))
                         if "thick" in st and clean_thick(st["thick"]) > THICK_MIN:  # (a wide pen: pen.py)
                             out[-1]["thick"] = clean_thick(st["thick"])
+                            if "pk" in st:  # (the pen's own zoom)
+                                out[-1]["pk"] = pen_k(st)
                         pen, ink = clean_pen(st.get("pen")), clean_ink(st.get("ink"), len(pts))
                         if pen:
                             out[-1]["pen"] = pen
@@ -696,9 +698,11 @@ def gap_lines(sh):
 def join_strokes(strokes):
     """Open lines that meet end to end become one line, so e.g. three lines drawn as a triangle make one
     closed triangle (only lines with the same role and outline colour, which they keep). Curves and circles stay as
-    they are (they still count as joined, see strokes_closed), and so do lines with a formula."""
+    they are (they still count as joined, see strokes_closed), and so do lines with a formula and freehand strokes
+    with a Thickness (joined, their pen was lost: hunt 2026-11-19, a library drawing came back thin)."""
     def plain_line(st):
-        return st["kind"] == "poly" and not stroke_closed(st) and not has_formula(st)
+        return st["kind"] == "poly" and not stroke_closed(st) and not has_formula(st) \
+            and not (st.get("free") and (st.get("thick") or 0) > THICK_MIN)
 
     others = [st for st in strokes if not plain_line(st)]
     order = ("",) + ROLES
@@ -759,6 +763,8 @@ def normalize_strokes(strokes):
             new = dict(st, pts=[fix(u, v) for u, v in st["pts"]])
             if (st["kind"] == "arc" or st.get("free")) and w > 1e-9 and h > 1e-9:
                 new["k"] = st.get("k", 1.0) * h / w  # still round when stretched back to the drawn proportions
+                if "pk" in st:  # (the pen's own, the same way: pen.pen_k)
+                    new["pk"] = st["pk"] * h / w
             if w > 1e-9 and h > 1e-9:
                 moved_formulas(new, lambda u, v: (u / w, v / h))
             out.append(new)
@@ -820,6 +826,8 @@ def map_stroke(st, fn, su=1.0, sv=1.0):
     new = dict(st, pts=[list(fn(u, v)) for u, v in st["pts"]])
     if st["kind"] == "arc" or st.get("free"):  # (a freehand stroke's k works like an arc's)
         new["k"] = st.get("k", 1.0) * abs(su / sv)
+        if "pk" in st:  # (the pen's own, the same way: pen.pen_k)
+            new["pk"] = st["pk"] * abs(su / sv)
     moved_formulas(new, fn)  # (a curve's)
     return new
 
@@ -932,6 +940,8 @@ def stroke_bp(sh, k):
     new = map_stroke(st, to_bp)
     if "k" in st:
         new["k"] = bp_k(sh["pts"], st["k"])
+    if "pk" in st:  # (the pen's own, the same way: pen.pen_k)
+        new["pk"] = bp_k(sh["pts"], st["pk"])
     return new
 
 
@@ -945,6 +955,8 @@ def add_stroke(sh, st, at=None):
     new = map_stroke(st, to_uv)
     if new.get("free") or new["kind"] == "arc":  # its k: beats per key on screen -> how many u one v is on screen
         new["k"] = uv_k(sh["pts"], st.get("k", 1.0))
+        if "pk" in st:  # (the pen's own, the same way: pen.pen_k)
+            new["pk"] = uv_k(sh["pts"], st["pk"])
     if new["kind"] != "ellipse":
         near = stroke_ends(sh["strokes"])
         for i in (0, len(new["pts"]) - 1) if new["kind"] != "poly" else range(len(new["pts"])):
@@ -1170,7 +1182,7 @@ def outline_notes(sh, ppq, only=None, paths=None):
             got = [paths_outline(join_paths([paths[k] for k in ks]), ppq)] if ks else []
             for k in wide:
                 st, a = sh["strokes"][k], np.asarray(paths[k], float).reshape(-1, 2)  # (in drawing order)
-                got.append(band_of(a * [ppq, 1], st, bp_k(sh["pts"], st.get("k", 1.0)), ppq, st.get("k", 1.0)))
+                got.append(band_of(a * [ppq, 1], st, bp_k(sh["pts"], pen_k(st)), ppq, pen_k(st)))
             return keep_longest(np.concatenate(got))
     return paths_outline(join_paths([paths[k] for k in ks]), ppq)
 

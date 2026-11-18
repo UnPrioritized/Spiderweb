@@ -17,14 +17,16 @@ const CW: usize = 10;
 fn piece_at(p: &[f64], c: &[f64], y: f64) -> (f64, f64) {
     let (ax, ay, bx, by, ra, rb, has) = (p[0], p[1], p[2], p[3], p[4], p[5], p[6]);
     let (mut lo, mut hi) = (f64::INFINITY, f64::NEG_INFINITY);
+    // (a line the band only TOUCHES gets nothing, like band_rows' plain pen: circles strictly crossed, a tangent
+    // lying on the line left out)
     let h = ra * ra - (y - ay) * (y - ay);
-    if h >= 0.0 {
+    if h > 0.0 {
         let w = h.sqrt();
         lo = pmin(lo, ax - w);
         hi = pmax(hi, ax + w);
     }
     let h = rb * rb - (y - by) * (y - by);
-    if h >= 0.0 {
+    if h > 0.0 {
         let w = h.sqrt();
         lo = pmin(lo, bx - w);
         hi = pmax(hi, bx + w);
@@ -37,9 +39,6 @@ fn piece_at(p: &[f64], c: &[f64], y: f64) -> (f64, f64) {
                 let x = px + (y - py) / span * (qx - px);
                 lo = pmin(lo, x);
                 hi = pmax(hi, x);
-            } else if span.abs() <= 1e-12 && (py - y).abs() <= 1e-12 {
-                lo = pmin(lo, pmin(px, qx));
-                hi = pmax(hi, pmax(px, qx));
             }
         }
     }

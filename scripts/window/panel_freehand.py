@@ -6,10 +6,11 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import refit, uv_k
+from notes.sliced import pen_set
 from notes.pen import (ENDS, PEN_DEFAULT, TAPER_MAX, THICK_MAX, THICK_MIN, clean_pen, clean_thick, clean_ink,
                        pen_of)
 from window import look
-from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged, unit_word
+from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, unchanged, unit_word
 
 TIP = tr("panel_freehand.makes_the_freehand_stroke_perfect_0")
 THICK_TIP = tr("panel_freehand.thickness_tip")
@@ -97,29 +98,34 @@ class FreehandPanel:
         self._loading = True
         self.free_var.set(fmt(tgts[0][0].get("smooth", 0) if tgts else self.free_smooth))
         self.free_entry.config(style="TEntry")
-        # Thickness: freehand shapes and freehand strokes inside a live shape (user 2026-11-19)
-        self.thick_var.set(fmt(clean_thick(tgts[0][0].get("thick", THICK_MIN)) if tgts else self.free_thick))
+        # Thickness: freehand shapes and freehand strokes inside a live shape (user 2026-11-19); several with
+        # different numbers = an empty box (widgets.same_or_blank, like every panel box: hunt 2026-11-19)
+        thicks = [clean_thick(d.get("thick", THICK_MIN)) for d, _ in tgts]
+        same_or_blank(self.thick_entry, self.thick_var, [fmt(t) for t in thicks] or [fmt(self.free_thick)])
         self.thick_entry.config(style="TEntry")
-        self.sync_pen(tgts)
+        self.sync_pen(tgts, thicks)
         self._loading = False
 
-    def sync_pen(self, tgts):
-        """The pen's shape row: the first target's (or the new strokes'), greyed while the Thickness shown is 1;
-        Width from speed greyed for strokes drawn before it existed (no ink: pen.py)."""
+    def sync_pen(self, tgts, thicks):
+        """The pen's shape row: the targets' (or the new strokes'), mixed = an empty box / "Mixed" / a half tick;
+        usable when ANY target is wider than 1 (nothing selected: the new-stroke Thickness); Width from speed
+        greyed only when no target has drawing-speed widths (no ink: pen.py)."""
         pens = [pen_of(d) for d, _ in tgts] or [dict(PEN_DEFAULT, **self.free_pen)]
-        pen = pens[0]
-        wide = clean_thick(tgts[0][0].get("thick", THICK_MIN) if tgts else self.free_thick) > THICK_MIN
+        wide = any(t > THICK_MIN for t in thicks) if tgts else self.free_thick > THICK_MIN
         state = ["!disabled" if wide else "disabled"]
-        self.pen_ends_box.set(self.pen_ends_names[ENDS.index(pen["ends"])])
+        ends = {p["ends"] for p in pens}
+        self.pen_ends_box.set(self.pen_ends_names[ENDS.index(ends.pop())] if len(ends) == 1 else tr("widgets.mixed"))
         self.pen_ends_box.state(["readonly"] + state)
-        self.pen_taper_var.set(fmt(pen["taper"]))
+        same_or_blank(self.pen_taper_entry, self.pen_taper_var, [fmt(p["taper"]) for p in pens])
         self.pen_taper_entry.state(state)
         self.pen_taper_entry.config(style="TEntry")
         for w in (self.pen_ends_word, self.pen_taper_word, self.pen_taper_unit):
             w.config(foreground="" if wide else look.FAINT_TEXT)
         self.pen_taper_unit.config(foreground=look.HINT if wide else look.FAINT_TEXT)
-        timed = not tgts or all(clean_ink(d.get("ink"), len(d.get("pts") or ())) for d, _ in tgts)
-        self.pen_speed_on.set(all(p["speed"] for p in pens))
+        timed = not tgts or any(clean_ink(d.get("ink"), len(d.get("pts") or ())) for d, _ in tgts)
+        speeds = [p["speed"] for p in pens]
+        self.pen_speed_on.set(all(speeds))
+        self.pen_speed_tick.state(["alternate" if any(speeds) and not all(speeds) else "!alternate"])
         self.pen_speed_tick.state(["!disabled" if wide and timed else "disabled"])
         self.pen_speed_tip.set_text(tr("panel_freehand.speed_tip") if timed else tr("panel_freehand.speed_no_times"))
 
@@ -129,8 +135,9 @@ class FreehandPanel:
         if self._loading:
             return
         if key == "ends":
-            value = ENDS[self.pen_ends_names.index(self.pen_ends_box.get())] \
-                if self.pen_ends_box.get() in self.pen_ends_names else "round"
+            if self.pen_ends_box.get() not in self.pen_ends_names:  # ("Mixed" shown: nothing picked)
+                return
+            value = ENDS[self.pen_ends_names.index(self.pen_ends_box.get())]
         elif key == "taper":
             if left and unchanged(self.pen_taper_entry):
                 return
@@ -150,12 +157,8 @@ class FreehandPanel:
         if not tgts:
             return self.sync_freehand()
         self.begin_edit(("pen", key, tuple(sorted(self.sels)), self.stroke))
-        for d in tgts:
-            new = clean_pen({**pen_of(d), key: value})
-            if new:
-                d["pen"] = new
-            else:
-                d.pop("pen", None)
+        for d in tgts:  # (a sliced piece stays a piece: sliced.pen_set)
+            pen_set(d, "pen", clean_pen({**pen_of(d), key: value}))
         self.shapes_changed()
         self.sync_freehand()
 
@@ -178,13 +181,15 @@ class FreehandPanel:
             return self.sync_freehand()
         self.begin_edit(("thick", tuple(sorted(self.sels)), self.stroke))
         k = self.roll.sy / self.roll.sx if self.roll.sx else 0.25  # (round as the roll looks now)
-        for d, owner in tgts:
+        for d, owner in tgts:  # (a sliced piece stays a piece: sliced.pen_set)
             if value > THICK_MIN:
-                d["thick"] = value
+                pen_set(d, "thick", value)
                 if "k" not in d:  # (one already drawn keeps its own: the pen round as it was drawn)
-                    d["k"] = k if owner is None else uv_k(owner["pts"], k)
+                    pen_set(d, "k", k if owner is None else uv_k(owner["pts"], k))
+                if "pk" not in d:  # (the pen's own: Straighten re-reading "k" never moves it, pen.pen_k)
+                    pen_set(d, "pk", d["k"])
             else:
-                d.pop("thick", None)
+                pen_set(d, "thick")
         self.shapes_changed()
         self.sync_freehand()  # (the pen's shape row greys / ungreys with it)
         self.sync_by_snap()  # (Notes by snap / Last note greyed while thick)
@@ -210,6 +215,8 @@ class FreehandPanel:
         k = self.roll.sy / self.roll.sx if self.roll.sx else 0.25  # worked out as the roll looks now
         for d, owner in tgts:
             d["smooth"] = value
+            if (d.get("thick") or 0) > THICK_MIN and "pk" not in d:  # (a wide pen keeps the zoom it's round in:
+                d["pk"] = d.get("k", k if owner is None else uv_k(owner["pts"], k))  # pen.pen_k, hunt 2026-11-19)
             d["k"] = k if owner is None else uv_k(owner["pts"], k)
         for owner in {id(o): o for _, o in tgts if o is not None}.values():
             refit(owner)  # the stroke's new outline may reach further
