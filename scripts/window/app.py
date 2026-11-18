@@ -454,6 +454,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.drawn, self.mask_covered = NO_NOTES, set()  # the notes as painted with the masks (mask.mask_view)
         self.drawn_slots = NO_NOTES[:, 4]  # each of them's real track (drawn's own can be strip colours)
         self.pattern = NO_NOTES  # rendered without the masks' own notes: what masks show (= rendered but in Single)
+        self.pattern_off = None  # (its kept notes when it's a pass of its own: App.kept_mask_world)
         self.note_counts = []  # notes per shape in rendered
         self.notes_late = False  # the notes are behind the shapes (a drag going on: see shapes_changed)
         self.scrubbing = False  # a number box's label is being dragged (widgets.Scrub): slow notes wait too ("follow":
@@ -2355,17 +2356,24 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # (before play_changed: App.outgoing reads them. Laid out with every other note, so they have the channels
         # they'd have inside the keys: all_notes' tall world, PLAN 2026-11-18)
         self.off_all = self.offrange_rows(stash)
+        # (the tools' Multi channel passes + their kept notes: forgotten with the old notes, hunt 2026-11-18: two
+        # project copies were held for good)
+        self._multi_off = ()
+        self._off_by_owner = self._own_off = None
         self.made_version += 1
         if getattr(self, "tempo_pane", None) is not None:  # (Keep timing notes too close: looked at again soon)
             self.tempo_pane.dense_now()
         started = time.perf_counter()
-        self.pattern = self.rendered
+        self.pattern, self.pattern_off = self.rendered, None
         if self.channel_mode.get() == "single" and any(is_mask(sh) and not silent(sh) for sh in self.shapes):
             # (Single channel: sounding masks' notes cut the pattern's where they start; what a mask shows / Apply
-            # makes = the pattern as it sounds without them, user)
+            # makes = the pattern as it sounds without them, user; its kept notes too: pattern_off, hunt 2026-11-18)
+            pst = {}
             self.pattern = all_notes(shown, self.ppq, self.keys, "single", self.channel_split, self.all16(),
-                                     self.notes_tracks, quiet=True, own=self.own_channels(),
+                                     self.notes_tracks, quiet=True, own=self.own_channels(), stash=pst,
                                      overlaps=self.overlap_rule(), kept=self.keeps_offrange())[2]
+            if self.keeps_offrange() and self.companion is None:
+                self.pattern_off = pst.get("off")
         if self.mask_preview.get():
             self.drawn, self.mask_covered = mask_view(self.rendered, self.shapes, self.ppq, self.keys, self.notes_of,
                                                       self.pattern, GHOST_FADE[0] > 0)

@@ -318,8 +318,10 @@ class AppOffrange:
         a taller keyboard (nkeys): (shapes with every drawn mask lifted, notes = the real rows of the shapes with kept
         notes + the kept rows, lifted, a 7th column 1 on the kept ones, nkeys, up, notes_of for those shapes: a lifted
         mask's notes made WHOLE there (engine.whole_notes_tracks), others' as made, lifted). None: no mask or no kept
-        note. pattern: the rows the masks cover (App.pattern's; None = rendered)."""
-        off = self.off_all
+        note. pattern: the rows the masks cover (App.pattern's; None = rendered); with it, the kept notes of that same
+        pass (pattern_off: Single with sounding masks, their own notes left out; hunt 2026-11-18)."""
+        po = getattr(self, "pattern_off", None)
+        off = po if pattern is not None and po is not None else self.off_all
         if not len(off) or not any(map(is_mask, self.shapes)):
             return None
         from notes.engine import whole_notes_tracks

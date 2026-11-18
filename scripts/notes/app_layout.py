@@ -361,7 +361,11 @@ def tall_back(made, shapes, own, up, later, keys, stash, strips=True):
             emptied = emptied | frozenset(int(s) for s in np.setdiff1d(there, rendered[:, 4]).tolist())
     if stash is not None:
         stash["off"] = off
-    return made[0], made[1], rendered, made[3], vs, made[5], emptied
+    # (the slot count from the heard notes + the tracks counted as holding notes, as the track list and the export
+    # count them: channels only kept notes use aren't tracks; hunt 2026-11-18, the status line said 4 for 2)
+    auto = [s for s in emptied if 0 <= s < OWN0]
+    slots = min(made[3], max(auto_count(rendered[:, 4]), max(auto, default=-1) + 1))
+    return made[0], made[1], rendered, slots, vs, made[5], emptied
 
 
 def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, rounds=False, order=False,

@@ -769,7 +769,9 @@ class JoinSplit:
                                        busy=self.cc_busy("auto"), own=self.own_channels(), stash=stash,
                                        kept=self.keeps_offrange())
         # (its kept notes, laid with it: layout_off; the last two, as multi_kept may hand out an older one)
-        self._multi_off = [(multi, stash.get("off"))] + list(getattr(self, "_multi_off", ()))[:1]
+        # (only with kept notes; forgotten with the notes: shapes_changed, hunt 2026-11-18)
+        if stash.get("off") is not None:
+            self._multi_off = [(multi, stash["off"])] + list(getattr(self, "_multi_off", ()))[:1]
         return use10, multi
 
     def layout_off(self, layout, i):
@@ -782,7 +784,13 @@ class JoinSplit:
             off = next((o for m, o in getattr(self, "_multi_off", ()) if m is layout), None)
         if off is None:
             return None
-        return off[off[:, 5] == i]
+        # (sorted by shape once per kept array, then sliced: a search per shape grew 14x for 4x, hunt 2026-11-18)
+        got = getattr(self, "_off_by_owner", None)
+        if got is None or got[0] is not off:
+            o = np.argsort(off[:, 5], kind="stable")
+            got = self._off_by_owner = (off, off[o], off[o, 5])
+        s, owners = got[1], got[2]
+        return s[np.searchsorted(owners, i):np.searchsorted(owners, i, "right")]
 
     def own_slots(self, i, use10):
         """Shape i's rendered rows in Multi channel as if alone (with its Add between group: its colour turn): its

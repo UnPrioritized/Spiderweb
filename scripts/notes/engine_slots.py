@@ -53,9 +53,24 @@ def assign_slots(note_lists, split="key", apart=(), first=None, taken=None, shap
     n = len(note_lists)
     extra = {i: span for i, span in (extra or {}).items() if span[1] > span[0]}
 
+    every_key = []
+
+    def all_keys():
+        """Keys 0-255 + any other key a note is on (kept notes laid out tall, app_layout.tall_world: moved past 255,
+        they slipped past a Hz bass's busy channel, hunt 2026-11-18); worked out once."""
+        if not every_key:
+            used = [np.asarray(n, np.int64)[:, 2] for n in note_lists if len(n)]
+            base = np.arange(ALL_KEYS, dtype=np.int64)
+            if used:
+                k = np.concatenate(used)
+                if k.min() < 0 or k.max() >= ALL_KEYS:
+                    base = np.union1d(base, k)
+            every_key.append(base)
+        return every_key[0]
+
     def span_rows(span, owner):
         """An extra span as stretches clashing with anything then: one on each key (split="time": all key 0)."""
-        keys = np.arange(ALL_KEYS, dtype=np.int64) if split == "key" else np.zeros(1, np.int64)
+        keys = all_keys() if split == "key" else np.zeros(1, np.int64)
         return np.column_stack([keys, np.full(len(keys), span[0]), np.full(len(keys), span[1]),
                                 np.full(len(keys), owner)]).astype(np.int64)
 
