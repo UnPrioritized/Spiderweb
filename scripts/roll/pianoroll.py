@@ -1592,6 +1592,10 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             # (when each point was drawn, ms: the pen's Width from speed, pen.py; Windows' mouse trail when it has
             # one, else the events' own times)
             self.draft["times"] = [trail[-1][2] if trail else e.time]
+            if app.free_thick > 1:  # (the wide pen already while drawing: its notes show as they'll be, user)
+                self.draft.update(thick=app.free_thick, k=self.sy / self.sx)
+                if app.free_pen:
+                    self.draft["pen"] = dict(app.free_pen)
             return
         self.draft = make_shape(tool, [pt, pt], app.new_defaults(tool))
         self.drag = ("create", pt, e.x, e.y)

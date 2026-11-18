@@ -145,13 +145,13 @@ class FreehandPanel:
             value = round(float(value), 2)
         else:
             value = bool(self.pen_speed_on.get())
-        self.free_pen = clean_pen(dict(PEN_DEFAULT, **self.free_pen, **{key: value})) or {}  # new strokes too
+        self.free_pen = clean_pen({**PEN_DEFAULT, **self.free_pen, key: value}) or {}  # new strokes too
         tgts = [d for d, _ in self.free_targets() if pen_of(d)[key] != value]
         if not tgts:
             return self.sync_freehand()
         self.begin_edit(("pen", key, tuple(sorted(self.sels)), self.stroke))
         for d in tgts:
-            new = clean_pen(dict(pen_of(d), **{key: value}))
+            new = clean_pen({**pen_of(d), key: value})
             if new:
                 d["pen"] = new
             else:
