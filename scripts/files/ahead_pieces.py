@@ -436,10 +436,20 @@ class Song:
 
     def tempo_track(self, t0, t_end, scale=1.0):
         """The heard tempo from tick t0 (the piece's tick 0) to t_end as a track; scale = the tempo values' factor
-        (an odd PPQ halved: the exact ratio, not 1/2)."""
+        (an odd PPQ halved: the exact ratio, not 1/2). It ENDS AT t_end, so the piece's file runs to there: a file
+        ended at its last event, and notes held there with their offs past t_end (a song's last chord, its offs 8
+        beats on: every track ended on the chord's own tick) were never played by BASSMIDI and let go at once by
+        Merlin (user 2026-11-18, dev/scratch/ahead_end_render.py); the sound kept stops at the piece's end anyway.
+        (Was only with a pedal down, PLAN E4.)"""
         us, changes = self._at(t0)
         tempo_of = lambda u: b"\xff\x51\x03" + max(1, int(round(u * scale))).to_bytes(3, "big")  # noqa: E731
-        return _track([(0, tempo_of(us))] + [(t - t0, tempo_of(u)) for t, u in changes if t < t_end])
+        events = [(0, tempo_of(us))] + [(t - t0, tempo_of(u)) for t, u in changes if t < t_end]
+        body, last = bytearray(), 0
+        for t, data in events:
+            body += _vlq(t - last) + data
+            last = t
+        body += _vlq(max(0, t_end - t0 - last)) + b"\xff\x2f\x00"
+        return b"MTrk" + len(body).to_bytes(4, "big") + bytes(body)
 
     def clock_at(self, t0):
         """(the song frame a piece starting at tick t0 has its time 0 on, the clock seed it needs). Kestrel times

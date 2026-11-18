@@ -47,6 +47,10 @@ FONT_TYPES = "*.sf2 *.sf3 *.sfz *.sf2pack" + ("" if WINDOWS else " *.SF2 *.SF3 *
 _SAMPLE_FLOAT, _STREAM_DECODE, _UNICODE = 0x100, 0x200000, 0x80000000
 _DATA_FLOAT, _POS_BYTE, _STREAMPROC_END = 0x40000000, 0, 0x80000000
 _MIDI_DECAYEND, _MIDI_NOFX, _MIDI_ASYNC = 0x1000, 0x2000, 0x400000
+# (BASSMIDI's file player cuts a file off at its last note-off: notes after it whose offs aren't in the file never
+# sounded. A Rendered ahead piece leaves out offs past its end: a song's last chord, its offs 8 beats on, was silent
+# (user 2026-11-18, dev/scratch/bass_last_tick.py))
+_MIDI_NOCROP = 0x8000
 _FILE_MEM = 1  # (BASS_MIDI_StreamCreateFile: the file is in memory, kept there while the stream lives)
 _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
 _ATTRIB_MIDI_CPU, _ATTRIB_MIDI_SRC, _ATTRIB_MIDI_KILL, _ATTRIB_MIDI_QUEUE_ASYNC = 0x12001, 0x12006, 0x12007, 0x1200d
@@ -620,7 +624,7 @@ class Synth:
         bass = self.bass
         held = (ctypes.c_char * len(data)).from_buffer(data) if isinstance(data, bytearray) else \
             ctypes.create_string_buffer(bytes(data), len(data))
-        flags = _STREAM_DECODE | _SAMPLE_FLOAT | _MIDI_DECAYEND | (_MIDI_NOFX if nofx else 0)
+        flags = _STREAM_DECODE | _SAMPLE_FLOAT | _MIDI_DECAYEND | _MIDI_NOCROP | (_MIDI_NOFX if nofx else 0)
         h = self.midi.BASS_MIDI_StreamCreateFile(_FILE_MEM, ctypes.addressof(held), 0, len(data), flags, RATE)
         if not h:
             raise SynthError("synth.failed", err=bass.BASS_ErrorGetCode())

@@ -925,13 +925,9 @@ class LoadedSong:
         if not got and not own and not counted_tracks:
             return None, 0
         ports = sorted(set(rows) | set(sysex) | set(replay))
-        # (PLAN E4: a pedal down at the piece's end: the file runs to t_copy, as Merlin lets every note go at its end;
-        # the last note-off under the pedal ended it there, its last 0.3 s faded where a whole render rings)
-        hold = b""
-        if self._pedal_since(t_on) is not None and t_copy > origin:
-            body = _vlq(t_copy - origin) + b"\xff\x2f\x00"
-            hold = b"MTrk" + len(body).to_bytes(4, "big") + body
-        count = 1 + len(ports) + len(got) + len(own) + len(counted_tracks) + bool(hold)
+        # (the file runs to t_copy: the tempo track ends there, Song.tempo_track; was PLAN E4's own track, only with a
+        # pedal down. Merlin lets every note go at the file's end, BASSMIDI never plays notes on its last tick)
+        count = 1 + len(ports) + len(got) + len(own) + len(counted_tracks)
         buf = PieceMidi(b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + min(65535, count).to_bytes(2, "big")
                         + self.ppq.to_bytes(2, "big"))
         buf += self.own.tempo_track(origin, t_copy)
@@ -981,7 +977,6 @@ class LoadedSong:
             buf += chunk
         for chunk in own:
             buf += chunk
-        buf += hold
         # (the frame its time 0 is on as Kestrel's clock has it, + what that clock carries there: Song.clock_at)
         zero, seed = self.own.clock_at(origin)
         buf.clock_seed = seed
