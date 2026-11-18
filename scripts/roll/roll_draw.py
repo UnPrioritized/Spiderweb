@@ -796,10 +796,11 @@ class RollDrawing:
     def redraw(self):
         with same_shapes():  # (each shape's lines looked up once a redraw)
             self._raise_later = True  # (raise_on_top: the redraw's end raises them all once)
+            self._redrawing = True  # (liquify_under_frame: the redraw's own "made" lowering does it)
             try:
                 self.redraw_all()
             finally:
-                self._raise_later = False
+                self._raise_later = self._redrawing = False
 
     def redraw_all(self):
         self._redraw_pending = False

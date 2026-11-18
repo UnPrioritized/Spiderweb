@@ -1032,6 +1032,7 @@ class LiquifyBrush:
                 self.create_image(x, y, image=pic, anchor="nw", tags="lqmask")
         self.tag_raise("lqmask")
         self.tag_raise("lqbrush")
+        self.liquify_under_frame()
 
     def liquify_mask_pic(self, made, m, W, H, span=lq.SPAN, fwd=None):
         """(picture, x, y) of the red tint of mask m over a shape on screen, or None (nothing frozen in view). span:
@@ -1176,6 +1177,15 @@ class LiquifyBrush:
             for width, col in ((band, look.ROLL_BG), (line, look.LIQUIFY_BRUSH)):
                 self.create_line(x, y, m[0], m[1], fill=col, width=width, tags="lqbrush")
         self.tag_raise("lqbrush")
+        self.liquify_under_frame()
+
+    def liquify_under_frame(self):
+        """The brush (and the freeze tint under it) go under the keyboard + ruler, where a full redraw puts them
+        (user 2026-11-18: drawn at a mouse move, a brush near the keys showed over them until the next redraw).
+        Inside a redraw nothing: the kept keyboard sits low there, its "made" lowering puts them in place."""
+        if not self.__dict__.get("_redrawing") and self.find_withtag("frame"):
+            self.tag_lower("lqmask", "frame")
+            self.tag_lower("lqbrush", "frame")
 
     def draw_liquify_way(self, a, b, r, line, band):
         """A straight stroke's preview: its start's circle (dashed) and a line from it to b with arrows showing the
