@@ -65,7 +65,7 @@ class LassoPanel:
         if not on:
             self.lasso_box.pack_forget()
             return
-        self.lasso_box.pack(fill="x", pady=(8, 0), before=self.settings)
+        self.lasso_box.pack(fill="x", pady=(8, 0), before=self.settings_home)
         self.lasso_cut_btn.state(["!disabled"] if las else ["disabled"])
         self.lasso_cancel_btn.state(["!disabled"] if las else ["disabled"])
         if las:

@@ -1301,8 +1301,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         ttk.Button(btns, text=tr("app.delete_all"), command=self.delete_all).pack(side="left")
 
     def _build_shape_settings(self, side):
-        self.settings = ttk.LabelFrame(side, text=tr("app.new_shape_defaults"), padding=6)
-        self.settings.pack(fill="x", pady=(8, 0))
+        # (a plain frame around it: Draw on Domino's Settings window lifts it out, window/domino_settings.py; Tk can
+        # lift only plain frames)
+        home = self.settings_home = tk.Frame(side, bg=ttk.Style().lookup("TFrame", "background") or "SystemButtonFace")
+        home.pack(fill="x", pady=(8, 0))
+        self.settings = ttk.LabelFrame(home, text=tr("app.new_shape_defaults"), padding=6)
+        self.settings.pack(fill="x")
         # Symmetrical steps (PLAN.md "Even steps"): the FIRST row for drawn custom shapes, greyed until the Inside
         # fill has a gate (sync_even)
         self.even_var = tk.BooleanVar(value=False)
@@ -1365,9 +1369,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         """Tick/pitch boxes for each point of the selected line or curve."""
         for w in self.points_box.winfo_children():
             w.destroy()
+        self.points_box.configure(width=1, height=1)  # (Tk keeps an emptied frame at its old size: a blank gap)
         self.point_rows = []
         sh = self.selected()
-        names = point_names(sh) if sh and len(self.sels) == 1 else None
+        c = self.companion
+        lifted = c is not None and getattr(c, "settings_out", False)  # (Draw on Domino's Settings window: no points)
+        names = point_names(sh) if sh and len(self.sels) == 1 and not lifted else None
         if not names:
             return
         if len(names) > MAX_POINT_BOXES:  # (a box pair per point took ~0.02 s: a fitted curve's hundreds froze it)

@@ -70,6 +70,7 @@ class DominoBar:
             b = ttk.Button(row, text=tr("companion." + key), takefocus=False, command=run)
             b.pack(side="left", padx=(2, 0))
             Tooltip(b, tr("companion." + key + "_tip"))
+        self.make_settings_toggle(row)  # (the shape settings window: window/domino_settings.py)
         ttk.Separator(row, orient="vertical").pack(side="left", fill="y", padx=3, pady=2)
         b = ttk.Button(row, text=tr("companion.back"), takefocus=False, command=self.stop)
         b.pack(side="left", padx=(2, 0))

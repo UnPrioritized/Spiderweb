@@ -43,6 +43,7 @@ from window.domino_box_watch import BoxWatch
 from window import look
 from window.big_ask import ask as ask_big
 from window.domino_bar import BAR_GAP, DominoBar, bar_tools  # (moved)
+from window.domino_settings import DominoSettings
 from window.tool_picker import ToolPicker
 from window.widgets import Tooltip
 
@@ -153,7 +154,7 @@ def any_in(codes, x):
     return bool((codes[at] == x).any())
 
 
-class Companion(DominoBar):
+class Companion(DominoBar, DominoSettings):
     def __init__(self, app, pid=None):  # (pid: follow only that Domino; tests give one that doesn't run)
         self.app = app
         self.main_roll = app.roll
@@ -236,6 +237,17 @@ class Companion(DominoBar):
         self.roll.request_redraw()
         app.withdraw()
         self.match_ppq()
+        if settings.get("domino", "settings_open") == "yes":  # (open last time: open again, once the bar shows)
+            self.bar.after(300, self.reopen_settings)
+
+    def reopen_settings(self, tries=20):
+        if self.app.companion is not self or self.leaving or self.settings_on.get():
+            return
+        if not self.bar.winfo_viewable():  # (no Domino in sight yet)
+            if tries:
+                self.bar.after(250, lambda: self.reopen_settings(tries - 1))
+            return
+        self.show_settings(True, save=False)
 
     # --- Domino's song PPQ ---
     def domino_ppq(self):
@@ -393,6 +405,7 @@ class Companion(DominoBar):
             self.sync_keys()  # (a run picked / let go, Domino's scale changed)
             if self.bar.winfo_viewable():  # (hidden: placed when shown again, show_bar)
                 self.place_bar()
+                self.settings_tick()  # (the Settings window goes along with the bar)
         d = self.overlay.domino
         if d is None:
             return
@@ -510,6 +523,8 @@ class Companion(DominoBar):
         held, a menu / window of Domino's open: tried again on the next tick, hunt 2026-11-06)."""
         if self.busy:
             return
+        if self.ready:
+            self.take_typed()  # (a number typed in the Settings window counts: domino_settings.py)
         self.ready = self.alive(self.ready)
         d = self.overlay.domino
         if self.ready and d is not None and dl.alive(d) and (dl.busy(d) or not dl.roll_shown(d)):
@@ -2109,6 +2124,7 @@ class Companion(DominoBar):
             app.on_project_change()
         self.picker.close()
         self.overlay.stop()
+        self.put_settings_back()  # (the shape settings box back in the side panel, before the main window shows)
         try:
             self.bar.destroy()
         except tk.TclError:
