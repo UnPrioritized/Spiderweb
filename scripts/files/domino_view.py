@@ -209,7 +209,24 @@ def _failed(d, key, got):
     n, old = _odd.get(key, (0, None))
     if system.WINDOWS and grid_window(d.top) is not None:
         _odd[key] = (n + 1, got or old)
+        if n + 1 == ODD_AFTER:
+            _log_unknown(d, got)
     return _mark(d, key)
+
+
+def _log_unknown(d, got):
+    """A Domino just called unknown: one line in the error log naming the check that failed (user 2026-11-18:
+    "isn't known" until Domino was restarted; not seen on our copies)."""
+    try:
+        import time
+        from files import domino_builds, errors
+        why = domino_builds.why_not if got is not None else "its reading spots weren't found"
+        bits = "" if not d.build else ", 64-bit" if d.build.ptr == 8 else ", 32-bit"
+        text = (f"==== {time.strftime('%Y-%m-%d %H:%M:%S')}   Draw on Domino: a Domino was called unknown "
+                f"({os.path.basename(d.path)}{bits}): {why}\n\n")
+        errors.append(errors.LOG, errors.OLD_LOG, text)
+    except Exception:
+        pass
 
 
 def _mark(d, key):

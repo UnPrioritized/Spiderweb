@@ -198,8 +198,27 @@ def find_slots(build, read, check=True):
     return out if not check or adds_up(out, read) else None
 
 
+why_not = ""  # (which check adds_up failed last: written to the log when a Domino is called unknown, user
+# 2026-11-18 "isn't known" until Domino restarts, not seen here)
+
+
 def adds_up(b, read):
     """The song read through these spots looks like a song: a PPQ, 1+ tracks (Conductor first), channels 0-15."""
+    global why_not
+    why_not = ""
+    ok = _adds_up(b, read)
+    if ok:
+        why_not = ""
+    return ok
+
+
+def _no(why):
+    global why_not
+    why_not = why
+    return False
+
+
+def _adds_up(b, read):
     def u32(a):
         x = read(a, 4)
         return struct.unpack("<I", x)[0] if x and len(x) == 4 else None
@@ -210,25 +229,26 @@ def adds_up(b, read):
     c = ptr(b.c_slot)
     s = ptr(c + b.song) if c else None
     if not s:
-        return False
+        return _no(f"no song (c={'set' if c else 'none'})")
     ppq, arr, n = u32(s + b.ppq_at), ptr(s + b.tracks_at), u32(s + b.tracks_at + b.ptr)
     if ppq is None or not 1 <= ppq <= 65535 or not arr or not n or not 1 <= n <= 65535:  # (the whole number, as
-        return False  # domino_view.song_place reads it: one test passing and the other failing = every send refused)
+        # domino_view.song_place reads it: one test passing and the other failing = every send refused)
+        return _no(f"ppq / tracks (ppq {ppq}, tracks {n}, list {'set' if arr else 'none'})")
     if b.undo_at:  # (hunt 2026-11-06: the undo count is read too, every look)
         u = ptr(c + b.undo_at)
         depth = u32(u + b.undo_n) if u else None
         if depth is None or depth > 10_000_000:
-            return False
+            return _no(f"undo count ({depth})")
     now, cursor = u32(s + b.track_now), u32(c + b.cursor)
     if now is None or not 0 <= now < n or cursor is None or cursor >= 2 ** 31:
-        return False
+        return _no(f"current track / cursor ({now} of {n}, cursor {cursor})")
     # (PLAN L4: a new Domino with things moved must fail here, never be read wrong) the view's numbers ...
     p, h = ptr(b.p_slot), ptr(b.h_slot)
     nums = [u32(p + b.top_row), u32(p + b.row_px), u32(p + b.beat_px)] if p else [None]
     left = u32(h + b.left) if h else None
     if None in nums or left is None or not (nums[0] < 256 and 1 <= nums[1] <= 200 and 1 <= nums[2] <= 10000
                                             and left < 2 ** 31):
-        return False
+        return _no(f"view numbers (top row, row px, beat px = {nums}, left {left})")
     # ... and every track (up to 64): a channel byte, an event list whose events are objects of the program's
     lo, hi = b.data_at - 0x1000000, b.data_at + 0x1000000
     tracks = read(arr, b.ptr * min(n, 64)) or b""
@@ -236,20 +256,20 @@ def adds_up(b, read):
         t = int.from_bytes(tracks[i * b.ptr:(i + 1) * b.ptr], "little") if len(tracks) >= (i + 1) * b.ptr else 0
         ch = read(t + b.track_ch, 1) if t else None
         if not ch or ch[0] >= 64:
-            return False
+            return _no(f"track {i} channel ({ch[0] if ch else None}) of {n}")
         ev, m = ptr(t + b.events_at), u32(t + b.events_at + b.ptr)
         if m is None or m > 50_000_000 or (m and not ev):
-            return False
+            return _no(f"track {i} events ({m})")
         last = -1
         for j in range(min(m, 4)):
             e = ptr(ev + j * b.ptr)
             vt = ptr(e) if e else None
             if vt is None or not lo <= vt < hi:
-                return False
+                return _no(f"track {i} event {j} not an object")
             if vt == b.note_vt:  # (hunt 2026-11-06: the note's own layout: a Domino keeping tick / velocity /
                 last = _note_tick(b, read, e, last)  # gate elsewhere must fail, never be misread)
                 if last is None:
-                    return False
+                    return _no(f"track {i} note {j} layout")
     return True
 
 
