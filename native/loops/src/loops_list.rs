@@ -97,6 +97,9 @@ py_loops! {
     // ---- Inside fills' distances to the outline (fills.rs)
     band_rows(ax: &[f64], ay: &[f64], bx: &[f64], by: &[f64], length: &[f64], ys: &[f64], first: &[i64], n: &[i64],
               r: f64, row_out: &mut [i64], lo_out: &mut [f64], hi_out: &mut [f64]) => crate::fills::band_rows;
+    // ---- the freehand pen's varying band (pen.rs; NumPy-twin: pen.py _pen_rows_np)
+    pen_rows(edges: Nd<f64, 2>, clips: Nd<f64, 2>, ys: &[f64], first: &[i64], n: &[i64], row_out: &mut [i64],
+             lo_out: &mut [f64], hi_out: &mut [f64]) => crate::pen::pen_rows;
     field_dist(ax: &[f64], ay: &[f64], bx: &[f64], by: &[f64], xs: &[f64], ys: &[f64], reach: f64, block: i64,
                dist: NdMut<f64, 2>) => crate::fills::field_dist;
     blend_heat(nodes: &[f64], dl: &[f64], mu: &[f64], wsc: &[f64], wec: &[f64], mode_at: &[i64], run_m: &[i64],

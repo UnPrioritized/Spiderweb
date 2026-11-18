@@ -6,7 +6,8 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.custom import refit, uv_k
-from notes.pen import THICK_MAX, THICK_MIN, clean_thick
+from notes.pen import (ENDS, PEN_DEFAULT, TAPER_MAX, THICK_MAX, THICK_MIN, clean_pen, clean_thick, clean_times,
+                       pen_of)
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, unchanged, unit_word
 
@@ -46,6 +47,35 @@ class FreehandPanel:
         unit_word(ttk.Label(row, foreground=look.HINT), self.thick_var, "unit.keys", "unit.key").pack(side="left")
         for w in (lb, e):
             Tooltip(w, THICK_TIP)
+        # the pen's shape (stage D, user): Ends round / flat, Taper %, Width from speed; greyed at Thickness 1
+        row = ttk.Frame(self.free_box)
+        row.pack(side="top", anchor="w", pady=(4, 0))
+        self.pen_ends_word = ttk.Label(row, text=tr("panel_freehand.ends"))
+        self.pen_ends_word.pack(side="left")
+        self.pen_ends_names = [tr("panel_freehand.ends_" + k) for k in ENDS]
+        self.pen_ends_box = ttk.Combobox(row, state="readonly", values=self.pen_ends_names,
+                                         width=max(len(n) for n in self.pen_ends_names) + 1)
+        self.pen_ends_box.pack(side="left", padx=(5, 10))
+        self.pen_ends_box.bind("<<ComboboxSelected>>", lambda ev: (self.on_pen("ends"), self.roll.focus_set()))
+        lb = self.pen_taper_word = ttk.Label(row, text=tr("panel_freehand.taper"))
+        lb.pack(side="left")
+        self.pen_taper_var = tk.StringVar()
+        e = self.pen_taper_entry = ttk.Entry(row, textvariable=self.pen_taper_var, width=4)
+        e.pack(side="left", padx=(5, 3))
+        e.bind("<Return>", lambda ev: self.on_pen("taper"))
+        leave_box(self, e, self.pen_taper_var, lambda left=False: self.on_pen("taper", left))
+        Scrub(self, [(e, self.pen_taper_var, lambda: self.on_pen("taper"))], (1, 10, 0.25), 0, TAPER_MAX, label=lb)
+        self.pen_taper_unit = ttk.Label(row, text="%", foreground=look.HINT)
+        self.pen_taper_unit.pack(side="left")
+        Tooltip(self.pen_ends_word, tr("panel_freehand.ends_tip"))
+        Tooltip(self.pen_ends_box, tr("panel_freehand.ends_tip"))
+        for w in (lb, e):
+            Tooltip(w, tr("panel_freehand.taper_tip"))
+        self.pen_speed_on = tk.BooleanVar()
+        self.pen_speed_tick = ttk.Checkbutton(self.free_box, text=tr("panel_freehand.speed"),
+                                              variable=self.pen_speed_on, command=lambda: self.on_pen("speed"))
+        self.pen_speed_tick.pack(side="top", anchor="w", pady=(4, 0))
+        self.pen_speed_tip = Tooltip(self.pen_speed_tick, tr("panel_freehand.speed_tip"))
 
     def free_targets(self):
         """What the setting changes: [(the dict holding "smooth", its custom shape or None)] — the selected
@@ -70,7 +100,64 @@ class FreehandPanel:
         # Thickness: freehand shapes and freehand strokes inside a live shape (user 2026-11-19)
         self.thick_var.set(fmt(clean_thick(tgts[0][0].get("thick", THICK_MIN)) if tgts else self.free_thick))
         self.thick_entry.config(style="TEntry")
+        self.sync_pen(tgts)
         self._loading = False
+
+    def sync_pen(self, tgts):
+        """The pen's shape row: the first target's (or the new strokes'), greyed while the Thickness shown is 1;
+        Width from speed greyed for strokes drawn before it existed (no times: pen.py)."""
+        pens = [pen_of(d) for d, _ in tgts] or [dict(PEN_DEFAULT, **self.free_pen)]
+        pen = pens[0]
+        wide = clean_thick(tgts[0][0].get("thick", THICK_MIN) if tgts else self.free_thick) > THICK_MIN
+        state = ["!disabled" if wide else "disabled"]
+        self.pen_ends_box.set(self.pen_ends_names[ENDS.index(pen["ends"])])
+        self.pen_ends_box.state(["readonly"] + state)
+        self.pen_taper_var.set(fmt(pen["taper"]))
+        self.pen_taper_entry.state(state)
+        self.pen_taper_entry.config(style="TEntry")
+        for w in (self.pen_ends_word, self.pen_taper_word, self.pen_taper_unit):
+            w.config(foreground="" if wide else look.FAINT_TEXT)
+        self.pen_taper_unit.config(foreground=look.HINT if wide else look.FAINT_TEXT)
+        timed = not tgts or all(clean_times(d.get("times"), len(d.get("pts") or ())) for d, _ in tgts)
+        self.pen_speed_on.set(all(p["speed"] for p in pens))
+        self.pen_speed_tick.state(["!disabled" if wide and timed else "disabled"])
+        self.pen_speed_tip.set_text(tr("panel_freehand.speed_tip") if timed else tr("panel_freehand.speed_no_times"))
+
+    def on_pen(self, key, left=False):
+        """Ends / Taper / Width from speed changed: the selected freehand shapes / picked stroke (one undo step)
+        and the new strokes' pen."""
+        if self._loading:
+            return
+        if key == "ends":
+            value = ENDS[self.pen_ends_names.index(self.pen_ends_box.get())] \
+                if self.pen_ends_box.get() in self.pen_ends_names else "round"
+        elif key == "taper":
+            if left and unchanged(self.pen_taper_entry):
+                return
+            try:
+                value = calc(self.pen_taper_var.get())
+                if not 0 <= value <= TAPER_MAX:
+                    raise ValueError
+            except ValueError:
+                bad(self.pen_taper_entry)
+                return
+            good(self.pen_taper_entry)
+            value = round(float(value), 2)
+        else:
+            value = bool(self.pen_speed_on.get())
+        self.free_pen = clean_pen(dict(PEN_DEFAULT, **self.free_pen, **{key: value})) or {}  # new strokes too
+        tgts = [d for d, _ in self.free_targets() if pen_of(d)[key] != value]
+        if not tgts:
+            return self.sync_freehand()
+        self.begin_edit(("pen", key, tuple(sorted(self.sels)), self.stroke))
+        for d in tgts:
+            new = clean_pen(dict(pen_of(d), **{key: value}))
+            if new:
+                d["pen"] = new
+            else:
+                d.pop("pen", None)
+        self.shapes_changed()
+        self.sync_freehand()
 
     def on_thick_entry(self, left=False):
         """The Thickness box (Enter, stepped, or left: widgets.leave_box)."""
@@ -99,7 +186,7 @@ class FreehandPanel:
             else:
                 d.pop("thick", None)
         self.shapes_changed()
-        self.sync_freehand()
+        self.sync_freehand()  # (the pen's shape row greys / ungreys with it)
         self.sync_by_snap()  # (Notes by snap / Last note greyed while thick)
 
     def on_free_entry(self, left=False):

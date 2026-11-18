@@ -24,12 +24,12 @@ import numpy as np
 
 from notes.custom import CENTRE_KEYS, frame_to_bp, frame_to_uv, moved_at
 from notes.paths import dedupe, dot_segment_notes, path_notes
-from notes.pen import band_notes, thick_of
+from notes.pen import band_of, thick_of
 
 # what makes a line kind's path (besides its points): changed = no longer the piece it was (end_dot too: "Last note"
 # changed on a piece is about its own last note)
 OUTLINE = ("kind", "pts", "k", "smooth", "tumour", "tumours", "gaps", "splits", "sharp", "sym", "shape", "pattern",
-           "end_dot", "thick")
+           "end_dot", "thick", "pen", "times")
 CUSTOM_OUTLINE = ("kind", "pts", "strokes", "areas", "round")  # a custom shape's (its strokes are in its frame)
 FUNNEL_OUTLINE = ("kind", "pts", "starts")  # a funnel's (its curves are in "starts"; cut through its notes, knife_in_two)
 VELOCITY = ("vel0", "vel1", "vel_env")
@@ -489,7 +489,7 @@ def spotted_notes(sh, ppq, end_dot):
     paths = paths_of(sh)
     if thick_of(sh):  # (a wide pen's band: cut by the knife only, so every note on spot 0: the whole part)
         a = paths[0] if paths[0][-1, 0] >= paths[0][0, 0] else paths[0][::-1]
-        notes = band_notes(a * [ppq, 1], sh["thick"], sh.get("k", 1.0), ppq)
+        notes = band_of(a * [ppq, 1], sh, sh.get("k", 1.0), ppq)
         return notes, np.zeros(len(notes))
     if len(paths) > 1:  # a joined curve's pieces: each like a line
         got = [path_notes(a * [ppq, 1], end_dot, where=True) for a in paths]

@@ -73,6 +73,7 @@ mod midi_index;
 mod midi_scan;
 mod misc;
 mod order;
+mod pen;
 mod piece;
 mod play;
 mod recolour;

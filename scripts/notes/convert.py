@@ -66,6 +66,9 @@ def line_strokes(sh, paths):
               "k": sh.get("k", 1.0)}
         if thick_of(sh):  # (the pen stays wide in the live shape: user 2026-11-19, pen.py)
             st["thick"] = sh["thick"]
+        for key in ("pen", "times"):  # (its shape + drawing speed along)
+            if sh.get(key):
+                st[key] = json.loads(json.dumps(sh[key]))
         return [st]
     return [{"kind": "poly", "pts": [list(p) for p in sh["pts"]]}]
 

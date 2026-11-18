@@ -38,7 +38,7 @@ from notes.picture import paths_for_file
 from notes.polygon import POLYGON_DEFAULTS, clean_polygon
 from notes.sliced import pack_wholes, unpack_wholes
 from notes.smooth import SMOOTH_DEFAULT, clean_level
-from notes.pen import THICK_MIN, clean_thick
+from notes.pen import THICK_MIN, clean_pen, clean_thick
 from notes.gliss import clean_gliss, for_new
 from notes.tempo import clamp_bpm, clean_tempo, empty as empty_tempo, has_tempo, tempo_text
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
@@ -348,7 +348,8 @@ class ProjectFiles:
             "hz_loud": bool(self.hz_loud.get()),
             "funnel_defaults": self.funnel_defaults, "text_defaults": self.text_defaults,
             "polygon_defaults": self.polygon_defaults,
-            "free_smooth": self.free_smooth, "free_thick": self.free_thick, "gliss_defaults": self.gliss_defaults,
+            "free_smooth": self.free_smooth, "free_thick": self.free_thick, "free_pen": self.free_pen,
+            "gliss_defaults": self.gliss_defaults,
             # (whenever anything in it isn't the default: a 3/4 with no tempo point too, hunt 2026-10-24; a plain
             # one is left out, so files without a tempo line stay as they were)
             **({"tempo": self.tempo} if self.tempo != empty_tempo() else {}),
@@ -602,6 +603,7 @@ class ProjectFiles:
             self.text_defaults = {k: tx[k] for k in TEXT_DEFAULTS}
         self.free_smooth = get(lambda: clean_level(data.get("free_smooth", SMOOTH_DEFAULT))) or SMOOTH_DEFAULT
         self.free_thick = clean_thick(data.get("free_thick", THICK_MIN))
+        self.free_pen = clean_pen(data.get("free_pen")) or {}
         self.gliss_defaults = for_new(clean_gliss(data.get("gliss_defaults")))
         if pg:
             self.polygon_defaults = {k: pg[k] for k in POLYGON_DEFAULTS}

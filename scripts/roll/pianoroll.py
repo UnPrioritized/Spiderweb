@@ -1589,6 +1589,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.draft = make_shape("free", [self.draw_pt(e, snap=False)], app.defaults)
             trail = mouse_trail(e.x_root, e.y_root, None)
             self.drag = ("free", e.x, e.y, trail[-1][2] if trail else None)
+            # (when each point was drawn, ms: the pen's Width from speed, pen.py; Windows' mouse trail when it has
+            # one, else the events' own times)
+            self.draft["times"] = [trail[-1][2] if trail else e.time]
             return
         self.draft = make_shape(tool, [pt, pt], app.new_defaults(tool))
         self.drag = ("create", pt, e.x, e.y)
@@ -1847,16 +1850,19 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if trail:
             since = trail[-1][2]
             ox, oy = self.winfo_rootx(), self.winfo_rooty()
-            spots = [(x - ox, y - oy) for x, y, _ in trail]
+            spots = [(x - ox, y - oy, t) for x, y, t in trail]
         else:
-            spots = [(e.x, e.y)]
+            spots = [(e.x, e.y, e.time)]
         pts = self.draft["pts"]
-        for x, y in spots:
+        times = self.draft.get("times")
+        for x, y, t in spots:
             if math.hypot(x - lx, y - ly) >= 3:
                 pt = self.event_pt(SimpleNamespace(x=x, y=y, state=e.state), snap=False)
                 self.create_line(self.t2x(pts[-1][0]), self.p2y(pts[-1][1]), self.t2x(pt[0]), self.p2y(pt[1]),
                                  fill=look.DRAFT_LINE, width=look.LINES + 1)  # (as the draft's redraw)
                 pts.append(pt)
+                if times is not None:
+                    times.append(t)
                 lx, ly = x, y
         self.drag = ("free", lx, ly, since)
         self.request_redraw(delay=100)
@@ -2023,6 +2029,14 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 if self.app.free_thick > 1:  # (a wide pen: pen.py; into a live shape too, user 2026-11-19; roll_live
                     # draft_stroke carries it)
                     self.draft["thick"] = self.app.free_thick
+                if self.app.free_pen:  # (the pen's shape picked last)
+                    self.draft["pen"] = dict(self.app.free_pen)
+                times = self.draft.pop("times", None)
+                if times and len(times) == len(pts) - 1:  # (a loop closed at the let go: its end as its last point)
+                    times.append(times[-1])
+                if times and len(times) == len(pts):  # (ms from the first point)
+                    t0 = times[0]
+                    self.draft["times"] = [max(0, int(t - t0)) for t in times]
                 self.commit_draft()
             else:
                 self.cancel_draft()

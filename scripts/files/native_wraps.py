@@ -445,6 +445,16 @@ class Wraps:
             return self.base.band_rows(*args)
         return m
 
+    def pen_rows(self, edges, clips, ys, first, n):
+        """notes/pen.py band_rows' loop: (row, lo, hi) of the joined stretches, or None = not run (pen.py's NumPy
+        way, _pen_rows_np: the same numbers). Not in NEEDS (NumPy's way is the twin)."""
+        if not hasattr(self.x, "pen_rows"):
+            return None
+        total = int(n.sum())
+        row, lo, hi = np.empty(total, np.int64), np.empty(total), np.empty(total)
+        m = self.x.pen_rows(edges, clips, ys, first, n, row, lo, hi)
+        return None if m < 0 else (row[:m], lo[:m], hi[:m])
+
     def field_dist(self, ax, ay, bx, by, xs, ys, reach, block, dist):
         args = (ax, ay, bx, by, xs, ys, reach, block, dist)
         got = self.x.field_dist(*args)
