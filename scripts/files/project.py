@@ -1266,6 +1266,10 @@ class ProjectFiles:
 
     def save_project(self, ask=False):
         """Into the project file opened / saved last; none yet (or ask: Save as…) = asks where. True if saved."""
+        c = getattr(self, "companion", None)
+        if c is not None:  # (drawing on Domino: the project's PPQ is Domino's for now, like autosave; hunt 11-18)
+            c.say(tr("companion.no_save"), warn=True)
+            return False
         self.colour_edit_leave()  # (a colour step being edited: its later steps shown again, PLAN.md stage C)
         path = self.project_file
         if ask or not path:

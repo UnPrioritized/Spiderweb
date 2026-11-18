@@ -335,6 +335,11 @@ class Companion(DominoBar, DominoSettings):
         pressed again there, after what's drawn here went in (pressing a key of Domino's = done drawing)."""
         if self.own_key(e):
             return None
+        return self.key_to_domino(e)
+
+    def key_to_domino(self, e):
+        """A key of Domino's, pressed here (the overlay, the Settings window): pressed again in Domino, after what's
+        drawn here went in."""
         d = self.overlay.domino
         if d is None:
             return "break"

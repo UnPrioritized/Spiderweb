@@ -12,6 +12,14 @@ from files.lang import tr
 from files import domino_link as dl
 
 GAP = 6  # px between the bar and the window the first time
+KEY_TAG = "DominoSettingsKeys"
+TAG_AGAIN = 20  # overlay ticks between looks for controls made in the window since (they get KEY_TAG too)
+
+
+def _all_in(w):
+    for k in w.winfo_children():
+        yield k
+        yield from _all_in(k)
 
 
 class DominoSettings:
@@ -43,6 +51,7 @@ class DominoSettings:
                 app.tk.call("wm", "deiconify", home)
             except tk.TclError:
                 return
+            self.window_look()
             self.place_settings()
             home.lift()
         elif self.settings_out:
@@ -74,9 +83,41 @@ class DominoSettings:
         app.tk.call("wm", "title", home, tr("companion.settings_title"))
         app.tk.call("wm", "resizable", home, 0, 0)
         app.tk.call("wm", "protocol", home, "WM_DELETE_WINDOW", app.register(lambda: self.show_settings(False)))
-        home.bind("<Escape>", self.settings_escape)
+        # (keys: a bind tag of our own FIRST on every control in it, before Spiderweb's window-wide shortcuts, hunt
+        # 11-18. Not the window's own tag: controls with a tip have their tags fixed, the main window's in them)
+        app.bind_class(KEY_TAG, "<Escape>", self.settings_escape)
+        app.bind_class(KEY_TAG, "<KeyPress>", self.settings_key)
+        self.tag_keys(True)
         self.settings_out = True
         app.build_points()  # (the Point / Tick / Pitch table left out while here)
+
+    def tag_keys(self, on):
+        """KEY_TAG first on every control in the window (on), or taken off again (back in the side panel)."""
+        home = self.app.settings_home
+        for w in [home, *_all_in(home)]:
+            try:
+                tags = w.bindtags()
+                if on and tags[:1] != (KEY_TAG,):
+                    w.bindtags((KEY_TAG,) + tuple(t for t in tags if t != KEY_TAG))
+                elif not on and KEY_TAG in tags:
+                    w.bindtags(tuple(t for t in tags if t != KEY_TAG))
+            except tk.TclError:
+                pass
+
+    def window_look(self):
+        """The title bar like every other Spiderweb window's: dark in the dark look, the small two-ring icon (hunt
+        2026-11-18: those are put on Toplevel windows when shown; a lifted frame isn't one)."""
+        import os
+        from types import SimpleNamespace
+        from files import system
+        from files.about import ICONS
+        from window import look
+        app, home = self.app, self.app.settings_home
+        if look.DARK:
+            from window.synth_look import dark_title
+            dark_title(home)
+        system.small_title_icon(SimpleNamespace(wm_frame=lambda: str(app.tk.call("wm", "frame", home))),
+                                os.path.join(ICONS, "icon-small.ico"), os.path.join(ICONS, "icon.ico"))
 
     def put_settings_back(self):
         """Back into the side panel where it was (stop)."""
@@ -86,7 +127,9 @@ class DominoSettings:
         home = app.settings_home
         self.settings_out = False
         try:
-            home.unbind("<Escape>")
+            self.tag_keys(False)
+            app.unbind_class(KEY_TAG, "<Escape>")
+            app.unbind_class(KEY_TAG, "<KeyPress>")
             app.tk.call("wm", "forget", home)
             nxt = self._settings_next
             if nxt is not None and nxt.winfo_exists() and nxt.winfo_manager() == "pack":
@@ -106,9 +149,47 @@ class DominoSettings:
         except ValueError:
             return None
 
+    def bar_room(self):
+        """How tall the bar is with ONE message line showing under its buttons, whether one shows now or not (hunt
+        2026-11-18, user's B: room kept, nothing jumps; a message hid under the window)."""
+        from tkinter import font as tkfont
+        from window import look
+        bar = self.bar
+        h = bar.winfo_height()
+        if self.notes.winfo_manager():
+            return max(h, bar.winfo_reqheight())
+        try:
+            line = tkfont.nametofont(look.TK).metrics("linespace") + 2
+        except tk.TclError:
+            line = 18
+        return h + line
+
+    def title_px(self):
+        """The window's title bar + top frame height (its inside starts this far under the spot it's put at):
+        measured while shown, else Windows' own sizes (hunt 2026-11-18: a fixed 30 px was 38 here)."""
+        home = self.app.settings_home
+        try:
+            if home.winfo_viewable():
+                m = re.search(r"[+-](-?\d+)$", str(self.app.tk.call("wm", "geometry", home)))
+                got = home.winfo_rooty() - int(m.group(1))
+                if 0 < got < 200:
+                    self._title_px = got
+        except (tk.TclError, ValueError, AttributeError):
+            pass
+        if getattr(self, "_title_px", None):
+            return self._title_px
+        from files import system
+        if system.WINDOWS:
+            import ctypes
+            m = ctypes.windll.user32.GetSystemMetrics
+            return m(4) + m(33) + m(92)  # SM_CYCAPTION + SM_CYSIZEFRAME + SM_CXPADDEDBORDER
+        return 30
+
     def place_settings(self):
-        """Under the bar's left edge the first time, else where it was dragged to (against the bar, so it moves
-        along with Domino), kept on the screen."""
+        """Under the bar's left edge the first time (one message line of room left), or above the bar when there's
+        no room under it; else where it was dragged to (against the bar, so it moves along with Domino). Always
+        whole on the screen, its size as now (hunt 2026-11-18: it covered the bar low on the screen, grew past
+        the bottom)."""
         from files import system
         app, home, bar = self.app, self.app.settings_home, self.bar
         try:
@@ -116,24 +197,37 @@ class DominoSettings:
             home.update_idletasks()
             at = self.saved_settings_at()
             bx, by = bar.winfo_rootx(), bar.winfo_rooty()
-            x, y = (bx + at[0], by + at[1]) if at else (bx, by + bar.winfo_height() + GAP)
             w, h = home.winfo_reqwidth(), home.winfo_reqheight()
-            left, top, right, bottom = system.work_area(bar, x + w // 2, y + 20)
-            x, y = min(max(x, left), right - w), max(min(y, bottom - h - 30), top)  # (30: its title bar)
+            tall = h + self.title_px()  # (the whole window, title bar included)
+            left, top, right, bottom = system.work_area(bar, bx + w // 2, by + 20)
+            if at:
+                x, y = bx + at[0], by + at[1]
+            else:
+                x, y = bx, by + self.bar_room() + GAP
+                if y + tall > bottom and by - GAP - tall >= top:  # (no room under the bar: above it)
+                    y = by - GAP - tall
+            x, y = min(max(x, left), right - w), max(min(y, bottom - tall), top)
             app.tk.call("wm", "geometry", home, f"+{x}+{y}")
             home.update_idletasks()
             self._settings_moved = (x, y)
             self._settings_bar = (bx, by)
+            self._settings_size = h
         except tk.TclError:
             pass
 
     def settings_tick(self):
-        """Overlay tick: a drag of the window remembered; the bar moved (Domino moved) = the window goes along."""
+        """Overlay tick: a drag of the window remembered; the bar moved (Domino moved) or the window changed size
+        (other rows: another tool / shape) = placed again, whole on the screen."""
         if not self.settings_out or not self.settings_on.get():
             return
+        self._tag_count = getattr(self, "_tag_count", 0) + 1
+        if self._tag_count % TAG_AGAIN == 0:  # (rows made since: their keys go through KEY_TAG too)
+            self.tag_keys(True)
         self.settings_moved()
         try:
-            if self.bar.winfo_viewable() and (self.bar.winfo_rootx(), self.bar.winfo_rooty()) != self._settings_bar:
+            home = self.app.settings_home
+            if self.bar.winfo_viewable() and ((self.bar.winfo_rootx(), self.bar.winfo_rooty()) != self._settings_bar
+                                              or home.winfo_reqheight() != getattr(self, "_settings_size", None)):
                 self.place_settings()
         except tk.TclError:
             pass
@@ -162,6 +256,32 @@ class DominoSettings:
         """Esc in the window: the keyboard back to where it was (the overlay while drawing, else Domino) (user
         2026-11-18). A dropdown's open list takes Esc itself first."""
         self.give_keys_back()
+        return "break"
+
+    # (Ctrl+A / C / V / X, word jumps / deletes in a box: its own text editing)
+    BOX_KEYS = frozenset(("a", "c", "v", "x", "left", "right", "home", "end", "backspace", "delete"))
+    BOXES = ("TEntry", "Entry", "TCombobox", "TSpinbox")
+
+    def settings_key(self, e):
+        """A key in the window (its own bind tag, before Spiderweb's window-wide shortcuts): Ctrl / Alt keys are
+        Domino's, as on the overlay (hunt 2026-11-18: Ctrl+S saved Spiderweb's project with Domino's PPQ, Ctrl+E
+        exported the hidden shapes, Ctrl+N / O replaced the project). Spiderweb keeps typing, Esc (own binding),
+        Ctrl+Z / Y (user's pick: Spiderweb's undo) and Ctrl+A / C / V / X inside a box."""
+        from window.domino_companion import ALONE_KEYS, ALT, CTRL
+        ks = e.keysym
+        if ks in ALONE_KEYS or not e.state & (CTRL | ALT):
+            return None
+        low = ks.lower()
+        if e.state & CTRL and not e.state & ALT and low in ("z", "y"):
+            return None
+        try:
+            box = e.widget.winfo_class() in self.BOXES
+        except (AttributeError, tk.TclError):
+            box = False
+        if box and e.state & CTRL and low in self.BOX_KEYS:
+            return None
+        self.take_typed()  # (a number typed there counts: the shape may go in with this key)
+        self.key_to_domino(e)
         return "break"
 
     def settings_has_keys(self):

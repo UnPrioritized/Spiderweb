@@ -3391,6 +3391,7 @@
  "companion.flip_sideways_tip": "Flip sideways: the shapes selected here, or else the notes selected in Domino (in one click; Domino's own Undo takes it back in 2 steps)",
  "companion.flip_upside": "↕",
  "companion.flip_upside_tip": "Flip upside down: the shapes selected here, or else the notes selected in Domino (in one click; Domino's own Undo takes it back in 2 steps)",
+ "companion.no_save": "Spiderweb's project can't be saved while drawing on Domino: press Spiderweb on the bar first",
  "companion.settings": "Settings",
  "companion.settings_tip": "Show or hide the shape settings (the same ones as in Spiderweb's side panel) in a small window of their own. With no shape picked they're the settings for new shapes",
  "companion.settings_title": "Shape settings",

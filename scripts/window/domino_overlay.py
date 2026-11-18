@@ -140,6 +140,10 @@ class DominoOverlay:
                 if self._middle == "letting go":  # (our own release: Tk let the mouse go, now the press for Domino)
                     self._middle = True
                     self._press_middle(True)
+                elif self._middle == "tap":  # (the quick tap's own release: Tk let go, Domino gets a whole click)
+                    self._middle = True
+                    self._press_middle(True)
+                    self._press_middle(False)
                 return "break"
             if pressed and seq.startswith("ButtonPress"):
                 pressed()
@@ -171,9 +175,14 @@ class DominoOverlay:
         when the press is MADE: so first a release (Tk lets go when it gets it), then the press (send() above).
         (Measured 2026-11-18 on our Domino copy, real mouse: press-only went back to the catcher.)"""
         import time
-        self._middle = "letting go"
         self._middle_at = time.monotonic()
         self._style(self.catch_hwnd, click_through=True)
+        if not self._middle_down():  # (a QUICK TAP: the real button already up before we got to its press; its own
+            # release comes next: then Domino gets press + release, never a press alone; hunt 2026-11-18, live:
+            # a release made after it never came back to Tk, Domino stayed panning)
+            self._middle = "tap"
+            return
+        self._middle = "letting go"
         self._press_middle(False)
 
     @staticmethod
@@ -190,7 +199,7 @@ class DominoOverlay:
         """The middle button is up again: the catcher takes the mouse back (while drawing). Our release never came
         back to Tk (MIDDLE_WAIT_S): given up, the catcher back too (never left click-through)."""
         import time
-        if self._middle == "letting go" and time.monotonic() - self._middle_at > self.MIDDLE_WAIT_S:
+        if self._middle in ("letting go", "tap") and time.monotonic() - self._middle_at > self.MIDDLE_WAIT_S:
             self._middle = True
         if self._middle is True and not self._middle_down():
             self._middle = False
