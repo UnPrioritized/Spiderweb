@@ -22,9 +22,8 @@ from files.about import USER
 from files.safefile import write_text
 from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
                           held_axis, keep_symmetric, nearest, pen_handles, sample)
-from notes.pattern import (LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, SOFT_DEFAULT, clean_loop,
-                           clean_pattern_graphs, formula_loop,
-                           formula_shape, keep_sym, most_loops, new_pattern, new_shape, pattern_name, pattern_names,
+from notes.pattern import (AROUND, LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, SOFT_DEFAULT,
+                           clean_loop, clean_pattern_graphs, formula_loop, formula_shape, formula_slice, keep_sym, most_loops, new_pattern, new_shape, pattern_name, pattern_names,
                            polar_of, polar_ok, polar_xy, shape_name, shape_names, span_numbers, t_span)
 from files.clipboard import put_text
 from roll.roll_shared import ALT, grab_while_panning
@@ -1021,7 +1020,11 @@ class FormulaDialog(tk.Toplevel):
         to the formulas (not kept until something is dragged)."""
         if self.pat.get("loop"):
             return self.pat["loop"]
-        if self.layer == "shape":
+        around = self.layer == "shape" and self.pat.get("sym") == AROUND
+        if around:  # (Around the centre: only its first slice is edited, the rest are copies)
+            u, v = formula_slice(self.pat)
+            tol, length = SHAPE_TOLERANCE, 1.0
+        elif self.layer == "shape":
             u, v = formula_shape(self.pat)
             tol, length = SHAPE_TOLERANCE, 1.0
         else:
@@ -1029,7 +1032,7 @@ class FormulaDialog(tk.Toplevel):
             tol, length = LOOP_TOLERANCE, self.loop_len()
         corners = []  # (symmetric halves first: then dragging a point moves its partner in the other half too)
         modes = SYM_MODES if self.layer == "shape" else ("mirror", "turn")
-        want = self.pat.get("sym")  # (the ones picked are tried first; a closed shape's mirror is "flip")
+        want = None if around else self.pat.get("sym")  # (the ones picked are tried first; a closed shape's mirror is "flip")
         want = "flip" if want == "mirror" and self.layer == "shape" and math.dist(
             (u[0], v[0]), (u[-1], v[-1])) < 1e-6 else want
         if want in modes:
@@ -1040,7 +1043,9 @@ class FormulaDialog(tk.Toplevel):
             out["sharp"] = corners
         if sym:
             out["sym"] = sym
-        if self.layer == "shape" and math.dist(out["pts"][0], out["pts"][-1]) < 1e-6:
+        if around:
+            out["slice"] = True
+        elif self.layer == "shape" and math.dist(out["pts"][0], out["pts"][-1]) < 1e-6:
             out["pts"][-1] = list(out["pts"][0])  # (a closed shape stays closed)
         return out
 

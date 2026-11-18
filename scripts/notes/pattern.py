@@ -155,6 +155,8 @@ def clean_loop(c):
             out["sharp"] = sharp
         if c.get("sym") in ("mirror", "turn", "flip") and (n - 1) % 6 == 0:  # symmetric halves (bezier.py)
             out["sym"] = c["sym"]
+        if c.get("slice"):  # (one slice of a shape set to Around the centre)
+            out["slice"] = True
         return out
     except (KeyError, TypeError, ValueError, AttributeError):
         return None
@@ -518,9 +520,29 @@ def _shape(text_x, text_y, values, sym, lo=0.0, hi=1.0, slices=0):
     vals = dict(values)
     a = _drawn(fx, fy, vals, lo, hi, SHAPE_SAMPLES)
     if sym == AROUND:
-        part = _drawn(fx, fy, vals, lo, lo + (hi - lo) / slices, max(16, SHAPE_SAMPLES // slices))
-        return fitted_shape(around_shape(part, slices))
+        return fitted_shape(around_shape(_slice_drawn(fx, fy, vals, lo, hi, slices), slices))
     return symmetric_shape(a, sym) if sym else fitted_shape(a)
+
+
+def _slice_drawn(fx, fy, vals, lo, hi, slices):
+    """The first slice's points (x, y rows) for Around the centre."""
+    return _drawn(fx, fy, vals, lo, lo + (hi - lo) / slices, max(16, SHAPE_SAMPLES // slices))
+
+
+@functools.lru_cache(maxsize=64)
+def _slice(text_x, text_y, values, lo, hi, slices):
+    fx, fy = formula(text_x, named=True, var="t"), formula(text_y, named=True, var="t")
+    part = _slice_drawn(fx, fy, dict(values), lo, hi, slices)
+    _, place = _fit_map(around_shape(part, slices))
+    return place(part)
+
+
+def formula_slice(p):
+    """A shape set to Around the centre: its first slice placed as in the whole (formula_shape), (along, sideways)
+    arrays: what an edit by hand starts from. ValueError if it can't be worked out."""
+    span = t_span(p)
+    lo, hi = span_numbers(span) if span else (0.0, 1.0)
+    return _slice(p["x"], p["y"], tuple(sorted(p["vars"].items())), lo, hi, shape_slices(p))
 
 
 def _turn(angle):
@@ -595,22 +617,34 @@ def symmetric_shape(a, sym):
 
 def fitted_shape(a):
     """A drawing (x, y rows) fitted to a curve from (0, 0) to (1, 0) (see the top): (along, sideways) arrays."""
+    at, place = _fit_map(a)
+    if at:  # (closed: from its leftmost point)
+        a = np.vstack([a[at:-1], a[:at + 1]])
+    return place(a)
+
+
+def _fit_map(a):
+    """How fitted_shape fits a drawing (x, y rows): (the row a closed one starts from, 0 if open; a function placing
+    any (x, y) rows the same way -> (along, sideways) arrays). Only sliding, turning and sizing: shapes keep."""
     lo, hi = a.min(axis=0), a.max(axis=0)
     size = math.hypot(*(hi - lo))
     if size < 1e-12:
         raise ValueError(tr("pattern.it_s_just_a_dot"))
     if math.dist(a[0], a[-1]) < CLOSED_SHARE * size:  # closed: from its leftmost point, as wide as the curve is long
-        at = int(a[:-1, 0].argmin())
-        a = np.vstack([a[at:-1], a[:at + 1]])
         width = hi[0] - lo[0]
         if width < 1e-9 * size:
             raise ValueError(tr("pattern.it_s_just_a_dot"))
-        return (a[:, 0] - lo[0]) / width, (a[:, 1] - (lo[1] + hi[1]) / 2) / width
+        mid = (lo[1] + hi[1]) / 2
+        return int(a[:-1, 0].argmin()), lambda b: ((b[:, 0] - lo[0]) / width, (b[:, 1] - mid) / width)
     d = a[-1] - a[0]  # open: turned and sized so it starts at (0, 0) and ends at (1, 0)
     length = math.hypot(*d)
     c, s = d / length / length
-    q = a - a[0]
-    return q[:, 0] * c + q[:, 1] * s, q[:, 1] * c - q[:, 0] * s
+    a0 = a[0].copy()
+
+    def place(b):
+        q = b - a0
+        return q[:, 0] * c + q[:, 1] * s, q[:, 1] * c - q[:, 0] * s
+    return 0, place
 
 
 def formula_shape(p):
@@ -623,10 +657,14 @@ def formula_shape(p):
 
 
 def shape_points(p):
-    """The shape as (along, sideways) arrays in the curve's length: edited by hand, else the formulas'."""
+    """The shape as (along, sideways) arrays in the curve's length: edited by hand, else the formulas'. Around the
+    centre edited by hand: the loop is ONE slice (loop["slice"]), copied round (around_shape: its ends make the
+    centre, so the joins stay closed)."""
     if p.get("loop"):
         from notes.bezier import sample
         a = np.asarray(sample([tuple(q) for q in p["loop"]["pts"]], 64), float)
+        if p["loop"].get("slice") and p.get("sym") == AROUND:
+            a = around_shape(a, shape_slices(p))
         u, v = a[:, 0], a[:, 1]
     else:
         u, v = formula_shape(p)
