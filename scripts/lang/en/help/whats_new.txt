@@ -8,6 +8,12 @@ What's new:
 
 • Notes kept past the keys and before bar 1 (Keep notes made there) now get real channels: they take part like notes inside the keys, as if the keyboard went on and the song started earlier, so every kept note shows the colour it would have inside, and Fold tracks, Fill gaps, Gate sensitive merge and Turn into plain notes copy them on those channels. The "Exact colours" setting is gone: the colours are always exact now. With Keep notes made there on, some shapes on the keys may get other colours than before. See [page:offrange|Notes past the keys].
 
+• Opening a project file from someone else no longer changes your own setup: your tool settings for new shapes, Snap and the Hz bass window's view stay as they were. The file's song settings (PPQ, keys, channels...) still come with it.
+
+• Settings → New projects: the PPQ, keys, channel settings, Domino start and output file that New and Load MIDI start with (before, New kept the open project's). Use the open project's settings saves them; untick Start new projects with these settings to work the old way. Fit view on New shows the whole empty project after New. See [page:settings#New projects:|Settings].
+
+• Help → About Spiderweb opens the About page.
+
 • Fixed: in Draw on Domino, dragging with the middle button did nothing while a drawing tool was picked. It now moves Domino's view as in Domino.
 • Fixed: the side panel left a blank gap under the shape settings after picking a line and then a shape without point boxes.
 

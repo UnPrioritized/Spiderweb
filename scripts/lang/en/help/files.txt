@@ -4,6 +4,8 @@ The File menu (top left) holds New (Ctrl+N), Open… (Ctrl+O), Save (Ctrl+S) and
 
 Opening a file replaces what's on the piano roll (Undo can't bring it back), so if your shapes aren't saved in a project file, Spiderweb asks to save them first. New starts a new MIDI: every shape goes, and the [page:conductor|Conductor pane]'s tempo and signatures too (back to 120 BPM and 4/4). Like opening a file, New can't be undone, so it offers to save unsaved work first.
 
+A new project (New or Load MIDI) starts with the PPQ, keys, channel settings, Domino start and output file set in [page:settings#New projects:|Settings] → New projects, not with the ones of the project open now. Opening a project file uses that file's own settings, so a file from someone else plays as they made it, but your tool settings for new shapes, Snap and the Hz bass window's view stay as you had them.
+
 A .spwb file is packed, so it's much smaller than the older .json project files. Older .json projects still open, and Save keeps writing them as .json; Save as… offers .spwb.
 
 Drop a .spwb project or a MIDI file onto Spiderweb's window to open it (a MIDI opens as a new project, like [page:load_midi|Load MIDI]), or onto Spiderweb's icon. Spiderweb opens one file at a time: drop several and it opens the first.
