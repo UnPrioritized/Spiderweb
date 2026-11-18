@@ -12,10 +12,16 @@ What's new:
 
 • Settings → New projects: the PPQ, keys, channel settings, Domino start and output file that New and Load MIDI start with (before, New kept the open project's). Set them right there, or Use the open project's settings fills them in; untick Start new projects with these settings to work the old way. Fit view on New shows the whole empty project after New. See [page:settings#New projects:|Settings].
 
+• Around the centre: a new Symmetric halves choice for a curve's Shape of the line. The shape is cut into equal slices round its centre (as many as a Flower's petals, or your own number) and only the first counts, so editing that one slice by hand in Custom… changes every petal, gear tooth or star point at once. Custom… shows the slice and the whole shape side by side; drag a point in the whole shape to change just that slice. See [page:around|Around the centre].
+
+• While the Custom… formula window is open, the piano roll can now be panned with the middle button and scrolled with its scrollbars.
+
 • Help → About Spiderweb opens the About page.
 
 • Fixed: in Draw on Domino, dragging with the middle button did nothing while a drawing tool was picked. It now moves Domino's view as in Domino.
 • Fixed: the side panel left a blank gap under the shape settings after picking a line and then a shape without point boxes.
+• Fixed: a formula shape crossing over itself many times (like a Circle with "t from 0 to 30") froze the Custom… window for seconds. Long thick lines everywhere (drawer strokes, lasso, Conductor and velocity lines) are drawn quickly now.
+• Fixed: the Hz bass window hid the bar number at the shape's start when the shape began a hair after the bar line.
 
 • Fixed: with Built-in BASSMIDI, playing from the play line right on a note started that note a little late.
 • Fixed: with Built-in BASSMIDI playing a loaded MIDI on several synths (Settings → Sound), the same note doubled on different channels sometimes sounded phased (hollow and swirly). Doubled notes now play exactly together.

@@ -43,13 +43,13 @@ The curve you drew stays as a dashed line with its [page:curves_pen|anchors and 
 
 The side panel shows the selected curve's numbers (like turns, petals, height and Loops). On a joined curve, Across all runs the loops on from piece to piece and Each piece gives every piece all of them. Separate curves each get their own pattern: join them first to run one pattern across them.
 
-[page:symmetric|Symmetric halves] (in the Formula menu under each list, in the Custom… window and in the side panel): only the first half of the formula counts, and the second half is made from it: Mirrored (arch), or Turned (S): turned half way round. A shape that ends where it starts stays closed. It works on your own formulas and saved ones too, and Save keeps it.
+[page:symmetric|Symmetric halves] (in the Formula menu under each list, in the Custom… window and in the side panel): only the first half of the formula counts, and the second half is made from it: Mirrored (arch), or Turned (S): turned half way round. A shape that ends where it starts stays closed. It works on your own formulas and saved ones too, and Save keeps it. For a Shape of the line there's a third choice, [page:around|Around the centre]: the shape is cut into equal slices round its centre and only the first counts, so a Flower's petals can be edited by hand as one.
 
 Remove formula takes them off (the curve you drew is left). Turn into plain curve makes what you see into ordinary anchors and handles (a line, polyline, arc or polygon becomes a curve); if its two halves match, it gets Symmetric halves.
 
 ## Custom… and your own formulas
 
-Custom… (at the top of each list) shows every shape or pattern with its formula and a box for each of its numbers. The preview shows one loop of a pattern, or the whole shape: drag its points to change it by hand, and every loop on the curve follows (Back to formula forgets it). Ctrl+Z / Ctrl+Y undo and redo your changes inside the window (Cancel still puts everything back).
+Custom… (at the top of each list) shows every shape or pattern with its formula and a box for each of its numbers. The preview shows one loop of a pattern, or the whole shape: drag its points to change it by hand, and every loop on the curve follows (Back to formula forgets it). Ctrl+Z / Ctrl+Y undo and redo your changes inside the window (Cancel still puts everything back). While it's open, the piano roll's shapes can't be picked, but the mouse wheel, middle-drag and the scrollbars still move the view.
 
 When its two halves match (like Wave, Bounce, S-curve or Circle), the points come as symmetric halves: moving a point moves its partner in the other half too. Double-click the line to add a point, right-click a point to remove it, Alt+drag for a sharp corner.
 

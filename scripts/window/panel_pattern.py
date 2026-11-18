@@ -336,6 +336,8 @@ class PatternPanel:
         self.push_undo(name=tr("pattern_dialog.symmetric_step", name=sym_label(mode)))
         for h in tgts:  # (like RollHost.set_sym, for curves and polygons together)
             put_sym(h[layer], mode)
+        if mode == "around":
+            self.tips.show("around", wait=True)  # (the first time: what it does)
         self.formulas_edited()
         self.sync_panel()
 

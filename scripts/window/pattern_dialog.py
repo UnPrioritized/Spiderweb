@@ -844,6 +844,8 @@ class FormulaDialog(tk.Toplevel):
         if mode == self.pat.get("sym"):
             return
         put_sym(self.pat, mode)
+        if mode == AROUND:
+            self.app.tips.show("around", wait=True)  # (the first time: what it does)
         self.pat.pop("name", None)  # (not the saved one any more)
         self.view = None
         self.pick_current()

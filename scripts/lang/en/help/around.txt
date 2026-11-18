@@ -1,0 +1,32 @@
+Around the centre is a choice in Symmetric halves for a curve's Shape of the line (see [page:formulas|Formulas]): the shape is cut into equal slices round its centre, and only the first slice counts. Every other slice is a copy of it, turned round. Pick it in the Formula menu (Symmetric halves ▸), in the side panel, or in the Custom… window.
+
+It suits shapes made of repeating parts: Flower, and your own or pasted Polar shapes like roses, gears and stars. Other shapes repeat too, round the middle of what the first slice draws, so you can make new patterns out of any of them.
+
+## Slices
+
+The Slices box next to the choice says how many slices go round (2 to 100). Left empty, it follows the shape's Petals number (a Flower with 5 petals has 5 slices), or 6 when the shape has none. Type a number to set your own.
+
+The slices always join up: each copy starts exactly where the one before it ends.
+
+## Editing one slice by hand
+
+With Around the centre picked, the Custom… window shows two views side by side:
+
+• One slice (left): the slice you edit, with its points and handles, and two faint lines from the centre to its ends. Drag a point and every slice changes with it. Double-click the line to add a point, right-click a point to remove it, Alt+drag for a sharp corner.
+• Whole shape (right): the whole shape as the curve gets it, between its ends A and B, with the slice you edit drawn in blue.
+
+The slice's two ends stay where they are: they are where the slices join. Their handles can move. Where the join is smooth, moving one end's handle turns the next slice's handle with it, so the join stays smooth. A sharp join (like a pointed petal tip) stays a corner. Alt+drag moves the handle on its own.
+
+Editing by hand gives you shapes no number can make, but the slice is then your drawing, not the formula's exact petal. Back to formula puts the formula's slice back.
+
+## Changing just one slice
+
+Drag a point of any slice in the Whole shape view: only that slice changes. It turns purple, gets its own handles there, and the line under the views says how many slices still follow ("4 of 5 slices follow the slice"). Editing the slice on the left no longer changes it.
+
+Right-click a purple slice → Follow the slice again to drop its own edit.
+
+Its two ends always stay on the joins, so the shape never opens. When no slice follows the left one any more, the left view fades. Changing Slices while some slices have their own edits asks first: going on makes every slice follow again.
+
+## While the Custom… window is open
+
+It previews on the piano roll as you change it, so the piano roll's shapes can't be picked or changed meanwhile. You can still look around: the mouse wheel scrolls and zooms, middle-drag pans, and the scrollbars work.

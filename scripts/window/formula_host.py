@@ -226,6 +226,8 @@ class FormulaHost:
             put_sym(h[layer], mode)
         self.spread()
         self.changed()
+        if mode == "around" and getattr(self.app, "tips", None):
+            self.app.tips.show("around", wait=True)  # (the first time: what it does)
 
     def with_formula(self):
         return [h for h in self.targets() if has_formula(h)]
