@@ -14,6 +14,7 @@ import os
 import re
 import tkinter as tk
 from tkinter import ttk, messagebox
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -396,7 +397,49 @@ class FormulaDialog(tk.Toplevel):
         self.geometry(f"+{max(0, x)}+{max(0, y)}")
         remember_place(self, "formula")
         self.grab_set()  # the roll can't change under it while it previews
+        # ... but the VIEW can (user 2026-11-19 picked "view only"): under the grab Tk hands the window every press /
+        # drag / let go over the main window (widget = this window, screen place); middle-drags over the piano roll
+        # pan it, left-drags on its scrollbars scroll / zoom. The wheel isn't held by a grab: it scrolls / zooms already.
+        self.passing = None  # (the piano roll or a scrollbar a press was handed to, till its let go)
+        for b in ("1", "2"):
+            for seq, kind in ((f"<ButtonPress-{b}>", "press"), (f"<B{b}-Motion>", "drag"),
+                              (f"<ButtonRelease-{b}>", "release")):
+                self.bind(seq, lambda e, k=kind, b=b: self.pass_view(e, k, b), add="+")
         self.focus_set()
+
+    def pass_view(self, e, kind, button):
+        """A press / drag / let go Tk handed this window from the main window (see the grab in __init__): the
+        middle button over the piano roll = a pan, the left one on the piano roll's scrollbars = their own drag.
+        Everything else there does nothing, as before (selecting / editing stays blocked while this previews)."""
+        if e.widget is not self:  # (this window's own widgets: theirs)
+            return
+        roll = self.app.roll
+        if kind == "press":
+            self.passing = None
+            spots = [roll] if button == "2" else list(getattr(roll, "bars", ()))
+            for w in spots:
+                if w.winfo_viewable() and 0 <= e.x_root - w.winfo_rootx() < w.winfo_width() \
+                        and 0 <= e.y_root - w.winfo_rooty() < w.winfo_height():
+                    self.passing = (w, button)
+                    break
+        if not self.passing or self.passing[1] != button:
+            return
+        w = self.passing[0]
+        ev = SimpleNamespace(x=e.x_root - w.winfo_rootx(), y=e.y_root - w.winfo_rooty(), x_root=e.x_root,
+                             y_root=e.y_root, state=e.state, delta=0, widget=w)
+        if w is roll:
+            if kind == "press":
+                roll.start_pan(ev)
+            elif kind == "drag":
+                roll.pan_view(ev)
+            else:  # (only the pan ends: a middle CLICK there would add a point to a selected curve = an edit)
+                roll._panning = False
+                roll._pan = None
+                roll.request_redraw()
+        else:
+            (w.on_press if kind == "press" else w.on_drag if kind == "drag" else w.on_release)(ev)
+        if kind == "release":
+            self.passing = None
 
     def presets(self):
         """(id, name, formulas {key: text}, numbers) of the built-in ones."""
