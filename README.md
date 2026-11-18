@@ -172,6 +172,8 @@ Two more are optional for the Text tool: **uharfbuzz** and **python-bidi** (lett
 writing, for Arabic, Persian, Hebrew, Hindi, Thai and more). Spiderweb offers them once too; by hand:
 `pip install uharfbuzz "python-bidi>=0.6,<0.7"` (python-bidi stays on its 0.6 line: Spiderweb reads a part of it
 that newer versions may change).
+When Spiderweb installs a package for you, it skips versions released in the last 14 days (a safety wait against
+tampered uploads); you can always update one yourself with pip.
 On a Mac, or a Linux too old for the included fast code, `pip install numba` gets you that speed back (the first
 start then takes a minute while it gets ready).
 

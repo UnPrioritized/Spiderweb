@@ -200,6 +200,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     project.py       project files (.spwb packed, old .json plain), autosave (+ its backup), MIDI export
     dropfiles.py     files dragged in from Explorer onto the main window (Windows' OLE drop target)
     safefile.py      saving without half-written files
+    pip_age.py       the start's package offers skip versions under 14 days old (asks PyPI their dates)
     saved_lists.py   the user's lists kept in one file (patterns, rhythms, colour formats): a damaged one loses nothing
     errors.py        spiderweb-error.log and the "something went wrong" message; spiderweb-crash.log when the
                      program dies outright (both next to Spiderweb)
@@ -293,8 +294,8 @@ def check_numpy():
 
 
 def run_pip(root, packages):
-    """pip installs each of packages = [(pip name, shown name)], one at a time (one that can't be installed here
-    doesn't stop the next), while root shows a small window saying so: it can take minutes, and with nothing on
+    """pip installs each of packages = [(pip name, shown name)] (never a version under 14 days old: files/pip_age.py),
+    one at a time (one that can't be installed here doesn't stop the next), while root shows a small window saying so: it can take minutes, and with nothing on
     screen a second start did nothing (the first one holds the lock) and looked broken. That window carries this
     folder's label, so a second start brings it to the front. -> (pip names that failed, their output's ends)."""
     import subprocess
@@ -328,7 +329,9 @@ def run_pip(root, packages):
 
         def work():
             try:
-                done = subprocess.run([sys.executable, "-m", "pip", "install", PIP_SPEC.get(pip, pip)],
+                from files import pip_age  # (versions under 14 days old left out: user 2026-11-18, supply chain)
+                wanted = pip_age.requests(pip, PIP_SPEC.get(pip, pip))
+                done = subprocess.run([sys.executable, "-m", "pip", "install"] + wanted,
                                       capture_output=True, text=True,
                                       errors="replace", creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
                 got["ok"], got["out"] = done.returncode == 0, ((done.stdout or "") + (done.stderr or "")).strip()
