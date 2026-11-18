@@ -5,8 +5,10 @@ The maths for each kind lives in its own file: paths.py (lines, polylines, freeh
 (custom shapes), funnel.py (funnels), envelope.py (velocities).
 """
 
+import copy
 import itertools
 import json
+import marshal
 import math
 import re
 import threading
@@ -670,16 +672,65 @@ _last_pass = 0  # shapes the last whole same_shapes pass asked for
 def same_shapes():
     """While the shapes can't change (the piano roll's redraw): _cached works each one out once, then knows it by
     the object itself (its key's JSON ~0.06 ms a circle, asked 3 times a shape a redraw: 200 shapes ~36 ms, redraw
-    hunt 2026-10-31)."""
+    hunt 2026-10-31). On the window's own thread, from one pass to the next too (_reused)."""
     outer = getattr(_held, "seen", None)
     _held.seen = {} if outer is None else outer
+    if outer is None:
+        _held.reuse = threading.current_thread() is threading.main_thread()
     try:
         yield
     finally:
         global _last_pass
         if outer is None:
             _last_pass = len(_held.seen)
+            _held.reuse = False
         _held.seen = outer
+
+
+# id(shape) -> [shape, its key, its _paths entry, a copy of _fields(shape) or None]: what the last passes found per
+# shape, so the next pass needs no key built (4,000 shapes: ~18 ms of every redraw). Main thread only.
+_KEPT = {}
+
+
+def _fields(sh):
+    """Everything _keyed's key is made from (and a bit more: the whole cut), as it is."""
+    return (sh["kind"], sh["pts"], sh.get("strokes"), [sh.get(k) for k in SHAPE_KEYS], sh.get("cut"), sh.get("fx"),
+            sh.get("_m"))
+
+
+def _copied(fields):
+    """A deep copy of plain data (lists, dicts, tuples, numbers, text) made in C (marshal: ~10x deepcopy; all 4,000
+    shapes are new objects after an undo); anything else the slow way."""
+    try:
+        return marshal.loads(marshal.dumps(fields))
+    except ValueError:
+        return copy.deepcopy(fields)
+
+
+def _reused(sh):
+    """_keyed(sh), or what the last pass found for the same shape object when nothing it's made from changed: its
+    fields compared (==, all in C) with a copy taken once its key came out the same twice in a row. Text keeps
+    the key way (its strokes go by their own fingerprint)."""
+    k = _KEPT.get(id(sh))
+    key = None
+    if k is not None and k[0] is sh and not sh.get("text"):
+        if k[3] is not None:
+            try:
+                if _fields(sh) == k[3]:
+                    return k[2]
+            except Exception:  # (a value that can't be compared: the key way)
+                pass
+        else:
+            key = _key_of(sh)
+            if key == k[1]:
+                k[3] = _copied(_fields(sh))
+                return k[2]
+    key = _key_of(sh) if key is None else key
+    got = _keyed(sh, key)
+    if len(_KEPT) > max(PATHS_KEPT, 2 * _last_pass, 2 * len(getattr(_held, "seen", None) or ())):
+        _KEPT.clear()  # (shapes gone hold no memory for long)
+    _KEPT[id(sh)] = [sh, key, got, None]
+    return got
 
 
 def _cached(sh):
@@ -688,7 +739,7 @@ def _cached(sh):
         got = seen.get(id(sh))
         if got is not None and got[0] is sh:
             return got[1]
-        seen[id(sh)] = (sh, _keyed(sh))
+        seen[id(sh)] = (sh, _reused(sh) if getattr(_held, "reuse", False) else _keyed(sh))
         return seen[id(sh)][1]
     return _keyed(sh)
 
@@ -702,12 +753,16 @@ def strokes_text(strokes):
     return STROKES_MARK + tok if tok else json.dumps(strokes)
 
 
-def _keyed(sh):
-    key = (sh["kind"], tuple(map(tuple, sh["pts"])), strokes_text(sh.get("strokes")),
-           json.dumps([text_unanchored(sh[k]) if k == "text" and isinstance(sh.get(k), dict) else sh.get(k)
-                       for k in SHAPE_KEYS]),
-           json.dumps([sh["cut"].get("knife"), sh["cut"]["was"], sh.get("fx"), sh.get("_m"), sh["cut"].get("mould")])
-           if sh.get("cut") and (sh["kind"] == "funnel" or sh["cut"].get("mould") or snap_piece(sh)) else None)
+def _key_of(sh):
+    return (sh["kind"], tuple(map(tuple, sh["pts"])), strokes_text(sh.get("strokes")),
+            json.dumps([text_unanchored(sh[k]) if k == "text" and isinstance(sh.get(k), dict) else sh.get(k)
+                        for k in SHAPE_KEYS]),
+            json.dumps([sh["cut"].get("knife"), sh["cut"]["was"], sh.get("fx"), sh.get("_m"), sh["cut"].get("mould")])
+            if sh.get("cut") and (sh["kind"] == "funnel" or sh["cut"].get("mould") or snap_piece(sh)) else None)
+
+
+def _keyed(sh, key=None):
+    key = _key_of(sh) if key is None else key
     got = _paths.get(key)
     if got is None:
         seen = getattr(_held, "seen", None)

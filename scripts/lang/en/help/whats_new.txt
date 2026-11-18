@@ -37,6 +37,7 @@ What's new:
 • Faster: the track list with many tracks you added yourself. Dragging tracks and other track list actions are up to 10 times quicker with thousands of them.
 • Faster: undo and redo while tracks are muted. With hundreds of muted tracks each step took seconds; now it's about ten times quicker.
 • Faster: the velocity pane on big projects. Drawing a velocity line, scrolling and zooming over millions of notes is up to 8 times quicker.
+• Faster: projects with thousands of shapes. With 4,000 shapes, drawing a new shape and dragging one are about 6 times quicker, scrolling the piano roll about 5 times, and selecting about twice as quick.
 
 • Fixed: Kestrel (GPU) could freeze when you switched MIDI outs quickly, or when several things used the graphics card at once (Rendered ahead, the Hz bass preview, playback, changing soundfonts). Everything that uses the graphics card now takes turns, one at a time.
 

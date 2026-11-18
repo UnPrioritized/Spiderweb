@@ -795,7 +795,11 @@ class RollDrawing:
     @stale_ok  # (notes being made in the background: the ones on screen, notes_wait.py)
     def redraw(self):
         with same_shapes():  # (each shape's lines looked up once a redraw)
-            self.redraw_all()
+            self._raise_later = True  # (raise_on_top: the redraw's end raises them all once)
+            try:
+                self.redraw_all()
+            finally:
+                self._raise_later = False
 
     def redraw_all(self):
         self._redraw_pending = False
@@ -803,13 +807,16 @@ class RollDrawing:
             bar.refresh()
         # the grid, keyboard + ruler and play line stay when nothing they show changed (e.g. dragging a shape): Tk
         # puts back on screen only the part around what's made again, not the whole piano roll (measured on the
-        # user's screen: ~43 ms a mouse move for the whole); the shapes' lines too (keep_lines)
-        self.delete("!(grid||frame||playhead||kept)")
+        # user's screen: ~43 ms a mouse move for the whole); the shapes' lines too (keep_lines); the notes' picture
+        # too while its tiles are the same (place_tiles: put back, Tk painted every shape's line again)
+        self.delete("!(grid||frame||playhead||kept||notespic)")
+        self._pic_placed = False
         w, h = self.winfo_width(), self.winfo_height()
         if self.sx is None or w < 50:
             self.delete("all")
             self._grid_key = self._frame_key = self._kb_key = None
             self._lines = {}
+            self._pic_items = None
             return
         # (keyboard and ruler kept apart: a sideways scroll draws only the ruler again)
         picks = self.app.gliss_picks()
@@ -873,7 +880,7 @@ class RollDrawing:
             self.paint_carried(w, h, rows, cols, fixed, *carried)
             self._note_pic = None
         elif old is not None and old[0] is pic[0] and old[1] == pic[1]:
-            self._tiles.place(self, int(self.kb_w), int(self.ruler_h))
+            self.place_tiles(int(self.kb_w), int(self.ruler_h))
         elif moved:
             # only the view moved, by whole pixels: the picture is moved along and just the new edge is painted.
             # (A pixel here and there can round the other way, so it's painted whole once the view rests.)
@@ -909,6 +916,9 @@ class RollDrawing:
             self.carried_pic(w, h, fixed, carried[0], carried[1])
         elif self._hide_sels and carried[2] == "stretch" and w > self.kb_w and h > self.ruler_h:
             self.stretched_pic(w, h)
+        if not self._pic_placed and self.__dict__.get("_pic_items") is not None:  # (no picture this time)
+            self.delete("notespic")
+            self._pic_items = None
         if self._tiles is not None and self._grid_key:  # (the grid is in the notes' picture)
             self.delete("grid")
             self._grid_key = None
@@ -917,7 +927,9 @@ class RollDrawing:
             self.draw_edge_preview(w, h)
         # the shapes' lines stay on the canvas while they'd be drawn the same (keep_lines): dragging / selecting one
         # shape remade every shape's lines (200 shapes: ~77 ms a drag step, redraw hunt 2026-10-31)
-        self.addtag_withtag("under", "!(grid||frame||playhead||kept)")  # (made so far: the notes, ring...: under them)
+        # (made so far: the ring...: under them; the notes' picture stays at the bottom, never moved: Tk paints a
+        # moved item again)
+        self.addtag_withtag("under", "!(grid||frame||playhead||kept||notespic)")
         lines = self.__dict__.get("_lines")
         if lines is None:  # (none known: any left from before go)
             self.delete("kept")
@@ -969,8 +981,9 @@ class RollDrawing:
                 path(sh, mask_colour(i, True), look.LINES + 2, dash=MASK_DASH)
             else:
                 path(sh, look.SHAPE_LINE_PICKED, look.LINES + 1)
-        for _, tag, _ in lines.values():  # (lines no longer shown / drawn otherwise now)
-            self.delete(tag)
+        gone = [item for _, _, items in lines.values() for item in items]  # (lines no longer shown / drawn otherwise
+        if gone:  # now; by item number: by tag, Tk looked through every item for each)
+            self.delete(*gone)
         self.stack_lines(order)
         self.draw_even_landing()
         for i in app.sels:
@@ -1014,23 +1027,22 @@ class RollDrawing:
                 self._frame_key = frame_key
             elif self.find_withtag("ruler"):  # (the keys redrawn alone: under the kept ruler, as in a full redraw)
                 self.tag_lower("kbd", "ruler")
-            self.addtag_withtag("made", "!(grid||frame||playhead||kept)")  # (the shapes made now: under the kept part)
+            self.addtag_withtag("made", "!(grid||frame||playhead||kept||notespic)")  # (made now: under the kept part)
             self.tag_lower("made", "frame")
             self.dtag("made")
             self.draw_playhead()
         else:  # (what was made now goes under the kept keyboard + ruler, in its own order)
-            self.addtag_withtag("made", "!(grid||frame||playhead||kept)")
+            self.addtag_withtag("made", "!(grid||frame||playhead||kept||notespic)")
             self.tag_lower("made", "frame")
             self.dtag("made")
             self.draw_playhead(keep=True)
         if self._line_order:  # (the notes' picture, ring...: under the shapes' kept lines)
             self.tag_lower("under", "kept")
         self.dtag("under")
-        self.tag_raise("rulerpick")  # (over the ruler, under the play line)
-        self.tag_raise("tempomark")
-        self.tag_raise("ccmark")  # (the CC row: a whole ruler drawn again went over it, hunt 2026-10-29)
-        self.tag_raise("trackmark")  # (the highlighted track's name: over the corner's patch the tempo marks bring)
-        self.tag_raise("playhead")
+        # rulerpick: over the ruler, under the play line; ccmark (the CC row): a whole ruler drawn again went over it
+        # (hunt 2026-10-29); trackmark (the highlighted track's name): over the corner's patch the tempo marks bring
+        self._raise_later = False
+        self.raise_on_top("rulerpick", "tempomark", "ccmark", "trackmark", "playhead")
         if self.typing:
             self.show_caret()
 
@@ -2093,7 +2105,25 @@ class RollDrawing:
         for x0, y0, x1, y1 in strips:
             self._tiles.put(img, x0, y0, x1, y1)
         self._shown = img
-        self._tiles.place(self, int(self.kb_w), int(self.ruler_h))
+        self.place_tiles(int(self.kb_w), int(self.ruler_h))
+
+    def place_tiles(self, x, y):
+        """The notes' picture tiles on the canvas, the picture's top left corner at (x, y), at the very bottom. The
+        canvas items already there stay when they show the same tiles at the same places (only their pixels changed:
+        Tk paints just the part sent; made again, the whole piano roll was painted again, every shape's line with it:
+        4,000 shapes ~95 ms a drawing step)."""
+        want = [(photo.photo, x + a, y + b) for photo, a, b in self._tiles.on_screen()]
+        self._pic_placed = True
+        have = self.__dict__.get("_pic_items")
+        if (have is not None and len(have) == len(want)
+                and all(p is q and (a, b) == (c, d) for (p, a, b), (q, c, d) in zip(have, want))
+                and len(self.find_withtag("notespic")) == len(want)):
+            return
+        self.delete("notespic")
+        for photo, a, b in want:
+            self.create_image(a, b, image=photo, anchor="nw", tags="notespic")
+        self.tag_lower("notespic")
+        self._pic_items = want
 
     def pan_pixels(self, old, pic, w, h):
         """(dx, dy): how far the picture painted for old has to move to show pic, if the view just moved by whole
@@ -2266,7 +2296,7 @@ class RollDrawing:
                 c["base"] = self.paint_region(rows, cols, rects, (kb, top, w, h), ring=False)
         if c["base"] is not None:
             if self._shown is c["base"] and self._tiles is not None:
-                self._tiles.place(self, kb, top)  # (nothing new to send)
+                self.place_tiles(kb, top)  # (nothing new to send)
             else:
                 self._img = c["base"]
                 self.show_image()
@@ -2539,10 +2569,19 @@ class RollDrawing:
         half = ((top_px >= 0) & ((top_px & 1) == 0) & (ends >= 0)).astype(np.uint8)
         return (top_px, half), idx
 
+    def _create(self, *args):
+        """Every canvas item made goes through here (tkinter's create_*): keep_lines notes the ones its draw makes."""
+        item = super()._create(*args)
+        got = self.__dict__.get("_collect")
+        if got is not None:
+            got.append(item)
+        return item
+
     def keep_lines(self, old, key, arrays, draw):
-        """The lines draw(tags) makes, kept on the canvas from the last redraw (old: {key: (arrays, tag, filled)})
+        """The lines draw(tags) makes, kept on the canvas from the last redraw (old: {key: (arrays, tag, items)})
         when key (which lines, how, the view) and the shape's lines are the same (arrays: its cached_arrays, held so
-        their id stays theirs). Returns (tag, made now), None when it drew nothing."""
+        their id stays theirs). Returns (tag, made now), None when it drew nothing. Their item numbers are kept:
+        asking Tk by tag looks at every item (each shape asked once a pan step: 4,000 shapes ~0.7 s)."""
         key = (key, id(arrays))
         got = old.pop(key, None)
         if key in self._lines:  # (twice the same: drawn, not kept)
@@ -2550,13 +2589,39 @@ class RollDrawing:
             return None
         made = got is None or got[0] is not arrays
         if made:
-            if got:
-                self.delete(got[1])
+            if got and got[2]:
+                self.delete(*got[2])
             tag = "lines%d" % next(LINE_TAGS)
-            draw(("kept", tag))
-            got = (arrays, tag, bool(self.find_withtag(tag)))
+            self._collect = []
+            try:
+                draw(("kept", tag))
+                items = tuple(self._collect)
+            finally:
+                self._collect = None
+            got = (arrays, tag, items)
         self._lines[key] = got
         return (got[1], made) if got[2] else None
+
+    def raise_on_top(self, *tags):
+        """tag_raise of each tag in turn, skipped when the canvas's top items already are in that order: Tk paints
+        every raised item again even when it doesn't move, and joins all it has to paint into one box (the play line
+        + ruler marks + a drawing step's corner = most of the piano roll, every shape's line in it: 4,000 shapes
+        ~55 ms a step). Inside a redraw (_raise_later) nothing: its end raises all five in this order anyway."""
+        if self.__dict__.get("_raise_later"):
+            return
+        want = []
+        for tag in tags:
+            got = self.find_withtag(tag)
+            if got:
+                drop = set(got)
+                want = [i for i in want if i not in drop] + list(got)
+        if not want:
+            return
+        if len(want) <= 64 and not self.find_above(want[-1]) and all(
+                self.find_above(a) == (b,) for a, b in zip(want, want[1:])):
+            return
+        for tag in tags:
+            self.tag_raise(tag)
 
     def stack_lines(self, order):
         """Puts the lines keep_lines made now in their place among the kept ones (order: its answers, bottom to
@@ -3035,8 +3100,8 @@ class RollDrawing:
                     self.create_line(x0, round(y), x1, round(y), fill=look.RULER_TEMPO_LINE, tags=tags)
         if shown:  # the keyboard's corner covers what slid past it
             self.create_rectangle(0, 0, kb, top, fill=look.RULER_BG, outline="", tags=tags)
-            self.tag_raise("trackmark")
-        self.tag_raise("playhead")
+        # (no tempo marks: this runs at every redraw; only raised when out of place)
+        self.raise_on_top(*(("trackmark",) if shown else ()), "playhead")
 
     def ruler_marks(self, w):
         """(x, label) of each bar number on the ruler, from the keyboard to w (by the time signatures); where a
@@ -3087,10 +3152,8 @@ class RollDrawing:
                                          fill=look.RULER_PICK_TEXT if pick(cx + measure(ch) / 2) else look.RULER_TEXT)
         self.draw_tempo_marks(boxes)
         self.draw_cc_marks(boxes)
-        self.tag_raise("tempomark")
-        self.tag_raise("ccmark")
-        self.tag_raise("trackmark")  # (over the corner's patch: a Select box drag hid the track's name, user 10-26)
-        self.tag_raise("playhead")
+        # (trackmark: over the corner's patch: a Select box drag hid the track's name, user 10-26)
+        self.raise_on_top("tempomark", "ccmark", "trackmark", "playhead")
 
     def cc_y(self):
         """The ruler's CC row's middle: under the tempo changes, over the bar numbers (user 2026-10-29)."""

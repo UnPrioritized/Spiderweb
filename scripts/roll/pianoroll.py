@@ -1128,12 +1128,14 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         top, bottom, w, h = self.app.keys - 0.5 + room, -0.5 - room, self.winfo_width(), self.winfo_height()
         s = self.scale
         out = []
+        hidden = self.app.hidden_shapes
         for i, sh in enumerate(self.app.shapes):
-            if i in self.app.hidden_shapes:
+            # (most shapes are inside: told apart first from their remembered reach, before any other work; 4,000
+            # shapes took ~15 ms of every redraw)
+            r = cached_reach(sh)
+            if r is None or (r[1] < top and r[2] > bottom and not r[3] <= -back) or i in hidden:
                 continue
-            r = self.reach([sh])
-            if not r:
-                continue
+            r = tuple(map(float, r))
             if r[3] <= -back and r[3] < 0:
                 y = min(max(self.p2y((r[1] + r[2]) / 2), self.ruler_h + 8 * s), h - 8 * s)
                 out.append((i, self.kb_w + 3 * s, y, "left"))
