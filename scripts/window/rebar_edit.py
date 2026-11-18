@@ -375,23 +375,6 @@ def tempo_pieces(old, new, pl):
     return out
 
 
-def _trimmed(kind, piece, pl):
-    """A piece read back from a project made before the fix above: its m0 / m1 shared tail (the rest of the line,
-    moved) taken off, like tempo_pieces does now."""
-    m0, m1 = piece.get("m0") or [], piece.get("m1") or []
-    s, fix = 0, list(piece.get("fix") or [])
-    while s < len(m0) and s < len(m1):
-        ok, f = _tail_same(kind, m0[len(m0) - 1 - s], m1[len(m1) - 1 - s], pl)
-        if not ok:
-            break
-        if f:
-            fix.append(f)
-        s += 1
-    if not s:
-        return piece
-    return dict(piece, m0=m0[:len(m0) - s], m1=m1[:len(m1) - s], s1=m1[len(m1) - s], fix=fix)
-
-
 def _locate(kind, items, piece, pl):
     """Where piece's m1 is in items now: its index, or None (changed since)."""
     m1, s1 = piece["m1"], piece["s1"]
@@ -1246,12 +1229,10 @@ def loaded(data, shapes=()):
             return EMPTY
         chs = []
         for c in data.get("changes") or []:
-            d = c["pl"]
-            pl = plan_of(d)
+            plan_of(c["pl"])  # (damaged: refused)
             assert isinstance(c["id"], int) and len(c["sig"]) == 2
             assert all(k in c["tempo"] for k in LISTS)
-            # (records saved before 2026-11-15 kept the whole rest of a long tempo line twice: trimmed)
-            chs.append(dict(c, tempo={k: _trimmed(k, p, pl) for k, p in c["tempo"].items()}))
+            chs.append(dict(c))
         groups = []
         for g in data.get("groups") or []:
             before = [clean_shape(s) for s in g["before"]]
