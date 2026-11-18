@@ -757,7 +757,8 @@ class ProjectFiles:
 
     def load_autosave(self):
         """At start: the autosave. If it won't open it's kept aside (renamed, never overwritten) and the backup
-        (the autosave as it was the last time the program started) opens instead; either way the user is told."""
+        (the autosave as it was the last time the program started) opens instead; either way the user is told.
+        True = a project opened (start_new_defaults: else the New projects settings)."""
         path, backup = self.autosave_path, backup_path(self.autosave_path)
         def opens(p):
             try:
@@ -766,7 +767,7 @@ class ProjectFiles:
                 return False
 
         if not os.path.exists(path):
-            return
+            return False
         if opens(path):
             self.find_loaded_later()
             kept = ""
@@ -781,12 +782,13 @@ class ProjectFiles:
                 pass
             if self.load_notes:
                 self.after(300, lambda: self.tell_load_notes(tr("project.opening_your_last_session"), kept))
-            return
+            return True
         try:
             kept = tr("project.it_was_kept_as", broken=keep_aside(path, "autosave-broken", move=True))
         except OSError:
             kept = ""
-        if os.path.exists(backup) and opens(backup):
+        opened = os.path.exists(backup) and opens(backup)
+        if opened:
             self.find_loaded_later()
             what = (tr("project.opened_the_backup_instead_your_work",
                        strftime=time.strftime('%Y-%m-%d %H:%M', time.localtime(os.path.getmtime(backup)))))
@@ -796,6 +798,7 @@ class ProjectFiles:
         self.after(300, lambda: messagebox.showwarning(
             tr("project.spiderweb"), tr("project.the_autosave_your_last_session_couldn", kept=kept, what=what),
             parent=self))
+        return opened
 
     def restore_window(self):
         try:
@@ -1078,10 +1081,10 @@ class ProjectFiles:
             return
         self._opening = True  # (each box set would make the notes again: on_project_change does it once)
         try:
-            if ppq and "ppq" in saved and 1 <= int(saved["ppq"]) <= 65535:
+            if ppq and "ppq" in saved:
                 self.pvar["ppq"].set(saved["ppq"])
-            if isinstance(saved.get("output"), str) and saved["output"].strip():
-                self.pvar["output"].set(saved["output"])
+            if isinstance(saved.get("output"), str):
+                self.pvar["output"].set(self.new_output(saved["output"]))
         finally:
             self._opening = False
         if saved.get("channel_mode") in CHANNEL_MODES:
@@ -1098,6 +1101,18 @@ class ProjectFiles:
         if saved.get("domino_start") in starts:
             self.domino_box.current(starts.index(saved["domino_start"]))
         self.sync_channels_fold()
+        self.on_project_change()  # (the whole refresh: 31-EDO ticks + tuning too, even when PPQ / keys stay)
+
+    def new_output(self, saved):
+        """The saved New projects output as the Output file box gets it: empty = spiderweb.mid in Spiderweb's output
+        folder, a name alone counts from there; a folder that's gone = the same name there + said (like Open)."""
+        out = output_path(saved)
+        folder = os.path.dirname(out)
+        if not os.path.isdir(folder) and os.path.normcase(folder) != os.path.normcase(os.path.normpath(OUTPUT_DIR)):
+            out = os.path.join(OUTPUT_DIR, os.path.basename(out))
+            if hasattr(self, "status"):
+                self.status.config(text=tr("project.output_folder_missing", folder=folder, path=out))
+        return out
 
     def new_defaults_into(self, data):
         """Load MIDI's new project (attach_midi's data, project_data's keys): the saved song settings in, PPQ and
@@ -1106,18 +1121,26 @@ class ProjectFiles:
         data.update({k: v for k, v in saved.items() if k not in ("ppq", "keys")})
         if saved.get("keys") in KEYS:
             data["keys"] = saved["keys"]
+        if isinstance(saved.get("output"), str):
+            data["output"] = self.new_output(saved["output"])
 
-    def start_new_defaults(self, had_autosave):
+    def project_for_new(self):
+        """The open project's song settings for Settings → New projects (its button, the first start): PPQ as the
+        project runs it (the box may hold "960*2")."""
+        data = self.project_data()
+        data["ppq"] = str(self.ppq)
+        return data
+
+    def start_new_defaults(self, opened):
         """At start: the first time (nothing saved yet) the project opened now becomes the New projects settings
-        (the user's setup as it was before this setting); a start without an autosave begins with them."""
+        (the user's setup as it was before this setting); a start where no autosave opened begins with them."""
         if new_project.read() is None:
             try:
-                new_project.save(self.project_data())
+                new_project.save(self.project_for_new())
             except OSError:
                 pass
-        elif not had_autosave:
+        elif not opened:
             self.use_new_defaults()
-            self.on_project_change()
 
     def open_project(self, path=None):
         """path = a file dropped / opened with Spiderweb (window/open_files.py); None = asks."""

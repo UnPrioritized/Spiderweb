@@ -53,8 +53,7 @@ def build(win, f):
         data["channel_mode"] = mode.get() if mode.get() in CHANNEL_MODES else "single"
         data["channel_split"] = SPLITS[max(split_box.current(), 0)]
         data["domino_start"] = DOMINO_STARTS[max(domino_box.current(), 0)][0]
-        if out.get().strip():
-            data["output"] = out.get().strip()
+        data["output"] = out.get().strip()  # (empty = spiderweb.mid in Spiderweb's output folder)
         status.grid_remove()  # (the button's "Saved." is about the button only)
         try:
             new_project.save(data)
@@ -73,6 +72,8 @@ def build(win, f):
         for w in greyed:
             if w.winfo_exists():
                 w.state(["!disabled"] if use.get() else ["disabled"])
+        if getattr(win, "new_page", None):
+            sync()  # (the panel's own greying on top)
     f.row(None, win.tick(page, "settings.new_use", use, switched, tip=tr("settings.new_use_tip")))
 
     # PPQ: typed or picked, taken on Enter / leaving / a pick (like the panel's box)
@@ -96,7 +97,8 @@ def build(win, f):
     Tooltip(keys_box, tr("app.128_the_standard_keys_0_127"))
     edo = ttk.Frame(krow)  # (shown with 256 keys, like the panel)
     tick(edo, "edo31", "app.edo31", "app.edo31_tip").pack(side="left", padx=(6, 0))
-    tick(edo, "edo31_audio", "app.edo31_audio", "app.edo31_audio_tip").pack(side="left", padx=(4, 0))
+    audio = tick(edo, "edo31_audio", "app.edo31_audio", "app.edo31_audio_tip")
+    audio.pack(side="left", padx=(4, 0))
     f.row(tr("settings.new_keys"), krow, widget_tip=False)
 
     orow = ttk.Frame(page)
@@ -171,6 +173,11 @@ def build(win, f):
         for w, pad_x in multi_rows:
             if shown[w]:
                 w.pack(anchor="w", padx=(pad_x or 0, 0), pady=(2, 0))
+        # greyed as the panel greys them (sync_edo, sync_ch10_grey): Audio needs 31-EDO; with "pitch kept" on, channel
+        # 10 and its order change nothing
+        lanes_on = tall and v["edo31"].get() and v["edo31_lanes"].get()
+        for w, ok in ((audio, v["edo31"].get()), (ch10, not lanes_on), (order, not lanes_on)):
+            w.state(["!disabled"] if use.get() and ok else ["disabled"])
         if getattr(win, "new_page", None):  # (a change after the window is built: its height may grow)
             win.fit_pages()
 
@@ -195,7 +202,7 @@ def build(win, f):
 
     def take():
         try:
-            new_project.save(app.project_data())
+            new_project.save(app.project_for_new())
         except OSError:
             status.config(text=tr("settings.new_not_saved"), foreground=look.WARN)
         else:
@@ -212,5 +219,13 @@ def build(win, f):
     f.note(tr("settings.new_open_note"))
     show()
     switched()
+    sync()  # (the panel's greying again, over the master tick's)
+
+    def take_typed():
+        """Settings closing: a PPQ / output typed without Enter is kept (like the voice limit and Opacity)."""
+        if ppq_box.winfo_exists() and use.get():
+            ppq_done()
+            save()
+    win.take_new_typed = take_typed
     win.new_page = {"show": show, "ppq": ppq_box, "keys": keys_box, "out": out_box, "mode": mode,
                     "split": split_box, "domino": domino_box, "take": b, "use": use, "vars": v}  # (tests)

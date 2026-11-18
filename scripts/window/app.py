@@ -622,9 +622,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.restore_window()
         speed.start()  # (the own compiled loops for lots of notes: loaded in the background)
         speed.wait_own()  # (~0.06 s: the autosave's notes made with them; a Warp's took ~7 s without)
-        had_autosave = os.path.exists(self.autosave_path)
-        self.load_autosave()
-        self.start_new_defaults(had_autosave)  # (Settings → New projects: saved the first time / used without one)
+        opened = self.load_autosave()
+        self.start_new_defaults(opened)  # (Settings → New projects: saved the first time / used when none opened)
         self.reattach_file()  # (the project file the work belonged to; the title)
         self.sync_panel()
         self.after(800, lambda: self.tips.show("welcome"))  # the first time Spiderweb starts
@@ -3569,6 +3568,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         plain = not any(self.tempo.get(k) for k in ("points", "catch", "keysigs")) and sigs_of(self.tempo) == [DEFAULT_SIG]
         plain = plain and not self.own_tracks and self.start_track
         if not self.shapes and plain and usual and not boxes[1] and self.loaded is None and self.midi_link is None:
+            # (nothing to lose: no question, but still Settings → New projects' settings + Fit view, user 2026-11-18;
+            # its undo steps stay)
+            self.use_new_defaults()
+            if new_project_settings.fit_view():
+                self.roll.fit_view()
             return
         ask = tr("app.new_ask") + ("\n\n" + tr("load.new_closes") if self.midi_link is not None else "")
         if self.saved_key() == self._saved_shapes or not self.shapes and plain:

@@ -3,6 +3,8 @@ with, so a project file from someone else never becomes the user's next project'
 [new_project] (one line each, like every app setting); taken from the open project by its button. The project's own
 keys (project_data's) -> the file's names."""
 
+import os
+
 from files import settings
 
 SECTION = "new_project"
@@ -29,29 +31,63 @@ FIELDS = {
 FIT_VIEW = "fit_view_on_new"  # (the tick: New = Fit view instead of the zoom kept, user 2026-11-18)
 
 
+def _usable(key, value):
+    """A saved value as New would use it, or None when it can't be (hand-edited lines: 70000, 200 keys...); text
+    choices in any capitals."""
+    from files.domino_clip import DOMINO_STARTS
+    from notes.engine import CHANNEL_MODES, SPLITS
+    from notes.paths import KEYS
+    if key == "ppq":
+        return str(value) if 1 <= value <= 65535 else None
+    if key == "keys":
+        return value if value in KEYS else None
+    choices = {"channel_mode": CHANNEL_MODES, "channel_split": SPLITS,
+               "domino_start": [v for v, _ in DOMINO_STARTS]}.get(key)
+    if choices is not None:
+        return next((c for c in choices if c.casefold() == value.strip().casefold()), None)
+    return value
+
+
 def read():
-    """{project key: value} of the saved ones that read well; None when nothing is saved yet."""
+    """{project key: value} of the saved ones that New can use; None when nothing is saved yet."""
     out = {}
     for key, (name, kind) in FIELDS.items():
         text = settings.get(SECTION, name)
         value = None if text is None else settings._read_value(text, kind)
         if value is not None:
-            out[key] = str(value) if key == "ppq" else value
+            value = _usable(key, value)
+        if value is not None:
+            out[key] = value
     return out or None
 
 
+def short_output(path):
+    """Spiderweb's own output folder saved as the file name alone (output_path counts it from there), so moving the
+    Spiderweb folder keeps it working; elsewhere kept whole; empty stays empty (= spiderweb.mid there)."""
+    from files.project import OUTPUT_DIR, output_path
+    if not path.strip():
+        return ""
+    full = output_path(path)
+    if os.path.normcase(os.path.dirname(full)) == os.path.normcase(os.path.normpath(OUTPUT_DIR)):
+        return os.path.basename(full)
+    return path.strip()
+
+
 def save(data):
-    """The song settings in data (project_data's) saved (OSError when settings.ini can't be written)."""
+    """The song settings in data (project_data's) saved (OSError when settings.ini can't be written). Ticks missing
+    from data count as off (project_data leaves the overlap ticks out when off)."""
     values = {}
     for key, (name, kind) in FIELDS.items():
-        if key not in data:
+        if key not in data and kind is not bool:
             continue
-        value = data[key]
+        value = data.get(key, False)
         if key == "ppq":
             try:
                 value = int(value)
             except (TypeError, ValueError):
                 continue
+        elif key == "output" and isinstance(value, str):
+            value = short_output(value)
         text = settings._write_value(value, kind)
         if text is not None:
             values[(SECTION, name)] = text

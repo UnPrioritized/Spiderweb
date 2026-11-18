@@ -373,6 +373,9 @@ class SettingsWindow(tk.Toplevel):
         take = getattr(self, "take_opacity", None)
         if take is not None and self.opacity_box.winfo_exists() and not self.opacity_box.instate(["disabled"]):
             take(True)
+        take = getattr(self, "take_new_typed", None)  # (New projects' PPQ / output boxes)
+        if take is not None:
+            take()
         self.destroy()
 
     def tick(self, page, key, var, command, tip=None, **kw):
