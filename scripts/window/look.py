@@ -321,6 +321,7 @@ PAT_FORMULA = pick("#d0d0d0", "#5a5a5d")  # the formula it came from, under it
 PAT_LINE, PAT_ARM = pick("#d01010", "#dcdce0"), pick("#6080c0", "#7a9ae0")  # the loop, its handle lines
 PAT_GRID, PAT_GRID_STRONG = pick("#eeeeee", "#444447"), pick("#d4d4d4", "#545457")
 PAT_GRID_TEXT = pick("#aaaaaa", "#808084")
+PAT_OWN = pick("#8a2be2", "#c39bff")  # Around the centre: a slice unlinked by hand (Whole view)
 
 # --- Drawer
 DRAWER_BG = pick("#f4f4f4", "#333336")  # around the board

@@ -81,6 +81,31 @@ def shape_slices(p):
     return petals if petals is not None else SLICES_DEFAULT
 
 
+def own_slices(p):
+    """Slices unlinked by hand (stage D, user 2026-11-19: a drag in the Whole view changes only that slice):
+    {slice number: its own curve {"pts", maybe "sharp"}}, kept in p["loop"]["own"] with text keys (as saved),
+    each drawn where slice 0 sits."""
+    out = {}
+    for key, c in ((p.get("loop") or {}).get("own") or {}).items():
+        try:
+            out[int(key)] = c
+        except (TypeError, ValueError):
+            pass
+    return out
+
+
+def pinned_ends(pts, shared):
+    """An unlinked slice's anchors + handles with its two ends (and their handles, moved along) on the shared
+    slice's ends: the joins between slices never open (user 2026-11-19)."""
+    out = [list(q) for q in pts]
+    last = len(out) - 1
+    for end, handle in ((0, 1), (last, last - 1)):
+        dx, dy = shared[end if end == 0 else -1][0] - out[end][0], shared[end if end == 0 else -1][1] - out[end][1]
+        for j in (end, handle):
+            out[j] = [out[j][0] + dx, out[j][1] + dy]
+    return out
+
+
 def keep_sym(new, old):
     """new with old's symmetric halves and Flatten / Softness (picking another preset keeps them; from a file:
     made valid). A shape (new has "x") also keeps Around the centre and its typed slice count."""
@@ -159,6 +184,17 @@ def clean_loop(c):
             out["slice"] = True
             if c.get("way") in (1, -1):
                 out["way"] = int(c["way"])
+            own = {}
+            for key, o in (c.get("own") or {}).items() if isinstance(c.get("own"), dict) else ():
+                try:
+                    k = int(key)
+                except (TypeError, ValueError):
+                    continue
+                o = clean_loop({"pts": o.get("pts"), "sharp": o.get("sharp", ())}) if isinstance(o, dict) else None
+                if o and 0 <= k < SLICES_MAX:
+                    own[str(k)] = o
+            if own:
+                out["own"] = own
         return out
     except (KeyError, TypeError, ValueError, AttributeError):
         return None
@@ -622,16 +658,17 @@ def around_centre(part, slices, way=None):
     return best[1], best[2]
 
 
-def around_shape(part, slices, way=None):
+def around_shape(part, slices, way=None, own=None):
     """One slice's drawing (x, y rows) and slices - 1 copies of it turned on round around_centre (way: see there):
-    the whole drawing (x, y rows). Points where a copy starts right on the last one's end are dropped (no zero-length
-    steps)."""
+    the whole drawing (x, y rows). own: {slice number: its own drawing} for slices unlinked by hand (drawn where
+    slice 0 sits, turned on like the copies). Points where a copy starts right on the last one's end are dropped (no
+    zero-length steps)."""
     part = np.asarray(part, float)
     centre, step = around_centre(part, slices, way)
-    q = part - centre
-    rows = [part]
-    for i in range(1, slices):
-        rows.append(centre + q @ _turn(step * i).T)
+    rows = []
+    for i in range(slices):
+        b = np.asarray(own[i], float) if own and i in own else part
+        rows.append(b if i == 0 and b is part else centre + (b - centre) @ _turn(step * i).T)
     a = np.vstack(rows)
     size = math.hypot(*(a.max(axis=0) - a.min(axis=0)))
     keep = np.concatenate([[True], np.hypot(*np.diff(a, axis=0).T) > 1e-12 * max(size, 1e-300)])
@@ -717,7 +754,10 @@ def shape_points(p):
         from notes.bezier import sample
         a = np.asarray(sample([tuple(q) for q in p["loop"]["pts"]], 64), float)
         if p["loop"].get("slice") and p.get("sym") == AROUND:
-            a = around_shape(a, shape_slices(p), p["loop"].get("way"))
+            n = shape_slices(p)
+            own = {k: np.asarray(sample([tuple(q) for q in pinned_ends(c["pts"], p["loop"]["pts"])], 64), float)
+                   for k, c in own_slices(p).items() if k < n}
+            a = around_shape(a, n, p["loop"].get("way"), own)
         u, v = a[:, 0], a[:, 1]
     else:
         u, v = formula_shape(p)

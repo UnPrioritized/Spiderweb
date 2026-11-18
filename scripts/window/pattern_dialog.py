@@ -17,7 +17,7 @@ from tkinter import ttk, messagebox
 
 import numpy as np
 
-from files.lang import tr
+from files.lang import tr, trn
 from files.mathexpr import as_written, calc, fmt, formula, split_pair
 from files import saved_lists
 from files.about import USER
@@ -26,7 +26,8 @@ from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_
                           held_axis, keep_symmetric, nearest, pen_handles, sample)
 from notes.pattern import (AROUND, LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, SLICES_MAX,
                            SLICES_MIN, SOFT_DEFAULT, around_centre, clean_loop, clean_pattern_graphs, formula_loop,
-                           formula_shape, formula_slice, formula_slice_way, formula_slice_ways, keep_sym, most_loops, new_pattern, new_shape, pattern_name,
+                           formula_shape, formula_slice, formula_slice_way, formula_slice_ways, keep_sym, own_slices,
+                           pinned_ends, most_loops, new_pattern, new_shape, pattern_name,
                            pattern_names, polar_of, polar_ok, polar_xy, shape_name, shape_names, shape_points,
                            shape_slices, span_numbers, t_span)
 from files.clipboard import put_text
@@ -347,6 +348,13 @@ class FormulaDialog(tk.Toplevel):
         self.whole = tk.Canvas(views, width=self.h, height=self.h, bg=look.CHART_BG, highlightthickness=1,
                                highlightbackground=look.PAT_BORDER)  # (shown only with Around the centre)
         Tooltip(self.whole, tr("pattern_dialog.whole_view_tip"))
+        self.wdrag = None  # (slice, point number) dragged in the Whole view
+        self.wview = None  # the Whole view's (pixels per unit, left x, middle y, centre, step angle)
+        self.whole_points = []
+        self.whole.bind("<ButtonPress-1>", self.whole_press)
+        self.whole.bind("<B1-Motion>", self.whole_motion)
+        self.whole.bind("<ButtonRelease-1>", self.whole_release)
+        self.whole.bind("<Button-3>", self.whole_right_click)
         c = self.canvas
         c.bind("<ButtonPress-1>", self.press)
         c.bind("<B1-Motion>", self.motion)
@@ -819,6 +827,13 @@ class FormulaDialog(tk.Toplevel):
             if value is None:
                 self.slices_var.set(str(shape_slices(self.pat)))
             return
+        own = (self.pat.get("loop") or {}).get("own")
+        if own:  # (user 2026-11-19: ask first; yes = every slice follows again)
+            if not messagebox.askyesno(tr("pattern_dialog.slices_title"), trn("pattern_dialog.slices_unlink_ask",
+                                                                                len(own), n=len(own)), parent=self):
+                self.slices_var.set(str(shape_slices(self.pat)))
+                return
+            self.pat["loop"].pop("own")
         if value is None:
             self.pat.pop("slices", None)
         else:
@@ -897,6 +912,8 @@ class FormulaDialog(tk.Toplevel):
             if self.pat.get("loop"):
                 self.set_info(tr("pattern_dialog.shape_edited_by_hand") if self.layer == "shape" else
                               tr("pattern_dialog.edited_by_hand"), look.GOOD, back=True)
+                if self.around():
+                    self.show_follow()
             else:
                 self.set_info(tr("pattern_dialog.one_slice") if self.around() else tr("pattern_dialog.whole_shape")
                               if self.layer == "shape" else tr("pattern_dialog.one_loop"), look.INFO)
@@ -1166,29 +1183,140 @@ class FormulaDialog(tk.Toplevel):
         drawn over it in the handles' colour."""
         w = self.whole
         w.delete("all")
+        self.whole_points = []  # (slice, point number, x, y) that can be dragged here
         if not self.around() or (not self.ok and not self.pat.get("loop")):
             return
         try:
             u, v = shape_points(dict(self.pat, mirror=False))
-            part = np.asarray(sample([tuple(p) for p in self.shown_loop()["pts"]], 32), float)
+            loop = self.shown_loop()
+            centre, step = self.slice_centre(loop)
         except (ValueError, KeyError):
             return
-        size, pad = self.h, 18 * self.scale
-        lo_u, hi_u = min(u.min(), 0.0), max(u.max(), 1.0)
-        lo_v, hi_v = min(v.min(), 0.0), max(v.max(), 0.0)
-        s = (size - 2 * pad) / max(hi_u - lo_u, hi_v - lo_v, 1e-9)
-        x0 = size / 2 - (lo_u + hi_u) / 2 * s
-        ym = size / 2 + (lo_v + hi_v) / 2 * s
-
-        def xy(a, b):
-            return x0 + a * s, ym - b * s
+        if self.wdrag is None or self.wview is None:  # (held still while a point here is dragged)
+            size, pad = self.h, 18 * self.scale
+            lo_u, hi_u = min(u.min(), 0.0), max(u.max(), 1.0)
+            lo_v, hi_v = min(v.min(), 0.0), max(v.max(), 0.0)
+            s = (size - 2 * pad) / max(hi_u - lo_u, hi_v - lo_v, 1e-9)
+            self.wview = (s, size / 2 - (lo_u + hi_u) / 2 * s, size / 2 + (lo_v + hi_v) / 2 * s, centre, step)
+        else:
+            self.wview = self.wview[:3] + (centre, step)
+        xy = self.whole_xy
         font = look.font(8)
-        (ax, ay), (bx, by) = xy(0, 0), xy(1, 0)
+        (ax, ay), (bx, by) = xy((0, 0)), xy((1, 0))
         w.create_line(ax, ay, bx, by, fill=look.PAT_ORIGIN, dash=(6, 4))
         w.create_text(ax, ay + 6, text="A", anchor="n", fill=look.PAT_AB, font=font)
         w.create_text(bx, by + 6, text="B", anchor="n", fill=look.PAT_AB, font=font)
-        w.create_line(*[q for a, b in zip(u.tolist(), v.tolist()) for q in xy(a, b)], fill=look.PAT_LINE, width=2)
-        w.create_line(*[q for a, b in part.tolist() for q in xy(a, b)], fill=look.HANDLE, width=3)
+        w.create_line(*[q for a, b in zip(u.tolist(), v.tolist()) for q in xy((a, b))], fill=look.PAT_LINE, width=2)
+        own = self.own_now()
+        r = 2.5 * self.scale
+        for k in range(shape_slices(self.pat)):
+            pts = pinned_ends(own[k]["pts"], loop["pts"]) if k in own else loop["pts"]
+            if k in own or k == 0:  # (an unlinked one in its own colour, the shared one in the handles' blue)
+                line = sample([tuple(p) for p in pts], 32)
+                w.create_line(*[q for p in line for q in xy(p, k)], fill=look.PAT_OWN if k in own else look.HANDLE,
+                              width=3)
+            if k in own:
+                for a, h in handle_lines(pts):
+                    w.create_line(*xy(a, k), *xy(h, k), fill=look.PAT_ARM)
+            for i, kind in pen_handles(pts):
+                if i in (0, len(pts) - 1) or kind == "ctrl" and k not in own:
+                    continue  # (the joins stay put; a following slice shows only its anchors)
+                x, y = xy(pts[i], k)
+                self.whole_points.append((k, i, x, y))
+                if k in own:
+                    w.create_oval(x - r, y - r, x + r, y + r, fill=look.PAT_OWN if kind != "ctrl" else look.HANDLE_FILL,
+                                  outline=look.PAT_OWN)
+                else:
+                    w.create_oval(x - r, y - r, x + r, y + r, fill=look.HANDLE_FILL, outline=look.PAT_ARM)
+
+    def own_now(self):
+        """The unlinked slices that count now: {number: curve} (pattern.own_slices, past the slice count left out)."""
+        n = shape_slices(self.pat)
+        return {k: c for k, c in own_slices(self.pat).items() if k < n}
+
+    def whole_xy(self, p, k=0):
+        """Whole view pixels of a point of slice 0's place, turned on to slice k's."""
+        s, x0, ym, centre, step = self.wview
+        if k:
+            c, si = math.cos(step * k), math.sin(step * k)
+            dx, dy = p[0] - centre[0], p[1] - centre[1]
+            p = (centre[0] + dx * c - dy * si, centre[1] + dx * si + dy * c)
+        return x0 + p[0] * s, ym - p[1] * s
+
+    def whole_from_xy(self, x, y, k=0):
+        """whole_xy's way back: a Whole view pixel -> slice 0's place, turned back from slice k's."""
+        s, x0, ym, centre, step = self.wview
+        p = ((x - x0) / s, (ym - y) / s)
+        if k:
+            c, si = math.cos(-step * k), math.sin(-step * k)
+            dx, dy = p[0] - centre[0], p[1] - centre[1]
+            p = (centre[0] + dx * c - dy * si, centre[1] + dx * si + dy * c)
+        return [p[0], p[1]]
+
+    def whole_press(self, e):
+        best = None
+        for k, i, x, y in self.whole_points:
+            d = math.hypot(x - e.x, y - e.y)
+            if d <= GRAB * self.scale and (best is None or d < best[0] - 0.5):
+                best = (d, k, i)
+        self.wdrag = best[1:] if best else None
+
+    def whole_motion(self, e):
+        """A point of slice k dragged in the Whole view: that slice is unlinked (its own copy of the slice, user
+        2026-11-19), the others keep following."""
+        if self.wdrag is None:
+            return
+        k, i = self.wdrag
+        self.by_hand()
+        loop = self.pat["loop"]
+        own = loop.setdefault("own", {})
+        if str(k) not in own:
+            own[str(k)] = {key: copy.deepcopy(loop[key]) for key in ("pts", "sharp") if key in loop}
+        c = own[str(k)]
+        drag_point(c, i, self.whole_from_xy(e.x, e.y, k), e.state & ALT, lambda p: self.whole_xy(p, k),
+                   lambda x, y: self.whole_from_xy(x, y, k))
+        if self._names != []:  # (edited by hand: the formula's numbers don't count any more, like a drag on the left)
+            self.build_boxes([])
+        self.show_follow()
+        self.draw()
+        self.show_on_roll()
+
+    def whole_release(self, e):
+        if self.wdrag is not None:
+            self.wdrag = None
+            self.draw()
+            self.mark()
+
+    def whole_right_click(self, e):
+        """Right-click an unlinked slice in the Whole view: Follow the slice again (its own edit goes)."""
+        if self.wview is None:
+            return
+        loop = self.pat.get("loop") or {}
+        best = None
+        for k, c in self.own_now().items():
+            line = sample([tuple(p) for p in pinned_ends(c["pts"], loop["pts"])], 16)
+            d = min(math.hypot(x - e.x, y - e.y) for x, y in (self.whole_xy(p, k) for p in line))
+            if d <= 3 * GRAB * self.scale and (best is None or d < best[0]):
+                best = (d, k)
+        if best is None:
+            return
+        m = tk.Menu(self, tearoff=0)
+        m.add_command(label=tr("pattern_dialog.follow_again"), command=lambda k=best[1]: self.follow_again(k))
+        m.tk_popup(e.x_root, e.y_root)
+
+    def follow_again(self, k):
+        own = (self.pat.get("loop") or {}).get("own") or {}
+        own.pop(str(k), None)
+        if not own:
+            self.pat["loop"].pop("own", None)
+        self.refresh()
+        self.mark()
+
+    def show_follow(self):
+        """The info line: "4 of 5 slices follow the slice" while some are unlinked."""
+        n, own = shape_slices(self.pat), len(self.own_now())
+        if own:
+            self.set_info(tr("pattern_dialog.slices_follow", n=n - own, total=n), look.GOOD, back=True)
 
     def draw(self):
         c = self.canvas
@@ -1229,6 +1357,11 @@ class FormulaDialog(tk.Toplevel):
                               fill=look.PAT_FORMULA, width=4)
             except (ValueError, KeyError):
                 pass
+        if self.all_unlinked():  # (user: the Slice view fades when no slice follows it any more)
+            c.create_line(*[v for p in line for v in p], fill=look.PAT_FORMULA, width=2)
+            c.create_text(self.w / 2, 8 * self.scale, text=tr("pattern_dialog.none_follow"), anchor="n",
+                          fill=look.PAT_GRID_TEXT, font=font)
+            return
         c.create_line(*[v for p in line for v in p], fill=look.PAT_LINE, width=2)
         r = 3.5 * self.scale
         for a, h in handle_lines(pts):
@@ -1242,8 +1375,11 @@ class FormulaDialog(tk.Toplevel):
             else:
                 c.create_rectangle(x - r, y - r, x + r, y + r, fill=look.HANDLE_FILL, outline=look.HANDLE_FIXED)
 
+    def all_unlinked(self):
+        return self.around() and len(self.own_now()) >= shape_slices(self.pat)
+
     def point_at(self, x, y):
-        if self.view is None or (not self.ok and not self.pat.get("loop")):
+        if self.view is None or (not self.ok and not self.pat.get("loop")) or self.all_unlinked():
             return None
         pts = self.shown_loop()["pts"]
         best = None
