@@ -275,8 +275,8 @@ class HzView:
         lo, hi = max(0.0, self.beat_at(kb)), self.beat_at(w)
         # bars and beats where the SONG's are (hunt 2026-10-23: counted from the shape's start, a time signature
         # change showed up late; user picked the song's bar numbers too)
-        left = self.song_left()
-        song_lo, song_hi = max(0.0, lo + left), hi + left
+        left = self.grid_left()
+        song_lo, song_hi = max(0.0, lo + left - 1e-9), hi + left
         # (columns: the snap's lines, then every beat and bar over them, as on the main piano roll: a 3/16 or 1/6
         # snap left most beat / bar lines out; beats and bars by the time signatures, zoomed far out every 2nd,
         # 4th... bar)
@@ -356,7 +356,7 @@ class HzView:
         # (by the time signatures; zoomed far out every 2nd, 4th... bar number, so they don't run into each other)
         marks = [(self.x_of(b - left), str(n + 1)) for b, n in bar_lines(sigs, song_lo, song_hi, 40 * s / self.sx)]
         for x, label in marks:
-            if x < kb:
+            if x < kb - 0.5:
                 continue
             c.create_text(x + 3, rh / 2, text=label, anchor="w", fill=look.LABEL, font=look.font(8, fit=True))
         for x0, x1 in sorted(sorted((self.x_of(a[0]), self.x_of(a[2]))) for a in bands):  # the bar numbers black
@@ -393,6 +393,14 @@ class HzView:
         """The song beat this window's beat 0 is at (the shape's left edge; no shape: where a new one would go)."""
         sh = self.target()
         return left_edge(sh) if sh is not None else self.app.hz_start or 0.0
+
+    def grid_left(self):
+        """song_left for the bar / beat lines and bar numbers: on the tick at or before it, where the notes start (a
+        drawn shape's left edge a hair past a bar line, like a formula curve's tip, cut that bar's line and number
+        off the window's left edge; user 2026-11-19)."""
+        left = self.song_left()
+        ppq = max(1, int(self.app.ppq or 960))
+        return math.floor(left * ppq + 1e-6) / ppq
 
     def tune_rows(self):
         """True when the rows are tall enough to see and change a note's tune."""
