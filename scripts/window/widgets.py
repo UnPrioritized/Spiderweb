@@ -289,6 +289,28 @@ def grid_shown(w, on):
         w.grid_remove()
 
 
+LINE_PIECE = 200  # points in one piece of a long wide line (long_line)
+
+
+def long_line(canvas, coords, **opts):
+    """canvas.create_line for a line of any length (coords: x, y, x, y, ...). Wider than 1 px and past LINE_PIECE
+    points it's drawn as pieces sharing their end points: Windows draws ONE wide line in time growing with the square
+    of its points (measured 2026-11-19: 8,000 points 0.4 s, 33,000 over 3 minutes, a busy formula shape froze the
+    Custom… window; in pieces of 200: 10 ms). Returns nothing (pieces have many ids: tag them to find them)."""
+    coords = list(coords)
+    n = len(coords) // 2
+    try:
+        wide = float(opts.get("width", 1)) > 1
+    except (TypeError, ValueError):
+        wide = True
+    if n <= LINE_PIECE + 1 or not wide:
+        if n >= 2:
+            canvas.create_line(*coords, **opts)
+        return
+    for i in range(0, n - 1, LINE_PIECE):
+        canvas.create_line(*coords[2 * i:2 * (i + LINE_PIECE + 1)], **opts)
+
+
 def pack_shown(w, on, **opts):
     """Show (packed with opts) / hide a packed widget, only when that changes (grid_shown's rule: re-packing every
     sync flashed the panel)."""

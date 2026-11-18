@@ -17,7 +17,7 @@ from files.mathpaste import from_latex, normalise, split_pair
 from notes.pattern import (formula_loop, formula_shape, pattern_names, polar_xy, shape_names, span_numbers,
                            clean_pattern_graphs)
 from window import look
-from window.widgets import remember_place
+from window.widgets import long_line, remember_place
 
 MOST_LINES = 200   # lines read (a whole data file pasted by mistake stays quick)
 NAME = r"[^\W\d]\w*"
@@ -474,7 +474,7 @@ class FormulaPaste(tk.Toplevel):
         c.create_line(x0, ym, x0 + length * s, ym, fill=look.PAT_ORIGIN, dash=(6, 4))
         pts = [q for a, b in zip(us, vs) for q in (x0 + a * s, ym - b * s)]
         if len(pts) >= 4:
-            c.create_line(*pts, fill=look.PAT_LINE, width=2)
+            long_line(c, pts, fill=look.PAT_LINE, width=2)
 
     def use(self):
         if not self.pat:

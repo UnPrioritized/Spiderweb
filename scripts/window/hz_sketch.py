@@ -24,6 +24,7 @@ from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOB
                           split_bez, with_handles, WAVE_DRAWN)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
+from window.widgets import long_line
 from window.hz_bend import BEND, LINE_NEAR, NEAR, drop_point, follow_wobble, set_curve, tidy_bend
 
 SKETCH_WIDE = 0.6  # the line's thickness: this part of a key's row (between SKETCH_THIN and SKETCH_THICK px)
@@ -1360,8 +1361,8 @@ class HzSketch:
             else:
                 y = self.pitch_y(pitch(n))
                 xy, ys = [x0, y, max(x1, x0 + 1), y], [y, y]
-            c.create_line(*xy, fill=edge, width=wide + 2 * max(1, round(s)), capstyle="round", joinstyle="round")
-            c.create_line(*xy, fill=fill, width=wide, capstyle="round", joinstyle="round")
+            long_line(c, xy, fill=edge, width=wide + 2 * max(1, round(s)), capstyle="round", joinstyle="round")
+            long_line(c, xy, fill=fill, width=wide, capstyle="round", joinstyle="round")
             if grabbed and i in self.sel:  # (held still: the whole note moves, a dashed box round it)
                 pad = wide / 2 + 4 * s
                 c.create_rectangle(x0 - pad, min(ys) - pad, x1 + pad, max(ys) + pad, outline=BEND, dash=(4, 3))

@@ -24,6 +24,7 @@ from notes.recolour import (KEEP, before_liquify, box_of, can_recolour, centre_a
                             with_order, without_recolour)
 from roll.roll_shared import CTRL, SHIFT
 from window import look
+from window.widgets import long_line
 
 LIVE_MS = 30  # (every note made again at most this often while brushing (not shown live); longer when it takes longer)
 SPACING = 0.2  # (a dab every this much of the brush's radius along its path)
@@ -1208,4 +1209,4 @@ class LiquifyBrush:
             pts = (cx - ux * size - uy * size, cy - uy * size + ux * size, cx, cy,
                    cx - ux * size + uy * size, cy - uy * size - ux * size)
             for width, col in ((band, look.ROLL_BG), (line, look.LIQUIFY_BRUSH)):
-                self.create_line(*pts, fill=col, width=width, capstyle="round", joinstyle="round", tags="lqbrush")
+                long_line(self, pts, fill=col, width=width, capstyle="round", joinstyle="round", tags="lqbrush")

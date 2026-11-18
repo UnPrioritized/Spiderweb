@@ -36,7 +36,7 @@ from roll.roll_shared import SLOT_COLORS
 from window import look
 from window.hz_gates import LENGTH_UNITS
 from window.hz_layers import layer_colour
-from window.widgets import Scrub, Tooltip, name_list, no_spaces, remember_place, set_names
+from window.widgets import Scrub, Tooltip, long_line, name_list, no_spaces, remember_place, set_names
 
 GRID = 16  # grid lines each way (snapped to)
 PAD = 14  # px round the drawing area (x scale)
@@ -543,7 +543,7 @@ class TraceWindow(tk.Toplevel):
         for px, py in dots:  # (on top of every bar)
             c.create_oval(px - r, py - r, px + r, py + r, fill=look.HZ_GREEN, outline="")
         c.create_rectangle(x0, y0, x0 + w, y0 + h, outline=look.CHART_FRAME)
-        c.create_line(*[v for p in line for v in self.xy(p)], fill=look.CHART_LINE, width=max(1, round(2 * s)))
+        long_line(c, [v for p in line for v in self.xy(p)], fill=look.CHART_LINE, width=max(1, round(2 * s)))
         q = 3.5 * s
         for i in self.dots():  # (each piece's round dot: drag it to bend the piece)
             x, y = self.xy(self.middle(i))

@@ -37,8 +37,8 @@ from window.formula_host import put_sym, sym_choices, sym_label
 from window.formula_paste import FormulaPaste
 from window.panel_custom import GAP_COLOR
 from window.pattern_graphs import DialogGraphs, graphed, open_graph
-from window.widgets import (ListTip, LocalUndo, Scrub, Tooltip, bad, good, pack_shown, read_number, remember_place,
-                            wheel_unit)
+from window.widgets import (ListTip, LocalUndo, Scrub, Tooltip, bad, good, long_line, pack_shown, read_number,
+                            remember_place, wheel_unit)
 
 PATTERNS_FILE = os.path.join(USER, "patterns.json")
 OLD_CURVES_FILE = os.path.join(USER, "curves.json")  # the funnel's saved curve formulas (before shapes of curves)
@@ -1099,6 +1099,13 @@ class FormulaDialog(tk.Toplevel):
         to the formulas (not kept until something is dragged)."""
         if self.pat.get("loop"):
             return self.pat["loop"]
+        key = json.dumps(self.pat, sort_keys=True, default=str)  # (the fit kept until the formula changes: a busy
+        if getattr(self, "_fitted", (None,))[0] == key:          # outline, t to 30, took 0.25 s every redraw)
+            return self._fitted[1]
+        self._fitted = (key, self.fit_loop())
+        return self._fitted[1]
+
+    def fit_loop(self):
         around = self.layer == "shape" and self.pat.get("sym") == AROUND
         if around:  # (Around the centre: only its first slice is edited, the rest are copies)
             u, v = formula_slice(self.pat)
@@ -1206,15 +1213,15 @@ class FormulaDialog(tk.Toplevel):
         w.create_line(ax, ay, bx, by, fill=look.PAT_ORIGIN, dash=(6, 4))
         w.create_text(ax, ay + 6, text="A", anchor="n", fill=look.PAT_AB, font=font)
         w.create_text(bx, by + 6, text="B", anchor="n", fill=look.PAT_AB, font=font)
-        w.create_line(*[q for a, b in zip(u.tolist(), v.tolist()) for q in xy((a, b))], fill=look.PAT_LINE, width=2)
+        long_line(w, [q for a, b in zip(u.tolist(), v.tolist()) for q in xy((a, b))], fill=look.PAT_LINE, width=2)
         own = self.own_now()
         r = 2.5 * self.scale
         for k in range(shape_slices(self.pat)):
             pts = pinned_ends(own[k]["pts"], loop["pts"]) if k in own else loop["pts"]
             if k in own or k == 0:  # (an unlinked one in its own colour, the shared one in the handles' blue)
                 line = sample([tuple(p) for p in pts], 32)
-                w.create_line(*[q for p in line for q in xy(p, k)], fill=look.PAT_OWN if k in own else look.HANDLE,
-                              width=3)
+                long_line(w, [q for p in line for q in xy(p, k)], fill=look.PAT_OWN if k in own else look.HANDLE,
+                          width=3)
             if k in own:
                 for a, h in handle_lines(pts):
                     w.create_line(*xy(a, k), *xy(h, k), fill=look.PAT_ARM)
@@ -1336,7 +1343,7 @@ class FormulaDialog(tk.Toplevel):
             c.create_line(0, ym, self.w, ym, fill=look.PAT_ORIGIN, dash=(6, 4))  # the curve itself (the origin path)
             width = length * s
             for shift in (-1, 1):  # the loops before and after it, faint
-                c.create_line(*[v for x, y in line for v in (x + shift * width, y)], fill=look.PAT_NEIGHBOUR, width=2)
+                long_line(c, [v for x, y in line for v in (x + shift * width, y)], fill=look.PAT_NEIGHBOUR, width=2)
         elif self.around():  # the wedge the slice fills: faint lines from the centre to its ends (user)
             centre, _ = self.slice_centre(loop)
             cx, cy = self.to_xy(centre)
@@ -1353,16 +1360,16 @@ class FormulaDialog(tk.Toplevel):
             try:
                 u, v = formula_slice(self.pat) if self.around() else formula_shape(self.pat) \
                     if self.layer == "shape" else formula_loop(self.pat)
-                c.create_line(*[q for a, b in zip(u.tolist(), v.tolist()) for q in self.to_xy((a, b))],
-                              fill=look.PAT_FORMULA, width=4)
+                long_line(c, [q for a, b in zip(u.tolist(), v.tolist()) for q in self.to_xy((a, b))],
+                          fill=look.PAT_FORMULA, width=4)
             except (ValueError, KeyError):
                 pass
         if self.all_unlinked():  # (user: the Slice view fades when no slice follows it any more)
-            c.create_line(*[v for p in line for v in p], fill=look.PAT_FORMULA, width=2)
+            long_line(c, [v for p in line for v in p], fill=look.PAT_FORMULA, width=2)
             c.create_text(self.w / 2, 8 * self.scale, text=tr("pattern_dialog.none_follow"), anchor="n",
                           fill=look.PAT_GRID_TEXT, font=font)
             return
-        c.create_line(*[v for p in line for v in p], fill=look.PAT_LINE, width=2)
+        long_line(c, [v for p in line for v in p], fill=look.PAT_LINE, width=2)
         r = 3.5 * self.scale
         for a, h in handle_lines(pts):
             c.create_line(*self.to_xy(a), *self.to_xy(h), fill=look.PAT_ARM)

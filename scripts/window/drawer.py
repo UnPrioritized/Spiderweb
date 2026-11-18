@@ -37,7 +37,7 @@ from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.layers import DrawerLayers
 from window.sticky import BEND, REACH, Targets, key_points
 from window.side_panel import ScrollingSide
-from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, Tooltip, remember_place, wrap_to_room
+from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, Tooltip, long_line, remember_place, wrap_to_room
 
 GRIDS = ["4", "8", "12", "16", "24", "32", "48", "64"]
 TOOLS = [("select", tr("drawer.select"), "v"), ("slice", tr("drawer.slice"), "k"), ("lasso", tr("drawer.lasso"), "j"),
@@ -485,7 +485,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
         for pts in pieces:
             coords = self.screen_points(pts)
             if len(coords) >= 4:
-                self.board.create_line(*coords, fill=STICK_LINE, width=width, capstyle="round", joinstyle="round")
+                long_line(self.board, coords, fill=STICK_LINE, width=width, capstyle="round", joinstyle="round")
 
     def stick_move(self, moving, du, dv):
         """The strokes moving ({index: stroke as it was when grabbed}) moved by du, dv: (du, dv) changed so they
@@ -1612,7 +1612,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
     def draw_stroke(self, st, color, width, dash=None):
         coords = self.screen_points(stroke_points(st))
         if len(coords) >= 4:
-            self.board.create_line(*coords, fill=color, width=width, capstyle="round", joinstyle="round", dash=dash)
+            long_line(self.board, coords, fill=color, width=width, capstyle="round", joinstyle="round", dash=dash)
         elif coords:
             x, y = coords
             self.board.create_oval(x - 2, y - 2, x + 2, y + 2, fill=color, outline=color)

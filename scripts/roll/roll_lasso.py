@@ -13,6 +13,7 @@ from notes.lasso import (curved_loop, magnet_rows, magnet_spot, magnetic_path, s
                          tidy_loop)
 from roll.roll_shared import ALT, CTRL, SHIFT
 from window import look
+from window.widgets import long_line
 
 CLOSE_PX = 8  # a Polygonal click this near the first point closes the loop
 POINT_PX = 6  # a waiting loop's point / handle grabbed this near
@@ -508,8 +509,8 @@ class LassoDrawing:
         if las["closed"]:
             xy += xy[:2]
         if len(xy) >= 4:  # (on a white edge, like the handles: it shows on notes and in the dark look; user 10-23)
-            c.create_line(*xy, fill=look.HANDLE_FILL, width=max(3, round(4 * s)), tags="lasso")
-            c.create_line(*xy, fill=look.CUT, width=max(1, round(2 * s)), dash=(6, 3), tags="lasso")
+            long_line(c, xy, fill=look.HANDLE_FILL, width=max(3, round(4 * s)), tags="lasso")
+            long_line(c, xy, fill=look.CUT, width=max(1, round(2 * s)), dash=(6, 3), tags="lasso")
         r = 3 * s
         hd = self.lasso_hd() if las["closed"] else []
         lines = [(self.to_xy(las["pts"][i]), self.to_xy(h[side])) for i, h in enumerate(hd) if h

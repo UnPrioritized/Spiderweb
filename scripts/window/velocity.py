@@ -23,6 +23,7 @@ from roll.roll_shared import (ALT, CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURS
                               set_cursor, slot_colours)
 from window import look
 from window.notes_wait import stale_ok
+from window.widgets import long_line
 from window.canvas_keep import KeepsItems
 
 LEVELS = (127, 96, 64, 32, 0)
@@ -826,7 +827,7 @@ class VelocityPane(KeepsItems, tk.Canvas):
         if cv:
             self.draw_curve_line(*cv, lw, kind=self.kind())
         elif ed and len(ed["trail"]) >= 2:
-            self.create_line(*[c for b, y in ed["trail"] for c in (roll.t2x(b), y)], fill=look.CHART_LINE, width=lw)
+            long_line(self, [c for b, y in ed["trail"] for c in (roll.t2x(b), y)], fill=look.CHART_LINE, width=lw)
         cv = None if ed else self.live_curve()
         if cv:
             self.draw_curve_line(cv["a"], cv["b"], cv["c"], lw, kind=cv["kind"])
@@ -862,7 +863,7 @@ class VelocityPane(KeepsItems, tk.Canvas):
         pts = self.shape_env(kind, a, b, c, 0)[1:-1]
         if len(pts) < 2:
             return
-        self.create_line(*[q for b_, v in pts for q in (roll.t2x(b_), self.v2y(v))], fill=look.CHART_LINE, width=lw)
+        long_line(self, [q for b_, v in pts for q in (roll.t2x(b_), self.v2y(v))], fill=look.CHART_LINE, width=lw)
         if a[0] != b[0]:
             r = 4 * self.scale
             if bend:

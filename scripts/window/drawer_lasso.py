@@ -8,6 +8,7 @@ from notes.custom import stroke_points
 from notes.lasso import in_or_on, lasso_stroke, path_middle
 from roll.roll_lasso import LassoDrawing
 from window import look
+from window.widgets import long_line
 
 
 class DrawerLasso(LassoDrawing):
@@ -57,7 +58,7 @@ class DrawerLasso(LassoDrawing):
             for lp in self.lasso_loops(self.lasso_line())[1:]:
                 xy = self.screen_points(lp + ([lp[0]] if self.lasso["closed"] else []))
                 if len(xy) >= 4:
-                    self.canvas.create_line(*xy, fill=look.CUT, width=max(1, round(s)), dash=(6, 4), tags="lasso")
+                    long_line(self.canvas, xy, fill=look.CUT, width=max(1, round(s)), dash=(6, 4), tags="lasso")
 
     def lasso_cut(self, loop):
         """The loop (and its Mirror copies) cuts the strokes it crosses: the picked ones if any, else every one the

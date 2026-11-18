@@ -52,7 +52,7 @@ from window.canvas_keep import KeepsItems
 from window.conductor_marks import ROW, ConductorMarks
 from window.rebar_marks import RebarMarks
 from window.melody_window import open_melody
-from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, ShortLabel, Tooltip, centre_over, unit_word
+from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, ShortLabel, Tooltip, centre_over, long_line, unit_word
 
 BPM_SNAPS = (0, 0.1, 1, 5, 10)  # the BPM snap dropdown's steps (0 = off)
 NICE = (0.01, 0.05, 0.1, 0.5, 1, 5, 10, 50, 100, 500, 1000, 5000, 10000, 50000, 100000, 500000, 1000000, 5000000,
@@ -3851,7 +3851,7 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
                 part = loaded_part(loaded, lay, n, 2 ** 62 if e is None else e, known)
                 events = [(0, part[0][2])] + [(x, u) for x, _, u in part[1:]] if part else loaded
                 x0, x1 = max(kb, hx[0]), hx[-1]
-                self.create_line(*self.heard_xy(events, x0, x1), fill=look.TEMPO_KEEP, dash=dash, width=lw + 1)
+                long_line(self, self.heard_xy(events, x0, x1), fill=look.TEMPO_KEEP, dash=dash, width=lw + 1)
             elif len(hx) >= 2:
                 self.create_line(*np.column_stack([hx, hy]).ravel().tolist(), fill=look.TEMPO_KEEP, dash=dash,
                                  width=lw + 1)
@@ -4101,7 +4101,7 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
                 vals = np.clip(v0 + (v1 - v0) * c, MIN_BPM, MAX_BPM)
             xs = [roll.t2x(b0 + (b1 - b0) * k) for k in t]
             ys = self.b2y(vals)
-            self.create_line(*np.column_stack([xs, ys]).ravel().tolist(), fill=look.TEMPO_PICKED, width=lw + 2)
+            long_line(self, np.column_stack([xs, ys]).ravel().tolist(), fill=look.TEMPO_PICKED, width=lw + 2)
             if self.box.mode == "heard":  # (what lands outside the Keep timing parts: faded, it's dropped)
                 bs = b0 + (b1 - b0) * t
                 inside = np.zeros(len(t), bool)
@@ -4118,7 +4118,7 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
                     lo, hi = max(0, k - 1), min(len(t) - 1, j + 1)  # (to the edge samples: no gap)
                     seg = np.column_stack([xs[lo:hi + 1], ys[lo:hi + 1]]).ravel().tolist()
                     if len(seg) >= 4:
-                        self.create_line(*seg, fill=look.TEMPO_FADED, width=lw + 2)
+                        long_line(self, seg, fill=look.TEMPO_FADED, width=lw + 2)
                     k = j + 1
 
     def show_play_bpm(self):
