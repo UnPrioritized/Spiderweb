@@ -112,6 +112,7 @@ from window.menubar import build_menu
 from roll.pianoroll import PianoRoll
 from roll.roll_draw import GHOST_FADE, MAKING_SHOW_S, pts_box, STACK_MODES, list_order, painting_order, stack_rule, track_ranks
 from files import clipboard, errors, notes_clip, speed, system
+from files import new_project as new_project_settings  # (Settings → New projects; App.new_project = the action)
 from files.about import ICONS, VERSION
 from files.playback import AHEAD, BUILTIN, DEFAULT_DEVICE, EDO_A_DEFAULT, KESTREL, MidiOut, Player
 from files.slow_down import SlowDown
@@ -621,7 +622,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.restore_window()
         speed.start()  # (the own compiled loops for lots of notes: loaded in the background)
         speed.wait_own()  # (~0.06 s: the autosave's notes made with them; a Warp's took ~7 s without)
+        had_autosave = os.path.exists(self.autosave_path)
         self.load_autosave()
+        self.start_new_defaults(had_autosave)  # (Settings → New projects: saved the first time / used without one)
         self.reattach_file()  # (the project file the work belonged to; the title)
         self.sync_panel()
         self.after(800, lambda: self.tips.show("welcome"))  # the first time Spiderweb starts
@@ -3553,8 +3556,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def new_project(self):
         """The Project tab's New: a new MIDI. The shapes and the tempo line go (their Select boxes / picks too); PPQ,
-        keys, the output file, channel settings and the Domino start stay; BPM and the time signature go back to
-        MIDI's 120 and 4/4 (user). Asked first (unsaved work: save it first?). NOTHING SURVIVES (user 2026-10-25:
+        keys, the output file, channel settings and the Domino start = Settings → New projects' (user 2026-11-18;
+        before: the open project's stayed); BPM and the time signature go back to MIDI's 120 and 4/4 (user). Asked first (unsaved work: save it first?). NOTHING SURVIVES (user 2026-10-25:
         Ctrl+Z after New brought the tempo back without the loaded MIDI): like Open, the undo / redo steps go."""
         from notes.recolour import forget_kept
         forget_kept()  # (quick Stir changes' kept work: hunt 11-07, ~0.45 GB on a 3 M-note shape)
@@ -3609,9 +3612,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.roll.box_kept = None
         self.roll.view_t = 0.0  # (back to bar 1, zoom kept: user)
         self.select(None)
+        self.use_new_defaults()  # (Settings → New projects, user 2026-11-18: not the open project's)
         self.pvar["bpm"].set("120")  # (remakes what hangs on it: on_project_change)
         self.tempo_changed()
         self.shapes_changed()
+        if new_project_settings.fit_view():  # (its "Fit view on New" tick: after the old notes went)
+            self.roll.fit_view()
         self.sync_ppq_lock()  # (no loaded MIDI any more: PPQ can be changed again)
         self.sync_history()
         self.sync_window_title()

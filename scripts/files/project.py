@@ -46,7 +46,7 @@ from notes.text import TEXT_DEFAULTS, clean_text, rejoin_old, tag_texts
 from notes import engine  # (engine.edo_lanes: 31-EDO "Overlaps keep their pitch")
 from notes import loaded_map  # (a loaded MIDI's ticks as shown after Change visual time signature)
 from window import rebar_edit  # (its editable changes, saved with the project)
-from files import clipboard, notes_clip
+from files import clipboard, new_project, notes_clip
 from files.domino_clip import (DOMINO_STARTS, GATE_MAX, LONGEST, MOST_NOTES, clip_data, clip_span, cut_gates, dms_data,
                                conductor_clip, dms_path, get_from_clipboard, put_on_clipboard, read_notes,
                                tempo_items)
@@ -1069,6 +1069,56 @@ class ProjectFiles:
                                                icon="warning", default="yes", parent=self)
         return answer is False or answer is True and self.save_project()
 
+    def use_new_defaults(self, ppq=True):
+        """Settings → New projects' song settings put in (New, a start without an autosave; Load MIDI uses
+        new_defaults_into instead). Nothing saved / the master tick off = the open project's stay (as before).
+        ppq=False: PPQ left."""
+        saved = new_project.used()
+        if not saved:
+            return
+        self._opening = True  # (each box set would make the notes again: on_project_change does it once)
+        try:
+            if ppq and "ppq" in saved and 1 <= int(saved["ppq"]) <= 65535:
+                self.pvar["ppq"].set(saved["ppq"])
+            if isinstance(saved.get("output"), str) and saved["output"].strip():
+                self.pvar["output"].set(saved["output"])
+        finally:
+            self._opening = False
+        if saved.get("channel_mode") in CHANNEL_MODES:
+            self.channel_mode.set(saved["channel_mode"])
+        if saved.get("channel_split") in SPLITS:
+            self.split_box.current(SPLITS.index(saved["channel_split"]))
+        for k in ("use_ch10", "ch10_order", "new_rounds", "pad_rounds", "single_split", "multi_cut", "multi_later",
+                  "multi_stretch", "edo31", "edo31_audio", "edo31_lanes"):
+            if k in saved:
+                getattr(self, k).set(saved[k])
+        if saved.get("keys") in KEYS:
+            self.keys_var.set(str(saved["keys"]))
+        starts = [v for v, _ in DOMINO_STARTS]
+        if saved.get("domino_start") in starts:
+            self.domino_box.current(starts.index(saved["domino_start"]))
+        self.sync_channels_fold()
+
+    def new_defaults_into(self, data):
+        """Load MIDI's new project (attach_midi's data, project_data's keys): the saved song settings in, PPQ and
+        keys left for the MIDI to set."""
+        saved = new_project.used() or {}
+        data.update({k: v for k, v in saved.items() if k not in ("ppq", "keys")})
+        if saved.get("keys") in KEYS:
+            data["keys"] = saved["keys"]
+
+    def start_new_defaults(self, had_autosave):
+        """At start: the first time (nothing saved yet) the project opened now becomes the New projects settings
+        (the user's setup as it was before this setting); a start without an autosave begins with them."""
+        if new_project.read() is None:
+            try:
+                new_project.save(self.project_data())
+            except OSError:
+                pass
+        elif not had_autosave:
+            self.use_new_defaults()
+            self.on_project_change()
+
     def open_project(self, path=None):
         """path = a file dropped / opened with Spiderweb (window/open_files.py); None = asks."""
         if path is None:
@@ -1094,6 +1144,7 @@ class ProjectFiles:
         r = self.roll
         zoom = r.sx, r.sy, r.view_top
         data = self.project_data()
+        self.new_defaults_into(data)  # (Settings → New projects: a new project; the MIDI's PPQ + keys win below)
         data.update(shapes=[], view=None, playhead=0.0, ppq=str(lm.ppq), bpm="120")
         data["tempo"] = conductor_line(lm)  # (the file's tempos + signatures, group C step 8)
         data.pop("loaded", None)

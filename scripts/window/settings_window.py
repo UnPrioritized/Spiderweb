@@ -317,6 +317,7 @@ class SettingsWindow(tk.Toplevel):
             say(tr("updates.checking")), updates.check(report=say))).pack(side="left")
         self.build_tips(f)
         self.build_file_link(f)
+        self.build_new_projects(page("new", tr("settings.cat_new")))  # (user 2026-11-18: its own page)
         f = page("look", tr("settings.look_tab"))
         f.head(tr("settings.look_tab"))
         self.look = f.row(tr("look.look"), look_box(f.page), tip=tr("settings.look_hint"))
@@ -379,6 +380,75 @@ class SettingsWindow(tk.Toplevel):
         if tip:
             Tooltip(c, tip)
         return c
+
+    def build_new_projects(self, f):
+        """New projects (user 2026-11-18): what New / Load MIDI start with (files/new_project.py), shown as text
+        + one button taking the open project's; the Fit view on New tick."""
+        from files import new_project
+        from files.domino_clip import DOMINO_STARTS
+        f.head(tr("settings.head_new"))
+        use = tk.BooleanVar(value=new_project.used_on())
+        names, shown = [], {}
+
+        def switched():
+            new_project.set_used(use.get())
+            for w in names + list(shown.values()) + [b]:
+                w.state(["!disabled"] if use.get() else ["disabled"])
+        f.row(None, self.tick(f.page, "settings.new_use", use, switched, tip=tr("settings.new_use_tip")))
+        for key in ("ppq", "keys", "channels", "domino", "output"):
+            shown[key] = f.row(tr("settings.new_" + key), ttk.Label(f.page))
+            names.append(f.page.grid_slaves(row=f.r - 1, column=0)[0])
+        output_tip = Tooltip(shown["output"], "")
+
+        def channel_words(s):
+            mode = s.get("channel_mode", "single")
+            words = [tr("app.ch_short_" + mode)] if mode in ("raw", "single", "auto") else []
+            if mode == "auto":
+                words.append(tr("app.ch_short_" + ("time" if s.get("channel_split") == "time" else "key")))
+                if s.get("use_ch10"):
+                    words.append(tr("app.ch_short_ch10"))
+                    if s.get("ch10_order"):
+                        words.append(tr("app.ch_short_order"))
+                if s.get("new_rounds"):
+                    words.append(tr("app.ch_short_rounds"))
+                if s.get("multi_cut"):
+                    words.append(tr("app.ch_short_later" if s.get("multi_later") else "app.ch_short_earlier"))
+                    if s.get("multi_stretch"):
+                        words.append(tr("app.ch_short_stretch"))
+            elif mode == "single" and s.get("single_split"):
+                words.append(tr("app.ch_short_split"))
+            return ", ".join(words)
+
+        def show():
+            s = new_project.read() or {}
+            starts = dict(DOMINO_STARTS)
+            out = s.get("output", "")
+            shown["ppq"].config(text=s.get("ppq", "?"))
+            shown["keys"].config(text=str(s.get("keys", "?")))
+            shown["channels"].config(text=channel_words(s), wraplength=round(NOTE_WRAP * self.app.scale))
+            shown["domino"].config(text=starts.get(s.get("domino_start"), ""))
+            shown["output"].config(text=os.path.basename(out))
+            output_tip.set_text(out)
+
+        def take():
+            try:
+                new_project.save(self.app.project_data())
+            except OSError:
+                status.config(text=tr("settings.new_not_saved"), foreground=look.WARN)
+            else:
+                status.config(text=tr("settings.new_saved"), foreground=look.HINT)
+            status.grid()
+            show()
+        b = ttk.Button(f.page, text=tr("settings.new_take"), takefocus=False, command=take)
+        f.row(None, b, tip=tr("settings.new_take_tip"), pady=(8, 3))
+        status = f.note()  # ("Saved." under the button)
+        status.grid_remove()
+        fit = tk.BooleanVar(value=new_project.fit_view())
+        f.row(None, self.tick(f.page, "settings.new_fit", fit, lambda: new_project.set_fit_view(fit.get()),
+                              tip=tr("settings.new_fit_tip")), pady=(10, 3))
+        f.note(tr("settings.new_open_note"))
+        show()
+        switched()
 
     def build_tips(self, f):
         """The same tick and button as at the bottom of the Help window (the tick shares app.tips.on)."""
