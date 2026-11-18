@@ -17,16 +17,20 @@ https://github.com/UnPrioritized/Spiderweb
 
 What it can do
 --------------
-- Draw: lines, polylines, freehand strokes, curves, arcs, circles, polygons,
-  stars, funnels, glissando runs, text (any font; Arabic, Hebrew and the
-  like right to left, joined scripts joined), and shapes you draw yourself.
+- Draw: lines, polylines, freehand strokes, curves, arcs, circles, polygons
+  (twisted, uneven or star-shaped), stars, funnels, glissando runs, text
+  (any font; Arabic, Hebrew and the like right to left, joined scripts
+  joined), and shapes you draw yourself.
 - Fill: shapes with notes, one long note per key or chopped into notes of
-  any length (spam). Inside fills can be smaller copies of the shape
-  (Nested), another shape repeated like wallpaper (Tiles), or rings
-  growing out from shapes drawn inside (Ripples).
-- Shape the notes: add bumps along lines (tumours), shape the velocities,
-  and put overlapping shapes on different channels (or remove the
-  overlaps, track by track).
+  any length (spam), with Symmetrical steps for perfectly even staircases.
+  Inside fills can be smaller copies of the shape (Nested), another shape
+  repeated like wallpaper (Tiles), or rings growing out from shapes drawn
+  inside (Ripples).
+- Shape the notes: add bumps along lines (tumours) or patterns from
+  formulas (paste one from a website or graphing site, and let its numbers
+  change along the line with a graph), shape the velocities, and put
+  overlapping shapes on different channels (or remove the overlaps, track
+  by track).
 - Hz bass: spam so fast it sounds like a tone, with a synth window (knobs,
   effects, layers) and a preview you can hear right away. Sketch its pitch
   with curved bends (with handles) and wobbles, or draw your own wobble
@@ -36,7 +40,7 @@ What it can do
 - Note tools: Claw machine, Strum and Chop pages that change the notes of a
   shape, Add between (shapes that step from one shape to another),
   Recolour, Stir, Warp and Liquify (swirl, bend with a grid, or brush the
-  colours you drew), Gate trim, Gate extend, Fill gaps, Fold tracks (many
+  colours you drew, or the shape itself), Gate trim, Gate extend, Fill gaps, Fold tracks (many
   tracks onto fewer), slicing (with a line, a Lasso loop or another shape)
   and merging. The Properties window lists every step done to a shape:
   drag to change their order.
@@ -47,8 +51,10 @@ What it can do
   back into their own tracks. Real Windows only: the button isn't there on Linux or
   macOS, or under Wine / Bottles / Proton.
 - Load MIDI: open a MIDI file, even a huge dense one, draw on top of it,
-  change its tempo, reorder or draw into its tracks; the export changes only
-  what you changed.
+  change its tempo or time signature, reorder or draw into its tracks; the
+  export changes only what you changed.
+- Big projects: after a change, the notes are made in the background on
+  several processor cores while you keep working.
 - Track list and Conductor pane: see and arrange the tracks your MIDI will
   have (Tab), and draw the tempo as a line with jumps, glides and catch-ups,
   plus time and key signatures. Change visual time signature turns bars
@@ -150,13 +156,17 @@ Limits
   channels, and you can cut them with the Slice or Lasso tool.
 - Domino can't hold notes longer than 65,535 ticks. Copy and Export to
   Domino cut them to that length and tell you.
+- MIDI notes sit on whole keys and whole ticks, so slopes and bends (Stir,
+  Warp, Liquify) come out as steps, never perfectly smooth. A higher PPQ
+  makes the steps in time finer.
 
 Autosave and problems
 - Projects save as .spwb files (packed JSON; older .json projects still
   open). Drop a project or a MIDI onto the window or onto Spiderweb's icon
   to open it. Settings -> General can make .spwb files open with a
   double-click (Windows).
-- Everything you do is saved on its own (user/autosave.json). Each time
+- Everything you do is saved on its own (user/autosave.json; it waits
+  while a song plays). Each time
   Spiderweb starts, the previous session is also kept as
   autosave-backup.json: open it with File -> Open... if something went
   wrong. The first time a new version starts, it packs the older
