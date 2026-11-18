@@ -260,8 +260,8 @@ class JoinLines:
                 # (past the edges: the hidden part too, hunt 2026-11-07; a merge's own notes with "Keep notes made
                 # there": the notes it slid with, merge_mover's kept_notes)
                 if whole and not own or own and keep and not all_kept or keep and not own and moved is None:
-                    rows = self.with_hidden(sh, rows)
-                laid = self.track_slots_in(rows)  # (its CCs' tracks by these notes' slots, before any slide)
+                    rows = self.with_hidden(sh, rows, use10, alone=own)
+                laid =self.track_slots_in(rows)  # (its CCs' tracks by these notes' slots, before any slide)
                 laid_rows[i] = (rows, {i: laid(i)} if "cc" in sh else {})
         if together:
             changed = together({i: r for i, (r, _) in laid_rows.items()})
@@ -271,7 +271,7 @@ class JoinLines:
             if moved:
                 rows = moved(rows)
                 if kept_after and keep and len(rows):
-                    rows = self.with_hidden(sh, rows)
+                    rows = self.with_hidden(sh, rows, use10)
             if not len(rows):  # (none of them wanted: merge leftovers; Fill gaps: all lost to same-start notes)
                 continue
             new[i] = without10(self.copied(rows, False, True, cc_slots.get), use10)

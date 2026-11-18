@@ -643,11 +643,38 @@ class JoinSplit:
             out[cut, 1] = shown[cut, 1]
         return out
 
-    def with_hidden(self, sh, rows):
+    def hidden_slots(self, sh, notes, rows, use10, painted=True):
+        """with_hidden's slots for notes of sh (past the edges, colours it has no heard note of): its channels in
+        Multi channel worked out ALONE on a taller keyboard (app_offrange.alone_slots), lined up with rows (its notes
+        as copied, use10 = their slot numbering; None = as worked out); -1 = not found, None = can't. painted (Keep
+        notes made there): the colours shown past the edges first, what you see is what you get."""
+        from window.app import all_notes  # (app.py imports this file)
+        from window.app_offrange import alone_slots, lined_up
+        all16 = self.use_ch10.get()
+        off = getattr(self, "off_all", None)
+        i = next((k for k, s in enumerate(self.shapes) if s is sh), None)
+        if painted and off is not None and len(off) and i is not None and use10 == self.picture_use10:
+            shown = off[off[:, 5] == i]
+            if len(shown):
+                got = lined_up(shown, use10, notes, use10, None)
+                if (got >= 0).all():
+                    return got
+
+        def alone(shapes, keys):
+            got = all_notes(shapes, self.ppq, keys, "auto", self.channel_split, all16, self.notes_tracks,
+                            rounds=self.new_rounds.get(), order=all16 and self.ch10_order.get(),
+                            own=self.own_channels())
+            return got[1], got[2]
+        return alone_slots(sh, notes, alone, self.keys, self.ppq, use10, rows)
+
+    def with_hidden(self, sh, rows, use10=None, alone=False):
         """rows (start, end, key, velocity, slot, owner: sh's notes as they sound) + the part of sh past the edges
         that isn't heard (Space past the edges: past the keys / before beat 0), each on the slot its colour has in
         rows (Flip each line / Fill gaps, hunt 2026-11-07: that part was thrown away; the normal Flip keeps it). A
-        note across beat 0 gets its real start back. Inside the edges: rows as they are."""
+        note across beat 0 gets its real start back. Inside the edges: rows as they are. use10: rows' slot numbering
+        (None: the shown notes'). alone (Gate sensitive merge's own notes): every note, heard or not, on the
+        shape's own channels worked out alone on a taller keyboard."""
+        use10 = self.picture_use10 if use10 is None else use10
         out = past_edges(sh, self.keys, self.ppq)
         if out is None or not len(rows):
             return rows
@@ -692,9 +719,18 @@ class JoinSplit:
             return rows
         extra = np.zeros((int(hid.sum()), rows.shape[1]), np.int64)
         extra[:, :4] = notes[hid]
-        extra[:, 4] = [slot_of.get(t, first) for t in tracks[hid].tolist()]
+        extra[:, 4] = [slot_of.get(t, -1) for t in tracks[hid].tolist()]
+        lost = extra[:, 4] < 0  # (colours with no heard note to copy from: the shape's channels worked out alone,
+        if lost.any():           # lined up with the heard ones; user 2026-11-18: a paste mostly before beat 0 merged
+            got = self.hidden_slots(sh, extra[lost], rows, use10)  # into one channel, every colour lost)
+            extra[lost, 4] = got if got is not None else first
+            extra[lost & (extra[:, 4] < 0), 4] = first
         extra[:, 5:] = rows[0, 5:]
         both = np.concatenate([rows, extra])
+        if alone:  # (its own colours, heard and kept from ONE pass: chain merges came out a colour off past the edge)
+            got = self.hidden_slots(sh, both, None, use10, painted=False)
+            if got is not None and (got >= 0).all():
+                both[:, 4] = got
         return both[np.lexsort((both[:, 2], both[:, 0]))]
 
     def multi_kept(self):
