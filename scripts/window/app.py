@@ -143,6 +143,8 @@ from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, StatusLine, To
 
 
 VEL_KEYS = ("vel0", "vel1")
+WARM_MOST = 5_000_000  # (warm_menu: bigger pastes are asked on the right-click itself, ~1 s at 20 M, as in 1.7.3;
+# warming them ahead took ~3 GB beside the notes being made: release run 2026-11-18, test slow_big_paste)
 # Common PPQ values. Above 32767 the MIDI header officially means SMPTE timing
 PPQS = [2, 4, 8, 16, 24, 48, 96, 120, 144, 192, 240, 384, 480, 768, 960, 1024, 1440, 1920, 2048, 2880,
         3840, 4096, 5760, 7680, 8192, 11520, 12288, 15360, 16384, 23040, 24576, 30720, 32768, 36864,
@@ -1483,16 +1485,22 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def warm_menu(self):
         """The right-click menu's slow question (does a gate aware flip change millions of pasted notes? ~0.1 s at
         2 M) worked out ahead in a background thread for the selected pasted shape, so the menu opens at once
-        (gateflip remembers the last answer; the notes are read-only arrays from the notes cache)."""
+        (gateflip remembers the last answer; the notes are read-only arrays from the notes cache). Never while ANY
+        notes are being made (an opened project's too, or a count): both at once doubled the memory on a 20 M-note
+        project (release run 2026-11-18, test slow_big_paste); the right-click then works it out itself."""
         from notes import gateflip
         sh = self.shapes[self.sel] if self.sel is not None and self.sel < len(self.shapes) else None
-        if sh is None or self._bg_notes or sh.get("gate_flip") or not gateflip.is_pasted(sh):
+        coming, warming = self._coming, getattr(self, "_warming", None)
+        if (sh is None or self._bg_notes or self._counting or (coming and not coming.get("done"))
+                or (warming is not None and warming.is_alive())  # (one at a time: two at once also doubled it)
+                or sh.get("gate_flip") or not gateflip.is_pasted(sh)):
             return
         got = self.notes_known(sh)
-        if got is None or len(got[0]) < 100_000 or gateflip._same[0] is got[0]:
+        if got is None or not 100_000 <= len(got[0]) <= WARM_MOST or gateflip._same[0] is got[0]:
             return
-        threading.Thread(target=gateflip.runs_same_both_ways, args=(got[0], got[1]), daemon=True,
-                         name="menu").start()
+        self._warming = threading.Thread(target=gateflip.runs_same_both_ways, args=(got[0], got[1]), daemon=True,
+                                         name="menu")
+        self._warming.start()
 
     def sync_list_selection(self):
         self.warm_menu()
