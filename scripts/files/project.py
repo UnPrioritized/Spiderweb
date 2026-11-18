@@ -365,12 +365,13 @@ class ProjectFiles:
             "shapes": self.shapes, "view": self.roll.view_state(), "playhead": self.playhead,
         }
 
-    def load_file(self, path, quiet=False, text=None):
+    def load_file(self, path, quiet=False, text=None, mine=True):
         """Opens a project. Everything in it is read and checked before anything changes: a file that can't be
         used leaves the project as it was; a broken setting keeps the one there is now; a shape that can't be read
         is left out and self.load_notes says so (tell_load_notes). Running out of memory (or any other error) while
         its notes are made puts the project as it was back (user 2026-10-20: a shape stuck failing at every redraw).
-        text: the project as text instead of the file at path (put_back)."""
+        text: the project as text instead of the file at path (put_back). mine=False (Open, a dropped file): the
+        tool settings / Snap / Hz view ticks stay the user's (put_working_setup)."""
         from notes.recolour import forget_kept
         forget_kept()  # (quick Stir changes' kept work, hunt 11-07)
         self.load_notes = []
@@ -505,29 +506,8 @@ class ProjectFiles:
         self.sync_channels_fold()
         if start in starts:
             self.domino_box.current(starts.index(start))
-        if "snap" in data:
-            self.snap.set(clean_snap(data["snap"]))
-        if "hz_snap" in data:
-            self.hz_snap.set(clean_snap(data["hz_snap"]))
-        self.hz_line.set(data.get("hz_line") is not False)
-        self.hz_fx.set(data.get("hz_fx") is True)
-        self.hz_layers.set(data.get("hz_layers") is True)
-        self.hz_loud.set(data.get("hz_loud") is True)
-        self.defaults = defaults
-        if hz_keys:
-            self.hz_defaults = hz_keys
-        if custom:
-            self.custom_defaults.clear()
-            self.custom_defaults.update(custom[0])
-            self.custom_shape = custom[1]
-        if funnel:
-            self.funnel_defaults = funnel
-        if tx:
-            self.text_defaults = {k: tx[k] for k in TEXT_DEFAULTS}
-        self.free_smooth = get(lambda: clean_level(data.get("free_smooth", SMOOTH_DEFAULT))) or SMOOTH_DEFAULT
-        self.gliss_defaults = for_new(clean_gliss(data.get("gliss_defaults")))
-        if pg:
-            self.polygon_defaults = {k: pg[k] for k in POLYGON_DEFAULTS}
+        if mine:  # (the user's own working setup: a project file from anywhere keeps it, user 2026-11-18)
+            self.put_working_setup(data, defaults, hz_keys, custom, funnel, tx, pg, get)
         self.roll.cancel_draft()
         self.roll.drop_lasso()  # (a waiting loop would cut the opened project, hunt 2026-10-23)
         self.shapes = shapes
@@ -596,6 +576,33 @@ class ProjectFiles:
             return False
         self.show_colour_limit()  # (its "Use channel 10" in the open drawer / Image window)
         return True
+
+    def put_working_setup(self, data, defaults, hz_keys, custom, funnel, tx, pg, get):
+        """load_file's tool settings for new shapes, Snap and the Hz window's view ticks (read and checked there).
+        Only from the autosave (and put_back / Load MIDI's own text): an opened project file keeps the user's."""
+        if "snap" in data:
+            self.snap.set(clean_snap(data["snap"]))
+        if "hz_snap" in data:
+            self.hz_snap.set(clean_snap(data["hz_snap"]))
+        self.hz_line.set(data.get("hz_line") is not False)
+        self.hz_fx.set(data.get("hz_fx") is True)
+        self.hz_layers.set(data.get("hz_layers") is True)
+        self.hz_loud.set(data.get("hz_loud") is True)
+        self.defaults = defaults
+        if hz_keys:
+            self.hz_defaults = hz_keys
+        if custom:
+            self.custom_defaults.clear()
+            self.custom_defaults.update(custom[0])
+            self.custom_shape = custom[1]
+        if funnel:
+            self.funnel_defaults = funnel
+        if tx:
+            self.text_defaults = {k: tx[k] for k in TEXT_DEFAULTS}
+        self.free_smooth = get(lambda: clean_level(data.get("free_smooth", SMOOTH_DEFAULT))) or SMOOTH_DEFAULT
+        self.gliss_defaults = for_new(clean_gliss(data.get("gliss_defaults")))
+        if pg:
+            self.polygon_defaults = {k: pg[k] for k in POLYGON_DEFAULTS}
 
     def read_custom_defaults(self, custom):
         """custom_defaults from a file -> (new custom_defaults, custom shape name); a broken one keeps what's
@@ -1072,7 +1079,7 @@ class ProjectFiles:
             return
         if not path or not self.may_replace(os.path.basename(path)):
             return
-        if self.load_file(path):
+        if self.load_file(path, mine=False):
             self._saved_shapes = self.saved_key()
             self.project_file = None if self.own_file(path) else os.path.normpath(path)
             self.mark_saved()

@@ -141,6 +141,7 @@ def build_menu(app):
     h = menu("menu.help")
     add(h, "menu.help_item", "menu.f1", app.open_help)
     add(h, "menu.whats_new", "", lambda: app.open_help("whats_new"))
+    add(h, "menu.about", "", lambda: app.open_help("about"))
 
     if not own:
         app.config(menu=bar)
