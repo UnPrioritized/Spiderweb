@@ -16,13 +16,23 @@ It works on Windows only. On Linux and macOS, and when Spiderweb or Domino runs 
 
 • Take / Send / Bake: see below. ↔ and ↕ flip the shapes selected on Domino's piano roll; with none selected there, they flip the notes selected in Domino, in one click. [page:stir|Stir…] and [page:sustain|Sustain…] open those windows for the selected shapes.
 
+• Settings: shows or hides the shape settings in a small window of their own (see below).
+
 • Spiderweb: stop drawing on Domino and bring Spiderweb's window back.
 
 Drag the dots at the bar's left end to move it: it stays at that spot on Domino's piano roll, follows Domino's window, and hides while Domino is minimised. A short line under the buttons says what just happened. Clicking the bar never takes the keyboard from Domino.
 
+## The Settings window
+
+The bar's Settings button opens the same shape settings as Spiderweb's side panel (Velocity, Colours, Recolour, Deform, Mask, Last note, Notes by snap, Inside, Tumours, and each shape's own rows), without the point boxes.
+• They're for the shape you're drawing or picked. With no shape picked, they're the settings for new shapes, so you can pick Colours before you draw.
+• Changing something there never sends the shape into Domino. A number you're still typing counts when the shape goes in.
+• Esc gives the keyboard back. The X closes it, like the button.
+• Drag it anywhere: it stays at that spot next to the bar, moves with Domino's window, hides while Domino is minimised, and opens again next time if you left it open.
+
 ## Drawing
 
-The mouse wheel scrolls and zooms Domino as if you turned it over Domino itself (Shift and Ctrl too), and what you draw follows Domino's scroll and zoom. Spiderweb takes Domino's PPQ while this is on, and gives yours back when you go back to Spiderweb.
+The mouse wheel scrolls and zooms Domino as if you turned it over Domino itself (Shift and Ctrl too), and dragging with the middle button moves Domino's view as in Domino, even while a drawing tool is picked. What you draw follows Domino's scroll and zoom. Spiderweb takes Domino's PPQ while this is on, and gives yours back when you go back to Spiderweb.
 
 A shape you draw stays on Spiderweb's layer until you're done with it, so you can still change it (drag its points, a curve's handles...). It goes into Domino's current track, at the spot where you drew it, when you draw the next shape, go back to Domino's mouse, press Enter or Send, or press one of Domino's keys. Then it leaves Spiderweb's layer.
 

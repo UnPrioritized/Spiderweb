@@ -1,5 +1,14 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+## Version 1.7.5
+
+What's new:
+
+• Draw on Domino: a Settings button on the bar opens the shape settings (Velocity, Colours, Recolour, Deform…) in a small window over Domino, the same ones as in the side panel, so you can set Colours before drawing or change a shape before it goes in. See [page:companion#The Settings window|Draw on Domino].
+
+• Fixed: in Draw on Domino, dragging with the middle button did nothing while a drawing tool was picked. It now moves Domino's view as in Domino.
+• Fixed: the side panel left a blank gap under the shape settings after picking a line and then a shape without point boxes.
+
 ## Version 1.7.4
 ^^ 2026/11/18 15:03:55 UTC+07:00 · 0ada8871
 
