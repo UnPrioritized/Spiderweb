@@ -46,6 +46,7 @@ OLD_CURVES_FILE = os.path.join(USER, "curves.json")  # the funnel's saved curve 
 LOOP_TOLERANCE = 0.02    # how closely the anchors + handles follow a pattern's formula when first edited, in keys
 SHAPE_TOLERANCE = 0.002  # the same for a shape, as a share of the curve's length
 GRAB = 7  # how near (pixels) a point has to be to be dragged
+WHOLE_HANDLES = 25  # Around the centre's Whole view: unlinked slices show their handles up to this many slices
 FILE_KEYS = {"pattern": "patterns", "shape": "shapes"}
 # the Symbols… window: (group, its symbols); every one is read by mathexpr.as_written (signs) or is a name
 SYMBOLS = [("numbers", "πθ"), ("signs", "×÷−²³√"), ("names", "αβγδελμσφω")]
@@ -462,6 +463,8 @@ class FormulaDialog(tk.Toplevel):
     def put_state(self, state):
         d = json.loads(state)
         self.pat, self.drag, self.pan, self.polar = d["pat"], None, None, d["polar"]
+        self.wdrag = None  # (a Whole view drag let go too: its point number could be gone, hunt 2026-11-19)
+        self.host.held = False  # (refresh below shows it on the piano roll + side panel)
         self._loading = True
         self.name.set(d["name"])
         for key, var in self.texts.items():
@@ -1232,7 +1235,12 @@ class FormulaDialog(tk.Toplevel):
 
     def draw_whole(self):
         """Around the centre: the Whole view = the whole shape as the curve gets it (A to B), the slice being edited
-        drawn over it in the handles' colour."""
+        drawn over it in the handles' colour. Drawn again only when what it shows changed (a Slice view zoom / pan
+        redrew it all: 160 ms at 100 slices, hunt 2026-11-19)."""
+        key = (json.dumps(self.pat, sort_keys=True, default=str), self.ok, self.around(), self.h)
+        if self.wdrag is None and key == getattr(self, "_whole_key", None):
+            return
+        self._whole_key = key
         w = self.whole
         w.delete("all")
         self.whole_points = []  # (slice, point number, x, y) that can be dragged here
@@ -1258,24 +1266,53 @@ class FormulaDialog(tk.Toplevel):
         w.create_line(ax, ay, bx, by, fill=look.PAT_ORIGIN, dash=(6, 4))
         w.create_text(ax, ay + 6, text="A", anchor="n", fill=look.PAT_AB, font=font)
         w.create_text(bx, by + 6, text="B", anchor="n", fill=look.PAT_AB, font=font)
-        long_line(w, [q for a, b in zip(u.tolist(), v.tolist()) for q in xy((a, b))], fill=look.PAT_LINE, width=2)
+        s, x0, ym = self.wview[:3]
+        long_line(w, np.column_stack([x0 + u * s, ym - v * s]).ravel().tolist(), fill=look.PAT_LINE, width=2)
         own = self.own_now()
         r = 2.5 * self.scale
-        for k in range(shape_slices(self.pat)):
-            pts = pinned_ends(own[k]["pts"], loop["pts"]) if k in own else loop["pts"]
-            if k in own or k == 0:  # (an unlinked one in its own colour, the shared one in the handles' blue)
-                line = sample([tuple(p) for p in pts], 32)
-                long_line(w, [q for p in line for q in xy(p, k)], fill=look.PAT_OWN if k in own else look.HANDLE,
-                          width=3)
-            if k in own:
+        n = shape_slices(self.pat)
+        held = self.wdrag[0] if self.wdrag else None
+
+        def turned(a, k):  # (rows of slice 0's place -> Whole view pixels of slice k: one turn per slice, all at once)
+            a = np.asarray(a, float)
+            if k:
+                c, si = math.cos(step * k), math.sin(step * k)
+                a = centre + (a - centre) @ np.array([[c, si], [-si, c]])
+            return np.column_stack([x0 + a[:, 0] * s, ym - a[:, 1] * s])
+
+        def grabbed(pts, mine):
+            """Points a slice offers here: its inner anchors (+ handles when it's unlinked); none inside (a short
+            slice, many slices) = its two end handles, so every slice can be unlinked (hunt 2026-11-19: 25+ slices
+            had nothing to grab)."""
+            kinds = pen_handles(pts)
+            last = len(pts) - 1
+            got = [(i, kind) for i, kind in kinds if i not in (0, last) and (mine or kind != "ctrl")]
+            if not any(kind != "ctrl" for _, kind in got):
+                got = sorted(set(got) | {(i, kind) for i, kind in kinds if i in (1, last - 1)})
+            return got
+        shared = [list(p) for p in loop["pts"]]
+        shared_line = np.asarray(sample([tuple(p) for p in shared], 32), float)
+        shared_grab = grabbed(shared, False)
+        shared_at = np.asarray([shared[i] for i, _ in shared_grab], float).reshape(-1, 2)
+        for k in range(n):
+            mine = k in own
+            pts = pinned_ends(own[k]["pts"], shared) if mine else shared
+            # (an unlinked slice's handles: up to WHOLE_HANDLES slices, else only the one held: 100 slices' arms
+            # were 1,000 items a move; tiny there anyway)
+            arms = mine and (n <= WHOLE_HANDLES or k == held)
+            if mine or k == 0:  # (an unlinked one in its own colour, the shared one in the handles' blue)
+                line = np.asarray(sample([tuple(p) for p in pts], 32), float) if mine else shared_line
+                long_line(w, turned(line, k).ravel().tolist(), fill=look.PAT_OWN if mine else look.HANDLE, width=3)
+            if arms:
                 for a, h in handle_lines(pts):
-                    w.create_line(*xy(a, k), *xy(h, k), fill=look.PAT_ARM)
-            for i, kind in pen_handles(pts):
-                if i in (0, len(pts) - 1) or kind == "ctrl" and k not in own:
-                    continue  # (the joins stay put; a following slice shows only its anchors)
-                x, y = xy(pts[i], k)
+                    (ax_, ay_), (hx, hy) = turned([a, h], k)
+                    w.create_line(ax_, ay_, hx, hy, fill=look.PAT_ARM)
+            grab = grabbed(pts, arms) if mine else shared_grab
+            at = turned([pts[i] for i, _ in grab], k) if mine else turned(shared_at, k) if len(shared_at) else ()
+            for (i, kind), (x, y) in zip(grab, at):
+                x, y = float(x), float(y)
                 self.whole_points.append((k, i, x, y))
-                if k in own:
+                if mine:
                     w.create_oval(x - r, y - r, x + r, y + r, fill=look.PAT_OWN if kind != "ctrl" else look.HANDLE_FILL,
                                   outline=look.PAT_OWN)
                 else:
@@ -1331,13 +1368,21 @@ class FormulaDialog(tk.Toplevel):
             self.build_boxes([])
         self.show_follow()
         self.draw()
+        self.host.held = True  # (the side panel catches up at the let go: let_go_panel)
         self.show_on_roll()
+
+    def let_go_panel(self):
+        """A drag in either view let go: the side panel shows the shape as it is now (skipped while held)."""
+        if self.host.held:
+            self.host.held = False
+            self.host.changed(final=False)
 
     def whole_release(self, e):
         if self.wdrag is not None:
             self.wdrag = None
             self.draw()
             self.mark()
+        self.let_go_panel()
 
     def whole_right_click(self, e):
         """Right-click an unlinked slice in the Whole view: Follow the slice again (its own edit goes)."""
@@ -1556,6 +1601,7 @@ class FormulaDialog(tk.Toplevel):
             if want:
                 self.boxes["loops"][0].set(fmt(self.pat["loops"]))
         self.draw()
+        self.host.held = True  # (the side panel catches up at the let go: let_go_panel)
         self.show_on_roll()
 
     def smooth_join(self, c):
@@ -1594,6 +1640,7 @@ class FormulaDialog(tk.Toplevel):
                 self.view = None
             self.draw()
             self.mark()
+        self.let_go_panel()
 
     def right_click(self, e):
         i = self.point_at(e.x, e.y)

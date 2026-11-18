@@ -101,6 +101,8 @@ class FormulaHost:
     layers = ("shape", "pattern")  # the formulas it can have
     plain_label = "roll_menu.turn_into_plain_curve"
     asks_big = True  # Turn into plain curve asks first past BIG_PLAIN anchors (bake works on a copy)
+    held = False  # a point held in the Custom… window: the side panel catches up at its let go (67 ms a move with
+                  # Around the centre's 100 slices, hunt 2026-11-19; pattern_dialog.let_go_panel)
 
     def targets(self):
         """The holders the menu / window change."""
@@ -356,7 +358,7 @@ class AppHost(FormulaHost):
         self.app.shapes_changed()
         if final:
             self.app.sync_panel()
-        else:
+        elif not self.held:
             self.app.sync_pattern()
 
     def snapshot(self):

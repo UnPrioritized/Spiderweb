@@ -752,10 +752,12 @@ def shape_points(p):
     centre, so the joins stay closed)."""
     if p.get("loop"):
         from notes.bezier import sample
-        a = np.asarray(sample([tuple(q) for q in p["loop"]["pts"]], 64), float)
-        if p["loop"].get("slice") and p.get("sym") == AROUND:
-            n = shape_slices(p)
-            own = {k: np.asarray(sample([tuple(q) for q in pinned_ends(c["pts"], p["loop"]["pts"])], 64), float)
+        around = p["loop"].get("slice") and p.get("sym") == AROUND
+        n = shape_slices(p) if around else 1
+        per = max(8, min(64, 320 // n))  # (points a piece: a slice is 1/n of the shape; 100 slices x 64 a piece made
+        a = np.asarray(sample([tuple(q) for q in p["loop"]["pts"]], per), float)  # 38,000 points a move, hunt)
+        if around:
+            own = {k: np.asarray(sample([tuple(q) for q in pinned_ends(c["pts"], p["loop"]["pts"])], per), float)
                    for k, c in own_slices(p).items() if k < n}
             a = around_shape(a, n, p["loop"].get("way"), own)
         u, v = a[:, 0], a[:, 1]
