@@ -18,8 +18,8 @@ class PenCircle:
     pen_mouse = None  # (x, y) of the mouse last seen over the roll while the circle can show
 
     def pen_on(self):
-        """The circle shows: Freehand tool, pen wider than a plain line, not drawing into a live shape."""
-        return self.app.tool.get() == "free" and self.app.free_thick > THICK_MIN and not self.live_drawing()
+        """The circle shows: Freehand tool, pen wider than a plain line (into a live shape too)."""
+        return self.app.tool.get() == "free" and self.app.free_thick > THICK_MIN
 
     def pen_motion(self, e):
         if self.pen_on() or self.pen_mouse:
@@ -51,7 +51,7 @@ class PenCircle:
         """[ / ] with the Freehand tool: the Thickness one key thinner / thicker (Shift: 5). True = the key was it."""
         step = PEN_KEYS.get(e.keysym)
         app = self.app
-        if step is None or app.tool.get() != "free" or self.live_drawing() or self.drag:
+        if step is None or app.tool.get() != "free" or self.drag:
             return False
         step *= 5 if e.state & SHIFT and abs(step) == 1 else 1
         app.sync_freehand()  # (from what the box shows: a selected freehand shape's own, else the new-stroke one)

@@ -19,6 +19,7 @@ from notes.custom import (CENTRE_KEYS, CUSTOM_FLAGS, add_strokes, cycle_effect,c
                           frame_to_uv, moved_at, new_live_shape, stroke_bp)
 from notes.hzbass import left_edge, shifted_hz
 from notes.joined import is_joined, join_velocity
+from notes.pen import thick_of
 from notes.tumour import LINE_KINDS
 
 CAN_TURN = LINE_KINDS + ("custom",)
@@ -61,8 +62,11 @@ def line_strokes(sh, paths):
     if kind == "arc":
         return [{"kind": "arc", "pts": [list(p) for p in sh["pts"]], "k": sh.get("k", 1.0)}]
     if kind == "free":
-        return [{"kind": "poly", "pts": [list(p) for p in sh["pts"]], "free": True, "smooth": sh.get("smooth", 0),
-                 "k": sh.get("k", 1.0)}]
+        st = {"kind": "poly", "pts": [list(p) for p in sh["pts"]], "free": True, "smooth": sh.get("smooth", 0),
+              "k": sh.get("k", 1.0)}
+        if thick_of(sh):  # (the pen stays wide in the live shape: user 2026-11-19, pen.py)
+            st["thick"] = sh["thick"]
+        return [st]
     return [{"kind": "poly", "pts": [list(p) for p in sh["pts"]]}]
 
 

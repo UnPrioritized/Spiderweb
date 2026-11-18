@@ -41,6 +41,7 @@ from notes.glue import for_part as glue_for_part, glue_box
 from notes.pattern import bake_shape, has_formula
 from notes.lasso import inside_point, knife_spans, lasso_notes, loop_crossings, path_middle, takes, touches
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
+from notes.pen import thick_of
 from notes.sliced import (CANT, carry_drawn, completed, cut_group, cut_in_two, keep_velocity, keep_was, keyed_pieces,
                           knife_hits, knife_in_two, moved_by, notes_across, rejoined, slice_in_two, split_here_ok, tooled)
 from notes.smooth import smooth_path
@@ -398,6 +399,8 @@ class JoinSplit:
         lost = shared_settings(olds)[1]
         if not again and not last_note(olds, new)[1]:
             lost.append(tr("join_split.last_note_moves"))
+        if not again and any(thick_of(sh) for sh in olds):  # (the joined curve is a plain line: pen.py)
+            lost.append(tr("join_split.thick_dropped"))
         laid, mixed = self.shared_into(olds)
         if mixed:
             lost.append(tr("join_split.leaves_tracks"))

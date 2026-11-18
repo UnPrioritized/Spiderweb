@@ -24,11 +24,12 @@ import numpy as np
 
 from notes.custom import CENTRE_KEYS, frame_to_bp, frame_to_uv, moved_at
 from notes.paths import dedupe, dot_segment_notes, path_notes
+from notes.pen import band_notes, thick_of
 
 # what makes a line kind's path (besides its points): changed = no longer the piece it was (end_dot too: "Last note"
 # changed on a piece is about its own last note)
 OUTLINE = ("kind", "pts", "k", "smooth", "tumour", "tumours", "gaps", "splits", "sharp", "sym", "shape", "pattern",
-           "end_dot")
+           "end_dot", "thick")
 CUSTOM_OUTLINE = ("kind", "pts", "strokes", "areas", "round")  # a custom shape's (its strokes are in its frame)
 FUNNEL_OUTLINE = ("kind", "pts", "starts")  # a funnel's (its curves are in "starts"; cut through its notes, knife_in_two)
 VELOCITY = ("vel0", "vel1", "vel_env")
@@ -261,8 +262,11 @@ def steps_kept(sh):
 
 def split_here_ok(sh):
     """Can Split here cut sh? Not a piece flipped / turned as a shape with pages, or one cut through its notes after
-    its own pages (its notes don't follow a spot on the drawing any more: the Slice tool cuts it)."""
+    its own pages (its notes don't follow a spot on the drawing any more: the Slice tool cuts it). Nor a thick
+    freehand stroke or its piece (its band's notes follow no one spot either)."""
     cut = sh.get("cut")
+    if thick_of(sh) or thick_of((cut or {}).get("whole") or {}):
+        return False
     return not cut or moved_by(sh) is not None and not (cut.get("whole") or {}).get("cut")
 
 
@@ -483,6 +487,10 @@ def paths_of(sh):
 def spotted_notes(sh, ppq, end_dot):
     """A line kind's (start, end, key) notes, as engine.kind_notes_tracks makes them, and each one's spot."""
     paths = paths_of(sh)
+    if thick_of(sh):  # (a wide pen's band: cut by the knife only, so every note on spot 0: the whole part)
+        a = paths[0] if paths[0][-1, 0] >= paths[0][0, 0] else paths[0][::-1]
+        notes = band_notes(a * [ppq, 1], sh["thick"], sh.get("k", 1.0), ppq)
+        return notes, np.zeros(len(notes))
     if len(paths) > 1:  # a joined curve's pieces: each like a line
         got = [path_notes(a * [ppq, 1], end_dot, where=True) for a in paths]
         return (np.concatenate([np.asarray(n, np.int64).reshape(-1, 3) for n, _ in got]),
@@ -783,9 +791,10 @@ def tooled(sh):
     """Do sh's notes come from glue / note tool pages or a Ripples fill (its own, or its whole's for a piece)? Then
     the Slice tool cuts its notes, not its drawing (user, 2026-10-06: they can sit far off the drawing; Ripples: its
     rings grow past it, and half a drawn heart would grow other rings). Notes by snap too (user 2026-10-28: a knife
-    through a staircase cuts its notes where it goes, slanted or flat; each piece drawn on its side only)."""
+    through a staircase cuts its notes where it goes, slanted or flat; each piece drawn on its side only). A freehand
+    stroke with a Thickness too (pen.py: its band's notes; drawn on its side like Notes by snap)."""
     def notes_apart(s):
-        return bool(s.get("fx") or s.get("glue") or s.get("ripples") or s.get("by_snap"))
+        return bool(s.get("fx") or s.get("glue") or s.get("ripples") or s.get("by_snap") or thick_of(s))
     if notes_apart(sh):
         return True
     got = source(sh) if sh.get("cut") else None
@@ -934,7 +943,7 @@ def knife_in_two(sh, halves, a, b, segs, hits=()):
             h["cut"]["gate"] = velocity(h, GATE)
         else:
             h["cut"]["knife"] = knife
-            if sh.get("by_snap") or (sh.get("cut") or {}).get("sided"):
+            if sh.get("by_snap") or thick_of(sh) or (sh.get("cut") or {}).get("sided"):
                 h["cut"]["sided"] = True  # (drawn on its side only: snap_piece)
         if mould:
             h["cut"]["mould"] = json.loads(json.dumps(mould))

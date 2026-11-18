@@ -67,10 +67,9 @@ class FreehandPanel:
         self._loading = True
         self.free_var.set(fmt(tgts[0][0].get("smooth", 0) if tgts else self.free_smooth))
         self.free_entry.config(style="TEntry")
-        # Thickness: freehand shapes only (strokes inside a live shape: not yet, my pick)
-        whole = [d for d, owner in tgts if owner is None]
-        self.thick_var.set(fmt(clean_thick(whole[0].get("thick", THICK_MIN)) if whole else self.free_thick))
-        self.thick_entry.config(style="TEntry", state="normal" if whole or not tgts else "disabled")
+        # Thickness: freehand shapes and freehand strokes inside a live shape (user 2026-11-19)
+        self.thick_var.set(fmt(clean_thick(tgts[0][0].get("thick", THICK_MIN)) if tgts else self.free_thick))
+        self.thick_entry.config(style="TEntry")
         self._loading = False
 
     def on_thick_entry(self, left=False):
@@ -87,20 +86,21 @@ class FreehandPanel:
         good(self.thick_entry)
         value = clean_thick(value)
         self.free_thick = value  # new strokes get it too
-        tgts = [d for d, owner in self.free_targets()
-                if owner is None and clean_thick(d.get("thick", THICK_MIN)) != value]
+        tgts = [(d, owner) for d, owner in self.free_targets() if clean_thick(d.get("thick", THICK_MIN)) != value]
         if not tgts:
             return self.sync_freehand()
-        self.begin_edit(("thick", tuple(sorted(self.sels))))
+        self.begin_edit(("thick", tuple(sorted(self.sels)), self.stroke))
         k = self.roll.sy / self.roll.sx if self.roll.sx else 0.25  # (round as the roll looks now)
-        for d in tgts:
+        for d, owner in tgts:
             if value > THICK_MIN:
                 d["thick"] = value
-                d.setdefault("k", k)  # (one already drawn keeps its own: the pen round as it was drawn)
+                if "k" not in d:  # (one already drawn keeps its own: the pen round as it was drawn)
+                    d["k"] = k if owner is None else uv_k(owner["pts"], k)
             else:
                 d.pop("thick", None)
         self.shapes_changed()
         self.sync_freehand()
+        self.sync_by_snap()  # (Notes by snap / Last note greyed while thick)
 
     def on_free_entry(self, left=False):
         """The Straighten box (Enter, stepped, or left: widgets.leave_box)."""

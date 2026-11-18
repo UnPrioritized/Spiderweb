@@ -101,8 +101,11 @@ class LiveDrawing:
         if kind == "arc":  # (stays an arc, so its notes are exactly the Arc tool's)
             return {"kind": "arc", "pts": [list(p) for p in sh["pts"]], "k": sh.get("k", 1.0)}
         if kind == "free":  # stays freehand, so it can be made perfect (k: beats per key, add_stroke converts it)
-            return {"kind": "poly", "pts": [list(p) for p in sh["pts"]], "free": True, "smooth": sh.get("smooth", 0),
-                    "k": sh.get("k", 1.0)}
+            st = {"kind": "poly", "pts": [list(p) for p in sh["pts"]], "free": True, "smooth": sh.get("smooth", 0),
+                  "k": sh.get("k", 1.0)}
+            if (sh.get("thick") or 0) > 1:  # (a wide pen: its band's notes in the live shape too, pen.py)
+                st["thick"] = sh["thick"]
+            return st
         return {"kind": "poly", "pts": [list(p) for p in sh["pts"]]}
 
     def live_commit(self, sh):

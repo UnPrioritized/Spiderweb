@@ -9,6 +9,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.engine import BY_SNAP_MOST, snap_name, snap_name_beats
 from notes.paths import SNAP_ENDS
+from notes.pen import thick_of
 from notes.tumour import LINE_KINDS
 from window import look
 from files.snap import DEFAULT_SNAP
@@ -85,7 +86,8 @@ class SnapPanel:
         same_or_blank(self.by_snap_entry, self.by_snap_var, steps)
         self._loading = False
         self.by_snap_tick.state(["alternate" if any(ons) and not all(ons) else "!alternate"])
-        self.by_snap_tick.state(["!disabled" if tgts else "disabled"])
+        thick = bool(tgts) and all(thick_of(t) for t in tgts)  # (freehand with a Thickness: its band, pen.py)
+        self.by_snap_tick.state(["!disabled" if tgts and not thick else "disabled"])
         self.by_snap_entry.state(["!disabled" if any(ons) else "disabled"])
         self.by_snap_entry.config(style="TEntry")
         self.by_snap_word.config(foreground="" if any(ons) else look.FAINT_TEXT)
@@ -97,7 +99,7 @@ class SnapPanel:
         self.by_snap_end_box.state(["!disabled" if any(ons) else "disabled"])
         self.by_snap_end_word.config(foreground="" if any(ons) else look.FAINT_TEXT)
         # Last note does nothing while every picked line steps (the last note always gets the full step)
-        off = bool(ons) and all(ons)
+        off = bool(ons) and all(ons) or thick  # (a thick stroke's band has no last note either)
         for w in self.last_parts:
             w.state(["disabled" if off else "!disabled"])
 

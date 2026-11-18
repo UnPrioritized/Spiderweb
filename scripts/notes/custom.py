@@ -22,6 +22,7 @@ from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, forme
                            moved_formulas)
 from notes.polygon import MIXES, clean_corners, formed_sides
 from notes.smooth import clean_level, smooth_path
+from notes.pen import THICK_MIN, band_notes, clean_thick
 from notes.paths import (ROW_EDGE, top_key, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
 from notes.hzbass import (HZ_DEFAULTS, KeyGrid, even_squares, heard_layers, left_edge, off_cents, own_channels,
@@ -223,6 +224,8 @@ def clean_strokes(strokes):
                     out.append({"kind": "poly", "pts": pts})
                     if st.get("free"):  # drawn freehand: can be made perfect (smooth.py)
                         out[-1].update(free=True, smooth=clean_level(st.get("smooth", 0)), k=arc_k(st))
+                        if "thick" in st and clean_thick(st["thick"]) > THICK_MIN:  # (a wide pen: pen.py)
+                            out[-1]["thick"] = clean_thick(st["thick"])
                     else:  # a line / polyline, or a polygon's (polygon.py: the shape / pattern on each side)
                         if st.get("sides"):
                             out[-1]["sides"] = True
@@ -1156,6 +1159,15 @@ def outline_notes(sh, ppq, only=None, paths=None):
     ks = range(len(paths)) if only is None else only
     if not sh.get("text"):
         ks = [k for k in ks if role_of(sh["strokes"][k]) != "cut"]
+        wide = [k for k in ks if (sh["strokes"][k].get("thick") or 0) > THICK_MIN]
+        if wide:  # (freehand strokes with a Thickness: their band's notes, pen.py; the others as lines)
+            ks = [k for k in ks if k not in wide]
+            got = [paths_outline(join_paths([paths[k] for k in ks]), ppq)] if ks else []
+            for k in wide:
+                st, a = sh["strokes"][k], np.asarray(paths[k], float).reshape(-1, 2)
+                a = a if a[-1, 0] >= a[0, 0] else a[::-1]
+                got.append(band_notes(a * [ppq, 1], st["thick"], bp_k(sh["pts"], st.get("k", 1.0)), ppq))
+            return keep_longest(np.concatenate(got))
     return paths_outline(join_paths([paths[k] for k in ks]), ppq)
 
 
