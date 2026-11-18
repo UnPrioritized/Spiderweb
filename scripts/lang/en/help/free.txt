@@ -1,3 +1,25 @@
 Hold the mouse button and draw.
 
 [page:straighten|Straighten] (panel, 0-100) makes it perfect: 0 = as you drew it, higher = straighter lines and smoother curves. A stroke that ends where it started becomes a perfect circle, ellipse, square, rectangle, triangle or another straight-sided shape (up to six sides). The higher, the simpler (a slightly oval loop becomes an ellipse, then a circle). The stroke as drawn is kept, so change it any time. New strokes use the last number you picked.
+
+## Thickness
+
+Thickness (panel, in keys) makes the freehand pen wide. 1 = a plain line, one note per key it passes. Wider: every key inside the band around the stroke gets one long note, for as long as the band covers it, like a ribbon of notes.
+
+The width runs across the stroke, as the piano roll looked when you drew it, so parts going up and down get wider in time too. The stroke itself stays a thin line; the notes show how wide it is.
+
+With the Freehand tool, [ makes the pen one key thinner and ] one key thicker (Shift: five keys). A circle around the mouse shows how wide the pen is before you draw. New strokes use the last number you picked; with freehand shapes selected, the box and the keys change them.
+
+## The pen's shape
+
+Under Thickness (only with a Thickness above 1):
+
+• Ends: Round (like a marker) or Flat (the ribbon stops straight across the stroke, exactly where it stops).
+• Taper: how much of the stroke's length, from each end, it takes to swell from a point to the full width (0-50 %), like a brush.
+• Width from speed: parts you drew faster come out thinner, like ink. Up to a calm speed you get the full width; a quick flick thins down to a quarter of it. Each part keeps the width it got when you drew it. Strokes drawn before Spiderweb remembered this stay one even width.
+
+## With other tools
+
+The [page:slice|Slice tool] cuts a thick stroke through its notes; each piece is drawn on its own side of the cut, and joining the pieces gives the stroke back. The Lasso turns it into plain notes first. Split here isn't offered on a thick stroke, and Notes by snap and Last note don't apply to it.
+
+[page:turn_live|Turn into live shape] keeps the pen wide inside the live shape, with the same notes. Freehand strokes drawn into a live shape can have a Thickness too: pick the stroke and change the box.
