@@ -1169,8 +1169,7 @@ def outline_notes(sh, ppq, only=None, paths=None):
             ks = [k for k in ks if k not in wide]
             got = [paths_outline(join_paths([paths[k] for k in ks]), ppq)] if ks else []
             for k in wide:
-                st, a = sh["strokes"][k], np.asarray(paths[k], float).reshape(-1, 2)
-                a = a if a[-1, 0] >= a[0, 0] else a[::-1]
+                st, a = sh["strokes"][k], np.asarray(paths[k], float).reshape(-1, 2)  # (in drawing order)
                 got.append(band_of(a * [ppq, 1], st, bp_k(sh["pts"], st.get("k", 1.0)), ppq, st.get("k", 1.0)))
             return keep_longest(np.concatenate(got))
     return paths_outline(join_paths([paths[k] for k in ks]), ppq)

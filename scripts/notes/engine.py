@@ -2991,6 +2991,7 @@ def _kind_notes_tracks(sh, ppq, keys):
             vel_sh = whole
         sh = whole
     path = dedupe(np.concatenate(cached_arrays(vel_sh)))  # (drawing the line uses the same points)
+    drawn = path * [ppq, 1]  # (in drawing order: a wide pen's width from speed goes along it, pen.py)
     if path[-1, 0] < path[0, 0]:
         path = path[::-1]  # drawn right to left: the "last point" is the later end in time, same as left to right
     path = path * [ppq, 1]  # beats -> ticks
@@ -3037,8 +3038,8 @@ def _kind_notes_tracks(sh, ppq, keys):
         raw = funnel_notes(sh, ppq)
     elif sh["kind"] == "gliss":  # a Glissando run: one note per picked key, a grid step each (gliss.py)
         raw = gliss_notes(sh, ppq)
-    elif thick:
-        raw = band_of(path, sh, sh.get("k", 1.0), ppq)
+    elif thick:  # (never turned round: its width from speed is in drawing order; user 2026-11-19, a stroke ending
+        raw = band_of(drawn, sh, sh.get("k", 1.0), ppq)  # earlier in time shifted it all)
     elif sh["kind"] in LINE_KINDS and len(cached_arrays(sh)) > 1:  # a joined curve's pieces: each like a line
         pieces = []
         for a in cached_arrays(sh):

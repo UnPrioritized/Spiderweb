@@ -488,8 +488,7 @@ def spotted_notes(sh, ppq, end_dot):
     """A line kind's (start, end, key) notes, as engine.kind_notes_tracks makes them, and each one's spot."""
     paths = paths_of(sh)
     if thick_of(sh):  # (a wide pen's band: cut by the knife only, so every note on spot 0: the whole part)
-        a = paths[0] if paths[0][-1, 0] >= paths[0][0, 0] else paths[0][::-1]
-        notes = band_of(a * [ppq, 1], sh, sh.get("k", 1.0), ppq)
+        notes = band_of(paths[0] * [ppq, 1], sh, sh.get("k", 1.0), ppq)  # (in drawing order, like engine's)
         return notes, np.zeros(len(notes))
     if len(paths) > 1:  # a joined curve's pieces: each like a line
         got = [path_notes(a * [ppq, 1], end_dot, where=True) for a in paths]
