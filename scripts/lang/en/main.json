@@ -2253,8 +2253,6 @@
  "settings.roll_tab": "Piano roll",
  "settings.keep_offrange": "Keep notes made there",
  "settings.keep_offrange_tip": "Shapes keep the notes they make below the lowest key, above the highest key and before the first beat. They're drawn see-through.\nThey're kept only in the project file: they're never exported, played or copied to other programs, unless Wrap them around is ticked.",
- "settings.exact_offrange": "Exact colours (slower)",
- "settings.exact_offrange_tip": "The kept notes' colours are worked out with the whole project, as if the keyboard were taller, so they show the colours they'd get once moved onto the keys, even where they'd overlap other shapes there.\nDone in the background after each change, so the colours may change a moment later.\nOff: the colours are worked out shape by shape. That's quicker and nearly always the same.\nMoving a shape across the edge can swap some of its colours (the whole shape together): that's normal, on or off.",
  "settings.wrap_offrange": "Wrap them around in exports and Domino copies",
  "settings.wrap_offrange_tip": "The kept notes past the keys are exported, played and copied put back onto the keys: one key above the highest key lands on the lowest key, one key below the lowest lands on the highest (by the project's Keys: 128 or 256).\nNotes before bar 1 are always left out.\nOff: the kept notes are left out.",
  "settings.keep_offrange_off": "Turn on Space past the keys or Space before the start first.",

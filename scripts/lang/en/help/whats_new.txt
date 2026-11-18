@@ -6,6 +6,8 @@ What's new:
 
 • Draw on Domino: a Settings button on the bar opens the shape settings (Velocity, Colours, Recolour, Deform…) in a small window over Domino, the same ones as in the side panel, so you can set Colours before drawing or change a shape before it goes in. See [page:companion#The Settings window|Draw on Domino].
 
+• Notes kept past the keys and before bar 1 (Keep notes made there) now get real channels: they take part like notes inside the keys, as if the keyboard went on and the song started earlier, so every kept note shows the colour it would have inside, and Fold tracks, Fill gaps, Gate sensitive merge and Turn into plain notes copy them on those channels. The "Exact colours" setting is gone: the colours are always exact now. With Keep notes made there on, some shapes on the keys may get other colours than before. See [page:offrange|Notes past the keys].
+
 • Fixed: in Draw on Domino, dragging with the middle button did nothing while a drawing tool was picked. It now moves Domino's view as in Domino.
 • Fixed: the side panel left a blank gap under the shape settings after picking a line and then a shape without point boxes.
 
