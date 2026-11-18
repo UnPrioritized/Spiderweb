@@ -38,10 +38,12 @@ def main():
     env["CARGO_ENCODED_RUSTFLAGS"] = "\x1f".join(([old] if old else []) + flags)
     env.pop("RUSTFLAGS", None)
     zig = os.environ.get("SW_ZIG_TARGET", "")
+    # --locked: exactly the crate versions in Cargo.lock; a build never picks newer ones by itself (user 2026-11-18:
+    # supply chain; new versions only through dev/harness/safe_crates.py's 14-day check)
     if zig:
-        cmd = ["cargo", "zigbuild", "--release", "--target", zig] + sys.argv[1:]
+        cmd = ["cargo", "zigbuild", "--release", "--locked", "--target", zig] + sys.argv[1:]
     else:
-        cmd = ["cargo", "build", "--release"] + sys.argv[1:]
+        cmd = ["cargo", "build", "--release", "--locked"] + sys.argv[1:]
     return subprocess.call(cmd, cwd=HERE, env=env)
 
 
