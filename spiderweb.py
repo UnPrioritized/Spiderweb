@@ -118,6 +118,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     roll_draw.py     painting the grid, notes, handles, keyboard, ruler
     roll_loaded.py   a loaded MIDI's notes on the piano roll (overview at once, exact in the background)
     roll_curve.py    editing curves (anchors + handles, symmetric halves)
+    roll_pen.py      the freehand pen's circle round the mouse, [ / ] = thinner / thicker
     roll_custom.py   the selected custom shape's box (resize, turn, skew)
     roll_funnel.py   editing funnels (curve starts, bends, extra lines, highlighted lines / curves)
     roll_gliss.py    editing a Glissando run: its thickness handle, its notes' right ends

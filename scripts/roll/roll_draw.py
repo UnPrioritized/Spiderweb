@@ -1017,6 +1017,7 @@ class RollDrawing:
         self.draw_liquify_mask()
         self.draw_warp_grid(in_redraw=True)
         self.draw_liquify_brush()
+        self.draw_pen_circle()
         self.draw_melody_lit()
         self.draw_sustain_stops()
         if self._kb_key is None or self._frame_key is None:

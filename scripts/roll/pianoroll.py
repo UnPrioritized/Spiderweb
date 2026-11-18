@@ -50,6 +50,7 @@ from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, 
                               cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box, mouse_trail,
                               note_name, ruler_boxes)
 from roll.roll_lasso import LassoDrawing
+from roll.roll_pen import PenCircle
 from roll.roll_loaded import LoadedNotes
 from roll.roll_sustain import SustainStops
 from roll.roll_text import TextTyping
@@ -95,7 +96,7 @@ def grid_x(sh, make, x, sb, ppq, notes_of):
 
 class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
                 PathEditing, SustainStops, LassoDrawing, CentreDots, LiquifyBrush, WarpGrid, MelodyMarks, GlissEditing,
-                tk.Canvas):
+                PenCircle, tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
@@ -193,6 +194,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.bind("<Motion>", self.on_motion)
         self.bind("<Leave>", self.liquify_leave, add="+")  # (Liquify's brush circle goes with the mouse)
         self.bind("<Leave>", self.warp_leave, add="+")  # (the Warp's lit twins go dark)
+        self.bind("<Leave>", self.pen_leave, add="+")  # (the freehand pen's circle goes with the mouse)
         for key in ("Alt_L", "Alt_R"):  # (Alt while brushing = the opposite tool, holding still too)
             self.bind(f"<KeyPress-{key}>", lambda e: self.liquify_alt(e, True), add="+")
             self.bind(f"<KeyRelease-{key}>", lambda e: self.liquify_alt(e, False), add="+")
@@ -1595,6 +1597,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
 
     def on_drag(self, e):
         self.app.show_position(self.position_text(e))
+        self.pen_motion(e)  # (the pen's circle stays round the mouse while a stroke is drawn)
         if not self.drag:
             return
         kind = self.drag[0]
@@ -2148,6 +2151,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.app.show_position(self.position_text(e))
         self.tempo_hover(e)
         self.liquify_motion(e)
+        self.pen_motion(e)
         if not self.drag and not self.draft and (self.warp_on() or getattr(self, "wp_hover", None)):
             self.warp_hover(e.x, e.y)  # (Warp: the point under the mouse lights its mirror twins)
         if not self.drag and self.lasso_motion(e):  # (a Polygonal loop's next line follows the mouse)
@@ -2564,6 +2568,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if self.app.box_drawn():  # (Esc, tool keys, Delete...: nothing until the Select box is let go, user)
             return "break"
         if self.lasso_key(e):  # (Enter cuts, Esc throws the loop away, Backspace = a Polygonal loop's last point)
+            return "break"
+        if self.pen_key(e):  # ([ / ] with the Freehand tool: the pen thinner / thicker)
             return "break"
         k = e.keysym.lower()
         if k == "w" and not e.state & (CTRL | ALT):  # (held: what the export gets; Alt+W = Claw, Ctrl: shortcuts)

@@ -2548,6 +2548,8 @@
  "panel_freehand.straighten": "Straighten",
  "panel_freehand.0_as_drawn_100_simplest": "0 = as drawn, 100 = simplest",
  "panel_freehand.thickness": "Thickness",
+ "pianoroll.pen_thickness": "Freehand Thickness: {n} keys  ([ thinner, ] thicker, Shift = by 5)",
+ "pianoroll.pen_thickness_one": "Freehand Thickness: {n} key, a plain line  ([ thinner, ] thicker, Shift = by 5)",
  "panel_freehand.thickness_tip": "How wide the freehand pen is, in keys. 1 = a plain line, one note per key it passes.\nWider: every key inside the band around the stroke gets one long note, for as long as the band covers it.\nThe width runs across the stroke, as the piano roll looked when it was drawn, so up-and-down parts get wider in time too.\nThe stroke itself stays a thin line. New freehand strokes use the last number picked.",
  "panel_gliss.grids": "Grids",
  "panel_gliss.halves": "Halves (1/1, 1/2, 1/4 …)",
