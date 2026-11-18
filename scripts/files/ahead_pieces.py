@@ -439,7 +439,7 @@ class Song:
         (an odd PPQ halved: the exact ratio, not 1/2). It ENDS AT t_end, so the piece's file runs to there: a file
         ended at its last event, and notes held there with their offs past t_end (a song's last chord, its offs 8
         beats on: every track ended on the chord's own tick) were never played by BASSMIDI and let go at once by
-        Merlin (user 2026-11-18, dev/scratch/ahead_end_render.py); the sound kept stops at the piece's end anyway.
+        Merlin (user 2026-11-18; test ahead_last_chord); the sound kept stops at the piece's end anyway.
         (Was only with a pedal down, PLAN E4.)"""
         us, changes = self._at(t0)
         tempo_of = lambda u: b"\xff\x51\x03" + max(1, int(round(u * scale))).to_bytes(3, "big")  # noqa: E731

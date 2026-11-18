@@ -49,7 +49,7 @@ _DATA_FLOAT, _POS_BYTE, _STREAMPROC_END = 0x40000000, 0, 0x80000000
 _MIDI_DECAYEND, _MIDI_NOFX, _MIDI_ASYNC = 0x1000, 0x2000, 0x400000
 # (BASSMIDI's file player cuts a file off at its last note-off: notes after it whose offs aren't in the file never
 # sounded. A Rendered ahead piece leaves out offs past its end: a song's last chord, its offs 8 beats on, was silent
-# (user 2026-11-18, dev/scratch/bass_last_tick.py))
+# (user 2026-11-18; test ahead_last_chord))
 _MIDI_NOCROP = 0x8000
 _FILE_MEM = 1  # (BASS_MIDI_StreamCreateFile: the file is in memory, kept there while the stream lives)
 _ATTRIB_MIDI_VOICES, _ATTRIB_MIDI_VOICES_ACTIVE = 0x12003, 0x12004
@@ -920,7 +920,7 @@ class _Limited:
     def _clip_on(self):
         """Every sample past full volume cut to it, after the limiter (on or off), the rest as made: a dense wall went
         ~40 dB over and Windows' own mixer limited it, then let it creep back up for seconds (user 2026-11-18,
-        dev/scratch/creep_check.py). Only the own loops' C function (BASS's sound thread never waits for Python);
+        test live_clip). Only the own loops' C function (BASS's sound thread never waits for Python);
         without it the sound goes out as made, as before."""
         from files import speed
         fast = speed.loops()

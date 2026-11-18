@@ -656,7 +656,7 @@ def emit(ms, trk, i0, i1, ticks, t_late, muted, tport, ports, synths, thr, room,
             # (the synth: fewer ports than synths = the synths in blocks, one per port (two ports' same channel never
             # share a synth), a key ALWAYS the same synth of its port's block whatever its channel: the same key on two
             # channels on two synths came out 1-2 samples apart now and then, a doubled part sounded phased (user
-            # 2026-11-18, dev/scratch/group_sync6.py); one synth plays them exactly together. As many ports as synths
+            # 2026-11-18, measured on the group's own mix); one synth plays them exactly together. As many ports as synths
             # or more: by port + channel (a key can't stay on one synth: the ports' channels would share it). A
             # channel + key always the same synth, so a note-off finds its note)
             if exact:

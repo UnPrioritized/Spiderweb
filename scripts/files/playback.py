@@ -640,7 +640,7 @@ class Player:
         self.ready = None  # a threading.Event the line waits for before it starts (play_loaded.LoadedPlayer.ready)
         # (seconds the line stands at its start once it may go: a loaded MIDI on Built-in BASSMIDI's synths sends each
         # note synth.GROUP_BUFFER ahead, so the notes right at the start get that head start too; they came ~30 ms
-        # late, the next note sounded too soon: user 2026-11-18, dev/scratch/start_timing.py)
+        # late, the next note sounded too soon: user 2026-11-18, measured by recording both starts)
         self.head = 0.0
         self.notes_ver = 0  # (+1 each time other notes are handed over: Kestrel's remembered note limits start over)
         self._notes_of = None
