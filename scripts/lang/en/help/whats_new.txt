@@ -10,7 +10,7 @@ What's new:
 
 • Opening a project file from someone else no longer changes your own setup: your tool settings for new shapes, Snap and the Hz bass window's view stay as they were. The file's song settings (PPQ, keys, channels...) still come with it.
 
-• Settings → New projects: the PPQ, keys, channel settings, Domino start and output file that New and Load MIDI start with (before, New kept the open project's). Use the open project's settings saves them; untick Start new projects with these settings to work the old way. Fit view on New shows the whole empty project after New. See [page:settings#New projects:|Settings].
+• Settings → New projects: the PPQ, keys, channel settings, Domino start and output file that New and Load MIDI start with (before, New kept the open project's). Set them right there, or Use the open project's settings fills them in; untick Start new projects with these settings to work the old way. Fit view on New shows the whole empty project after New. See [page:settings#New projects:|Settings].
 
 • Help → About Spiderweb opens the About page.
 

@@ -2,7 +2,7 @@ File → Settings… (the menu bar at the top) or Ctrl+, opens Settings: how Spi
 
 General: how often to look for a new version (and Check now), tips on or off, Show all tips again, and Open .spwb files with Spiderweb (double-clicking a project opens it; press it again if you move the Spiderweb folder).
 
-New projects: what New and [page:load_midi|Load MIDI] start with: PPQ, keys, channel settings, Domino start and output file (Load MIDI takes the file's own PPQ). Use the open project's settings saves the open project's here. Untick Start new projects with these settings to have New keep the open project's settings instead. Fit view on New shows the whole empty project instead of keeping the zoom.
+New projects: what New and [page:load_midi|Load MIDI] start with: PPQ, keys, channel settings, Domino start and output file (Load MIDI takes the file's own PPQ). They're set right on the page, with the same names as in the Project panel, or Use the open project's settings fills them in from the open project. Untick Start new projects with these settings to have New keep the open project's settings instead. Fit view on New shows the whole empty project instead of keeping the zoom.
 
 Piano roll: Space past the keys / Space before the start (room to scroll and put shapes past the keys and before the first beat; see Help → [page:view#Space past the edges|View]). Keep notes made there: shapes keep the notes they make in that space, drawn see-through (Opacity: how strongly, 1 to 100 %). They're kept only in the project file, unless Wrap them around puts them back onto the keys in exports, Domino copies and playback; Show wrapped notes shows where they land. See Help → [page:offrange|Notes past the keys].
 
