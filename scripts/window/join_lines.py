@@ -260,7 +260,11 @@ class JoinLines:
                 # (past the edges: the hidden part too, hunt 2026-11-07; a merge's own notes with "Keep notes made
                 # there": the notes it slid with, merge_mover's kept_notes)
                 if whole and not own or own and keep and not all_kept or keep and not own and moved is None:
-                    rows = self.with_hidden(sh, rows, use10, alone=own)
+                    # (the kept notes laid with these very rows: their real channels; laid on tracks = colour
+                    # places, not slots: looked up the old way)
+                    off = None if own or self.in_own_track(sh) else self.layout_off(
+                        self.rendered if auto and not whole else multi, i)
+                    rows = self.with_hidden(sh, rows, use10, alone=own, off=off)
                 laid =self.track_slots_in(rows)  # (its CCs' tracks by these notes' slots, before any slide)
                 laid_rows[i] = (rows, {i: laid(i)} if "cc" in sh else {})
         if together:

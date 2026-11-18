@@ -667,14 +667,20 @@ class JoinSplit:
             return got[1], got[2]
         return alone_slots(sh, notes, alone, self.keys, self.ppq, use10, rows)
 
-    def with_hidden(self, sh, rows, use10=None, alone=False):
+    def with_hidden(self, sh, rows, use10=None, alone=False, off=None):
         """rows (start, end, key, velocity, slot, owner: sh's notes as they sound) + the part of sh past the edges
         that isn't heard (Space past the edges: past the keys / before beat 0), each on the slot its colour has in
         rows (Flip each line / Fill gaps, hunt 2026-11-07: that part was thrown away; the normal Flip keeps it). A
         note across beat 0 gets its real start back. Inside the edges: rows as they are. use10: rows' slot numbering
         (None: the shown notes'). alone (Gate sensitive merge's own notes): every note, heard or not, on the
-        shape's own channels worked out alone on a taller keyboard."""
+        shape's own channels worked out alone on a taller keyboard. off: sh's kept rows laid out WITH rows
+        (layout_off; alone: own_slots' own pass): the hidden notes take the channels they got there (PLAN
+        2026-11-18: real channels); the old look-ups only for what that doesn't cover."""
         use10 = self.picture_use10 if use10 is None else use10
+        if alone:
+            got = getattr(self, "_own_off", None)
+            i = next((k for k, s in enumerate(self.shapes) if s is sh), None)
+            off = got[1] if got is not None and got[0] == i else None
         out = past_edges(sh, self.keys, self.ppq)
         if out is None or not len(rows):
             return rows
@@ -720,6 +726,12 @@ class JoinSplit:
         extra = np.zeros((int(hid.sum()), rows.shape[1]), np.int64)
         extra[:, :4] = notes[hid]
         extra[:, 4] = [slot_of.get(t, -1) for t in tracks[hid].tolist()]
+        real = False
+        if off is not None and len(off):  # (where they were laid with the rest: exact)
+            from window.app_offrange import lined_up
+            got = lined_up(off, use10, extra, use10, None)
+            real = bool((got >= 0).all())
+            extra[:, 4] = np.where(got >= 0, got, extra[:, 4])
         lost = extra[:, 4] < 0  # (colours with no heard note to copy from: the shape's channels worked out alone,
         if lost.any():           # lined up with the heard ones; user 2026-11-18: a paste mostly before beat 0 merged
             got = self.hidden_slots(sh, extra[lost], rows, use10)  # into one channel, every colour lost)
@@ -727,7 +739,7 @@ class JoinSplit:
             extra[lost & (extra[:, 4] < 0), 4] = first
         extra[:, 5:] = rows[0, 5:]
         both = np.concatenate([rows, extra])
-        if alone:  # (its own colours, heard and kept from ONE pass: chain merges came out a colour off past the edge)
+        if alone and not real:  # (its own colours, heard and kept from ONE pass: chain merges came out a colour off)
             got = self.hidden_slots(sh, both, None, use10, painted=False)
             if got is not None and (got >= 0).all():
                 both[:, 4] = got
@@ -750,12 +762,27 @@ class JoinSplit:
         from window.app import all_notes  # (app.py imports this file)
         # (the project's ticks as they are: all16 / in_order / rounds_apart are off outside Multi channel, hunt)
         all16 = self.use_ch10.get()
+        stash = {}
         _, use10, multi, _, _, _, _ = all_notes(self.shapes, self.ppq, self.keys, "auto", self.channel_split, all16,
                                        self.notes_tracks, rounds=self.new_rounds.get(),
                                        order=all16 and self.ch10_order.get(), keep=self.keep_colours.get(),
-                                       busy=self.cc_busy("auto"), own=self.own_channels(),
+                                       busy=self.cc_busy("auto"), own=self.own_channels(), stash=stash,
                                        kept=self.keeps_offrange())
+        # (its kept notes, laid with it: layout_off; the last two, as multi_kept may hand out an older one)
+        self._multi_off = [(multi, stash.get("off"))] + list(getattr(self, "_multi_off", ()))[:1]
         return use10, multi
+
+    def layout_off(self, layout, i):
+        """Shape i's kept notes (past the keys / before beat 0, "Keep notes made there") laid out WITH layout (the
+        shown notes or multi_rendered's), so with_hidden gives them the very channels they got there (PLAN
+        2026-11-18: real channels, nothing guessed). None: not known for that layout."""
+        if layout is self.rendered:
+            off = self.off_all
+        else:
+            off = next((o for m, o in getattr(self, "_multi_off", ()) if m is layout), None)
+        if off is None:
+            return None
+        return off[off[:, 5] == i]
 
     def own_slots(self, i, use10):
         """Shape i's rendered rows in Multi channel as if alone (with its Add between group: its colour turn): its
@@ -767,16 +794,24 @@ class JoinSplit:
         gid = group_of(sh)
         alone = [s for s in self.shapes if s is sh or gid is not None and group_of(s) == gid]
         all16 = self.use_ch10.get()
+        stash = {}
         _, used10, rows, _, _, _, _ = all_notes(alone, self.ppq, self.keys, "auto", self.channel_split, all16, self.notes_tracks,
                                        rounds=self.new_rounds.get(), order=all16 and self.ch10_order.get(),
-                                       busy=self.cc_busy("auto", alone), own=self.own_channels(),
+                                       busy=self.cc_busy("auto", alone), own=self.own_channels(), stash=stash,
                                        kept=self.keeps_offrange())
-        rows = rows[rows[:, 5] == next(k for k, s in enumerate(alone) if s is sh)].copy()
-        rows[:, 5] = i
-        if use10 and not used10 and not self.in_own_track(sh):  # (made with channel 10 skipped: the same channels in the project's numbering)
-            t = rows[:, 4]
-            rows[:, 4] = t // 15 * 16 + np.asarray(SKIP10)[t % 15]
-        return rows
+        me = next(k for k, s in enumerate(alone) if s is sh)
+        off = stash.get("off")
+        parts = [rows[rows[:, 5] == me].copy(), None if off is None else off[off[:, 5] == me].copy()]
+        for r in parts:
+            if r is None:
+                continue
+            r[:, 5] = i
+            if use10 and not used10 and not self.in_own_track(sh):  # (made with channel 10 skipped: the same channels in the project's numbering)
+                t = r[:, 4]
+                r[:, 4] = t // 15 * 16 + np.asarray(SKIP10)[t % 15]
+        # (its kept notes from the same alone pass: with_hidden's alone, PLAN 2026-11-18)
+        self._own_off = (i, parts[1])
+        return parts[0]
 
     def mark_cut_of(self, new):
         """plain_copies' shapes of sliced pieces stay one shape with the pieces left (sh["cut_of"]), for "Overlapping

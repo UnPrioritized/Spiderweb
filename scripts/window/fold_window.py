@@ -94,7 +94,7 @@ class FoldWindow(tk.Toplevel):
         # picture's, slot order with "Channels 1-16 in order")
         self.seq = ("plain" if app.ch10_order.get() else "last10") if app.use_ch10.get() else "skip10"
         shown = by_owner(multi)
-        parts = [app.with_hidden(app.shapes[i], shown(i)) for i in got]
+        parts = [app.with_hidden(app.shapes[i], shown(i), off=app.layout_off(multi, i)) for i in got]
         self.rows = np.concatenate(parts) if parts else np.zeros((0, 6), np.int64)
         self.slots = np.unique(self.rows[:, 4]) if len(self.rows) else np.zeros(0, np.int64)
         self.tracks = len(self.slots)
