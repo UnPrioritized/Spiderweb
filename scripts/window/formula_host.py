@@ -37,10 +37,11 @@ MIX_CHOICES = (("top", "formula_host.mix_top"), ("turns", "formula_host.mix_turn
 
 SYM_CHOICES = (("", "widgets.off"), ("mirror", "formula_host.mirrored"),
                ("turn", "formula_host.turned"))  # a formula's symmetric halves (pattern.py)
+SHAPE_SYM_CHOICES = SYM_CHOICES + (("around", "formula_host.around"),)  # + Repeat around the centre (shapes only)
 
 
 def sym_label(mode):
-    return tr(dict(SYM_CHOICES)[mode or ""])
+    return tr(dict(SHAPE_SYM_CHOICES).get(mode or "", "widgets.off"))
 
 
 def set_loop_sym(loop, mode):

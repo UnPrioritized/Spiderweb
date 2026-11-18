@@ -55,14 +55,41 @@ LOOPS_DEFAULT = 4.0
 
 
 SYMS = ("mirror", "turn")  # a formula's symmetric halves (see the top)
+# REPEAT AROUND THE CENTRE (user 2026-11-19, shapes only): sym "around" = only the first of N equal slices of t
+# counts, the others are it turned round the centre. N = shape["slices"] when typed, else a "petals" number
+# (Flower: they follow it), else SLICES_DEFAULT.
+AROUND = "around"
+SHAPE_SYMS = SYMS + (AROUND,)
+SLICES_MIN, SLICES_MAX, SLICES_DEFAULT = 2, 100, 6
+
+
+def clean_slices(v):
+    """A typed slice count made valid (SLICES_MIN..SLICES_MAX, whole), or None."""
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return None
+    return int(max(SLICES_MIN, min(SLICES_MAX, round(v)))) if math.isfinite(v) else None
+
+
+def shape_slices(p):
+    """How many slices a shape set to Around the centre has (see AROUND)."""
+    typed = clean_slices(p.get("slices")) if p.get("slices") is not None else None
+    if typed is not None:
+        return typed
+    petals = clean_slices(p.get("vars", {}).get("petals")) if "petals" in p.get("vars", {}) else None
+    return petals if petals is not None else SLICES_DEFAULT
 
 
 def keep_sym(new, old):
     """new with old's symmetric halves and Flatten / Softness (picking another preset keeps them; from a file:
-    made valid)."""
+    made valid). A shape (new has "x") also keeps Around the centre and its typed slice count."""
     old = old or {}
-    if old.get("sym") in SYMS:
+    shape = "x" in new
+    if old.get("sym") in (SHAPE_SYMS if shape else SYMS):
         new["sym"] = old["sym"]
+    if shape and old.get("slices") is not None and clean_slices(old["slices"]) is not None:
+        new["slices"] = clean_slices(old["slices"])
     for key in ("flatten", "soft"):
         try:
             v = float(old.get(key, 0.0))
@@ -471,12 +498,10 @@ def shape_name(p):
     return tr("pattern.edited", name=name) if p.get("loop") else name
 
 
-@functools.lru_cache(maxsize=256)
-def _shape(text_x, text_y, values, sym, lo=0.0, hi=1.0):
-    fx, fy = formula(text_x, named=True, var="t"), formula(text_y, named=True, var="t")
-    vals = dict(values)
+def _drawn(fx, fy, vals, lo, hi, count):
+    """The formulas' points at count + 1 even steps of t from lo to hi: (x, y) rows."""
     pts = []
-    for t in np.linspace(lo, hi, SHAPE_SAMPLES + 1).tolist():
+    for t in np.linspace(lo, hi, count + 1).tolist():
         try:
             x, y = fx(t, vals), fy(t, vals)
         except (ValueError, ArithmeticError, TypeError, KeyError):
@@ -484,8 +509,58 @@ def _shape(text_x, text_y, values, sym, lo=0.0, hi=1.0):
         if not (math.isfinite(x) and math.isfinite(y)):
             raise ValueError(tr("pattern.can_t_work_it_out_at_t", t=round(t, 3)))
         pts.append((x, y))
-    a = np.array(pts)
+    return np.array(pts)
+
+
+@functools.lru_cache(maxsize=256)
+def _shape(text_x, text_y, values, sym, lo=0.0, hi=1.0, slices=0):
+    fx, fy = formula(text_x, named=True, var="t"), formula(text_y, named=True, var="t")
+    vals = dict(values)
+    a = _drawn(fx, fy, vals, lo, hi, SHAPE_SAMPLES)
+    if sym == AROUND:
+        part = _drawn(fx, fy, vals, lo, lo + (hi - lo) / slices, max(16, SHAPE_SAMPLES // slices))
+        return fitted_shape(around_shape(part, slices))
     return symmetric_shape(a, sym) if sym else fitted_shape(a)
+
+
+def _turn(angle):
+    c, s = math.cos(angle), math.sin(angle)
+    return np.array([[c, -s], [s, c]])
+
+
+def around_centre(part, slices):
+    """(centre, step angle) for Around the centre: the point that turns the slice's start exactly onto its end by a
+    slice's share of a full turn, so every copy starts where the last one ended (joins never open, whatever the
+    formula; on an evenly repeating one, like a flower, it's its middle). Of the two ways round, the one the slice
+    itself goes round that point. A slice ending where it starts turns round its start."""
+    part = np.asarray(part, float)
+    p0, p1 = part[0], part[-1]
+    best = None
+    for sign in (1.0, -1.0):
+        step = sign * 2 * math.pi / slices
+        r = _turn(step)
+        c = np.linalg.solve(np.eye(2) - r, p1 - r @ p0)  # (end - c = turn(start - c))
+        q = part - c
+        swept = np.unwrap(np.arctan2(q[:, 1], q[:, 0]))
+        miss = abs(swept[-1] - swept[0] - step)
+        if best is None or miss < best[0]:
+            best = (miss, c, step)
+    return best[1], best[2]
+
+
+def around_shape(part, slices):
+    """One slice's drawing (x, y rows) and slices - 1 copies of it turned on round around_centre: the whole drawing
+    (x, y rows). Points where a copy starts right on the last one's end are dropped (no zero-length steps)."""
+    part = np.asarray(part, float)
+    centre, step = around_centre(part, slices)
+    q = part - centre
+    rows = [part]
+    for i in range(1, slices):
+        rows.append(centre + q @ _turn(step * i).T)
+    a = np.vstack(rows)
+    size = math.hypot(*(a.max(axis=0) - a.min(axis=0)))
+    keep = np.concatenate([[True], np.hypot(*np.diff(a, axis=0).T) > 1e-12 * max(size, 1e-300)])
+    return a[keep]
 
 
 def symmetric_shape(a, sym):
@@ -542,8 +617,9 @@ def formula_shape(p):
     """The shape's formulas fitted (see fitted_shape), not mirrored. ValueError if it can't be worked out."""
     span = t_span(p)
     lo, hi = span_numbers(span) if span else (0.0, 1.0)
-    return _shape(p["x"], p["y"], tuple(sorted(p["vars"].items())), p.get("sym") if p.get("sym") in SYMS else None,
-                  lo, hi)
+    sym = p.get("sym") if p.get("sym") in SHAPE_SYMS else None
+    return _shape(p["x"], p["y"], tuple(sorted(p["vars"].items())), sym, lo, hi,
+                  shape_slices(p) if sym == AROUND else 0)
 
 
 def shape_points(p):

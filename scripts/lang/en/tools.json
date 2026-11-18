@@ -530,6 +530,7 @@
  "pattern_dialog.symmetric_step": "Symmetric halves: {name}",
  "formula_host.mirrored": "Mirrored (arch)",
  "formula_host.turned": "Turned (S)",
+ "formula_host.around": "Around the centre",
  "formula_host.mix": "Mix",
  "formula_host.mix_top": "On top",
  "formula_host.mix_turns": "Taking turns",
