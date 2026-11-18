@@ -155,8 +155,10 @@ def clean_loop(c):
             out["sharp"] = sharp
         if c.get("sym") in ("mirror", "turn", "flip") and (n - 1) % 6 == 0:  # symmetric halves (bezier.py)
             out["sym"] = c["sym"]
-        if c.get("slice"):  # (one slice of a shape set to Around the centre)
+        if c.get("slice"):  # (one slice of a shape set to Around the centre, and which way round it goes)
             out["slice"] = True
+            if c.get("way") in (1, -1):
+                out["way"] = int(c["way"])
         return out
     except (KeyError, TypeError, ValueError, AttributeError):
         return None
@@ -545,20 +547,38 @@ def formula_slice(p):
     return _slice(p["x"], p["y"], tuple(sorted(p["vars"].items())), lo, hi, shape_slices(p))
 
 
+def formula_slice_ways(p):
+    """Which way the first slice leaves its start and arrives at its end, as placed in the whole: ((du, dv) out of
+    the start, (du, dv) back from the end), from a tiny step of t (a sample's chord was degrees off on a tight petal
+    tip: a smooth join between copies looked like a corner). ValueError if it can't be worked out."""
+    span = t_span(p)
+    lo, hi = span_numbers(span) if span else (0.0, 1.0)
+    n = shape_slices(p)
+    fx, fy = formula(p["x"], named=True, var="t"), formula(p["y"], named=True, var="t")
+    vals = dict(p["vars"])
+    part = _slice_drawn(fx, fy, vals, lo, hi, n)
+    _, place = _fit_map(around_shape(part, n))
+    end, tiny = lo + (hi - lo) / n, (hi - lo) / n * 1e-6
+    u, v = place(_drawn(fx, fy, vals, lo, lo + tiny, 1))
+    u2, v2 = place(_drawn(fx, fy, vals, end - tiny, end, 1))
+    return (u[1] - u[0], v[1] - v[0]), (u2[0] - u2[1], v2[0] - v2[1])
+
+
 def _turn(angle):
     c, s = math.cos(angle), math.sin(angle)
     return np.array([[c, -s], [s, c]])
 
 
-def around_centre(part, slices):
+def around_centre(part, slices, way=None):
     """(centre, step angle) for Around the centre: the point that turns the slice's start exactly onto its end by a
     slice's share of a full turn, so every copy starts where the last one ended (joins never open, whatever the
-    formula; on an evenly repeating one, like a flower, it's its middle). Of the two ways round, the one the slice
-    itself goes round that point. A slice ending where it starts turns round its start."""
+    formula; on an evenly repeating one, like a flower, it's its middle). way: +1 / -1 = which way round (a slice
+    edited by hand keeps its formula's: a big edit could fool the guess); None = the one the slice itself goes round
+    that point. A slice ending where it starts turns round its start."""
     part = np.asarray(part, float)
     p0, p1 = part[0], part[-1]
     best = None
-    for sign in (1.0, -1.0):
+    for sign in ((float(way),) if way in (1, -1) else (1.0, -1.0)):
         step = sign * 2 * math.pi / slices
         r = _turn(step)
         c = np.linalg.solve(np.eye(2) - r, p1 - r @ p0)  # (end - c = turn(start - c))
@@ -570,11 +590,12 @@ def around_centre(part, slices):
     return best[1], best[2]
 
 
-def around_shape(part, slices):
-    """One slice's drawing (x, y rows) and slices - 1 copies of it turned on round around_centre: the whole drawing
-    (x, y rows). Points where a copy starts right on the last one's end are dropped (no zero-length steps)."""
+def around_shape(part, slices, way=None):
+    """One slice's drawing (x, y rows) and slices - 1 copies of it turned on round around_centre (way: see there):
+    the whole drawing (x, y rows). Points where a copy starts right on the last one's end are dropped (no zero-length
+    steps)."""
     part = np.asarray(part, float)
-    centre, step = around_centre(part, slices)
+    centre, step = around_centre(part, slices, way)
     q = part - centre
     rows = [part]
     for i in range(1, slices):
@@ -664,7 +685,7 @@ def shape_points(p):
         from notes.bezier import sample
         a = np.asarray(sample([tuple(q) for q in p["loop"]["pts"]], 64), float)
         if p["loop"].get("slice") and p.get("sym") == AROUND:
-            a = around_shape(a, shape_slices(p))
+            a = around_shape(a, shape_slices(p), p["loop"].get("way"))
         u, v = a[:, 0], a[:, 1]
     else:
         u, v = formula_shape(p)

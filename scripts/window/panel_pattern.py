@@ -12,7 +12,7 @@ from files.mathexpr import calc, fmt
 from notes.pattern import FORMULA_KINDS, MAX_LOOPS, SOFT_DEFAULT, formula_shape, loop_points, most_loops
 from notes.polygon import update_polygon
 from window import look
-from window.formula_host import MIX_CHOICES, SYM_CHOICES, PolygonHost, layer_name, set_loop_sym, sym_label
+from window.formula_host import MIX_CHOICES, PolygonHost, layer_name, put_sym, sym_choices, sym_label
 from window.panel_custom import GAP_COLOR
 from window.pattern_graphs import PanelGraphs, graphed, open_graph
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, read_number, unchanged
@@ -44,7 +44,7 @@ class PatternPanel:
             lb = ttk.Label(sym_row, text=tr("widgets.symmetric_halves"))
             lb.pack(side="left")
             sym = tk.StringVar()
-            names = [tr(key) for _, key in SYM_CHOICES]
+            names = [tr(key) for _, key in sym_choices(layer)]
             cb = ttk.Combobox(sym_row, textvariable=sym, values=names, state="readonly",
                               width=max(len(n) for n in names))
             cb.pack(side="left", padx=(5, 0))
@@ -327,20 +327,15 @@ class PatternPanel:
         if self._loading:
             return
         text = self.formula_ui[layer]["sym"].get()
-        mode = (SYM_CHOICES[picked][0] if picked >= 0 else
-                next(value for value, key in SYM_CHOICES if tr(key) == text)) or None
+        choices = sym_choices(layer)
+        mode = (choices[picked][0] if picked >= 0 else
+                next(value for value, key in choices if tr(key) == text)) or None
         tgts = [h for h in self.with_layer(layer) if h[layer].get("sym") != mode]
         if not tgts:
             return
         self.push_undo(name=tr("pattern_dialog.symmetric_step", name=sym_label(mode)))
         for h in tgts:  # (like RollHost.set_sym, for curves and polygons together)
-            p = h[layer]
-            if mode:
-                p["sym"] = mode
-            else:
-                p.pop("sym", None)
-            if p.get("loop"):
-                set_loop_sym(p["loop"], mode)
+            put_sym(h[layer], mode)
         self.formulas_edited()
         self.sync_panel()
 

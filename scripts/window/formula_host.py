@@ -44,6 +44,33 @@ def sym_label(mode):
     return tr(dict(SHAPE_SYM_CHOICES).get(mode or "", "widgets.off"))
 
 
+def sym_choices(layer):
+    """The Symmetric halves list for a layer: a shape also has Around the centre."""
+    return SHAPE_SYM_CHOICES if layer == "shape" else SYM_CHOICES
+
+
+def put_sym(p, mode):
+    """A formula's Symmetric halves set to mode ("mirror", "turn", "around" or None), in place. An edit by hand
+    follows: halves keep its first half; Around the centre starts again from the formula's first slice (the whole
+    drawn outline isn't one slice; my pick 2026-11-19), and leaving it drops the one slice (it isn't a whole)."""
+    if mode:
+        p["sym"] = mode
+    else:
+        p.pop("sym", None)
+    loop = p.get("loop")
+    if not loop:
+        return
+    if mode == "around" or loop.get("slice"):
+        if p.get("x") or p.get("polar"):  # (back to the formula; one drawn without a formula keeps its outline)
+            p.pop("loop")
+        else:
+            loop.pop("slice", None)
+            if mode == "around":
+                p.pop("sym")
+    else:
+        set_loop_sym(loop, mode)
+
+
 def set_loop_sym(loop, mode):
     """A loop edited by hand (anchors + handles) with symmetric halves on / off; its first half stays. A closed
     shape is mirrored across the line through its start ("flip", bezier.py)."""
@@ -58,7 +85,7 @@ def sym_menu(m, host, layer, picks):
     p = (host.current() or {}).get(layer)
     sub = tk.Menu(m, tearoff=0)
     pick = picks[layer + "_sym"] = tk.StringVar(m, value=(p or {}).get("sym", ""))
-    for value, key in SYM_CHOICES:
+    for value, key in sym_choices(layer):
         sub.add_radiobutton(label=tr(key), value=value, variable=pick,
                             command=lambda v=value: host.set_sym(layer, v or None))
     m.add_cascade(label=tr("widgets.symmetric_halves"), menu=sub, state="normal" if p else "disabled")
@@ -196,13 +223,7 @@ class FormulaHost:
             return
         self.begin(tr("pattern_dialog.symmetric_step", name=sym_label(mode)))
         for h in tgts:
-            p = h[layer]
-            if mode:
-                p["sym"] = mode
-            else:
-                p.pop("sym", None)
-            if p.get("loop"):
-                set_loop_sym(p["loop"], mode)
+            put_sym(h[layer], mode)
         self.spread()
         self.changed()
 

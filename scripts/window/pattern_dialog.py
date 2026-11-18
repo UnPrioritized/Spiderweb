@@ -15,6 +15,8 @@ import re
 import tkinter as tk
 from tkinter import ttk, messagebox
 
+import numpy as np
+
 from files.lang import tr
 from files.mathexpr import as_written, calc, fmt, formula, split_pair
 from files import saved_lists
@@ -22,13 +24,15 @@ from files.about import USER
 from files.safefile import write_text
 from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
                           held_axis, keep_symmetric, nearest, pen_handles, sample)
-from notes.pattern import (AROUND, LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, SOFT_DEFAULT,
-                           clean_loop, clean_pattern_graphs, formula_loop, formula_shape, formula_slice, keep_sym, most_loops, new_pattern, new_shape, pattern_name, pattern_names,
-                           polar_of, polar_ok, polar_xy, shape_name, shape_names, span_numbers, t_span)
+from notes.pattern import (AROUND, LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG, SHAPE_PRESETS, SLICES_MAX,
+                           SLICES_MIN, SOFT_DEFAULT, around_centre, clean_loop, clean_pattern_graphs, formula_loop,
+                           formula_shape, formula_slice, formula_slice_ways, keep_sym, most_loops, new_pattern, new_shape, pattern_name,
+                           pattern_names, polar_of, polar_ok, polar_xy, shape_name, shape_names, shape_points,
+                           shape_slices, span_numbers, t_span)
 from files.clipboard import put_text
 from roll.roll_shared import ALT, grab_while_panning
 from window import look
-from window.formula_host import SYM_CHOICES, set_loop_sym, sym_label
+from window.formula_host import put_sym, sym_choices, sym_label
 from window.formula_paste import FormulaPaste
 from window.panel_custom import GAP_COLOR
 from window.pattern_graphs import DialogGraphs, graphed, open_graph
@@ -272,13 +276,25 @@ class FormulaDialog(tk.Toplevel):
         lb = ttk.Label(row, text=tr("widgets.symmetric_halves"))
         lb.pack(side="left")
         self.sym = tk.StringVar()
-        names = [tr(key) for _, key in SYM_CHOICES]
+        names = [tr(key) for _, key in sym_choices(layer)]
         cb = ttk.Combobox(row, textvariable=self.sym, values=names, state="readonly",
                           width=max(len(n) for n in names))
         cb.pack(side="left", padx=(5, 0))
         cb.bind("<<ComboboxSelected>>", lambda e: self.on_sym(e.widget.current()))
         for w in (lb, cb):
-            Tooltip(w, tr("pattern_dialog.sym_tip"))
+            Tooltip(w, tr("pattern_dialog.sym_tip_shape") if shape else tr("pattern_dialog.sym_tip"))
+        self.slices_var = tk.StringVar()  # Around the centre: how many slices (empty = follows Petals / 6)
+        self.slices_row = ttk.Frame(row)
+        lb = ttk.Label(self.slices_row, text=tr("pattern_dialog.slices"))
+        lb.pack(side="left", padx=(8, 0))
+        e = self.slices_box = ttk.Entry(self.slices_row, textvariable=self.slices_var, width=4)
+        e.pack(side="left", padx=(4, 0))
+        e.bind("<Return>", lambda ev: (self.on_slices(), "break")[1])
+        e.bind("<FocusOut>", lambda ev: self.on_slices())
+        Scrub(self.host.app, [(e, self.slices_var, self.on_slices)], (1, 5, 1), SLICES_MIN, SLICES_MAX, label=lb)
+        for w in (lb, e):
+            Tooltip(w, tr("pattern_dialog.slices_tip", least=SLICES_MIN, most=SLICES_MAX))
+        self.slices_after = cb
         self.type_box = None  # a shape: typed as x(t) and y(t), or as one polar line r(t)
         if shape:
             lb = ttk.Label(row, text=tr("pattern_dialog.type_as"))
@@ -319,9 +335,18 @@ class FormulaDialog(tk.Toplevel):
         self.numbers.grid(row=r + 1, column=0, columnspan=2, sticky="w", pady=(0, 6))
         self.boxes = {}
         self._names = None
-        self.canvas = tk.Canvas(right, width=self.w, height=self.h, bg=look.CHART_BG, highlightthickness=1,
+        views = ttk.Frame(right)  # the preview; Around the centre: Slice | Whole side by side (user 2026-11-19)
+        views.grid(row=r + 2, column=0, columnspan=2)
+        self.canvas = tk.Canvas(views, width=self.w, height=self.h, bg=look.CHART_BG, highlightthickness=1,
                                 highlightbackground=look.PAT_BORDER)
-        self.canvas.grid(row=r + 2, column=0, columnspan=2)
+        self.canvas.grid(row=1, column=0)
+        self.slice_title = ttk.Label(views, text=tr("pattern_dialog.slice_view"), foreground=look.HINT,
+                                     font=look.font(8))
+        self.whole_title = ttk.Label(views, text=tr("pattern_dialog.whole_view"), foreground=look.HINT,
+                                     font=look.font(8))
+        self.whole = tk.Canvas(views, width=self.h, height=self.h, bg=look.CHART_BG, highlightthickness=1,
+                               highlightbackground=look.PAT_BORDER)  # (shown only with Around the centre)
+        Tooltip(self.whole, tr("pattern_dialog.whole_view_tip"))
         c = self.canvas
         c.bind("<ButtonPress-1>", self.press)
         c.bind("<B1-Motion>", self.motion)
@@ -761,22 +786,47 @@ class FormulaDialog(tk.Toplevel):
         place in the list (two choices translated alike stay apart); -1: found by its word."""
         if self._loading:
             return
+        choices = sym_choices(self.layer)
         if picked < 0:
-            picked = [tr(key) for _, key in SYM_CHOICES].index(self.sym.get())
-        mode = SYM_CHOICES[picked][0] or None
+            picked = [tr(key) for _, key in choices].index(self.sym.get())
+        mode = choices[picked][0] or None
         if mode == self.pat.get("sym"):
             return
-        if mode:
-            self.pat["sym"] = mode
-        else:
-            self.pat.pop("sym", None)
-        if self.pat.get("loop"):
-            set_loop_sym(self.pat["loop"], mode)
+        put_sym(self.pat, mode)
         self.pat.pop("name", None)  # (not the saved one any more)
+        self.view = None
         self.pick_current()
         self.own_view = False
         self.refresh()
         self.mark()
+
+    def on_slices(self):
+        """Slices typed or stepped (Around the centre): a typed count stays; empty = follows Petals again (else 6)."""
+        if self._loading or self.pat.get("sym") != AROUND:
+            return
+        text = self.slices_var.get().strip()
+        if not text:
+            value = None
+        else:
+            value = read_number(text, SLICES_MIN, SLICES_MAX)
+            if value is None or value != int(value):
+                bad(self.slices_box)
+                return
+            value = int(value)
+        good(self.slices_box)
+        if value == self.pat.get("slices") or value is not None and "slices" not in self.pat \
+                and value == shape_slices(self.pat):
+            if value is None:
+                self.slices_var.set(str(shape_slices(self.pat)))
+            return
+        if value is None:
+            self.pat.pop("slices", None)
+        else:
+            self.pat["slices"] = value
+        self.pat.pop("name", None)  # (not the saved one any more)
+        self.view = None
+        self.refresh()
+        self.mark(("slices",))
 
     def on_flat(self, key):
         """Flatten % / Softness % typed or stepped (0 Flatten = none)."""
@@ -809,6 +859,18 @@ class FormulaDialog(tk.Toplevel):
             var.set(fmt(self.pat["loops"] if name == "loops" else self.pat["vars"][name]))
             e.config(style="TEntry")
         self.sym.set(sym_label(self.pat.get("sym")))
+        around = self.around()
+        if around:
+            self.slices_var.set(str(shape_slices(self.pat)))
+            good(self.slices_box)
+        pack_shown(self.slices_row, around, side="left", after=self.slices_after)
+        for w, place in ((self.slice_title, dict(row=0, column=0, sticky="w")),
+                         (self.whole_title, dict(row=0, column=1, sticky="w", padx=(6, 0))),
+                         (self.whole, dict(row=1, column=1, padx=(6, 0)))):
+            if around and not w.winfo_manager():
+                w.grid(**place)
+            elif not around and w.winfo_manager():
+                w.grid_forget()
         self.show_type()
         self.box_was = {key: var.get() for key, var in self.texts.items()}  # (what a paste is measured against)
         span = t_span(self.pat) or ["0", "1"]
@@ -836,8 +898,8 @@ class FormulaDialog(tk.Toplevel):
                 self.set_info(tr("pattern_dialog.shape_edited_by_hand") if self.layer == "shape" else
                               tr("pattern_dialog.edited_by_hand"), look.GOOD, back=True)
             else:
-                self.set_info(tr("pattern_dialog.whole_shape") if self.layer == "shape" else
-                              tr("pattern_dialog.one_loop"), look.INFO)
+                self.set_info(tr("pattern_dialog.one_slice") if self.around() else tr("pattern_dialog.whole_shape")
+                              if self.layer == "shape" else tr("pattern_dialog.one_loop"), look.INFO)
             if self.kind == "pattern" and self.pat["loops"] >= self.most_loops():  # (only then, user)
                 self.set_info(tr("panel_pattern.loops_most", most=fmt(self.most_loops())), GAP_COLOR,
                               back=bool(self.pat.get("loop")))
@@ -1045,18 +1107,41 @@ class FormulaDialog(tk.Toplevel):
             out["sym"] = sym
         if around:
             out["slice"] = True
+            _, step = around_centre(np.column_stack([u, v]), shape_slices(self.pat))
+            out["way"] = 1 if step > 0 else -1  # (the formula's way round, kept: see around_centre)
+            p = out["pts"]  # (the end handles along the formula's own way at the ends: the fit leaves them a few
+            ways = formula_slice_ways(self.pat)  # degrees off, so a smooth join between copies looked like a corner)
+            for end, handle, d in ((0, 1, ways[0]), (len(p) - 1, len(p) - 2, ways[1])):
+                n, length = math.hypot(*d), math.dist(p[end], p[handle])
+                if n > 1e-12 and length > 1e-12:
+                    p[handle] = [p[end][0] + d[0] / n * length, p[end][1] + d[1] / n * length]
         elif self.layer == "shape" and math.dist(out["pts"][0], out["pts"][-1]) < 1e-6:
             out["pts"][-1] = list(out["pts"][0])  # (a closed shape stays closed)
         return out
 
+    def around(self):
+        """Around the centre picked (a shape): the preview edits ONE slice, the Whole view shows the rest."""
+        return self.layer == "shape" and self.pat.get("sym") == AROUND
+
+    def slice_centre(self, loop):
+        """(centre, step angle) the slice turns round (pattern.around_centre: its ends make it)."""
+        return around_centre(np.asarray(sample([tuple(p) for p in loop["pts"]], 32), float), shape_slices(self.pat),
+                             loop.get("way"))
+
     def fit_view(self, loop):
         """Pixels per unit, the left edge, the middle line and the loop's length in units: as it looks on the
-        curve, as big as fits."""
+        curve, as big as fits. Around the centre: the slice and its centre (no A to B line)."""
         length = self.loop_len()
         pad = 26 * self.scale
         line = sample([tuple(p) for p in loop["pts"]], 32)
-        us = [a for a, _ in loop["pts"]] + [a for a, _ in line] + [0.0, 1.0]
+        us = [a for a, _ in loop["pts"]] + [a for a, _ in line]
         vs = [b for _, b in loop["pts"]] + [b for _, b in line]
+        if self.around():
+            (cu, cv), _ = self.slice_centre(loop)
+            us.append(cu)
+            vs.append(cv)
+        else:
+            us += [0.0, 1.0]
         if self.kind == "pattern":  # (the middle line in the middle)
             tall = max([abs(b) for b in vs] + [0.5])
             lo_v, hi_v = -tall, tall
@@ -1076,9 +1161,39 @@ class FormulaDialog(tk.Toplevel):
         s, x0, ym, length = self.view
         return [(x - x0) / (length * s), (ym - y) / s]
 
+    def draw_whole(self):
+        """Around the centre: the Whole view = the whole shape as the curve gets it (A to B), the slice being edited
+        drawn over it in the handles' colour."""
+        w = self.whole
+        w.delete("all")
+        if not self.around() or (not self.ok and not self.pat.get("loop")):
+            return
+        try:
+            u, v = shape_points(dict(self.pat, mirror=False))
+            part = np.asarray(sample([tuple(p) for p in self.shown_loop()["pts"]], 32), float)
+        except (ValueError, KeyError):
+            return
+        size, pad = self.h, 18 * self.scale
+        lo_u, hi_u = min(u.min(), 0.0), max(u.max(), 1.0)
+        lo_v, hi_v = min(v.min(), 0.0), max(v.max(), 0.0)
+        s = (size - 2 * pad) / max(hi_u - lo_u, hi_v - lo_v, 1e-9)
+        x0 = size / 2 - (lo_u + hi_u) / 2 * s
+        ym = size / 2 + (lo_v + hi_v) / 2 * s
+
+        def xy(a, b):
+            return x0 + a * s, ym - b * s
+        font = look.font(8)
+        (ax, ay), (bx, by) = xy(0, 0), xy(1, 0)
+        w.create_line(ax, ay, bx, by, fill=look.PAT_ORIGIN, dash=(6, 4))
+        w.create_text(ax, ay + 6, text="A", anchor="n", fill=look.PAT_AB, font=font)
+        w.create_text(bx, by + 6, text="B", anchor="n", fill=look.PAT_AB, font=font)
+        w.create_line(*[q for a, b in zip(u.tolist(), v.tolist()) for q in xy(a, b)], fill=look.PAT_LINE, width=2)
+        w.create_line(*[q for a, b in part.tolist() for q in xy(a, b)], fill=look.HANDLE, width=3)
+
     def draw(self):
         c = self.canvas
         c.delete("all")
+        self.draw_whole()
         if not self.ok and not self.pat.get("loop"):
             return
         loop = self.shown_loop()
@@ -1094,6 +1209,13 @@ class FormulaDialog(tk.Toplevel):
             width = length * s
             for shift in (-1, 1):  # the loops before and after it, faint
                 c.create_line(*[v for x, y in line for v in (x + shift * width, y)], fill=look.PAT_NEIGHBOUR, width=2)
+        elif self.around():  # the wedge the slice fills: faint lines from the centre to its ends (user)
+            centre, _ = self.slice_centre(loop)
+            cx, cy = self.to_xy(centre)
+            for end in (pts[0], pts[-1]):
+                c.create_line(cx, cy, *self.to_xy(end), fill=look.PAT_ORIGIN, dash=(6, 4))
+            r = 3 * self.scale
+            c.create_oval(cx - r, cy - r, cx + r, cy + r, outline=look.PAT_AB)
         else:
             (ax, ay), (bx, by) = self.to_xy((0, 0)), self.to_xy((1, 0))
             c.create_line(ax, ay, bx, by, fill=look.PAT_ORIGIN, dash=(6, 4))  # the curve from A to B (the origin path)
@@ -1101,7 +1223,8 @@ class FormulaDialog(tk.Toplevel):
             c.create_text(bx, by + 6, text="B", anchor="n", fill=look.PAT_AB, font=font)
         if self.pat.get("loop"):  # the formula it came from, faint under it
             try:
-                u, v = formula_shape(self.pat) if self.layer == "shape" else formula_loop(self.pat)
+                u, v = formula_slice(self.pat) if self.around() else formula_shape(self.pat) \
+                    if self.layer == "shape" else formula_loop(self.pat)
                 c.create_line(*[q for a, b in zip(u.tolist(), v.tolist()) for q in self.to_xy((a, b))],
                               fill=look.PAT_FORMULA, width=4)
             except (ValueError, KeyError):
@@ -1218,7 +1341,10 @@ class FormulaDialog(tk.Toplevel):
         last = len(c["pts"]) - 1
         ends = [list(c["pts"][0]), list(c["pts"][last])]
         axis = held_axis(c, self.to_xy)  # (zooming the preview never changes which way it's mirrored)
+        join = self.smooth_join(c) if self.around() and not e.state & ALT and self.drag in (1, last - 1) else None
         drag_point(c, self.drag, self.from_xy(e.x, e.y), e.state & ALT, self.to_xy, self.from_xy)
+        if join:  # (Around the centre: the handle on the join's other side follows, turned; Alt = a corner)
+            self.follow_join(c, join)
         for i, handle, along in ((0, 1, 0.0), (last, last - 1, 1.0)):
             if self.layer == "shape":  # a shape's ends stay where they are
                 d = [ends[0 if i == 0 else 1][k] - c["pts"][i][k] for k in (0, 1)]
@@ -1243,6 +1369,34 @@ class FormulaDialog(tk.Toplevel):
                 self.boxes["loops"][0].set(fmt(self.pat["loops"]))
         self.draw()
         self.show_on_roll()
+
+    def smooth_join(self, c):
+        """Around the centre, dragging an end's handle: (turn, length of the other end's handle) when the join between
+        copies is smooth (the end's handle points straight on from the next copy's start handle), else None (a corner,
+        like a sharp petal tip: the handles stay apart)."""
+        pts = c["pts"]
+        last = len(pts) - 1
+        _, step = self.slice_centre(c)
+        turn = np.array([[math.cos(step), -math.sin(step)], [math.sin(step), math.cos(step)]])
+        a = turn @ (np.asarray(pts[1], float) - pts[0])  # (the next copy's start handle, at this slice's end)
+        b = np.asarray(pts[last - 1], float) - pts[last]
+        la, lb = np.hypot(*a), np.hypot(*b)
+        if la < 1e-12 or lb < 1e-12 or np.hypot(*(a / la + b / lb)) > 0.02:
+            return None
+        return turn, lb if self.drag == 1 else la
+
+    def follow_join(self, c, join):
+        """The handle across the join turned to point straight on from the dragged one, keeping its own length."""
+        turn, length = join
+        pts = c["pts"]
+        last = len(pts) - 1
+        if self.drag == 1:  # (start handle dragged: the end's handle = opposite of it, turned on)
+            d, at, other = turn @ (np.asarray(pts[1], float) - pts[0]), pts[last], last - 1
+        else:  # (end handle dragged: the start's handle = opposite of it, turned back)
+            d, at, other = turn.T @ (np.asarray(pts[last - 1], float) - pts[last]), pts[0], 1
+        n = np.hypot(*d)
+        if n > 1e-12:
+            pts[other] = [at[0] - d[0] / n * length, at[1] - d[1] / n * length]
 
     def release(self, e):
         self.pan = None
