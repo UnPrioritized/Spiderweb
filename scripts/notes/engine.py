@@ -2367,6 +2367,12 @@ def _owned_rows(w0, wt, mine, pt, lo, hi, partial=False):
     return rows
 
 
+def turns_back(src):
+    """Does a line's drawn path go back in time anywhere (a loop, a spiral, a curve's slices round a centre)?"""
+    from notes.sliced import paths_of
+    return any(len(a) > 1 and bool((np.diff(np.asarray(a, float)[:, 0]) < -1e-9).any()) for a in paths_of(src))
+
+
 def held_piece(sh, notes, tracks, ppq, get):
     """A sliced piece of a sustained line (notes, tracks: its own, before Sustain): held as the WHOLE shape holds them,
     cut at the piece's own cuts, and the held ends of earlier notes crossing its start starting again there (partial
@@ -2431,16 +2437,31 @@ def held_piece(sh, notes, tracks, ppq, get):
         if same_vel:
             return None
         return int(env_velocities(env, np.array([s0]), t_lo, t_hi, min(0.0, float(env[0][0])))[0])
+    back = turns_back(src)
+    made_end = {}  # ((start, key) -> the whole's note's end before Sustain: looping lines only)
+    if back:
+        for s, e, k in np.asarray(w0, np.int64)[:, :3].tolist():
+            made_end[s, k] = max(e, made_end.get((s, k), e))
     for i, (s, e, k) in enumerate(notes[:, :3].tolist()):
         if (s, k) in ends:
             e2 = ends[s, k]
         else:  # (the second half of a note cut at the piece's start: the whole's note held over it)
             over = w1[(w1[:, 2] == k) & (w1[:, 0] < s) & (w1[:, 1] > s)]
             e2 = int(over[:, 1].max()) if len(over) else e
-        # (a LINE TURNING BACK IN TIME (a loop, a spiral, slices round a centre): a piece's notes can start after its
-        # end cut's tick; it is theirs by their place on the line and no piece after carries their held tail: held
-        # whole, not cut to a one-tick sliver; sweep 2026-11-19 cut families, 270590240 / 672320163 ...)
-        notes[i, 1] = (max(min(e2, hi), s + 1) if s < hi else e2) if e2 > s else e
+        if back:
+            # (LOOPING HELD LINE, user 2026-11-19 (A): the line turns back in time (a loop, a spiral, slices round a
+            # centre), so a cut is a place on the line, not a moment: a held note stays WHOLE in the piece that made
+            # it; only the note the piece's own end cut goes through ends there; sweep cut families 270590240 ...)
+            # (cut there = the whole's own note, before Sustain, ran past the cut; one merely ending on that tick is
+            # held on as the whole holds it, case 672318438)
+            made = made_end.get((s, k))
+            if made is None:  # (a cut half: the whole's note it is part of, case 172319871 cut at both box edges)
+                w0a = np.asarray(w0, np.int64)
+                on = w0a[(w0a[:, 2] == k) & (w0a[:, 0] < s) & (w0a[:, 1] > s)]
+                made = int(on[:, 1].max()) if len(on) else e
+            notes[i, 1] = e if e == hi and e < e2 and made > hi else max(e2, e)
+        else:
+            notes[i, 1] = max(min(e2, hi), s + 1) if e2 > s else e
     extra = []
     # ((start, key) -> the earliest place on the line a whole note starts: made once a tail is asked, once a whole)
     got_spots = _held_spots.get(id(w0))
@@ -2477,6 +2498,8 @@ def held_piece(sh, notes, tracks, ppq, get):
     for j, (s, e, k, v) in enumerate(w1[:, :4].tolist()):
         if latest.get(k) == j:
             continue
+        if back and s < lo < e:
+            continue  # (looping: the note stays whole in its own piece, never copied into this one)
         if s < lo < e and k not in own_at and from_before(s, k):  # (held over the cut from the piece before)
             row = [lo, min(e, hi), k, vel_of(k, s) or v]
         elif lo <= s < hi and (s, k) not in starts0 and (s, k) not in mine:  # (starting on a Sustain stop)
