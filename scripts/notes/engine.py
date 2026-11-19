@@ -7,6 +7,7 @@ The maths for each kind lives in its own file: paths.py (lines, polylines, freeh
 
 import copy
 import itertools
+import hashlib
 import json
 import marshal
 import math
@@ -1144,7 +1145,31 @@ def shape_key(sh):
     tok = strokes_token(out.get("strokes"))
     if tok:  # (a text's strokes as their fingerprint: ~38,000 points not written out at every key)
         out["strokes"] = STROKES_MARK + tok
+    cut = out.get("cut")
+    if isinstance(cut, dict) and isinstance(cut.get("whole"), dict):  # (a piece's whole as its fingerprint: shared by
+        out = dict(out, cut=dict(cut, whole=WHOLE_MARK + whole_token(cut["whole"])))  # its pieces, never changed;
+        # every piece wrote its whole out at every key, a slice at 120 pieces took over a second: hunt 2026-11-19)
     return json.dumps(out, sort_keys=True) if not texts else (json.dumps(out, sort_keys=True), tuple(texts))
+
+
+WHOLE_MARK = "\0whole:"  # (a piece's whole in a key: its fingerprint, whole_token)
+_WHOLE_TOKENS = {}  # id(whole) -> (whole, fingerprint)
+_TOKEN_WHOLES = {}  # fingerprint -> whole (from_key)
+WHOLE_TOKENS_MOST = 512
+
+
+def whole_token(whole):
+    """A cut shape's whole's fingerprint, worked out once per whole dict (pieces share one; it's never changed in
+    place: sliced / history)."""
+    got = _WHOLE_TOKENS.get(id(whole))
+    if got is None or got[0] is not whole:
+        if len(_WHOLE_TOKENS) >= WHOLE_TOKENS_MOST:
+            _WHOLE_TOKENS.clear()
+            _TOKEN_WHOLES.clear()
+        fp = hashlib.sha1(json.dumps(whole, sort_keys=True).encode()).hexdigest()
+        got = _WHOLE_TOKENS[id(whole)] = (whole, fp)
+        _TOKEN_WHOLES[fp] = whole
+    return got[1]
 
 
 def text_unanchored(tx):
@@ -1197,6 +1222,12 @@ def from_key(key):
         if got is None:  # (can't happen: asked right after shape_key, while the shape holds them)
             raise LookupError("a text's strokes are gone")
         sh["strokes"] = got
+    cut = sh.get("cut")
+    if isinstance(cut, dict) and isinstance(cut.get("whole"), str) and cut["whole"].startswith(WHOLE_MARK):
+        whole = _TOKEN_WHOLES.get(cut["whole"][len(WHOLE_MARK):])
+        if whole is None:  # (can't happen: asked right after shape_key, while the piece holds it)
+            raise LookupError("a piece's whole is gone")
+        sh["cut"] = dict(cut, whole=whole)
     return sh
 
 

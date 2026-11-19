@@ -60,7 +60,23 @@ def _whole_settings(sh):
             continue  # order, and they run on its share after, on_share; case 492774334)
         if now.get(k) != at.get(k):  # (changed on the piece since the cut: its own)
             if k in now:
-                out[k] = now[k]
+                out[k] = _merged(out.get(k), at.get(k), now[k])
+            else:
+                out.pop(k, None)
+    return out
+
+
+def _merged(whole, at, now):
+    """A setting the piece changed since its cut: only the parts it changed go into the whole's (a cut rewrites some
+    per piece: Sustain stops as shares of the piece's time, a Gate subtract / extend graph over its stretch; the hold
+    gap changed on a piece moved the stops, hunt 2026-11-19). Not all dicts: the piece's as it is."""
+    if not (isinstance(whole, dict) and isinstance(at, dict) and isinstance(now, dict)):
+        return now
+    out = dict(whole)
+    for k in set(now) | set(at):
+        if now.get(k) != at.get(k):
+            if k in now:
+                out[k] = _merged(whole.get(k), at.get(k), now[k])
             else:
                 out.pop(k, None)
     return out
@@ -103,11 +119,13 @@ def _keep(cache, key, value):
     return value
 
 
-def _whole_of(src, ppq, keys):
+def _whole_of(src, ppq, keys, pts_key=None):
     """The whole's notes as if never cut, before beat 0 / past the keys too (they may belong to a piece), its plain
-    line notes with their spots (sorted by key, start), its paths, and whether it goes back in time."""
+    line notes with their spots (sorted by key, start), its paths, and whether it goes back in time. pts_key: what
+    its points are (the cut's whole's fingerprint + how far it's moved), so they aren't written out per piece."""
     from notes.engine import whole_notes_tracks
-    key = (json.dumps(src, sort_keys=True), ppq, keys)
+    key = (json.dumps({k: v for k, v in src.items() if k != "pts"} if pts_key else src, sort_keys=True), pts_key,
+           ppq, keys)
     got = _wholes.get(key)
     if got is None:
         notes, tracks = whole_notes_tracks(src, ppq, keys)
@@ -164,7 +182,9 @@ def _share(sh, ppq, keys):
     if not same_vel:  # (a velocity of its own: the whole made as it was when cut, its line read on top, own_velocity)
         from notes.sliced import with_whole_velocity
         src = with_whole_velocity(src, sh)
-    whole = _whole_of(src, ppq, keys)
+    from notes.engine import whole_token
+    d = moved_by(sh)
+    whole = _whole_of(src, ppq, keys, (whole_token(sh["cut"]["whole"]), round(d[0], 9), round(d[1], 9)))
     from notes.sustain import sustain_on
     held = sustain_on(src) and not whole[6]
     cuts = sh["cut"].get("group") or [[u, None] for u in part if u]  # (every cut of its shape: sliced.sync_cuts)
