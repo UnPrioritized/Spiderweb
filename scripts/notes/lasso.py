@@ -107,6 +107,28 @@ def _both(e1, e2):
     return out
 
 
+def rows_taken(loop, boxes, beat, ppq):
+    """The key rows a Lasso takes in at a cut at beat: inside the loop (and the kept Select boxes, like pasted
+    notes: lasso_pieces) there, a tick either way (the cut sits on the loop's edge). As [[first, last], ...]: what
+    a line piece keeps for its held notes (LASSO = ONLY ROWS IN ITS BOX, user 2026-11-19; engine.held_cuts)."""
+    ys = [float(p[1]) for p in loop]
+    t = int(round(beat * ppq))
+    taken = []
+    for r, edges in sorted(row_spans(loop, range(int(math.floor(min(ys))), int(math.ceil(max(ys))) + 1),
+                                     ppq).items()):
+        if boxes is not None:
+            edges = _both(edges, _box_spans(boxes, r, ppq))
+        if any(edges[i] - 1 <= t <= edges[i + 1] + 1 for i in range(0, len(edges) - 1, 2)):
+            taken.append(int(r))
+    out = []
+    for r in taken:
+        if out and r == out[-1][1] + 1:
+            out[-1][1] = r
+        else:
+            out.append([r, r])
+    return out
+
+
 def lasso_pieces(notes, loop, ppq, boxes=None):
     """notes (start, end, key, ...) ints cut where the loop crosses their row -> (which note each piece is from,
     piece starts, piece ends, inside: True where the piece is inside the loop; or under a knife_spans knife). boxes: the kept Select boxes

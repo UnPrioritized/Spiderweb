@@ -642,7 +642,7 @@ def as_heard(sh, mode, rule):
             and sh.get("held") is not True):
         # (a cut LINE piece where the mode fixes the line's own overlaps: a cut half reads the velocity heard there,
         # sliced.cut_through heard=; LINES' OWN OVERLAPS, user 2026-11-19)
-        return dict(sh, _cut_heard=True)
+        return dict(sh, _cut_heard=(rule or {}).get("way") or "stretch")  # (its way: stretch / split)
     return sh
 
 

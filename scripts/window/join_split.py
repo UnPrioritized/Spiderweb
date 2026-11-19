@@ -39,7 +39,7 @@ from notes.merge import (LAP, box_map, edge_moves, low_corner, merge_parts, merg
                          part_rows, reshaped_parts, side_plan, spans_of, unmerged, up_down_plan, up_down_rows)
 from notes.glue import for_part as glue_for_part, glue_box
 from notes.pattern import bake_shape, has_formula
-from notes.lasso import inside_point, knife_spans, lasso_notes, loop_crossings, path_middle, takes, touches
+from notes.lasso import inside_point, knife_spans, lasso_notes, loop_crossings, path_middle, rows_taken, takes, touches
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
 from notes.pen import thick_of
 from notes.sliced import (CANT, carry_drawn, completed, cut_group, cut_in_two, keep_velocity, keep_was, keyed_pieces,
@@ -1538,15 +1538,15 @@ class JoinSplit:
             mid = path_middle(path)
             return True if inside_point(loop, mid) and boxed(mid) else None
         pieces = [sh]
-        # (the loop goes on each cut's mark: a held note is cut there only on rows inside it, user 2026-11-19,
-        # engine.held_piece in_loop)
-        ring = None if isinstance(loop, dict) else [[float(p[0]), float(p[1])] for p in loop]
+        knife = isinstance(loop, dict)  # (a knife's spans: lines are made plain notes first, never here)
         for pt, way in hits:
             at = SimpleNamespace(x=roll.t2x(pt[0]), y=roll.p2y(pt[1]), state=0)
             k = min(range(len(pieces)), key=lambda j: self.path_dist(pieces[j], at))  # (the piece it's on)
-            got = self.cut_at(pieces[k], at, dict({"kind": "slice", "dir": way}, **({"loop": ring} if ring else {})),
-                              exact=True,
-                              spot=(float(pt[0]), float(pt[1])))  # (its mark along the loop)
+            mark = {"kind": "slice", "dir": way}  # (its mark along the loop)
+            if not knife:  # (the rows the loop + kept boxes take in there: held notes are cut only on those,
+                # user 2026-11-19, engine.held_cuts)
+                mark["rows"] = rows_taken(loop, boxes, float(pt[0]), self.ppq)
+            got = self.cut_at(pieces[k], at, mark, exact=True, spot=(float(pt[0]), float(pt[1])))
             if got:
                 pieces[k:k + 1] = got
         if len(pieces) == 1:  # (only too near an end to cut)

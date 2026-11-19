@@ -35,7 +35,6 @@ FUNNEL_OUTLINE = ("kind", "pts", "starts")  # a funnel's (its curves are in "sta
 VELOCITY = ("vel0", "vel1", "vel_env")
 GATE = ("gate", "range")  # a custom piece's spam gate: the whole's until it's changed (slice shares out a Range)
 BIG = 1 << 30  # a joined curve's piece k has the spots k * BIG + ...
-LOOP_MOST = 4096  # (points of a Lasso loop kept on a cut mark: clean_cut)
 WHOLE_TOOLS = ("glue", "fx")  # the whole's glue and note tool pages: done on the whole, then the pieces cut (user:
 # slicing keeps the look; the piece's own glue / pages added later go on its part)
 
@@ -113,8 +112,6 @@ def carried_mark(m, ch):
         out["segs"] = [[pt(a), pt(b)] for a, b in m["segs"]]
     if m.get("hits"):
         out["hits"] = [pt(p) for p in m["hits"]]
-    if m.get("loop"):
-        out["loop"] = [pt(p) for p in m["loop"]]
     return out
 
 
@@ -483,6 +480,68 @@ def keyed_pieces(old, parts):
     for p in parts:
         if isinstance(p.get("cut"), dict):
             p["cut"] = dict(p["cut"], id=key)
+
+
+CUTS_MOST = 10000  # (cuts kept on a line piece: clean_cuts)
+
+
+def clean_cuts(cuts):
+    """A line piece's cut["cuts"] from a file: [[u, None | [[first key, last key], ...]], ...] sorted, else []."""
+    out = []
+    try:
+        for c in cuts[:CUTS_MOST]:
+            rows = None if c[1] is None else [[int(a), int(b)] for a, b in c[1][:4096]]
+            out.append([float(c[0]), rows])
+    except (TypeError, ValueError, IndexError):
+        return []
+    return sorted(out, key=lambda c: c[0])
+
+
+def sync_cuts(shapes):
+    """Every line piece of one cut shape (cut["id"]) gets the SAME list of the cuts parting its pieces, with the rows
+    each took in (LASSO = ONLY ROWS IN ITS BOX, user 2026-11-19; engine.held_cuts): the cuts are the pieces' part
+    ends still there (a join took one away; a cut on a sibling added one), rows from any piece that knows them
+    (else None = every row, a cut from before the lists). So no two pieces both hold a held note or both leave it
+    out (hunt 2026-11-19). Changes only pieces whose list differs (a new cut dict). -> changed anything."""
+    from notes.tumour import LINE_KINDS
+    groups = {}
+    for i, sh in enumerate(shapes):
+        c = sh.get("cut")
+        if isinstance(c, dict) and c.get("id") and sh.get("kind") in LINE_KINDS and isinstance(c.get("part"), list) \
+                and len(c["part"]) == 2 and not isinstance(c["part"][0], list):
+            groups.setdefault(c["id"], []).append(i)
+    changed = False
+    seen = {}
+    for key, members in groups.items():
+        sig = [(shapes[i]["cut"], str(shapes[i]["cut"]["part"])) for i in members]
+        last = _SYNCED.get(key)  # (the same cut dicts as last time (held, so never another's id): nothing to do)
+        if last is not None and len(last) == len(sig) and all(a[0] is b[0] and a[1] == b[1] for a, b in zip(last, sig)):
+            seen[key] = last
+            continue
+        ends, rows = set(), {}
+        for i in members:
+            c = shapes[i]["cut"]
+            a, b = c["part"]
+            ends.update(round(float(u), 9) for u in (a, b) if u)
+            for u, r in c.get("cuts") or ():
+                if r is not None:
+                    rows.setdefault(round(float(u), 9), r)
+        # (only where a Lasso cut it: with every cut taking in every row, the piece's own ends say it all, and a line
+        # sliced into hundreds of pieces would keep hundreds of cuts on each)
+        want = [[u, rows.get(u)] for u in sorted(ends)] if any(u in rows for u in ends) else None
+        for i in members:
+            c = shapes[i]["cut"]
+            if (c.get("cuts") or None) != want:
+                shapes[i]["cut"] = dict(c, cuts=json.loads(json.dumps(want))) if want else \
+                    {k: v for k, v in c.items() if k != "cuts"}
+                changed = True
+        seen[key] = [(shapes[i]["cut"], str(shapes[i]["cut"]["part"])) for i in members]
+    _SYNCED.clear()
+    _SYNCED.update(seen)
+    return changed
+
+
+_SYNCED = {}  # cut key -> [(each piece's cut dict, its part)] as sync_cuts last left them
 
 
 def fresh_cut_ids(copies):
@@ -1117,7 +1176,9 @@ def cut_through(whole, raw, spots, tracks, part, ppq, came=None, floor=None, hea
             p = np.flatnonzero(before)
             p = p[raw[p, 0] == raw[p, 0].max()]
             p = int(p[np.argmax(spots[p])])
-            if p != j and raw[p, 0] > raw[j, 0] and raw.shape[1] > 3:
+            if p != j and raw[p, 0] > raw[j, 0] and raw.shape[1] > 3 and (heard != "split" or raw[p, 1] > t):
+                # (split around: a later note doesn't stretch, so it gives its velocity only while it still sounds
+                # at the cut; the earlier note's leftover is what is heard after it, hunt 2026-11-19)
                 sound = raw[p, 3]
         second = raw[j:j + 1].copy()  # (any other columns, a velocity, go along)
         second[0, 0] = t
@@ -1191,15 +1252,18 @@ def cut_in_two(sh, halves, at, scale, mark):
         path = cached_path(h)
         mids.append(spot_of(src, path[len(path) // 2], scale, part))
     new = dict(mark, id=uuid.uuid4().hex[:12], at=[float(at[0]) - d[0], float(at[1]) - d[1]], u=uc)
-    if new.get("loop"):  # (a Lasso's loop, where the whole sits like "at": engine.held_piece's rows in the box)
-        new["loop"] = [[float(x) - d[0], float(y) - d[1]] for x, y in new["loop"]]
+    rows = new.pop("rows", None)  # (a Lasso's: the key rows it took in at the cut, where the whole sits like "at")
+    dk = int(round(d[1]))
+    rec = [uc, None if rows is None else [[int(a) - dk, int(b) - dk] for a, b in rows]]
+    cuts = [c for c in ((cut.get("cuts") or []) if got else []) if abs(c[0] - uc) > 1e-9] + [rec]
     order = sorted(range(2), key=lambda i: mids[i])
     for i, (a, b) in zip(order, ((part[0], uc), (uc, part[1]))):
         h = halves[i]
         # (a cut through the notes, its stretch over them: both halves have notes along it)
         mine = [m for m in marks if m.get("segs") or m["u"] >= a - 1e-9 and (b is None or m["u"] <= b + 1e-9)]
         was = outline(h) if not (d[0] or d[1]) else moved(outline(h), (-d[0], -d[1]))
-        h["cut"] = {"whole": whole, "was": was, "part": [a, b], "vel": None, "marks": mine + [new]}
+        h["cut"] = {"whole": whole, "was": was, "part": [a, b], "vel": None, "marks": mine + [new],
+                    "cuts": json.loads(json.dumps(sorted(cuts, key=lambda c: c[0])))}
         floor = list(cut.get("from") or []) if got else []  # (cut_through's floor: the starts it came from)
         if a == uc and part[0]:
             floor.append(part[0])
@@ -1358,6 +1422,13 @@ def rejoined(olds, new, join=None):
         whole["cut"] = json.loads(json.dumps(src["cut"]))
     out = dict(new, cut={"whole": whole, "was": was, "part": list(part), "vel": None,
                          "marks": list(marks.values())})
+    known = {}  # (the pieces' cuts + rows: sync_cuts keeps the ones still parting pieces)
+    for sh in olds:
+        for u, r in sh["cut"].get("cuts") or ():
+            if r is not None or u not in known:
+                known[u] = r
+    if known:
+        out["cut"]["cuts"] = [[u, known[u]] for u in sorted(known)]
     floor = next((sh["cut"].get("from") for sh, g in zip(olds, got) if g[1][0] == part[0]), None)
     if floor:  # (the first piece's floor: cut_through)
         out["cut"]["from"] = floor
@@ -1526,8 +1597,6 @@ def moved_mark(m, d):
         out["segs"] = [[[x + d[0], y + d[1]] for x, y in sg] for sg in m["segs"]]
     if m.get("hits"):
         out["hits"] = [[x + d[0], y + d[1]] for x, y in m["hits"]]
-    if m.get("loop"):
-        out["loop"] = [[x + d[0], y + d[1]] for x, y in m["loop"]]
     return out
 
 
@@ -1693,8 +1762,6 @@ def clean_cut(c):
                 mk["segs"] = [[pt(a), pt(b)] for a, b in m["segs"]]
             if m.get("hits"):
                 mk["hits"] = [pt(p) for p in m["hits"]]
-            if m.get("loop"):  # (the Lasso that made this cut: held notes are cut only on rows inside it)
-                mk["loop"] = [pt(p) for p in m["loop"][:LOOP_MOST]]
             marks.append(mk)
         snaps = {}
         for key, keys in (("vel", VELOCITY), ("gate", GATE)):  # (as the piece's own would come out of a file)
@@ -1731,6 +1798,10 @@ def clean_cut(c):
             out["drawn"] = got
     if isinstance(c.get("id"), str) and c["id"]:  # (its cut's key: keyed_pieces)
         out["id"] = c["id"][:32]
+    if whole["kind"] in LINE_KINDS and isinstance(c.get("cuts"), list):  # (its shape's cuts + rows: held_cuts)
+        got = clean_cuts(c["cuts"])
+        if got:
+            out["cuts"] = got
     if whole["kind"] != "custom" and isinstance(c.get("from"), list):  # (cut_through's floor)
         try:
             got = [float(u) for u in c["from"][:10000]]

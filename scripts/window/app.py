@@ -66,7 +66,7 @@ from notes.paths import KEYS
 from notes.tumour import LINE_KINDS
 from notes.polygon import POLYGON_DEFAULTS
 from notes.ripples import grows_free
-from notes.sliced import completed, cut_group, fresh_marks, moved_by, steps_kept, turned_piece
+from notes.sliced import completed, cut_group, fresh_marks, moved_by, steps_kept, sync_cuts, turned_piece
 from notes.smooth import SMOOTH_DEFAULT
 from notes.text import TEXT_DEFAULTS
 from files.mathexpr import calc, calc_int, fmt
@@ -2241,6 +2241,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # (the user's own new steps placed first, so Add between sees a step's order as it'll be kept; the steps it
         # remakes come with their own order: noted as they are, sweep 69812094)
         self.steps_noted()
+        sync_cuts(self.shapes)  # (pieces of one cut shape share its cuts + rows: engine.held_cuts)
         if sync_groups(self.shapes):  # Add between: the steps follow their first / last shape (between.py)
             self.after_idle(self.sync_title)  # (a step changed by hand is a key now)
             self.steps_noted(only_seen=True)
