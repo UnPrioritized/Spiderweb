@@ -35,6 +35,7 @@ FUNNEL_OUTLINE = ("kind", "pts", "starts")  # a funnel's (its curves are in "sta
 VELOCITY = ("vel0", "vel1", "vel_env")
 GATE = ("gate", "range")  # a custom piece's spam gate: the whole's until it's changed (slice shares out a Range)
 BIG = 1 << 30  # a joined curve's piece k has the spots k * BIG + ...
+LOOP_MOST = 4096  # (points of a Lasso loop kept on a cut mark: clean_cut)
 WHOLE_TOOLS = ("glue", "fx")  # the whole's glue and note tool pages: done on the whole, then the pieces cut (user:
 # slicing keeps the look; the piece's own glue / pages added later go on its part)
 
@@ -112,6 +113,8 @@ def carried_mark(m, ch):
         out["segs"] = [[pt(a), pt(b)] for a, b in m["segs"]]
     if m.get("hits"):
         out["hits"] = [pt(p) for p in m["hits"]]
+    if m.get("loop"):
+        out["loop"] = [pt(p) for p in m["loop"]]
     return out
 
 
@@ -1188,6 +1191,8 @@ def cut_in_two(sh, halves, at, scale, mark):
         path = cached_path(h)
         mids.append(spot_of(src, path[len(path) // 2], scale, part))
     new = dict(mark, id=uuid.uuid4().hex[:12], at=[float(at[0]) - d[0], float(at[1]) - d[1]], u=uc)
+    if new.get("loop"):  # (a Lasso's loop, where the whole sits like "at": engine.held_piece's rows in the box)
+        new["loop"] = [[float(x) - d[0], float(y) - d[1]] for x, y in new["loop"]]
     order = sorted(range(2), key=lambda i: mids[i])
     for i, (a, b) in zip(order, ((part[0], uc), (uc, part[1]))):
         h = halves[i]
@@ -1521,6 +1526,8 @@ def moved_mark(m, d):
         out["segs"] = [[[x + d[0], y + d[1]] for x, y in sg] for sg in m["segs"]]
     if m.get("hits"):
         out["hits"] = [[x + d[0], y + d[1]] for x, y in m["hits"]]
+    if m.get("loop"):
+        out["loop"] = [[x + d[0], y + d[1]] for x, y in m["loop"]]
     return out
 
 
@@ -1686,6 +1693,8 @@ def clean_cut(c):
                 mk["segs"] = [[pt(a), pt(b)] for a, b in m["segs"]]
             if m.get("hits"):
                 mk["hits"] = [pt(p) for p in m["hits"]]
+            if m.get("loop"):  # (the Lasso that made this cut: held notes are cut only on rows inside it)
+                mk["loop"] = [pt(p) for p in m["loop"][:LOOP_MOST]]
             marks.append(mk)
         snaps = {}
         for key, keys in (("vel", VELOCITY), ("gate", GATE)):  # (as the piece's own would come out of a file)

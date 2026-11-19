@@ -1538,11 +1538,15 @@ class JoinSplit:
             mid = path_middle(path)
             return True if inside_point(loop, mid) and boxed(mid) else None
         pieces = [sh]
+        # (the loop goes on each cut's mark: a held note is cut there only on rows inside it, user 2026-11-19,
+        # engine.held_piece in_loop)
+        ring = None if isinstance(loop, dict) else [[float(p[0]), float(p[1])] for p in loop]
         for pt, way in hits:
             at = SimpleNamespace(x=roll.t2x(pt[0]), y=roll.p2y(pt[1]), state=0)
             k = min(range(len(pieces)), key=lambda j: self.path_dist(pieces[j], at))  # (the piece it's on)
-            got = self.cut_at(pieces[k], at, {"kind": "slice", "dir": way}, exact=True,  # (its mark along the loop)
-                              spot=(float(pt[0]), float(pt[1])))
+            got = self.cut_at(pieces[k], at, dict({"kind": "slice", "dir": way}, **({"loop": ring} if ring else {})),
+                              exact=True,
+                              spot=(float(pt[0]), float(pt[1])))  # (its mark along the loop)
             if got:
                 pieces[k:k + 1] = got
         if len(pieces) == 1:  # (only too near an end to cut)

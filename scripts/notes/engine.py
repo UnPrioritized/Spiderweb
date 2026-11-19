@@ -2367,6 +2367,30 @@ def _owned_rows(w0, wt, mine, pt, lo, hi, partial=False):
     return rows
 
 
+def lasso_rows(sh, u, t, ppq):
+    """A line piece's cut at spot u (its part's end) made by a LASSO (the mark keeps its loop): a function key -> is
+    that key's row inside the loop at tick t (LASSO = ONLY ROWS IN ITS BOX, user 2026-11-19: held notes are cut
+    there only on those rows); None: not a Lasso's cut (Slice / Split here: every row, as before)."""
+    if u is None or not isinstance(sh.get("cut"), dict):
+        return None
+    m = next((m for m in sh["cut"].get("marks") or () if m.get("loop") and abs(float(m.get("u", -1)) - u) <= 1e-9),
+             None)
+    if m is None:
+        return None
+    from notes.lasso import row_spans
+    from notes.sliced import moved_by
+    d = moved_by(sh) or (0.0, 0.0)
+    loop = [[x + d[0], y + d[1]] for x, y in m["loop"]]
+    seen = {}
+
+    def inside(k):
+        if k not in seen:
+            e = row_spans(loop, [k], ppq).get(int(k), [])
+            seen[k] = any(e[i] - 1 <= t <= e[i + 1] + 1 for i in range(0, len(e) - 1, 2))
+        return seen[k]
+    return inside
+
+
 def turns_back(src):
     """Does a line's drawn path go back in time anywhere (a loop, a spiral, a curve's slices round a centre)?"""
     from notes.sliced import paths_of
@@ -2438,10 +2462,24 @@ def held_piece(sh, notes, tracks, ppq, get):
             return None
         return int(env_velocities(env, np.array([s0]), t_lo, t_hi, min(0.0, float(env[0][0])))[0])
     back = turns_back(src)
-    made_end = {}  # ((start, key) -> the whole's note's end before Sustain: looping lines only)
-    if back:
+    end_in = None if back else lasso_rows(sh, part[1], hi, ppq)  # (LASSO = ONLY ROWS IN ITS BOX)
+    start_in = None if back or not part[0] else lasso_rows(sh, part[0], lo, ppq)
+    made_end = {}  # ((start, key) -> the whole's note's end before Sustain: looping lines / Lasso cuts only)
+    if back or end_in is not None:
         for s, e, k in np.asarray(w0, np.int64)[:, :3].tolist():
             made_end[s, k] = max(e, made_end.get((s, k), e))
+
+    def cut_here(s, e, k):
+        """Did the piece's end cut go THROUGH this note (the whole's own note, before Sustain, ran on past it)? One
+        merely ending on that tick is held on as the whole holds it (cases 672318438, 119204317)."""
+        if e != hi:
+            return False
+        made = made_end.get((s, k))
+        if made is None:  # (a cut half: the whole's note it is part of, case 172319871 cut at both box edges)
+            w0a = np.asarray(w0, np.int64)
+            on = w0a[(w0a[:, 2] == k) & (w0a[:, 0] < s) & (w0a[:, 1] > s)]
+            made = int(on[:, 1].max()) if len(on) else e
+        return made > hi
     for i, (s, e, k) in enumerate(notes[:, :3].tolist()):
         if (s, k) in ends:
             e2 = ends[s, k]
@@ -2452,14 +2490,11 @@ def held_piece(sh, notes, tracks, ppq, get):
             # (LOOPING HELD LINE, user 2026-11-19 (A): the line turns back in time (a loop, a spiral, slices round a
             # centre), so a cut is a place on the line, not a moment: a held note stays WHOLE in the piece that made
             # it; only the note the piece's own end cut goes through ends there; sweep cut families 270590240 ...)
-            # (cut there = the whole's own note, before Sustain, ran past the cut; one merely ending on that tick is
-            # held on as the whole holds it, case 672318438)
-            made = made_end.get((s, k))
-            if made is None:  # (a cut half: the whole's note it is part of, case 172319871 cut at both box edges)
-                w0a = np.asarray(w0, np.int64)
-                on = w0a[(w0a[:, 2] == k) & (w0a[:, 0] < s) & (w0a[:, 1] > s)]
-                made = int(on[:, 1].max()) if len(on) else e
-            notes[i, 1] = e if e == hi and e < e2 and made > hi else max(e2, e)
+            notes[i, 1] = e if e < e2 and cut_here(s, e, k) else max(e2, e)
+        elif end_in is not None and not end_in(k) and not cut_here(s, e, k):
+            # (a Lasso's cut, this row outside its loop: the held note stays whole in its piece; the note the cut went
+            # through is cut there below)
+            notes[i, 1] = max(e2, e)
         else:
             notes[i, 1] = max(min(e2, hi), s + 1) if e2 > s else e
     extra = []
@@ -2500,7 +2535,8 @@ def held_piece(sh, notes, tracks, ppq, get):
             continue
         if back and s < lo < e:
             continue  # (looping: the note stays whole in its own piece, never copied into this one)
-        if s < lo < e and k not in own_at and from_before(s, k):  # (held over the cut from the piece before)
+        if s < lo < e and k not in own_at and from_before(s, k) and (start_in is None or start_in(k)):
+            # (held over the cut from the piece before; a Lasso's cut: only on rows inside its loop)
             row = [lo, min(e, hi), k, vel_of(k, s) or v]
         elif lo <= s < hi and (s, k) not in starts0 and (s, k) not in mine:  # (starting on a Sustain stop)
             row = [s, min(e, hi), k, vel_of(k, s) or v]
