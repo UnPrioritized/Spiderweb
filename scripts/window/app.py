@@ -2241,7 +2241,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # (the user's own new steps placed first, so Add between sees a step's order as it'll be kept; the steps it
         # remakes come with their own order: noted as they are, sweep 69812094)
         self.steps_noted()
-        sync_cuts(self.shapes)  # (pieces of one cut shape share its cuts + rows: engine.held_cuts)
+        sync_cuts(self.shapes)  # (pieces of one cut shape share its cuts + rows: cut_share)
         if sync_groups(self.shapes):  # Add between: the steps follow their first / last shape (between.py)
             self.after_idle(self.sync_title)  # (a step changed by hand is a key now)
             self.steps_noted(only_seen=True)

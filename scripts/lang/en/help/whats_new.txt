@@ -16,6 +16,8 @@ What's new:
 
 • Around the centre: a new Symmetric halves choice for a curve's Shape of the line. The shape is cut into equal slices round its centre (as many as a Flower's petals, or your own number) and only the first counts, so editing that one slice by hand in Custom… changes every petal, gear tooth or star point at once. Custom… shows the slice and the whole shape side by side; drag a point in the whole shape to change just that slice. See [page:around|Around the centre].
 
+• Slice, Lasso and Split here: the pieces now take their notes straight from the shape they were cut from, made once as if it were never cut, so together they always hold exactly its notes. Before, each piece worked its notes out again, and with several effects stacked (Sustain, Gate steps, Gate aware flip, Stir, Warp, flips) a cut could lose a note, double one or change its velocity. A moved piece keeps its notes exactly; a piece you change afterwards keeps the shape's notes with only your change on top.
+
 • While the Custom… formula window is open, the piano roll can now be panned with the middle button and scrolled with its scrollbars.
 
 • Help → About Spiderweb opens the About page.

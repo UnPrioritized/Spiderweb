@@ -11,17 +11,15 @@ shape into parts, and each part goes to one piece, so the pieces together always
   Slice, the loop's rows for a Lasso: slice-2.md "SWEEP PICKS 2026-11-19"); the part after a cut goes to the piece on
   the later side of it.
 The whole and its parts are made once for all its pieces (each piece only picks its own).
-SHARE[0] = on (default); SPIDERWEB_SHARE=0 = the old way (each piece re-makes its notes), kept to compare; pieces
-shares() says no to still go the old way.
+A line piece shares() says no to (not a piece any more) is made as a shape of its own.
 """
 import json
-import os
 
 import numpy as np
 
 from notes.sliced import BIG, beat_on, moved_by, source, spotted_notes, thick_of, tools
 
-SHARE = [os.environ.get("SPIDERWEB_SHARE", "1") != "0"]  # (SPIDERWEB_SHARE=0: the old way, to compare)
+SHARE = [True]  # (always: the old way each piece re-made its notes is gone, PLAN stage E)
 _wholes = {}  # (src json, ppq, keys) -> the whole made once for all its pieces
 _parts = {}  # (that key, the cuts, held, heard way) -> the whole's notes cut into parts + each part's owner spot
 MOST = 8
@@ -37,7 +35,7 @@ def shares(sh):
     part = cut.get("part")
     if not isinstance(whole, dict) or whole.get("cut") or not isinstance(part, list) or len(part) != 2:
         return False
-    if isinstance(part[0], list) or cut.get("mould"):
+    if isinstance(part[0], list):
         return False
     if (thick_of(sh) or thick_of(whole)) and not cut.get("knife"):  # (a wide pen's pieces are cut through notes)
         return False
@@ -198,6 +196,11 @@ def _share(sh, ppq, keys):
         from notes.sliced import knife_cut
         got, tracks = knife_cut(np.column_stack([out, start0]), tracks, knife, moved_by(sh), ppq)
         out, start0 = np.ascontiguousarray(got[:, :4]), got[:, 4]
+    mould = sh["cut"].get("mould")
+    if mould and len(out):  # (cut with a shape, an old cookie cutter piece: mould.py)
+        from notes.mould import mould_cut
+        got, tracks = mould_cut(np.column_stack([out, start0]), tracks, mould, moved_by(sh), ppq)
+        out, start0 = np.ascontiguousarray(got[:, :4]), got[:, 4]
     if not same_vel and len(out):
         out = out.copy()
         out[:, 3] = own_velocity(sh, src, out, start0, ppq)
@@ -235,7 +238,7 @@ def _takes(rows, k):
 def _through(notes, t, key, over, way, owner):
     """The note a cut at tick t (the line at key there) goes through, of those over (sounding there): on the crossing
     key (a key off when none: a curve's notes are spread evenly in time), the one last along the line (where the
-    Channels mode fixes the line's own overlaps: the one starting last, then last along it; sliced.cut_through).
+    Channels mode fixes the line's own overlaps: the one starting last, then last along it, as the old cut_through).
     -1: none."""
     q = int(np.floor(key + 0.5))
     for reach in (0, 1, 2):

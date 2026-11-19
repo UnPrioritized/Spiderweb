@@ -82,17 +82,38 @@ def undo_state(shapes):
     60 MB: every step copying it ran out of memory); long texts' letter strokes the same way (KeptStrokes). Equal
     states = equal shapes."""
     places = [p for sh in shapes for p in _big_texts(sh) + _kept_strokes(sh)]
-    if not places:
+    wholes = _kept_wholes(shapes)
+    if not places and not wholes:
         return StateText(json.dumps(shapes))
     was = [d[k] for d, k in places]
-    texts = tuple(KeptStrokes(v) if k == "strokes" else v for (_, k), v in zip(places, was))
+    texts = [KeptStrokes(v) if k == "strokes" else v for (_, k), v in zip(places, was)]
+    at = {}  # (id of a whole -> its place in texts: the pieces of one shape share it, kept ONCE)
+    for c, w in wholes:
+        if id(w) not in at:
+            at[id(w)] = len(texts)
+            texts.append(w)
     try:
         for i, (d, k) in enumerate(places):
             d[k] = BIG_MARK + str(i)
-        return json.dumps(shapes), texts
+        for c, w in wholes:
+            c["whole"] = BIG_MARK + str(at[id(w)])
+        return json.dumps(shapes), tuple(texts)
     finally:
         for (d, k), text in zip(places, was):
             d[k] = text
+        for c, w in wholes:
+            c["whole"] = w
+
+
+def _kept_wholes(shapes):
+    """(cut dict, its whole) of every sliced piece: an undo step keeps each whole ONCE, shared by its pieces (100
+    pieces of a long freehand line made 4.5 MB steps; a whole is never changed in place, like the big texts)."""
+    out = []
+    for sh in shapes:
+        c = sh.get("cut")
+        if isinstance(c, dict) and isinstance(c.get("whole"), dict):
+            out.append((c, c["whole"]))
+    return out if len(out) > 1 else []
 
 
 def as_state(state, shapes):
@@ -104,7 +125,7 @@ def as_state(state, shapes):
     if isinstance(got, str):
         return got
     same = {d[k]: d[k] for sh in shapes for d, k in _big_texts(sh)}
-    return got[0], tuple(same.get(t, t) for t in got[1])
+    return got[0], tuple(same.get(t, t) if isinstance(t, str) else t for t in got[1])  # (wholes: dicts)
 
 
 def load_state(state):

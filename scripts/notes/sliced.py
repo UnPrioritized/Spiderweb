@@ -510,7 +510,7 @@ def clean_cuts(cuts):
 
 def sync_cuts(shapes):
     """Every line piece of one cut shape (cut["id"]) gets the SAME list of the cuts parting its pieces, with the rows
-    each took in (LASSO = ONLY ROWS IN ITS BOX, user 2026-11-19; engine.held_cuts): the cuts are the pieces' part
+    each took in (LASSO = ONLY ROWS IN ITS BOX, user 2026-11-19; cut_share): the cuts are the pieces' part
     ends still there (a join took one away; a cut on a sibling added one), rows from any piece that knows them
     (else None = every row, a cut from before the lists). So no two pieces both hold a held note or both leave it
     out (hunt 2026-11-19). Changes only pieces whose list differs (a new cut dict). -> changed anything."""
@@ -548,8 +548,12 @@ def sync_cuts(shapes):
         full = None
         if cut_share.SHARE[0]:  # (pieces sharing the whole's notes read EVERY cut of their shape, cut["group"]: one
             full = [[exact[u], rows.get(u)] for u in sorted(ends)]  # list object shared by all its pieces, PLAN.md)
+        first = shapes[members[0]]["cut"].get("whole")
         for i in members:
             c = shapes[i]["cut"]
+            if c.get("whole") is not first and c.get("whole") == first:  # (equal wholes made ONE shared dict (a file
+                c = shapes[i]["cut"] = dict(c, whole=first)  # load cleans each piece's): undo steps keep it once
+                changed = True
             if "set_at" not in c and isinstance((c.get("whole") or {}).get("_set"), dict):
                 # (the piece's settings right after its cut (every cut is followed by this): what it changes later is
                 # its own, on top of the whole's, cut_share; settings_of)
@@ -1106,124 +1110,6 @@ def beat_on(a, r):
     return a[i][0] + (a[i + 1][0] - a[i][0]) * (r - i)
 
 
-def cut_through(whole, raw, spots, tracks, part, ppq, came=None, floor=None, heard=False):
-    """A line piece's notes (the whole's, before its part is kept): the note sounding at each of the piece's cuts is
-    cut in two there (user: slicing adds a note at the cut), the second half starting on the cut's spot, so the piece
-    before keeps the first half and the piece after starts with the second (same key and colour).
-    floor: cut["from"], the starts of the pieces this one was cut from (oldest first): each start is cut again here
-    as that piece cut it, and at each start only notes of the piece before are cut (a long page note of an EARLIER
-    piece sounding there stays whole in its own piece, which never learns of the new cut; case 488603472).
-    came: "Notes by snap" steps, the line note each came from (start, end): the steps of the line note sounding at
-    the cut that start after it go to the piece after (they all share that note's spot); a step held on its own is
-    cut in two where the knife goes through it (user 2026-10-28: "a knife sliced through"), a stack of keys goes
-    by key row."""
-    paths = paths_of(whole)
-    chain = [u for u in floor or () if u and (part[0] is None or u < part[0])]
-    starts = chain + ([part[0]] if part[0] else [])
-    low = dict(zip(starts[1:], starts))  # (each start: the start before it, only notes from there on are cut)
-    for c in starts + ([part[1]] if part[1] else []):
-        k = int(c // BIG)
-        if k >= len(paths) or len(paths[k]) < 2:
-            continue
-        a = paths[k]
-        r = c - k * BIG
-        i = max(0, min(int(r), len(a) - 2))
-        beat, key = a[i] + (a[i + 1] - a[i]) * (r - i)
-        t = int(round(float(beat) * ppq))
-        mine = spots >= low[c] if c in low and c != part[1] else True
-        if c == part[1] and starts:
-            # (this piece's END cut looks at the same notes as the piece after, whose START cut (above) sees only
-            # notes from the piece before on: else the two pieces cut different notes at one tick, one reading
-            # the fallback of a key further off, and a note stayed whole before it with its tail made after;
-            # sweep case 872318617)
-            mine = spots >= starts[-1]
-        if came is not None:
-            over = mine & (spots < c) & (came[:, 0] < t) & (came[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 1)
-            if over.any():
-                spots = spots.copy()
-                spots[over & (spots == spots[over].max()) & (raw[:, 0] >= t)] = c
-            # a stacked step goes by key row (each key to the piece where the line reaches it: user 2026-10-28, a flat
-            # knife across a steep stack separates the keys above from those below); only a key held on its own
-            # (a flat part, one key a step) is cut in two in time where the knife goes through it
-            row = key + 0.5 - np.floor(key + 0.5)
-            if min(row, 1 - row) < 1e-6:
-                continue  # (the knife on the edge between two rows: no note under it)
-            q = int(np.floor(key + 0.5))
-            idx = np.flatnonzero((raw[:, 0] < t) & (raw[:, 1] > t) & (raw[:, 2] == q))
-            if len(idx) != 1:
-                continue
-            same = (raw[:, 0] == raw[idx[0], 0]) & (np.abs(raw[:, 2] - q) == 1)
-            if same.any():
-                continue  # (a stack: by key row)
-            second = raw[idx].copy()
-            second[:, 0] = t
-            raw[idx, 1] = t
-            was = spots[idx]
-            spots = spots.copy()
-            spots[idx] = np.minimum(was, np.nextafter(c, -np.inf))
-            raw = np.concatenate([raw, second])
-            spots = np.append(spots, np.maximum(was, c))
-            came = np.concatenate([came, came[idx]])
-            if tracks is not None:
-                tracks = np.append(tracks, tracks[idx])
-            continue
-        near = np.abs(raw[:, 2] - key) <= 1
-        late = np.flatnonzero(mine & (spots < c) & (raw[:, 0] == t) & (raw[:, 1] > t) & near)
-        if len(late):  # (starting under half a tick before the cut, rounded onto it: nothing of it is before the cut,
-            # it goes to the piece after whole, partial sweep 11-02: it stayed with the piece before, uncut)
-            ks = (spots[late] // BIG).astype(np.int64)
-            rs = spots[late] - ks * BIG
-            exact = np.array([float(beat_on(paths[kk], rr)) for kk, rr in zip(ks.tolist(), rs.tolist())]) * ppq
-            # (an upright part: its keys start right on it, they stay; a note starting at the cut's own spot, a
-            # slanted line cut where its note begins, is not before the cut at all: it goes after; triage
-            # 2026-11-13: a float hair under the cut's spot left a 1-tick sliver before it and lost the rest)
-            late = late[(exact < t - 1e-9) | (c - spots[late] < 1e-6)]
-            if len(late):
-                spots = spots.copy()
-                spots[late] = c
-        hit = mine & (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & near
-        if not hit.any():
-            # (a curve's notes are spread evenly in time, so the one sounding at the cut can be a hair more than a
-            # key from where the drawing is: its second half went missing, sweep 319217754)
-            hit = mine & (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 2)
-        if not hit.any():
-            continue
-        at = np.flatnonzero(hit)
-        j = int(at[np.argmax(spots[hit])])  # (the one started last along the path)
-        sound = None
-        # (Single's overlap rule: the note that STARTS last sounds, the earlier ones are cut where
-        # it starts and the later one is stretched to the earlier's end if shorter (channels.md "Same-pitch
-        # overlap"). A curve that doubles back has an earlier note later along the path: cutting that one left
-        # the sounding note whole, and the cut half took the quieter note's velocity. So the cut goes through the
-        # note starting last that crosses it, and the half after it reads the velocity of the note SOUNDING at
-        # the cut (the last start on the key, maybe a short one stretched over the cut), slice-1.md "keeps its
-        # velocity in both halves" / "a cut where a stretched loud note covers a quiet one keeps both pieces loud")
-        # (LINES' OWN OVERLAPS, user 2026-11-19: only where the Channels mode fixes them (heard: not As drawn, not
-        # held); As drawn keeps the overlap as stored, the cut as before)
-        if heard:
-            late = at[raw[at, 0] == raw[at, 0].max()]
-            j = int(late[np.argmax(spots[late])])
-        before = (raw[:, 2] == raw[j, 2]) & (raw[:, 0] < t)  # (also notes of the pieces after: they sound too)
-        if heard and before.any():
-            p = np.flatnonzero(before)
-            p = p[raw[p, 0] == raw[p, 0].max()]
-            p = int(p[np.argmax(spots[p])])
-            if p != j and raw[p, 0] > raw[j, 0] and raw.shape[1] > 3 and (heard != "split" or raw[p, 1] > t):
-                # (split around: a later note doesn't stretch, so it gives its velocity only while it still sounds
-                # at the cut; the earlier note's leftover is what is heard after it, hunt 2026-11-19)
-                sound = raw[p, 3]
-        second = raw[j:j + 1].copy()  # (any other columns, a velocity, go along)
-        second[0, 0] = t
-        if sound is not None:
-            second[0, 3] = sound
-        raw = np.concatenate([raw, second])
-        raw[j, 1] = t
-        spots = np.append(spots, c)
-        if tracks is not None:
-            tracks = np.append(tracks, tracks[j])
-    return raw, spots, tracks
-
-
 def spot_of(sh, at, scale, part=None):
     """The spot on sh's path nearest the point at (beat, key); scale = (px per beat, px per key) to measure in.
     part: only there."""
@@ -1303,6 +1189,8 @@ def cut_in_two(sh, halves, at, scale, mark):
         whole = dict(outline(cut["whole"]), **velocity(cut["whole"]), **tools(cut["whole"]), **inner(cut["whole"]))
         if isinstance(cut["whole"].get("_set"), dict):  # (the whole's own settings, as when first cut)
             whole["_set"] = cut["whole"]["_set"]
+        if whole == cut["whole"]:  # (the same whole: the SAME dict, shared with the other pieces; an undo step
+            whole = cut["whole"]  # keeps one whole for them all, history._kept_wholes; never changed in place)
         # (cut through its notes by the Slice tool before: both halves keep that cut)
         knives = [[b0, k0, db, dk, sd] for b0, k0, db, dk, sd in cut.get("knife", [])]
     else:
