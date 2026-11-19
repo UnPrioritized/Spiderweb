@@ -1,11 +1,12 @@
-"""Freehand Thickness on the piano roll (notes/pen.py; user 2026-11-19): a circle round the mouse showing the pen's
-width while the Freehand tool is on and the pen is wider than a plain line (only round the mouse: the drawn stroke
-stays the thin line), and [ / ] = thinner / thicker (Shift: by 5), like paint programs and the Magnetic lasso's
-Width. The keys go through the side panel's Thickness box, so selected freehand shapes change with it."""
+"""The line tools' Thickness on the piano roll (notes/pen.py; user 2026-11-19, every line tool since): a circle
+round the mouse showing the pen's width while a line tool is on and the pen is wider than a plain line (only round
+the mouse: the drawn line stays thin), and [ / ] = thinner / thicker (Shift: by 5), like paint programs and the
+Magnetic lasso's Width (Lasso keeps its own). The keys go through the side panel's Thickness box, so selected line
+shapes change with it. New lines take the pen (pen_draft)."""
 
 from files.lang import trn
 from files.mathexpr import fmt
-from notes.pen import THICK_MAX, THICK_MIN, clean_thick
+from notes.pen import PEN_KINDS, THICK_MAX, THICK_MIN, clean_thick
 from roll.roll_shared import SHIFT
 from window import look
 
@@ -19,7 +20,22 @@ class PenCircle:
 
     def pen_on(self):
         """The circle shows: Freehand tool, pen wider than a plain line (into a live shape too)."""
-        return self.app.tool.get() == "free" and self.app.free_thick > THICK_MIN
+        return self.app.tool.get() in PEN_KINDS and self.app.free_thick > THICK_MIN
+
+    def pen_draft(self):
+        """The shape being drawn takes the shared pen (every line tool, user 2026-11-19): Thickness, the zoom it's
+        round in ("pk", as the roll looks now), Ends / Taper (Width from speed: freehand only). Called whenever the
+        draft is made, so its notes show wide while drawing."""
+        d, app = self.draft, self.app
+        if not d or d.get("kind") not in PEN_KINDS or app.free_thick <= THICK_MIN:
+            return
+        k = self.sy / self.sx if self.sx else 0.25
+        d.update(thick=app.free_thick, pk=d.get("k", k) if d["kind"] == "arc" else k)
+        pen = {key: v for key, v in app.free_pen.items() if key != "speed" or d["kind"] == "free"}
+        if pen:
+            d["pen"] = pen
+        else:
+            d.pop("pen", None)
 
     def pen_motion(self, e):
         if self.pen_on() or self.pen_mouse:
@@ -51,12 +67,12 @@ class PenCircle:
         """[ / ] with the Freehand tool: the Thickness one key thinner / thicker (Shift: 5). True = the key was it."""
         step = PEN_KEYS.get(e.keysym)
         app = self.app
-        if step is None or app.tool.get() != "free" or self.drag:
+        if step is None or app.tool.get() not in PEN_KINDS or self.drag:
             return False
         step *= 5 if e.state & SHIFT and abs(step) == 1 else 1
         # (from the selected freehand shape's own number, else the new-stroke one; never what the hidden box last
         # held: another kind selected left it stale, hunt 2026-11-19)
-        tgts = app.free_targets()
+        tgts = app.pen_targets()
         now = clean_thick(tgts[0][0].get("thick", THICK_MIN)) if tgts else app.free_thick
         value = clean_thick(min(max(now + step, THICK_MIN), THICK_MAX))
         app.thick_var.set(fmt(value))

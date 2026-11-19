@@ -1549,6 +1549,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if tool == "poly":  # click its points, or drag each segment
             if self.draft is None:
                 self.draft = make_shape("poly", [pt, pt], app.defaults)
+                self.pen_draft()  # (the shared pen: roll_pen)
             elif self.poly_point(pt):
                 return
             self.drag = ("segment", e.x, e.y)
@@ -1563,6 +1564,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             if self.draft is None:
                 self.draft = make_shape("arc", [pt, pt], app.defaults)
                 self.draft["k"] = self.sy / self.sx  # round as it looks on screen now
+                self.pen_draft()
                 self.drag = ("arcdrag", e.x, e.y)
             elif self.arc_bend:  # dragged start -> end: this click sets the point it passes through
                 self.draft["pts"][1] = pt
@@ -1595,11 +1597,11 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self._ink_way = ([(e.x / self.scale, e.y / self.scale)], [trail[-1][2] if trail else e.time])
             self.draft["ink"] = [1.0]
             if app.free_thick > 1:  # (the wide pen already while drawing: its notes show as they'll be, user)
-                self.draft.update(thick=app.free_thick, k=self.sy / self.sx, pk=self.sy / self.sx)
-                if app.free_pen:
-                    self.draft["pen"] = dict(app.free_pen)
+                self.draft["k"] = self.sy / self.sx
+                self.pen_draft()
             return
         self.draft = make_shape(tool, [pt, pt], app.new_defaults(tool))
+        self.pen_draft()
         self.drag = ("create", pt, e.x, e.y)
         self._draft_time = 0.0
         self.request_redraw()
@@ -1749,6 +1751,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.draft = self.box_draft(kind, self.drag[1], pt)
             else:
                 self.draft = make_shape(kind, [self.drag[1], pt], self.app.new_defaults(kind))
+                self.pen_draft()
             self.draft_moved()
         elif kind == "wall":
             pt = self.event_pt(e)

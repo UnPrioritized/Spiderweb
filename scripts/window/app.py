@@ -396,12 +396,12 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.custom_shape = "Circle"  # the library shape new custom shapes are made of
         self.funnel_defaults = dict(FUNNEL_DEFAULTS)  # settings for new funnels
         self.free_smooth = SMOOTH_DEFAULT  # how much new freehand strokes are made perfect (smooth.py)
-        self.free_thick = 1.0  # how wide new freehand strokes' pen is, keys (pen.py; 1 = the plain line)
-        self.free_pen = {}  # new freehand strokes' pen shape: what differs from pen.PEN_DEFAULT (ends, taper, speed)
+        self.free_thick = 1.0  # how wide new lines' pen is, keys, EVERY line tool (pen.py; 1 = the plain line)
+        self.free_pen = {}  # new lines' pen shape: what differs from pen.PEN_DEFAULT (ends, taper; speed: freehand)
         self.text_defaults = dict(TEXT_DEFAULTS)  # settings for new text (the last ones used)
         self.polygon_defaults = dict(POLYGON_DEFAULTS)  # points / kind of new polygons (polygon.py)
         self.gliss_defaults = dict(GLISS_DEFAULTS)  # grids new Glissando runs pick their step from (the last used)
-        self._rows = {"last": True, "line_fill": False, "free": False, "gliss": False, "tumour": False,
+        self._rows = {"last": True, "line_fill": False, "free": False, "pen": False, "gliss": False, "tumour": False,
                       "pattern": False, "text": False, "custom": False, "funnel": False}  # optional panel parts
         self.drawer = None
         self.claw_window = None
@@ -3994,7 +3994,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def layout_rows(self):
         """Show the panel's optional parts, always in the same order above the point boxes."""
         rows = ((self.last_row, "last"), (self.line_fill_row, "line_fill"), (self.free_box, "free"),
-                (self.gliss_box, "gliss"), (self.tumour_box, "tumour"), (self.pattern_box, "pattern"),
+                (self.pen_box, "pen"), (self.gliss_box, "gliss"), (self.tumour_box, "tumour"), (self.pattern_box, "pattern"),
                 (self.text_box, "text"), (self.custom_box, "custom"), (self.funnel_box, "funnel"))
         shown = [key for _, key in rows if self._rows[key]]
         if shown == getattr(self, "_rows_shown", None):
