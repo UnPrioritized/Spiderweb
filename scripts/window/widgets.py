@@ -520,12 +520,29 @@ def watch_bad(e):
     e.bind("<FocusOut>", check, add="+")
 
 
+def traced(widget, var, fn, mode="write"):
+    """var.trace_add(mode, fn) for as long as widget lives. Tk keeps a trace's code until it's taken away, and that code
+    keeps whatever it uses alive: a closed window whose boxes / own variables were traced stayed in memory with every
+    box and tooltip (2026-11-19: each Properties window opened and closed left ~8 behind; the sweep's copies hit their
+    memory guard every few minutes). Every trace in a window that closes goes through this."""
+    tid = var.trace_add(mode, fn)
+
+    def gone(ev):
+        if str(ev.widget) == str(widget):  # (its children's <Destroy> reach a window's bindings too)
+            try:
+                var.trace_remove(mode, tid)
+            except (tk.TclError, ValueError):  # (already taken away)
+                pass
+    widget.bind("<Destroy>", gone, add="+")
+    return tid
+
+
 def leave_box(app, e, var, fn):
     """A side panel box that takes its number on Enter or when it's left. fn(left=True) is called when the box is
     left, and before the selection changes with a number typed but not entered (App.commit_typing: it goes to the
     shapes it was typed for, user). With left it must do nothing while unchanged(e): the box still shows what the
     panel put there (several shapes with different numbers all got the first one's, user)."""
-    var.trace_add("write", lambda *_: setattr(e, "shown_text", var.get()) if app._loading else None)
+    traced(e, var, lambda *_: setattr(e, "shown_text", var.get()) if app._loading else None)
     e.bind("<FocusOut>", lambda ev: fn(left=True))
     app.leave_boxes[e] = lambda: fn(left=True)
     e.bind("<Destroy>", lambda ev: app.leave_boxes.pop(e, None), add="+")

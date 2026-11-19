@@ -15,7 +15,7 @@ from files.snap import (COUNT_RANGE, DIV_RANGE, DOTS, NOTE_RANGE, SNAP_LIST, cus
 from files.mathexpr import fmt
 from notes.basics import seg_dist
 from window import look
-from window.widgets import Tooltip, remember_place
+from window.widgets import Tooltip, remember_place, traced
 
 SIZE = 16  # the pictures' size at 100 % display scaling (drawn in a 16 x 16 box, then scaled)
 DIGIT_3 = ["111", "001", "011", "001", "111"]
@@ -203,7 +203,7 @@ class CustomSnapWindow(tk.Toplevel):
         ttk.Button(row, text=tr("snap.ok"), command=self.ok).pack(side="left")
         ttk.Button(row, text=tr("snap.cancel"), command=self.destroy).pack(side="left", padx=(6, 0))
         for v in (self.count, self.note, self.div):
-            v.trace_add("write", lambda *_: self.update_info())
+            traced(self, v, lambda *_: self.update_info())
         self.bind("<Return>", lambda e: self.ok())
         self.bind("<Escape>", lambda e: self.destroy())
         self.update_info()

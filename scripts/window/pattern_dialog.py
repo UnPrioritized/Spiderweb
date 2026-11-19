@@ -39,7 +39,7 @@ from window.formula_paste import FormulaPaste
 from window.panel_custom import GAP_COLOR
 from window.pattern_graphs import DialogGraphs, graphed, open_graph
 from window.widgets import (ListTip, LocalUndo, Scrub, Tooltip, bad, good, long_line, pack_shown, read_number,
-                            remember_place, wheel_unit)
+                            remember_place, traced, wheel_unit)
 
 PATTERNS_FILE = os.path.join(USER, "patterns.json")
 OLD_CURVES_FILE = os.path.join(USER, "curves.json")  # the funnel's saved curve formulas (before shapes of curves)
@@ -387,7 +387,7 @@ class FormulaDialog(tk.Toplevel):
         ttk.Button(btns, text=tr("pattern_dialog.apply"), command=self.apply).pack(side="right", padx=4)
 
         for key, var in self.texts.items():
-            var.trace_add("write", lambda *_, k=key: (self.on_formula(), self.mark(("text", k))))
+            traced(self, var, lambda *_, k=key: (self.on_formula(), self.mark(("text", k))))
         self.bind("<Return>", lambda e: self.apply())
         self.bind("<Escape>", lambda e: self.cancel())
         self.protocol("WM_DELETE_WINDOW", self.cancel)

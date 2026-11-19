@@ -27,7 +27,7 @@ from notes.subtract import (MOST, box_of, cut_marks, empty_side, end_side, is_su
                             side_used, subtracts, ticks_of, touched, touching, with_sides)
 from window import look
 from window.range_window import PRESETS
-from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, unit_text
+from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, traced, unit_text
 
 GRAPH_KEYS = ("to", "graph", "dir", "rows", "join", "count")  # (a side's graph settings, shared by all)
 ALONG = ("time", "count")  # "Along a row:" choices (count = by note count)
@@ -225,7 +225,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.by_unit = ttk.Label(row)
         self.by_unit.pack(side="left", padx=(4, 0))
         for var in (self.by_var, self.to_var):
-            var.trace_add("write", lambda *_: self.put_unit())
+            traced(self, var, lambda *_: self.put_unit())
         Scrub(app, [(self.by_box, self.by_var, lambda: self.on_box("by"))], lambda: (1, 10, 1), 0, None,
               label=self.by_unit, drag_box=True, no_undo=True)
         self.by_tips = [Tooltip(w, "") for w in (self.by_label, self.by_box, self.by_unit)]

@@ -14,7 +14,8 @@ from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
 from window import look
 from window.graph_window import GraphSource, GraphWindow
 from window.panel_custom import GAP_COLOR
-from window.widgets import LocalUndo, Scrub, Tooltip, bad, fit_screen, good, grid_shown, placed, unchanged, unit_text
+from window.widgets import (LocalUndo, Scrub, Tooltip, bad, fit_screen, good, grid_shown, placed, traced, unchanged,
+                            unit_text)
 
 SHAPE_CHOICES = [("triangle", tr("tumour_window.triangle")), ("square", tr("tumour_window.square")),
                  ("circle", tr("tumour_window.circle")), ("parabola", tr("tumour_window.parabola"))]
@@ -149,7 +150,7 @@ class TumourWindow(tk.Toplevel):
                 self.widgets.append(b)
             u = self.units[key] = ttk.Label(box, text=tr(unit), foreground=look.HINT)
             u.grid(row=r, column=3, sticky="w")
-            var.trace_add("write", lambda *_, key=key: self.show_unit(key))
+            traced(self, var, lambda *_, key=key: self.show_unit(key))
             Tooltip(e, TIPS[key])
             self.widgets.append(e)
             self.entries[key] = e

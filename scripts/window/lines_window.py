@@ -10,7 +10,7 @@ from tkinter import messagebox, ttk
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from window import look
-from window.widgets import Scrub, Tooltip, centre_over, remember_place, unit_text
+from window.widgets import Scrub, Tooltip, centre_over, remember_place, traced, unit_text
 
 MOST_GAP = 1_000_000  # (ticks)
 COUNT_WAIT_MS = 150  # (the count waits for the typing / stepping to rest)
@@ -38,7 +38,7 @@ class LinesWindow(tk.Toplevel):
         self.gap_box.pack(side="left", padx=(4, 0))
         unit = ttk.Label(row)
         unit.pack(side="left", padx=(4, 0))
-        self.gap_var.trace_add("write", lambda *_: (unit.config(text=unit_text(self.gap_var.get(), "lines.ticks",
+        traced(self, self.gap_var, lambda *_: (unit.config(text=unit_text(self.gap_var.get(), "lines.ticks",
                                                                                "lines.tick")), self.count_later()))
         unit.config(text=unit_text(self.gap_var.get(), "lines.ticks", "lines.tick"))
         Scrub(app, [(self.gap_box, self.gap_var, None)], lambda: (1, 10, 1), 0, MOST_GAP, label=label, drag_box=True,

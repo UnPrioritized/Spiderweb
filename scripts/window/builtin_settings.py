@@ -15,21 +15,11 @@ from files.synth import RATE
 from window import look
 from window.font_list import FontList
 from window.hz_preview import VOICES
-from window.widgets import Scrub, Tooltip, keep_width
+from window.widgets import Scrub, Tooltip, keep_width, traced
 
-
-def follow(widget, var, fn):
-    """fn called when var changes, for as long as widget lives (Settings opened again = a new row: the old one's
-    watch goes with it, hunt 2026-10-29: they piled up)."""
-    tid = var.trace_add("write", fn)
-
-    def gone(ev):
-        if ev.widget is widget:
-            try:
-                var.trace_remove("write", tid)
-            except Exception:  # (already gone)
-                pass
-    widget.bind("<Destroy>", gone, add="+")
+# fn called when var changes, for as long as widget lives (Settings opened again = a new row: the old one's watch goes
+# with it, hunt 2026-10-29: they piled up)
+follow = traced
 
 
 def open_builtin_settings(app):

@@ -7,7 +7,7 @@ from tkinter import ttk
 from files.lang import tr
 from notes.fonts import font_families
 from window import look
-from window.widgets import ListTip, remember_place
+from window.widgets import ListTip, remember_place, traced
 
 SAMPLE = "AaBbCc 0123"
 
@@ -50,7 +50,7 @@ class FontDialog(tk.Toplevel):
         ttk.Button(btns, text=tr("font_dialog.cancel"), command=self.destroy).pack(side="right")
         ttk.Button(btns, text=tr("font_dialog.ok"), command=self.pick).pack(side="right", padx=4)
 
-        self.name.trace_add("write", lambda *_: self.filter())
+        traced(self, self.name, lambda *_: self.filter())
         self.entry.bind("<Down>", lambda e: self.move(1))
         self.entry.bind("<Up>", lambda e: self.move(-1))
         self.entry.bind("<Next>", lambda e: self.move(10))

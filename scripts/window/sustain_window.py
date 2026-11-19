@@ -23,7 +23,7 @@ from files.mathexpr import calc, fmt
 from notes.sustain import (MOST_GAP, MOST_PAST, MOST_PIECES, MOST_POINTS, auto_gap, is_sustained, stop_share, stop_tick,
                            carry_shares, stop_ticks, sustained, too_many_pieces)
 from window import look
-from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, unit_text
+from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, traced, unit_text
 
 
 def target_indices(app):
@@ -188,7 +188,7 @@ class SustainWindow(tk.Toplevel):
         lb = ttk.Label(row)
         lb.pack(side="left", padx=(4, 0))
         self.units.append((lb, var))
-        var.trace_add("write", lambda *_: self.put_units())
+        traced(self, var, lambda *_: self.put_units())
         self.put_units()
         return lb
 

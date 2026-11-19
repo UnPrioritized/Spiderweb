@@ -19,7 +19,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.strips import MOST_GAP, can_strip, clean_strips, has_strips, strip_sizes
 from window import look
-from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, unit_text
+from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, traced, unit_text
 
 
 def target_indices(app):
@@ -62,7 +62,7 @@ class StripsWindow(tk.Toplevel):
         self.gap_box.bind("<FocusOut>", lambda ev: self.on_box())
         self.gap_unit = ttk.Label(row)
         self.gap_unit.pack(side="left", padx=(4, 0))
-        self.gap_var.trace_add("write", lambda *_: self.gap_unit.config(
+        traced(self, self.gap_var, lambda *_: self.gap_unit.config(
             text=unit_text(self.gap_var.get(), "strips.notes", "strips.note")))
         Scrub(app, [(self.gap_box, self.gap_var, self.on_box)], lambda: (1, 10, 1), 1, MOST_GAP,
               label=self.gap_label, drag_box=True, no_undo=True)

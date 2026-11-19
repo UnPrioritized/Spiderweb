@@ -26,7 +26,7 @@ from window import look
 from window.jump_areas import JumpChain
 from window.jump_graph import JumpGraph, graph_pts
 from window.load_extract import boxes_now
-from window.widgets import Scrub, centre_over, open_or_lift, read_number, remember_place, unhighlight
+from window.widgets import Scrub, centre_over, open_or_lift, read_number, remember_place, traced, unhighlight
 
 WATCH_MS = 250
 # the words round the two BPM boxes, by shape (None = one box: the second hidden)
@@ -118,7 +118,7 @@ class MelodyWindow(tk.Toplevel):
         unit = ttk.Label(row, text=tr("melody.every_n_unit"))
         unit.pack(side="left", padx=(4, 0))
         self.rules += [(lb, e), (unit, e)]
-        self.every.trace_add("write", lambda *_: self.sync())
+        traced(self, self.every, lambda *_: self.sync())
         Scrub(app, [(e, self.every, None)], (1, 10, 1), 1, None, drag_box=True, no_undo=True)
         # the tempo made (group B): shape between jumps, its BPMs (the words round the boxes by the shape), how the
         # timing is kept
@@ -160,11 +160,11 @@ class MelodyWindow(tk.Toplevel):
         self.pitch_box = ttk.Entry(row, textvariable=self.pitch_low, width=5)
         self.pitch_box.pack(side="left", padx=(6, 0))
         ttk.Label(row, text="%").pack(side="left", padx=(4, 0))
-        self.pitch_low.trace_add("write", lambda *_: self.sync())
+        traced(self, self.pitch_low, lambda *_: self.sync())
         Scrub(app, [(self.pitch_box, self.pitch_low, None)], (1, 10, 0.1), 0, 100, drag_box=True, no_undo=True)
         self.sizes = None  # the jumps' pitch shares (melody.pitch_sizes), None = whole
         for var in (self.lo, self.hi):
-            var.trace_add("write", lambda *_: self.sync())
+            traced(self, var, lambda *_: self.sync())
         # (the boxes themselves drag sideways, user 2026-10-29: 1 BPM, Shift 10, Ctrl 0.1; no undo step)
         Scrub(app, [(e, var, None) for e, var in zip(self.bpm_boxes, (self.lo, self.hi))], (1, 10, 0.1),
               round(MIN_BPM, 3), MAX_BPM, drag_box=True, no_undo=True)
@@ -178,7 +178,7 @@ class MelodyWindow(tk.Toplevel):
         self.catch_parts = [ttk.Label(row, text=tr("melody.hold"))]
         self.hold = tk.StringVar(value=getattr(app, "melody_hold", fmt(HOLD)))
         self.catch_parts += [ttk.Entry(row, textvariable=self.hold, width=5), ttk.Label(row, text=tr("melody.hold_unit"))]
-        self.hold.trace_add("write", lambda *_: self.sync())
+        traced(self, self.hold, lambda *_: self.sync())
         for w in self.catch_parts:
             w.pack(side="left", padx=(0, 4))
         row = ttk.Frame(box)
@@ -228,7 +228,7 @@ class MelodyWindow(tk.Toplevel):
         def put_unit(*_):  # ("ticks" after a number, nothing after a note length)
             unit.config(text="" if snap_name(var.get()) else tr("melody.ticks"))
             self.sync()
-        var.trace_add("write", put_unit)
+        traced(self, var, put_unit)
         unit.config(text="" if snap_name(start) else tr("melody.ticks"))
         scrub = Scrub(self.app, [(e, var, None)], (1, 10, 1), 0, None, drag_box=True, no_undo=True)
         # (dragging / Up / Down from a note length: from its ticks)

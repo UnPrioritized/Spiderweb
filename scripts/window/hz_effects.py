@@ -47,7 +47,7 @@ from notes.hzbass import (BEND, BOOST_FX, CC_FX, ENVELOPES, FROM_MODES, FX, FX_S
 from roll.roll_shared import BOX_STILL, CTRL, MAX_SX, MIN_SX, SELECT_CURSOR, SHIFT
 from window import look
 from window.canvas_keep import KeptItems
-from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, remember_place, traced
 
 # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
 REPEAT_MOST = 999  # Repeat every… [n] / [n]: the biggest number in either box
@@ -1383,10 +1383,10 @@ class FxPane:
         ttk.Button(b, text=tr("hz.fx_repeat_cancel"), command=lambda: done(False)).pack(side="left")
         Scrub(win.app, [(top.entry, num, None)], (1, 4, 1), 1, REPEAT_MOST, label=lb, drag_box=True)
         Scrub(win.app, [(top.under, den, None)], (1, 4, 1), 1, REPEAT_MOST, drag_box=True)
-        num.trace_add("write", shown)
-        den.trace_add("write", shown)
-        how.trace_add("write", switched)
-        fit.trace_add("write", switched)
+        traced(top, num, shown)
+        traced(top, den, shown)
+        traced(top, how, switched)
+        traced(top, fit, switched)
         top.bind("<Return>", lambda e: done(True) if value() else None)
         top.bind("<Escape>", lambda e: done(False))
         top.bind("<Destroy>", gone)

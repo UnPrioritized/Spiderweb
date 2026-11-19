@@ -20,7 +20,7 @@ from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pie
 from window import look
 from window.snap_picker import SnapPicker
 from window.tool_window import ORANGE, ToolWindow, page_place_added
-from window.widgets import Scrub, Tooltip, bad, good, read_number
+from window.widgets import Scrub, Tooltip, bad, good, read_number, traced
 
 RHYTHMS_FILE = os.path.join(USER, "rhythms.json")
 CELLS = (1, 2, 3, 4, 6, 8)  # the strip's grid: cells per step
@@ -263,7 +263,7 @@ class ChopWindow(ToolWindow):
         Tooltip(self.ticks_entry, tr("chop.tip_ticks"))
         self.ticks_unit = ttk.Label(row, text=tr("chop.ticks"), foreground=look.HINT)
         self.ticks_unit.pack(side="left", padx=(5, 0))
-        self.snap.trace_add("write", lambda *_: self.on_snap())
+        traced(self, self.snap, lambda *_: self.on_snap())
 
         lb = ttk.Label(box, text=tr("chop.velocity"))
         lb.grid(row=7, column=0, sticky="e", padx=(0, 8), pady=2)

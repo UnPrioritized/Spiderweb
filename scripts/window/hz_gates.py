@@ -15,7 +15,7 @@ from notes.hzbass import (AUTO, AUTO_MOST, EXTRAS, FULL_LENGTH, HZ_DEFAULTS, LEN
 from window import look
 from window.history import load_state
 from window.hz_effects import AMOUNT
-from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, bad, good, read_number, remember_place, unit_word
+from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, bad, good, read_number, remember_place, traced, unit_word
 
 
 GATE_MODES = ("auto", "mixed", "fixed")  # the Gates dropdown's choices, in order
@@ -80,7 +80,7 @@ def ask_live(win, app, prompt, value, lo, hi, steps, on_change):
         got["value"] = v
         top.destroy()
 
-    var.trace_add("write", changed)
+    traced(top, var, changed)
     btns = ttk.Frame(f)
     btns.pack(anchor="e")
     ttk.Button(btns, text=tr("hz.live_ok"), command=ok).pack(side="left")

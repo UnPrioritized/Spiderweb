@@ -14,7 +14,7 @@ from tkinter import ttk
 from files.lang import tr, trn
 from notes.meter import BOTTOMS, TOPS, at_beat, bar_at, bar_line, key_name, on_bars, sig_text, sigs_of, where
 from window import look
-from window.widgets import Tooltip, centre_over
+from window.widgets import Tooltip, centre_over, traced
 
 MARK_LEN = 10  # px (x the window's scale): a mark's line down from the pane's top edge
 ROW = 12  # px (x scale) between the time signature row and the key signature row
@@ -229,8 +229,8 @@ def ask_rebar(parent, sigs, lo, hi, bpm_at, why_of, forecast_of=None, test_of=No
             say({} if "why" in got else got, pl["sig"])
             if state["anyway"] is not None and state["anyway"] != (pl["a"], pl["b"], tuple(pl["sig"])):
                 ok_text(None)
-        t.trace_add("write", show)
-        b.trace_add("write", show)
+        traced(f, t, show)
+        traced(f, b, show)
         show()
         e.focus_set()
         e.selection_range(0, "end")

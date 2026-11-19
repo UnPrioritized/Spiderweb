@@ -18,7 +18,7 @@ from notes.tumour import GRAPH_LIMIT
 from window import look
 from window.panel_custom import GAP_COLOR
 from window.widgets import (REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, chart_edges, fit_screen, placed, read_number,
-                            remember_place, unit_text, unit_word)
+                            remember_place, traced, unit_text, unit_word)
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
 PRESETS = [(tr("graph_window.flat_off"), FLAT), (tr("graph_window.rise"), [[0.0, 0.0], [1.0, 1.0]]),
@@ -621,8 +621,8 @@ class PointDialog(tk.Toplevel):
                 continue
             Scrub(gw.app, [(e, var, None)], steps, lo, hi, label=lb)
         if "number" in self.vars:
-            self.vars["value"].trace_add("write", lambda *_: self.link("value", "number", self.number / 100))
-            self.vars["number"].trace_add("write", lambda *_: self.link("number", "value", 100 / self.number))
+            traced(self, self.vars["value"], lambda *_: self.link("value", "number", self.number / 100))
+            traced(self, self.vars["number"], lambda *_: self.link("number", "value", 100 / self.number))
         btns = ttk.Frame(box)
         btns.grid(row=len(rows), column=0, columnspan=3, sticky="e", pady=(8, 0))
         ttk.Button(btns, text=tr("graph_window.ok"), command=self.ok).pack(side="left")

@@ -37,7 +37,7 @@ from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.layers import DrawerLayers
 from window.sticky import BEND, REACH, Targets, key_points
 from window.side_panel import ScrollingSide
-from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, Tooltip, long_line, remember_place, wrap_to_room
+from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, Tooltip, long_line, remember_place, traced, wrap_to_room
 
 GRIDS = ["4", "8", "12", "16", "24", "32", "48", "64"]
 TOOLS = [("select", tr("drawer.select"), "v"), ("slice", tr("drawer.slice"), "k"), ("lasso", tr("drawer.lasso"), "j"),
@@ -112,15 +112,15 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
         self.right_used = False  # the last right-click worked on something (a quick next one isn't a double one)
         self.menu_wait = None  # a right-click menu waiting to see if it's a double right-click
         self.lasso_kind = tk.StringVar(value="free")  # the Lasso tool's ▾: "free" (drag) / "poly" (click points)
-        self.lasso_kind.trace_add("write", lambda *_: self.drop_lasso(unfinished=True))
+        traced(self, self.lasso_kind, lambda *_: self.drop_lasso(unfinished=True))
         self.grid_n = tk.StringVar(value="16")
         self.mirror = tk.StringVar(value=tr("drawer.mirror_off"))  # (its shown name: mirror_mode)
         self.name = tk.StringVar()
         self._build()
         self.refresh_list()
-        self.tool.trace_add("write", lambda *_: (self.drop_sel(), self.cancel_draft(), self.on_tool()))
-        self.grid_n.trace_add("write", lambda *_: self.redraw())
-        self.mirror.trace_add("write", lambda *_: self.redraw())
+        traced(self, self.tool, lambda *_: (self.drop_sel(), self.cancel_draft(), self.on_tool()))
+        traced(self, self.grid_n, lambda *_: self.redraw())
+        traced(self, self.mirror, lambda *_: self.redraw())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.after(500, lambda: app.tips.show("drawer", parent=self))  # the first time it opens
 

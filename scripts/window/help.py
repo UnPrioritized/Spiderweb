@@ -15,7 +15,7 @@ from files.about import BANNER, BUILT, FULL_VERSION, HERE, LICENSE, VERSION, WEB
 from files import system
 from files.system import open_path
 from window import look
-from window.widgets import Tooltip, WrapRow, placed, remember_place, set_least
+from window.widgets import Tooltip, WrapRow, placed, remember_place, set_least, traced
 from window.help_texts import (BY_ID, DRAWER_TOOL_TOPICS, NEXT, PAGE_LINK, SECTION_NAMES, SECTIONS, SEE,
                                TOOL_TOPICS, TOPICS, link_words)
 
@@ -349,7 +349,7 @@ class HelpWindow(tk.Toplevel):
         search.pack(fill="x")
         ttk.Label(left, text=tr("help.search_type_words_all_of_them"), foreground=look.HINT,
                   font=look.font(8)).pack(anchor="w", pady=(2, 4))
-        self.query.trace_add("write", lambda *_: self.fill_list())
+        traced(self, self.query, lambda *_: self.fill_list())
         search.bind("<Down>", lambda e: (self.tree.focus_set(), self.pick_first()))
         search.bind("<Return>", lambda e: self.pick_first())
         tree_box = ttk.Frame(left)

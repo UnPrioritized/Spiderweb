@@ -44,7 +44,7 @@ from window.hz_trace import TraceWindow
 from window.preview_settings import PreviewSettings, open_settings
 from window.snap_picker import SnapPicker
 from window.tool_picker import ToolPicker
-from window.widgets import ShortLabel, Tooltip, fit_screen, placed, set_least
+from window.widgets import ShortLabel, Tooltip, fit_screen, placed, set_least, traced
 # the window is made of these parts (each a mixin of HzWindow); shape_length / DOUBLE_MS are handed on from here
 from window.hz_view import RED, HzView, shape_length  # noqa: F401
 from window.hz_sound import HzSound
@@ -156,7 +156,7 @@ class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzLfo, 
         if kept.get("wobble_same") == "speed":  # (Sketch: several notes' wobbles alike at the same speed, stage D)
             self.wobble_same = "speed"
         self.picker.show()
-        self.tool.trace_add("write", lambda *a: self.on_tool())
+        traced(self, self.tool, lambda *a: self.on_tool())
         f = piece()
         ttk.Label(f, text=tr("app.snap")).pack(side="left", padx=(10, 0))
         SnapPicker(app, f, app.hz_snap).button.pack(side="left", padx=(4, 10))
