@@ -1,0 +1,27 @@
+Thickness (side panel, in keys) makes the pen wide for every line tool: [page:line|Line], [page:poly|Polyline], [page:free|Freehand], [page:curve|Curve] and [page:arc|Arc]. 1 = a plain line, one note per key it passes. Wider: every key inside the band around the line gets one long note, for as long as the band covers it, like a ribbon of notes.
+
+The width runs across the line, as the piano roll looked when you drew it, so parts going up and down get wider in time too. The line itself stays thin; the notes show how wide it is. [page:tumours|Tumours] get the band too.
+
+## Setting it
+
+With a line tool picked and nothing selected, the box sets the pen for new lines. There is one Thickness for every line tool, like a paint program's line width, and it starts at 1 each time Spiderweb opens.
+
+[ makes the pen one key thinner and ] one key thicker (Shift: five keys). A circle around the mouse shows how wide the pen is before you draw. With line shapes selected, the box and the keys change them instead.
+
+## The pen's shape
+
+Under Thickness (only with a Thickness above 1):
+
+• Ends: Round (like a marker) or Flat (the ribbon stops straight across the line, exactly where it stops).
+• Taper: how much of the line's length, from each end, it takes to swell from a point to the full width (0-50 %), like a brush.
+• Width from speed (Freehand only): parts you drew faster come out thinner, like ink. Up to a calm speed you get the full width; a quick flick thins down to a quarter of it. Each part keeps the width it got when you drew it. Strokes drawn before Spiderweb remembered this stay one even width.
+
+## With other tools
+
+The [page:slice|Slice tool] cuts a thick line through its notes; each piece is drawn on its own side of the cut, and joining the pieces gives the line back. The Lasso turns it into plain notes first. Split here isn't offered on a thick line, and Notes by snap and Last note don't apply to it. Joining a thick line with other shapes makes one plain line (Spiderweb asks first).
+
+A curve joined from pieces with gaps between them gets one band per piece, nothing across the gaps.
+
+[page:between|Add between] a thick and a thin line makes the in-between lines thinner step by step.
+
+[page:turn_live|Turn into live shape] keeps the pen wide inside the live shape, with the same notes. Lines drawn into a live shape take the pen too; pick a stroke to change its Thickness.

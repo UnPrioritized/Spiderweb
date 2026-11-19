@@ -4,7 +4,7 @@ What changed in each version, newest first. This page opens by itself the first 
 
 What's new:
 
-• Freehand Thickness: a wide freehand pen. Set Thickness in the side panel (or [ / ] while drawing; a circle around the mouse shows the size) and every key inside the band around your stroke gets one long note, like a ribbon. The pen's Ends can be round or flat, Taper thins both ends like a brush, and Width from speed makes quickly drawn parts thinner, like ink. The stroke itself stays a thin line. Slice, Join and Turn into live shape keep it. See [page:free#Thickness|Freehand].
+• Thickness: a wide pen for every line tool (Line, Polyline, Freehand, Curve, Arc). Set Thickness in the side panel (or [ / ] while drawing; a circle around the mouse shows the size) and every key inside the band around your line gets one long note, like a ribbon. The pen's Ends can be round or flat, Taper thins both ends like a brush, and on Freehand, Width from speed makes quickly drawn parts thinner, like ink. The line itself stays thin. Slice, Join, Add between and Turn into live shape keep it. See [page:thickness|Thickness].
 
 • Draw on Domino: a Settings button on the bar opens the shape settings (Velocity, Colours, Recolour, Deform…) in a small window over Domino, the same ones as in the side panel, so you can set Colours before drawing or change a shape before it goes in. See [page:companion#The Settings window|Draw on Domino].
 

@@ -7,3 +7,5 @@ Last note (panel): the last note ends on the line's end, or starts exactly on it
 Notes by snap (panel): every note one step long instead, so the line becomes a staircase on the grid (see [page:by_snap|Notes by snap]).
 
 Right-click it: Formula (a shape or a pattern along it, see [page:formulas|Formulas]), Tumours… (bumps along it, see [page:tumours|Tumours]), Copy along a path… (see [page:path|Copy along a path]) and Split here (see [page:join|Join]). With two open lines selected: Add between… (see [page:between|Add between]).
+
+[page:thickness|Thickness] (panel) makes the pen wide: every key inside the band around the line gets one long note.
