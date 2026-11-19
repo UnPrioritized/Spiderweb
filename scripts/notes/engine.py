@@ -2040,12 +2040,22 @@ def shown_subtracted(notes, sub, sh, ppq):
     if len({v for _, v in env}) == 1:
         return out
     path = dedupe(np.concatenate(cached_arrays(sh)))[:, 0] * ppq
-    t_lo, t_hi = float(path.min()), float(path.max())
-    if grows_free(sh):
-        t_lo, t_hi = free_span(sh, ppq) or (t_lo, t_hi)
+    t_lo, t_hi = line_span(sh, ppq, float(path.min()), float(path.max()))
     out = out.copy()
     out[moved, 3] = env_velocities(env, from0_starts(sh, out[moved], out[moved, 0], ppq), t_lo, t_hi)
     return out
+
+
+def line_span(sh, ppq, t_lo, t_hi):
+    """(first, last) tick sh's velocity line runs over, from its drawing's (t_lo, t_hi): Ripples rings growing past
+    the drawing (free_span) or a wide pen's band past the line's ends (pen.band_reach) stretch it, the same as
+    velocity.time_span shows it. EVERY place reading a shape's line uses this (sweep 2026-11-19: the note page
+    "vel" step and the shown-start reads kept the drawing's span, so a line over a thick line's ends missed notes)."""
+    if grows_free(sh):
+        return free_span(sh, ppq) or (t_lo, t_hi)
+    if thick_of(sh):
+        return band_reach(sh, ppq) or (t_lo, t_hi)
+    return t_lo, t_hi
 
 
 def reads_line(sh):
@@ -2083,9 +2093,7 @@ def line_at_shown(sh, out, ppq):
     if len({v for _, v in env}) == 1:
         return out
     path = dedupe(np.concatenate(cached_arrays(sh)))[:, 0] * ppq
-    t_lo, t_hi = float(path.min()), float(path.max())
-    if grows_free(sh):
-        t_lo, t_hi = free_span(sh, ppq) or (t_lo, t_hi)
+    t_lo, t_hi = line_span(sh, ppq, float(path.min()), float(path.max()))
     out = out.copy()
     out[:, 3] = env_velocities(env, from0_starts(sh, out, out[:, 0], ppq), t_lo, t_hi)
     return out
@@ -2697,7 +2705,7 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
         return _after(apply_trim, notes, tracks, step["cfg"], ppq)
     if tool == "vel":  # (over the shape's time, like its velocity line)
         t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
-        return velocities(notes, step["pts"], float(t.min()), float(t.max()),
+        return velocities(notes, step["pts"], *line_span(sh, ppq, float(t.min()), float(t.max())),
                           from0_starts(sh, notes, notes[:, 0], ppq)), tracks
     return notes, tracks
 
@@ -3059,12 +3067,7 @@ def _kind_notes_tracks(sh, ppq, keys):
     if by_snap and not piece:
         raw = snap_steps(note_array(raw, 3), by_snap * ppq, int(np.floor(float(path[:, 0].min()) + 0.5)),
                          int(np.floor(float(path[:, 0].max()) + 0.5)), sh.get("by_snap_end", "cut"))[0]
-    t_lo = float(path[:, 0].min())
-    t_hi = float(path[:, 0].max())
-    if grows_free(vel_sh):  # (Ripples rings past the drawing: the velocity line runs over them, velocity.time_span)
-        t_lo, t_hi = free_span(vel_sh, ppq) or (t_lo, t_hi)
-    elif thick_of(vel_sh):  # (a wide pen's band past the line's ends: the same, pen.band_reach)
-        t_lo, t_hi = band_reach(vel_sh, ppq) or (t_lo, t_hi)
+    t_lo, t_hi = line_span(vel_sh, ppq, float(path[:, 0].min()), float(path[:, 0].max()))
     env = velocity_env(vel_sh)
     raw = note_array(raw, 3)
     if sh["kind"] in HZ_KINDS and sh.get("hz") and "notes" not in sh and not piece:  # (a Hz bass's Note length)
