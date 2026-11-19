@@ -4,6 +4,9 @@ What changed in each version, newest first. This page opens by itself the first 
 
 What's new:
 
+• Fixed: the window sometimes froze for good after an edit (most often after Merge, Slice or Ctrl+Z) and had to be closed. It no longer does.
+• Fixed: closed tool windows (Sustain, Chop, the drawer, the Hz bass window and others) stayed in memory, so memory use crept up during a long session.
+
 • Thickness: a wide pen for every line tool (Line, Polyline, Freehand, Curve, Arc). Set Thickness in the side panel (or [ / ] while drawing; a circle around the mouse shows the size) and every key inside the band around your line gets one long note, like a ribbon. The pen's Ends can be round or flat, Taper thins both ends like a brush, and on Freehand, Width from speed makes quickly drawn parts thinner, like ink. The line itself stays thin. Slice, Join, Add between and Turn into live shape keep it. See [page:thickness|Thickness].
 
 • Draw on Domino: a Settings button on the bar opens the shape settings (Velocity, Colours, Recolour, Deform…) in a small window over Domino, the same ones as in the side panel, so you can set Colours before drawing or change a shape before it goes in. See [page:companion#The Settings window|Draw on Domino].
