@@ -41,7 +41,7 @@ from notes.glue import for_part as glue_for_part, glue_box
 from notes.pattern import bake_shape, has_formula
 from notes.lasso import inside_point, knife_spans, lasso_notes, loop_crossings, path_middle, rows_taken, takes, touches
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
-from notes.pen import thick_of
+from notes.pen import band_reach, thick_of
 from notes.sliced import (CANT, carry_drawn, completed, cut_group, cut_in_two, keep_velocity, keep_was, keyed_pieces,
                           knife_hits, knife_in_two, moved_by, notes_across, rejoined, slice_in_two, split_here_ok, tooled)
 from notes.smooth import smooth_path
@@ -183,6 +183,11 @@ def without10(sh, use10):
 
 
 def span(sh):
+    # (a wide pen's velocity line runs over its whole band, engine.line_span: a piece's line is cut over that same
+    # time, or its notes read another velocity than they had; band_reach at 1 tick a beat gives beats)
+    got = band_reach(sh, 1)
+    if got:
+        return got
     bs = [b for b, _ in cached_path(sh)]
     return min(bs), max(bs)
 

@@ -453,15 +453,12 @@ def piece_velocity(new, old, new_span, old_span, lead=False):
         before = []
     before = straight_out(before + [[0.0, va]])[:-1]
     # (old's line past the piece's end too, for a note of the piece starting there: a cut by the path can leave one;
-    # not where it only carries the piece's own last stretch on straight)
+    # kept also where it carries the piece's last stretch on straight: the line is read flat past its last point)
     after = [[(u - ua) / (ub - ua), float(v)] for u, v in env if u > ub + 1e-12][:LEAD_MOST] if lead else []
+    if after and all(abs(v - vb) <= 1e-9 * (1 + abs(v)) for _, v in after):
+        after = []  # (flat on past the end: read so anyway; a flat piece keeps no line, so a new velocity reaches it)
     if after:
-        (u0, v0), (u1, v1) = (before + [[0.0, va]] + inner + [[1.0, vb]])[-2:]
-        if u1 - u0 > 1e-12 and all(abs(v1 + (v1 - v0) * (u - u1) / (u1 - u0) - v) <= 1e-9 * (1 + abs(v))
-                                   for u, v in after):
-            after = []
-        else:
-            after = straight_out([[1.0, vb]] + after)[1:]
+        after = straight_out([[1.0, vb]] + after)[1:]
     if inner or before or after:
         new["vel_env"] = before + [[0.0, va]] + inner + [[1.0, vb]] + after
     elif abs(va - round(va)) > 1e-9 or abs(vb - round(vb)) > 1e-9:
