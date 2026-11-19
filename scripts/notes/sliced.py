@@ -1219,6 +1219,38 @@ def spot_of(sh, at, scale, part=None):
     return best[1] if best else 0.0
 
 
+def spot_on_line(sh, at, way, scale, part, near):
+    """near (spot_of's nearest spot to at) moved to where sh's path really crosses the knife: the line through at (beat,
+    key) going way (the Slice's / Lasso's edge). at came from the PIECE's own drawing, which after earlier cuts differs
+    a hair from the whole's path: the nearest spot then sat up to a tick off the line (sweep 272320129: a Slice cut a
+    curve's note at 3912, not 3911). The crossing nearest `near` within a few pixels, else near as it was."""
+    d = np.asarray(way, float)
+    if not np.all(np.isfinite(d)) or not np.any(d):
+        return near
+    a0 = np.asarray(at, float)
+    sc = np.asarray(scale, float)
+    best = None
+    for k, a in enumerate(paths_of(sh)):
+        if len(a) < 2:
+            continue
+        p, r = np.asarray(a[:-1], float), np.asarray(a[1:] - a[:-1], float)
+        den = r[:, 0] * d[1] - r[:, 1] * d[0]
+        ok = np.abs(den) > 1e-12
+        w = a0 - p
+        t = np.where(ok, (w[:, 0] * d[1] - w[:, 1] * d[0]) / np.where(ok, den, 1), -1.0)
+        hit = ok & (t >= 0) & (t <= 1)
+        for j in np.flatnonzero(hit):
+            u = k * BIG + int(j) + float(t[j])
+            if not in_part(u, part) and not (part[0] is not None and u == part[0]):
+                if not (part[1] is not None and u == part[1]):
+                    continue
+            pt = p[j] + r[j] * t[j]
+            dist = float(np.hypot(*((pt - a0) * sc)))
+            if dist <= 6 and (best is None or abs(u - near) < abs(best - near)):
+                best = u
+    return near if best is None else best
+
+
 def cut_in_two(sh, halves, at, scale, mark):
     """sh (a line kind, maybe a piece already) cut in two at at (beat, key): each half made a piece of the shape sh
     was cut from (or of sh). mark: {"kind", "dir"?} for the cut's marks."""
@@ -1247,6 +1279,8 @@ def cut_in_two(sh, halves, at, scale, mark):
             for k in WHOLE_TOOLS:
                 h.pop(k, None)
     uc = spot_of(src, at, scale, part)
+    if mark.get("dir") is not None:
+        uc = spot_on_line(src, at, mark["dir"], scale, part, uc)
     mids = []
     for h in halves:
         path = cached_path(h)
