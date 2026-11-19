@@ -782,9 +782,11 @@ def reshaped_notes(sh, ppq, keys, rounds=False):
     stay, moved = rows[1 - slide], rows[slide]
     apart = sh["merge"]["apart"]
     if len(moved) and apart:  # (rows made "Merge leftovers": their notes stay out, found where they were drawn)
-        mid = np.column_stack([(moved[:, 0] + moved[:, 1]) / (2 * ppq), moved[:, 2] + 0.5])
+        # (a key row's middle sits ON its key number, as the drawing's points do: a flipped box's rows are the
+        # mirror rows, not one row off, so Flip upside down kept / dropped the wrong leftover rows' notes)
+        mid = np.column_stack([(moved[:, 0] + moved[:, 1]) / (2 * ppq), moved[:, 2].astype(float)])
         was = (mid - o) @ np.linalg.inv(L).T
-        moved = moved[~np.isin(np.floor(was[:, 1]).astype(np.int64), apart)]
+        moved = moved[~np.isin(np.floor(was[:, 1] + 0.5).astype(np.int64), apart)]
     # (rows with nothing to meet stay where they are: the sliding part already sits at its slide; a quarter turn: no
     # key row runs along the old ones, nothing merged again)
     upright = abs(L[0, 0]) <= 1e-9 * max(1.0, abs(L[1, 0]))
