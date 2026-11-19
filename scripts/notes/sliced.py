@@ -1183,6 +1183,58 @@ def cut_in_two(sh, halves, at, scale, mark):
 CANT = "can't"  # rejoined: pieces cut through their notes that can't become one piece
 
 
+def whole_recolour(src, olds):
+    """The Recolour of the shape these pieces were cut from: their Recolour without the whole's box each remembers
+    (recolour.carried), when every piece has the same one. None: nothing to give back."""
+    from notes.recolour import is_recoloured
+    if src.get("cut") or not is_recoloured(src):
+        return None
+    drop = ("whole", "cut_frame")
+    want = {k: v for k, v in src["recolour"].items() if k not in drop}
+    for sh in olds:
+        rc = sh.get("recolour")
+        if not isinstance(rc, dict) or {k: v for k, v in rc.items() if k not in drop} != want:
+            return None
+    return json.loads(json.dumps(want))
+
+
+def with_edge_pages(olds, new):
+    """new (the join of these pieces of one shape) with the note tool pages the pieces share, edge Strum pages too:
+    Join drops those (the new shape's edges differ, user 2026-11-08), but pieces of one shape joined back into it
+    keep its edges."""
+    from notes.convert import has_edge_strum
+    fx = olds[0].get("fx")
+    if any(has_edge_strum(sh) for sh in olds) and all(sh.get("fx") == fx for sh in olds):
+        new = dict(new, fx=json.loads(json.dumps(fx)))
+    team = olds[0].get("team")  # (the colour turn + repeat of a shape unlinked from an Add between group: kept)
+    if team is not None and all(sh.get("team") == team for sh in olds):
+        new = dict(new, team=json.loads(json.dumps(team)))
+    return new
+
+
+def piece_recolour(olds):
+    """The Recolour of a bigger piece made of these pieces of one shape: the pieces' own, alike, with the whole's box
+    they each remember (rc "whole": the whole's start / end / lowest / highest key counted from the piece's own, then
+    its width / height) counted from the bigger piece's box, which covers theirs. None: nothing to give back (not
+    alike, flipped or turned since, a piece without its box while others have it)."""
+    from notes.recolour import SAME, clean_recolour
+    rcs = [sh.get("recolour") for sh in olds]
+    if not all(isinstance(r, dict) for r in rcs) or any(tuple(r.get("frame") or SAME) != SAME for r in rcs):
+        return None
+    plain = [{k: v for k, v in r.items() if k != "whole"} for r in rcs]
+    if any(p != plain[0] for p in plain):
+        return None
+    out = json.loads(json.dumps(plain[0]))
+    ws = [r.get("whole") for r in rcs]
+    if any(ws):
+        if not all(isinstance(w, list) and len(w) == 6 for w in ws):
+            return None
+        w0 = ws[0]  # (the whole's own width / height: the same seen from any piece)
+        far = max(w[0] for w in ws), min(w[1] for w in ws), max(w[2] for w in ws), min(w[3] for w in ws)
+        out["whole"] = list(far) + [w0[4] + w0[1] - w0[0] - far[1] + far[0], w0[5] + w0[3] - w0[2] - far[3] + far[2]]
+    return clean_recolour(out)
+
+
 def rejoined(olds, new, join=None):
     """Join of pieces of one shape that follow on from each other, or lie on both sides of a Slice cut through its
     notes (and were moved together, if at all): all of them = that shape back as it was (with new's other settings:
@@ -1220,6 +1272,7 @@ def rejoined(olds, new, join=None):
     part, knives = items[0]
     same_vel = all(g[2] for g in got)
     src = got[0][0]
+    new = with_edge_pages(olds, new)
     if part[0] == 0 and part[1] is None and not knives and not keep:  # all of it: the shape it was
         out = {k: v for k, v in new.items() if k not in OUTLINE and k != "cut" and not (same_vel and k in VELOCITY)}
         out.update(outline(src))
@@ -1232,6 +1285,9 @@ def rejoined(olds, new, join=None):
             out["glue"] = json.loads(json.dumps(src["glue"]))
         if src.get("cut"):  # (a piece itself: the one these were cut from)
             out["cut"] = json.loads(json.dumps(src["cut"]))
+        rc = whole_recolour(src, olds)
+        if rc:  # (the shape's Recolour / Stir back: a join of drawings alone has none, sweep join-split-join)
+            out["recolour"] = rc
         return out
     drawings = {}  # (pieces cut through their notes keep the same drawing: once)
     for sh in olds:
@@ -1244,18 +1300,29 @@ def rejoined(olds, new, join=None):
         new = join(list(drawings.values())) if join else None
         if new is None:
             return fail
+        new = with_edge_pages(olds, new)
+    # (pieces moved together without a knife cut: the whole + marks stay where it was cut and the drawing is what
+    # moved, as before the pieces were cut; the whole shifted by the move made the notes 1 tick off, sweep join-split-join)
+    ds = [moved_by(sh) for sh in olds]
+    stay = (not knives and not keep and not src.get("cut") and all(close(list(d), list(ds[0])) for d in ds)
+            and (abs(ds[0][0]) > 1e-9 or abs(ds[0][1]) > 1e-9))
     marks = {}
     for sh in olds:  # (the cuts joined up again are gone)
         d = moved_by(sh)
         for m in sh["cut"].get("marks", []):
-            m = moved_mark(m, d)
+            m = m if stay else moved_mark(m, d)
             if m["id"] not in marks and (any(on_knife(m, k) for k in knives) if m.get("segs") else
                                          any(e is not None and abs(m["u"] - e) <= 1e-9 for e in part)):
                 marks[m["id"]] = m
     whole = dict(outline(src), **velocity(olds[0]["cut"]["whole"]), **tools(olds[0]["cut"]["whole"]))
+    was = outline(new)
+    if stay:
+        whole = dict(outline(olds[0]["cut"]["whole"]), **velocity(olds[0]["cut"]["whole"]),
+                     **tools(olds[0]["cut"]["whole"]))
+        was = outline(moved(new, (-ds[0][0], -ds[0][1])))
     if src.get("cut"):
         whole["cut"] = json.loads(json.dumps(src["cut"]))
-    out = dict(new, cut={"whole": whole, "was": outline(new), "part": list(part), "vel": None,
+    out = dict(new, cut={"whole": whole, "was": was, "part": list(part), "vel": None,
                          "marks": list(marks.values())})
     floor = next((sh["cut"].get("from") for sh, g in zip(olds, got) if g[1][0] == part[0]), None)
     if floor:  # (the first piece's floor: cut_through)
@@ -1266,6 +1333,9 @@ def rejoined(olds, new, join=None):
         out["cut"]["knife"] = knives
     if keep:
         out["cut"]["mould"] = keep
+    rc = piece_recolour(olds)
+    if rc:  # (the pieces' Stir / Recolour back on the bigger piece: a join of drawings alone has none)
+        out["recolour"] = rc
     if same_vel:
         # (the whole's line over the bigger piece's time, as a cut gives it (joined.piece_velocity): the joined
         # drawing's line samples the pieces' lines and lost a jump in the whole's line (two points on one spot), so
