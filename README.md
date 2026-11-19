@@ -18,12 +18,14 @@ Windows, nothing to install. Linux and Windows users can also [run it from sourc
 
 - **Draw** lines, polylines, freehand strokes, curves, arcs, circles, polygons (twisted, uneven or star-shaped),
   stars, funnels, glissando runs, text (any font; Arabic, Hebrew and the like right to left, joined scripts joined),
-  and shapes you draw yourself.
+  and shapes you draw yourself. Lines can be drawn with a wide pen (round or flat ends, tapered, thinner where
+  drawn fast) that fills the band around them with long notes.
 - **Fill** shapes with notes: one long note per key, or chopped into notes of any length (spam), with Symmetrical
   steps for perfectly even staircases. Inside fills can be smaller copies of the shape (Nested), another shape
   repeated like wallpaper (Tiles), or rings growing out from shapes drawn inside (Ripples).
 - **Shape the notes:** add bumps along lines (tumours) or patterns from formulas (paste one from a website or
-  graphing site, and let its numbers change along the line with a graph), shape the velocities, and put overlapping
+  graphing site, and let its numbers change along the line with a graph; repeat one slice of a flower or gear
+  round its centre and edit that slice by hand), shape the velocities, and put overlapping
   shapes on different channels (or remove the overlaps, track by track).
 - **Hz bass:** spam so fast it sounds like a tone, with a synth window (knobs, effects, layers) and a preview you
   can hear right away. Sketch its pitch with curved bends (with handles) and wobbles, or draw your own wobble wave

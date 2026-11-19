@@ -6,7 +6,7 @@ The width runs across the line, as the piano roll looked when you drew it, so pa
 
 With a line tool picked and nothing selected, the box sets the pen for new lines. There is one Thickness for every line tool, like a paint program's line width, and it starts at 1 each time Spiderweb opens.
 
-[ makes the pen one key thinner and ] one key thicker (Shift: five keys). A circle around the mouse shows how wide the pen is before you draw. With line shapes selected, the box and the keys change them instead.
+[ makes the pen one key thinner and ] one key thicker (with Shift, or { and }: five keys). A circle around the mouse shows how wide the pen is before you draw. With line shapes selected, the box and the keys change them instead.
 
 ## The pen's shape
 
@@ -18,7 +18,7 @@ Under Thickness (only with a Thickness above 1):
 
 ## With other tools
 
-The [page:slice|Slice tool] cuts a thick line through its notes; each piece is drawn on its own side of the cut, and joining the pieces gives the line back. The Lasso turns it into plain notes first. Split here isn't offered on a thick line, and Notes by snap and Last note don't apply to it. Joining a thick line with other shapes makes one plain line (Spiderweb asks first).
+The [page:slice|Slice tool] cuts a thick line through its notes; each piece is drawn on its own side of the cut, and joining the pieces gives the line back. The Lasso turns it into plain notes first. Split here doesn't cut a thick line (use the Slice tool), and Notes by snap and Last note don't apply to it. Joining a thick line with other shapes makes one plain line (Spiderweb asks first).
 
 A curve joined from pieces with gaps between them gets one band per piece, nothing across the gaps.
 

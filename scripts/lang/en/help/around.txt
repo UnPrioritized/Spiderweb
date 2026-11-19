@@ -4,7 +4,7 @@ It suits shapes made of repeating parts: Flower, and your own or pasted Polar sh
 
 ## Slices
 
-The Slices box next to the choice says how many slices go round (2 to 100). Left empty, it follows the shape's Petals number (a Flower with 5 petals has 5 slices), or 6 when the shape has none. Type a number to set your own.
+The Slices box next to the choice in the Custom… window says how many slices go round (2 to 100). Left empty, it follows the shape's Petals number (a Flower with 5 petals has 5 slices), or 6 when the shape has none. Type a number to set your own.
 
 The slices always join up: each copy starts exactly where the one before it ends.
 
