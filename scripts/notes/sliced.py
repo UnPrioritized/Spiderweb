@@ -629,12 +629,33 @@ def fresh_cut_ids(copies):
             sh["cut_of"] = fresh.setdefault(sh["cut_of"], new_cut_id())
 
 
-def paths_of(sh):
-    """The paths a line kind's notes are made from, each first to last point in time (engine.kind_notes_tracks)."""
+def _paths_here(sh):
     from notes.engine import cached_arrays
     arrs = cached_arrays(sh)
     arrs = [dedupe(np.concatenate(arrs))] if len(arrs) == 1 else [dedupe(a) for a in arrs]
     return [a[::-1] if len(a) and a[-1, 0] < a[0, 0] else a for a in arrs]
+
+
+def paths_of(sh):
+    """The paths a line kind's notes are made from, each first to last point in time (engine.kind_notes_tracks).
+    A line reaching before beat 0 / under key 0 is MADE lifted (engine.past_edges): its paths are taken there too and
+    moved back, so a Slice / Lasso numbers its spots as the notes are made. A closed line's ends often meet only to
+    a hair: lifted, the hair went the other way (turned round / closed), and a cut's spots landed elsewhere on the
+    pieces (sweep 2026-11-20, cases 111186465 / 211186577 / 672320163)."""
+    here = _paths_here(sh)
+    if sh.get("_free") or "pts" not in sh:  # (made where it is: lifted already, or not a drawn line)
+        return here
+    from notes.engine import past_edges
+    try:  # (a line's lift needs neither the PPQ nor the key count: LATER_STEP, whole keys under 0)
+        got = past_edges(sh, 1 << 20, 960)
+    except Exception:
+        got = None
+    if got is None or not (got[1] or got[3]):
+        return here
+    lifted = _paths_here(got[0])
+    if len(lifted) != len(here) or any(len(a) != len(b) for a, b in zip(lifted, here)):
+        return here
+    return [a - np.array([got[3], got[1]], float) for a in lifted]
 
 
 def spotted_notes(sh, ppq, end_dot):
