@@ -752,6 +752,7 @@ class JoinSplit:
                 by_slot.setdefault((k, e, sl), []).append(n)
                 by_vel.setdefault((k, e, sl, v), []).append(n)
                 spot_of[n] = (k, e, sl, v)
+            unmatched = []
             for j in np.flatnonzero(rows[:, 0] == 0):
                 k, e, sl, v = int(rows[j, 2]), int(rows[j, 1]), int(rows[j, 4]), int(rows[j, 3])
                 lists = (by_vel.get((k, e, sl, v)), by_slot.get((k, e, sl)), at.get((k, e)))
@@ -762,6 +763,32 @@ class JoinSplit:
                     for other in (at.get(spot_of[n][:2]), by_slot.get(spot_of[n][:3]), by_vel.get(spot_of[n])):
                         if other is not None and other is not got and n in other:
                             other.remove(n)
+                else:
+                    unmatched.append(j)
+            on_key = {}  # (key -> the notes across beat 0 on it, made once: no search of them all per row)
+            for n, (k, *_r) in spot_of.items():
+                on_key.setdefault(k, []).append(n)
+            left = {n for ns in at.values() for n in ns}
+            for j in unmatched:
+                # (a heard note SHORTENED by the mode's overlap fix, a later note on its key starting inside it: its
+                # end no longer matches the made note's. The note across beat 0 on its key, on its colour's slot,
+                # running at least as far, is it; else its kept part was lost; sweep 470590256)
+                k, e, sl = int(rows[j, 2]), int(rows[j, 1]), int(rows[j, 4])
+                cand = [n for n in on_key.get(k, ()) if n in left and spot_of[n][1] > e and spot_of[n][2] in (sl, -1)]
+                if cand:
+                    n = min(cand, key=lambda x: notes[x, 1])
+                    rows[j, 0] = notes[n, 0]
+                    left.discard(n)
+                    for other in (at.get(spot_of[n][:2]), by_slot.get(spot_of[n][:3]), by_vel.get(spot_of[n])):
+                        if other is not None and n in other:
+                            other.remove(n)
+            # (a note across beat 0 with NO heard row left, covered by a later note stacked over it (the overlap fix
+            # took its heard part away): only its kept part is left, ending where the next such note on its key
+            # starts, or on beat 0; it was lost before, case 272320050)
+            for n in {x for ns in at.values() for x in ns}:
+                later = [notes[x, 0] for x in on_key[spot_of[n][0]] if notes[x, 0] > notes[n, 0]]
+                notes[n, 1] = min([0] + later)
+                heard[n] = False
         hid = ~heard
         if not hid.any():
             return rows
