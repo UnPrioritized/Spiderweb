@@ -3267,7 +3267,7 @@ def _kind_notes_tracks(sh, ppq, keys):
     else:
         carried = vel_at is not None and len(vel_at) == len(raw)
         # (a cut note's start before a piece's own time: read on the line kept from before it, joined.piece_velocity)
-        at = from0_starts(sh, raw, vel_at if carried else raw[:, 0], ppq)
+        at = at0 = from0_starts(sh, raw, vel_at if carried else raw[:, 0], ppq)
         if carried and piece and not same_vel:  # (a line drawn over only a cut half's start since: there)
             at = drawn_spots(vel_sh, at, raw[:, 0], t_lo, t_hi)
         # (a piece's note can also start past the piece's own end, when the cut parts the whole by its path and not by
@@ -3275,6 +3275,22 @@ def _kind_notes_tracks(sh, ppq, keys):
         far = carried and not same_vel
         vel = env_velocities(env, at, t_lo, t_hi, min(0.0, float(env[0][0])) if far else 0.0,
                              max(1.0, float(env[-1][0])) if far else 1.0)
+        was_vel = (vel_sh["cut"].get("vel") or {}) if vel_sh is not sh else {}
+        if far and was_vel.get("vel0") is not None and t_hi > t_lo and (
+                vel_sh.get("vel0"), vel_sh.get("vel1")) == (was_vel.get("vel0"), was_vel.get("vel1")):
+            # (only while its velocity at both ends is still the one it had when cut: a new velocity for the whole
+            # piece reaches every note, test sliced)
+            # (a line drawn on a piece changes only the notes under it: a note whose spot reads the same on its line
+            # as on the line it had when cut keeps the velocity the whole gave it, as before the drawing. A note
+            # starting past the piece's own time took the whole's line; the piece's own line, ended at 1, flattened
+            # it, sweep 572319412)
+            frac = np.clip((at - t_lo) / (t_hi - t_lo), min(0.0, float(env[0][0])), max(1.0, float(env[-1][0])))
+            moved_line = np.abs(env_values(env, frac) - env_values(velocity_env(vel_sh["cut"]["vel"]), frac)) > 1e-6
+            if not moved_line.all():
+                whole_sh = with_whole_velocity(sh, vel_sh)
+                wt = dedupe(np.concatenate(cached_arrays(whole_sh)))[:, 0] * ppq
+                w_lo, w_hi = line_span(whole_sh, ppq, float(wt.min()), float(wt.max()))
+                vel = np.where(moved_line, vel, env_velocities(velocity_env(whole_sh), at0, w_lo, w_hi))
     if sh["kind"] in HZ_KINDS and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
         got = velocity_parts(sh, ppq, raw[:, 0], raw[:, 2])
         if got is not None:  # (a note with a loudness line drawn: its own velocity instead of the shape's)
