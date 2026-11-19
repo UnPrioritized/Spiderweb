@@ -671,8 +671,16 @@ class JoinSplit:
             return out
         # (a held note of another shape starting on the key, slot and tick where the shown note ends)
         wall = {(int(s), int(k), int(sl)) for s, k, sl in walls[:, [0, 2, 4]].tolist()}
+        # (a note of another shape that is NOT held, starting right there and shown stretched over the whole hidden
+        # tail, stands on it: cutting this note there took that stretch away for good, sweep 111188092, an Add
+        # between group with held and not held steps: the stretched copy came back short after a Lasso)
+        over = r[~np.isin(r[:, 5], held + [i])]
+        reach = {}
+        for s, e, key, sl in over[:, [0, 1, 2, 4]].tolist():
+            reach[(s, key, sl)] = max(e, reach.get((s, key, sl), 0))
         k = np.flatnonzero(short)
-        cut = [j for j in k.tolist() if (int(shown[j, 1]), int(out[j, 2]), int(out[j, 4])) in wall]
+        cut = [j for j in k.tolist() if (int(shown[j, 1]), int(out[j, 2]), int(out[j, 4])) in wall
+               and reach.get((int(shown[j, 1]), int(out[j, 2]), int(out[j, 4])), 0) < int(out[j, 1])]
         if cut:
             out = out.copy()
             out[cut, 1] = shown[cut, 1]
