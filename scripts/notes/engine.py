@@ -2140,6 +2140,7 @@ def run_step(notes, tracks, step, sh, ppq, get):
 
 
 _held_wholes = {}  # id(whole's notes) -> (them, (sustain, ppq), held(...)): held_piece's
+_held_spots = {}  # id(whole's notes) -> (them, {(start, key): earliest place on the line}): held_piece's from_before
 
 
 def unglued(sh):
@@ -2246,7 +2247,11 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
     # (a note not found in the whole (glued on the piece since, say): that note alone made as on the piece by itself,
     # every other one as the whole's; all of them fell back to the piece alone and a note cut at the piece's end
     # grew past it, sweep 392782245)
-    rows = _owned_rows(w0, wt, mine, pick, lo, hi, partial=not gate)
+    # (a line turning back in time, or a note before beat 0 the piece keeps, shown at beat 0: notes of the piece
+    # outside its stretch of time are still the whole's notes there: looked for too, else they weren't found, were
+    # made alone and lost the step's stops (an extended note ran on); sweep 2026-11-19 cut families)
+    rows = _owned_rows(w0, wt, mine, pick, min(lo, int(mine[:, 0].min())), max(hi, int(mine[:, 1].max())),
+                       partial=not gate)
     if rows is None or (rows < 0).all():
         return None
     lost = rows < 0
@@ -2397,6 +2402,12 @@ def held_piece(sh, notes, tracks, ppq, get):
         # held on the cut notes alone it held them only to the next note of the piece; sweep 319165685)
         w1 = np.asarray(w1, np.int64)[:, :4]
         return knife_cut(w1, None if wt1 is None else np.asarray(wt1, np.int64), knife, moved_by(sh), ppq)
+    if knife and part[0] == 0 and part[1] is None:
+        # (a plain line the knife cut THROUGH its notes (both pieces keep the whole drawing): the held whole is cut by
+        # the knife too, as held_knife_piece does for pages; without it the piece before kept a held note to its
+        # whole end and the piece after started its tail again on top = stacked notes; sweep case 770590034)
+        w1, wt1 = knife_cut(np.asarray(w1, np.int64)[:, :4], None if wt1 is None else np.asarray(wt1, np.int64),
+                            knife, moved_by(sh), ppq)
     tl, lo, hi = piece_ticks(src, part, ppq)
     w1 = np.asarray(w1, np.int64)
     wt1 = np.zeros(len(w1), np.int64) if wt1 is None else np.asarray(wt1, np.int64)
@@ -2426,8 +2437,34 @@ def held_piece(sh, notes, tracks, ppq, get):
         else:  # (the second half of a note cut at the piece's start: the whole's note held over it)
             over = w1[(w1[:, 2] == k) & (w1[:, 0] < s) & (w1[:, 1] > s)]
             e2 = int(over[:, 1].max()) if len(over) else e
-        notes[i, 1] = max(min(e2, hi), s + 1) if e2 > s else e
+        # (a LINE TURNING BACK IN TIME (a loop, a spiral, slices round a centre): a piece's notes can start after its
+        # end cut's tick; it is theirs by their place on the line and no piece after carries their held tail: held
+        # whole, not cut to a one-tick sliver; sweep 2026-11-19 cut families, 270590240 / 672320163 ...)
+        notes[i, 1] = (max(min(e2, hi), s + 1) if s < hi else e2) if e2 > s else e
     extra = []
+    # ((start, key) -> the earliest place on the line a whole note starts: made once a tail is asked, once a whole)
+    got_spots = _held_spots.get(id(w0))
+    if got_spots is None or got_spots[0] is not w0:
+        if len(_held_spots) > 16:
+            _held_spots.clear()
+        got_spots = _held_spots[id(w0)] = (w0, {})
+    spot_at = got_spots[1]
+
+    def from_before(s, k):
+        """Is the whole's note starting at s on key k held over this piece's start FROM A PIECE BEFORE it on the line?
+        A line turning back in time: a note sounding across the start tick can be this piece's own or a later
+        piece's (it starts later along the line): no tail for it here, or it showed twice (whole + a tail at the
+        cut); sweep 172319871 / 370420025."""
+        if (s, k) in mine:
+            return False
+        if not spot_at:
+            from notes.sliced import spotted_notes
+            raw, spots = spotted_notes(src, ppq, bool(src.get("end_dot")))
+            for (s1, k1), u in zip(np.asarray(raw, np.int64)[:, [0, 2]].tolist(), np.asarray(spots).tolist()):
+                spot_at[s1, k1] = min(u, spot_at.get((s1, k1), u))
+            spot_at[None] = 0
+        u = spot_at.get((s, k))
+        return u is None or u < part[0]
     own_at = {k for s, k in mine if s == tl and (s, k) in starts0}
     # (a note of the piece starting at its first tick that is only the second half of a whole note cut there: it is
     # that one note's tail; another whole note held across the cut on the same key still has its own tail here, else
@@ -2440,7 +2477,7 @@ def held_piece(sh, notes, tracks, ppq, get):
     for j, (s, e, k, v) in enumerate(w1[:, :4].tolist()):
         if latest.get(k) == j:
             continue
-        if s < lo < e and k not in own_at:  # (held over the cut from the piece before)
+        if s < lo < e and k not in own_at and from_before(s, k):  # (held over the cut from the piece before)
             row = [lo, min(e, hi), k, vel_of(k, s) or v]
         elif lo <= s < hi and (s, k) not in starts0 and (s, k) not in mine:  # (starting on a Sustain stop)
             row = [s, min(e, hi), k, vel_of(k, s) or v]

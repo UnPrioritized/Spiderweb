@@ -441,7 +441,12 @@ def whole_steps(sh):
         else:
             tags = [t for t in order_of(sh) if t[0] in (FX, GLUE)]
             k = tags.index((GLUE, 0))
-            if k:
+            # (the glue ordered AFTER a Sustain / Gate extend / subtract with no page before it: glue0 stays in the
+            # list, so the hold goes in before it (_lengths_inside) and the glue gets the notes as the hold left
+            # them, as the whole did; else it glued first and the held notes came back, case 571275071)
+            full = order_of(sh)
+            held = any(t[0] in LENGTHS and t[0] in sh and t not in off_tags(sh) for t in full[:full.index((GLUE, 0))])
+            if k or held:
                 n = sum(1 for t in tags[:k] if t[0] == FX)
                 fx = fx[:n] + [{"tool": "glue0"}] + fx[n:]
                 first = False

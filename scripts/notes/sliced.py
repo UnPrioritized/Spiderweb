@@ -1037,6 +1037,12 @@ def cut_through(whole, raw, spots, tracks, part, ppq, came=None, floor=None):
         beat, key = a[i] + (a[i + 1] - a[i]) * (r - i)
         t = int(round(float(beat) * ppq))
         mine = spots >= low[c] if c in low and c != part[1] else True
+        if c == part[1] and starts:
+            # (this piece's END cut looks at the same notes as the piece after, whose START cut (above) sees only
+            # notes from the piece before on: else the two pieces cut different notes at one tick, one reading
+            # the fallback of a key further off, and a note stayed whole before it with its tail made after;
+            # sweep case 872318617)
+            mine = spots >= starts[-1]
         if came is not None:
             over = mine & (spots < c) & (came[:, 0] < t) & (came[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 1)
             if over.any():
