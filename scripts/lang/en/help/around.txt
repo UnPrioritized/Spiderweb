@@ -14,6 +14,7 @@ With Around the centre picked, the Custom… window shows two views side by side
 
 • One slice (left): the slice you edit, with its points and handles, and two faint lines from the centre to its ends. Drag a point and every slice changes with it. Double-click the line to add a point, right-click a point to remove it, Alt+drag for a sharp corner.
 • Whole shape (right): the whole shape as the curve gets it, between its ends A and B, with the slice you edit drawn in blue.
+[clip:around-edit]
 
 The slice's two ends stay where they are: they are where the slices join. Their handles can move. Where the join is smooth, moving one end's handle turns the next slice's handle with it, so the join stays smooth. A sharp join (like a pointed petal tip) stays a corner. Alt+drag moves the handle on its own.
 

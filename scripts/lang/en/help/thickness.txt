@@ -1,4 +1,5 @@
-Thickness (side panel, in keys) makes the pen wide for every line tool: [page:line|Line], [page:poly|Polyline], [page:free|Freehand], [page:curve|Curve] and [page:arc|Arc]. 1 = a plain line, one note per key it passes. Wider: every key inside the band around the line gets one long note, for as long as the band covers it, like a ribbon of notes.
+Thickness (side panel, in keys) makes the pen wide for every line tool: [page:line|Line], [page:poly|Polyline], [page:free|Freehand], [page:curve|Curve] and [page:arc|Arc]. 1 = a plain line, one note per key it passes. Wider: every key inside the band around the line gets one long note, for as long as the band covers it, like a ribbon of notes. Below: Thickness 1, then 6.
+[clip:thickness-band]
 
 The width runs across the line, as the piano roll looked when you drew it, so parts going up and down get wider in time too. The line itself stays thin; the notes show how wide it is. [page:tumours|Tumours] get the band too.
 
@@ -15,6 +16,9 @@ Under Thickness (only with a Thickness above 1):
 • Ends: Round (like a marker) or Flat (the ribbon stops straight across the line, exactly where it stops).
 • Taper: how much of the line's length, from each end, it takes to swell from a point to the full width (0-50 %), like a brush.
 • Width from speed (Freehand only): parts you drew faster come out thinner, like ink. Up to a calm speed you get the full width; a quick flick thins down to a quarter of it. Each part keeps the width it got when you drew it. Strokes drawn before Spiderweb remembered this stay one even width.
+
+From left to right: Round ends, Flat ends, and Taper 40 %.
+[clip:thickness-ends]
 
 ## With other tools
 
