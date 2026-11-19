@@ -16,6 +16,7 @@ from notes.custom import pack_notes, unpack_notes
 from notes.fx import pages, with_velocity
 from notes.gateflip import is_pasted_flipped, mirrored_runs
 from notes.pattern import SOFT_DEFAULT, flattened, loop_points
+from notes.pen import band_reach
 from notes.ripples import free_span, grows_free
 from notes.sliced import note_drawn
 from roll.roll_shared import (ALT, CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, SELECTED_COLOR, SLOT_COLORS,
@@ -40,7 +41,7 @@ NORMAL, SELECTED, DRAFT = len(SLOT_COLORS), 2 * len(SLOT_COLORS), 2 * len(SLOT_C
 def time_span(sh, ppq):
     """(first, last) beat a shape's velocity line runs over: its drawing's, or its Ripples rings' when they grow
     past it (engine makes the notes' velocities over the same span)."""
-    got = free_span(sh, ppq) if grows_free(sh) else None
+    got = free_span(sh, ppq) if grows_free(sh) else band_reach(sh, ppq)  # (or a wide pen's band past its ends)
     if got:
         return got[0] / ppq, got[1] / ppq
     bs = [b for b, _ in cached_path(sh)]

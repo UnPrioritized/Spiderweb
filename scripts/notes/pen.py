@@ -213,6 +213,23 @@ def shape_band(sh, ppq):
     return joined_rows(np.concatenate([band_of(dedupe(a) * [ppq, 1], sh, k, ppq) for a in arrays]))
 
 
+def band_reach(sh, ppq):
+    """(first, last) tick a wide line's band can reach: its line as shown, half the pen's width further each way in
+    time (round ends reach that far; flat / tapered ones less). The velocity line runs over this (user 2026-11-19:
+    the band's notes sticking out before the line's start all took its first velocity, a line drawn over them left
+    them flat; velocity.time_span uses the same). None: not a wide line / nothing drawn."""
+    t = thick_of(sh)
+    if t is None:
+        return None
+    from notes.engine import cached_arrays
+    arrays = [a for a in cached_arrays(sh) if len(a)]
+    if not arrays:
+        return None
+    a = np.concatenate(arrays)
+    r = t / 2 * max(float(pen_k(sh)), 1e-9) * ppq
+    return max(0.0, float(a[:, 0].min()) * ppq - r), float(a[:, 0].max()) * ppq + r
+
+
 def joined_rows(notes):
     """(start, end, key) notes with those overlapping / touching on one key joined into one, by key then start."""
     n = np.asarray(notes, np.int64).reshape(-1, 3)

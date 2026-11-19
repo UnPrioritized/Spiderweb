@@ -69,7 +69,7 @@ from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_c
                           piece_knives, piece_notes, run_origins, snap_piece, source, spotted_notes, steps_kept,
                           whole_made)
 from notes.smooth import clean_level, smooth_path
-from notes.pen import THICK_MIN, clean_pen, clean_thick, clean_ink, pen_k, shape_band, thick_of
+from notes.pen import THICK_MIN, band_reach, clean_pen, clean_thick, clean_ink, pen_k, shape_band, thick_of
 from notes.steps import RUNNER, expanded, whole_steps
 from notes.text import clean_text, strokes_of, strokes_token
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -3063,6 +3063,8 @@ def _kind_notes_tracks(sh, ppq, keys):
     t_hi = float(path[:, 0].max())
     if grows_free(vel_sh):  # (Ripples rings past the drawing: the velocity line runs over them, velocity.time_span)
         t_lo, t_hi = free_span(vel_sh, ppq) or (t_lo, t_hi)
+    elif thick_of(vel_sh):  # (a wide pen's band past the line's ends: the same, pen.band_reach)
+        t_lo, t_hi = band_reach(vel_sh, ppq) or (t_lo, t_hi)
     env = velocity_env(vel_sh)
     raw = note_array(raw, 3)
     if sh["kind"] in HZ_KINDS and sh.get("hz") and "notes" not in sh and not piece:  # (a Hz bass's Note length)
