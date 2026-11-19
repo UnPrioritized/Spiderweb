@@ -1418,8 +1418,15 @@ def piece_recolour(olds):
     alike, flipped or turned since, a piece without its box while others have it)."""
     from notes.recolour import SAME, clean_recolour
     rcs = [sh.get("recolour") for sh in olds]
-    if not all(isinstance(r, dict) for r in rcs) or any(tuple(r.get("frame") or SAME) != SAME for r in rcs):
+    if not all(isinstance(r, dict) for r in rcs):
         return None
+    # (a flip made BEFORE the cut (frame = cut_frame, sideways / upside down; or pieces whose box isn't carried yet)
+    # still counts the same: the box's ends keep their meaning, so a closed line's two end pieces joined across its
+    # start kept their Stir; one flipped since the cut, or turned, is not given back)
+    for r in rcs:
+        frame, then = tuple(r.get("frame") or SAME), r.get("cut_frame")
+        if frame != SAME and (frame[1] or frame[2] or then is not None and tuple(then) != frame):
+            return None
     plain = [{k: v for k, v in r.items() if k != "whole"} for r in rcs]
     if any(p != plain[0] for p in plain):
         return None
