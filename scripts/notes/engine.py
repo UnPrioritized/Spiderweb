@@ -64,6 +64,7 @@ from notes.mask import clean_mask, is_mask
 from notes.passengers import check_cc
 from notes.strips import clean_strips
 from notes.mould import clip_to, mould_cut, piece_loops
+from notes import cut_share
 from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, made_at_cut, moved, moved_by,
                           own_velocities, with_whole_velocity, drawn_spots,
                           piece_knives, piece_notes, run_origins, snap_piece, source, spotted_notes, steps_kept,
@@ -1854,6 +1855,14 @@ def fx_notes(sh, ppq, keys, get):
     get(shape) = another shape's notes and tracks (remembered by the caller: the steps before the last one, the
     notes flipped back). A hidden "_m" = the notes made flipped along those axes (the steps before a flip)."""
     sh = made_from(sh)  # (a Hz bass's CC lines make no notes: never from them, whoever asks)
+    if "_share_of" in sh and not sh.get("fx"):  # (a piece's own glue / pages run on its share: cut_share.on_share's
+        # stand-in, asked for without its pages; its glue before them here, as with_glue below does on a shape's)
+        got = cut_share.piece_notes(sh["_share_of"], ppq, keys)
+        return got if not sh.get("glue") or sh.get("_noglue0") else with_glue(*got, sh, ppq)
+    if sh.get("cut") and cut_share.shares(sh):  # (a line piece only moved since the cut: its share of the whole's)
+        if sh.get("fx") or sh.get("glue"):
+            return get(cut_share.on_share(sh))
+        return cut_share.piece_notes(sh, ppq, keys)
     if isinstance(sh.get("recolour"), dict) and _has_shape_tab(sh["recolour"]):
         got = shape_tabs_done(sh, ppq, keys, get)  # (Stir tabs bending the shape: before every other step)
         return got if isinstance(got, tuple) else get(got)

@@ -43,6 +43,17 @@ def keys_of(sh):
     return {"custom": CUSTOM_OUTLINE, "funnel": FUNNEL_OUTLINE}.get(sh["kind"], OUTLINE)
 
 
+SET_SKIP = set(OUTLINE) | set(VELOCITY) | set(WHOLE_TOOLS) | {"cut", "name", "cut_of", "colour_cut", "sel"}
+
+
+def settings_of(sh):
+    """A line's settings besides its outline, velocity, glue / pages (its Sustain, Gate steps, Colours, ...): a cut
+    keeps the whole's (whole["_set"]) and each piece's right after the cut (cut["set_at"]), so a piece's notes come
+    from the whole exactly as it was, its own changes since on top (notes/cut_share.py; a cut rewrites some per
+    piece: a Gate subtract / extend graph across the shape, Sustain stops, "only touching" marks)."""
+    return {k: json.loads(json.dumps(v)) for k, v in sh.items() if k not in SET_SKIP and not k.startswith("_")}
+
+
 def snap_piece(sh):
     """A line cut through its notes while it had Notes by snap (knife_in_two marks it "sided"): drawn and picked on
     its side of the knife only, like a funnel piece, also once unticked (hunt 2026-10-28: it drew the whole line over
@@ -518,22 +529,39 @@ def sync_cuts(shapes):
         if last is not None and len(last) == len(sig) and all(a[0] is b[0] and a[1] == b[1] for a, b in zip(last, sig)):
             seen[key] = last
             continue
-        ends, rows = set(), {}
+        ends, rows, exact = set(), {}, {}
         for i in members:
             c = shapes[i]["cut"]
             a, b = c["part"]
-            ends.update(round(float(u), 9) for u in (a, b) if u)
+            for u in (a, b):
+                if u:
+                    ends.add(round(float(u), 9))
+                    exact.setdefault(round(float(u), 9), float(u))  # (the pieces' own ends as they are: cut_share
+                    # compares them with its parts' owners, a rounded one fell inside the piece before)
             for u, r in c.get("cuts") or ():
                 if r is not None:
                     rows.setdefault(round(float(u), 9), r)
         # (only where a Lasso cut it: with every cut taking in every row, the piece's own ends say it all, and a line
         # sliced into hundreds of pieces would keep hundreds of cuts on each)
         want = [[u, rows.get(u)] for u in sorted(ends)] if any(u in rows for u in ends) else None
+        from notes import cut_share
+        full = None
+        if cut_share.SHARE[0]:  # (pieces sharing the whole's notes read EVERY cut of their shape, cut["group"]: one
+            full = [[exact[u], rows.get(u)] for u in sorted(ends)]  # list object shared by all its pieces, PLAN.md)
         for i in members:
             c = shapes[i]["cut"]
-            if (c.get("cuts") or None) != want:
-                shapes[i]["cut"] = dict(c, cuts=json.loads(json.dumps(want))) if want else \
-                    {k: v for k, v in c.items() if k != "cuts"}
+            if "set_at" not in c and isinstance((c.get("whole") or {}).get("_set"), dict):
+                # (the piece's settings right after its cut (every cut is followed by this): what it changes later is
+                # its own, on top of the whole's, cut_share; settings_of)
+                c = shapes[i]["cut"] = dict(c, set_at=settings_of(shapes[i]))
+                changed = True
+            if (c.get("cuts") or None) != want or (c.get("group") or None) != full:
+                c = dict(c, cuts=json.loads(json.dumps(want))) if want else {k: v for k, v in c.items() if k != "cuts"}
+                if full:
+                    c["group"] = full
+                else:
+                    c.pop("group", None)
+                shapes[i]["cut"] = c
                 changed = True
         seen[key] = [(shapes[i]["cut"], str(shapes[i]["cut"]["part"])) for i in members]
     _SYNCED.clear()
@@ -995,6 +1023,8 @@ def knife_in_two(sh, halves, a, b, segs, hits=()):
                                                                                cut.get("knife", []))]
         own = cut.get("own_vel") or cut.get("vel") is not None and not same_vel
         whole = dict(outline(src), **velocity(cut["whole"]), **tools(cut["whole"]), **inner(src))
+        if not custom and isinstance(cut["whole"].get("_set"), dict):  # (the whole's own settings: settings_of)
+            whole["_set"] = cut["whole"]["_set"]
         if custom:
             whole.update(velocity(src, GATE))
         if cut.get("mould"):
@@ -1003,6 +1033,8 @@ def knife_in_two(sh, halves, a, b, segs, hits=()):
     else:
         part, marks, knives, own = [0.0, None], [], [], False
         whole = dict(outline(sh), **velocity(sh), **tools(sh))
+        if not custom:
+            whole["_set"] = settings_of(sh)
         if custom:
             whole.update(velocity(sh, GATE))
         for h in halves:  # (the whole's glue / pages are done before the cut now)
@@ -1269,12 +1301,14 @@ def cut_in_two(sh, halves, at, scale, mark):
         # (its velocities changed since it was cut: the halves keep their own, cut from its)
         own = cut.get("own_vel") or cut.get("vel") is not None and not same_vel
         whole = dict(outline(cut["whole"]), **velocity(cut["whole"]), **tools(cut["whole"]), **inner(cut["whole"]))
+        if isinstance(cut["whole"].get("_set"), dict):  # (the whole's own settings, as when first cut)
+            whole["_set"] = cut["whole"]["_set"]
         # (cut through its notes by the Slice tool before: both halves keep that cut)
         knives = [[b0, k0, db, dk, sd] for b0, k0, db, dk, sd in cut.get("knife", [])]
     else:
         d = (0.0, 0.0)
         src, part, marks, own, knives = sh, [0.0, None], [], False, []
-        whole = dict(outline(sh), **velocity(sh), **tools(sh))
+        whole = dict(outline(sh), **velocity(sh), **tools(sh), _set=settings_of(sh))
         for h in halves:  # (the whole's glue / pages are done before the cut now)
             for k in WHOLE_TOOLS:
                 h.pop(k, None)
@@ -1809,6 +1843,13 @@ def clean_cut(c):
     out = {"whole": dict(outline(whole), **velocity(whole), **(velocity(whole, GATE) if whole["kind"] == "custom"
                                                                else {}), **tools(whole), **inner(whole)),
            "was": outline(was), "part": part, "vel": snaps["vel"], "marks": marks}
+    try:  # (the whole's own settings and the piece's right after the cut, settings_of: cleaned like a shape's)
+        for at, key in ((whole, "_set"), (c, "set_at")):
+            if isinstance(at.get(key), dict) and whole["kind"] != "custom":
+                got = settings_of(clean_shape(dict(outline(whole), **velocity(whole), **at[key])) or {})
+                (out["whole"] if key == "_set" else out)[key] = got
+    except (KeyError, TypeError, ValueError, IndexError, AttributeError):
+        pass
     if whole["kind"] == "custom":
         out["gate"] = snaps["gate"]
     elif knife:

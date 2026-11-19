@@ -632,17 +632,21 @@ def in_track(notes, slots, owner, fix, way="stretch"):
     return fix_rows(rows, way) if fix else rows
 
 
-def as_heard(sh, mode, rule):
+def as_heard(sh, mode, rule, kept=False):
     """sh as its notes are made in this Channels mode: a notes shape whose own overlaps the mode fixes carries the
-    way ("_heard", engine.heard_way / heard_notes), so it's made, kept and looked up apart from the other modes."""
+    way ("_heard", engine.heard_way / heard_notes), so it's made, kept and looked up apart from the other modes.
+    kept: "Keep notes made there" on (a cut line piece's notes before beat 0 then take part in what's heard)."""
     way = heard_way(sh, mode, rule)
     if way:
         return dict(sh, _heard=way)
     if (mode != "raw" and isinstance(sh.get("cut"), dict) and sh.get("kind") in LINE_KINDS and not sustain_on(sh)
             and sh.get("held") is not True):
         # (a cut LINE piece where the mode fixes the line's own overlaps: a cut half reads the velocity heard there,
-        # sliced.cut_through heard=; LINES' OWN OVERLAPS, user 2026-11-19)
-        return dict(sh, _cut_heard=(rule or {}).get("way") or "stretch")  # (its way: stretch / split)
+        # sliced.cut_through heard= / cut_share; LINES' OWN OVERLAPS, user 2026-11-19)
+        out = dict(sh, _cut_heard=(rule or {}).get("way") or "stretch")  # (its way: stretch / split)
+        if kept:
+            out["_cut_kept"] = True
+        return out
     return sh
 
 
