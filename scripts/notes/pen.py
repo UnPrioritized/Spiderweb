@@ -227,7 +227,9 @@ def band_reach(sh, ppq):
         return None
     a = np.concatenate(arrays)
     r = t / 2 * max(float(pen_k(sh)), 1e-9) * ppq
-    return max(0.0, float(a[:, 0].min()) * ppq - r), float(a[:, 0].max()) * ppq + r
+    # (before beat 0 too, user 2026-11-19: the line runs over the WHOLE band, so moving / copying the shape against
+    # beat 0 changes no velocity; the pane still draws lines from beat 0 only)
+    return float(a[:, 0].min()) * ppq - r, float(a[:, 0].max()) * ppq + r
 
 
 def joined_rows(notes):
