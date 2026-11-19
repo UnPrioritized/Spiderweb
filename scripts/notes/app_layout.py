@@ -646,6 +646,8 @@ def as_heard(sh, mode, rule, kept=False):
         out = dict(sh, _cut_heard=(rule or {}).get("way") or "stretch")  # (its way: stretch / split)
         if kept:
             out["_cut_kept"] = True
+        if mode == "auto":  # (Multi: each piece on its own channels, a cut half hears only its own piece's notes,
+            out["_cut_own"] = True  # user 2026-11-20, case 111186177)
         return out
     return sh
 

@@ -160,7 +160,7 @@ def _at(paths, u):
 
 def _share(sh, ppq, keys):
     src, part, same_vel = source(sh)
-    for k in ("fx", "glue", "_cut_heard", "_cut_kept"):  # (the whole's own pages / glue only; a piece's own
+    for k in ("fx", "glue", "_cut_heard", "_cut_kept", "_cut_own"):  # (the whole's own pages / glue only; a piece's own
         src.pop(k, None)  # reading marks are not the whole's: one whole for all its pieces; "_from0" stays: where
     # beat 0 is, for notes across it reading their velocity there, made_at_cut)
     src.update(tools(sh["cut"]["whole"]))
@@ -201,10 +201,11 @@ def _share(sh, ppq, keys):
     way = sh.get("_cut_heard")
     beat0 = int(round(float(src.get("_from0") or 0) * ppq))
     kept = bool(sh.get("_cut_kept"))
-    pkey = (whole[0], json.dumps([[m[0], m[2], m[3]] for m in marks]), held, way, beat0, kept)
+    own = bool(sh.get("_cut_own"))
+    pkey = (whole[0], json.dumps([[m[0], m[2], m[3]] for m in marks]), held, way, beat0, kept, own)
     got = _parts.get(pkey)
     if got is None:
-        got = _keep(_parts, pkey, _cut_up(whole, marks, held, way, ppq, beat0, kept))
+        got = _keep(_parts, pkey, _cut_up(whole, marks, held, way, ppq, beat0, kept, own))
     notes, tracks, owner, start0 = got
     a, b = part
     if wraps(part):  # (across a closed line's start: from a to the end, then from the start to b)
@@ -221,7 +222,7 @@ def _share(sh, ppq, keys):
         out, start0 = np.ascontiguousarray(got[:, :4]), got[:, 4]
         if way and len(out):  # (a knife half takes the velocity heard there too, LINES' OWN OVERLAPS: it also cuts
             # a note another note on its key already took over, the halves then start together, case 172320124)
-            out = _knife_heard(whole[1], out, start0, way, beat0, kept)
+            out = _knife_heard(whole[1], out, start0, way, beat0, kept, own)
     mould = sh["cut"].get("mould")
     if mould and len(out):  # (cut with a shape, an old cookie cutter piece: mould.py)
         from notes.mould import mould_cut
@@ -275,15 +276,18 @@ def _through(notes, t, key, over, way, owner):
     return -1
 
 
-def _heard_velocity(notes, j, t, way, beat0, kept):
+def _heard_velocity(notes, j, t, way, beat0, kept, among=None):
     """The velocity the part after a cut through note j takes (LINES' OWN OVERLAPS, user 2026-11-19): where the
     Channels mode fixes a line's own overlaps (way: not As drawn, not held), the note heard at the cut: the one on
     its key starting last before it, when that started after j (split around: only while it still sounds). Notes
     wholly before beat 0 (tick beat0 here) take part only with "Keep notes made there" (kept; else they're gone);
-    the others start on beat 0 as heard (the loudest of those starting together)."""
+    the others start on beat 0 as heard (the loudest of those starting together). among: the notes that count
+    (Multi: the cut half's own piece, user 2026-11-20)."""
     if not way:
         return None
     on = (notes[:, 2] == notes[j, 2]) & (notes[:, 0] < t)
+    if among is not None:
+        on &= among
     if not kept:
         on &= notes[:, 1] > beat0
     before = np.flatnonzero(on)
@@ -298,30 +302,37 @@ def _heard_velocity(notes, j, t, way, beat0, kept):
     return None
 
 
-def _knife_heard(wnotes, out, start0, way, beat0, kept):
+def _knife_heard(wnotes, out, start0, way, beat0, kept, own=False):
     """out's parts starting later than their note did (cut halves) with _heard_velocity's velocity, each found in
-    the whole's notes by its start, key and end."""
+    the whole's notes by its start, key and end. own (Multi): only the notes this piece holds count."""
     cut = np.flatnonzero(out[:, 0] > start0)
     if not len(cut):
         return out
+    among = None
+    if own:
+        mine = np.asarray(start0, np.int64) * (1 << 14) + out[:, 2] + 8192  # (start + key; keys -4096..4095 fit)
+        among = np.isin(wnotes[:, 0] * (1 << 14) + wnotes[:, 2] + 8192, mine)
     out = out.copy()
     for i in cut.tolist():
         k, s, e = int(out[i, 2]), int(start0[i]), int(out[i, 1])
         j = np.flatnonzero((wnotes[:, 0] == s) & (wnotes[:, 2] == k) & (wnotes[:, 1] >= e))
         if len(j):
-            v = _heard_velocity(wnotes, int(j[0]), int(out[i, 0]), way, beat0, kept)
+            v = _heard_velocity(wnotes, int(j[0]), int(out[i, 0]), way, beat0, kept, among)
             if v is not None:
                 out[i, 3] = v
     return out
 
 
-def _cut_up(whole, marks, held, way, ppq, beat0=0, kept=False):
+def _cut_up(whole, marks, held, way, ppq, beat0=0, kept=False, own=False):
     """The whole's notes cut at every mark into parts, and each part's owner spot (the piece it goes to), + where
     each part's note started. Cut by cut along the line: a cut goes through a note of the piece just before it (the
     old rule, case 488603472: a long note of an earlier piece stays whole in its own piece); on a held line every
-    note sounding there on its rows. beat0: the tick beat 0 is at here (made later, made_at_cut)."""
+    note sounding there on its rows. beat0: the tick beat 0 is at here (made later, made_at_cut). own (Multi): a cut
+    half hears only the notes of its own piece (each piece on its own channels, user 2026-11-20)."""
     _key, notes, tracks, base, spots, paths, back = whole
     owner, bi = _owners(notes, base, spots, paths, back, marks, ppq)
+    cut_at = np.sort(np.array([m[3] for m in marks], float))
+    piece0 = np.searchsorted(cut_at, owner, "right")  # (each whole note's piece)
     start0 = notes[:, 0].copy()
     bend = np.where(bi >= 0, base[np.maximum(bi, 0), 1] if len(base) else 0, -1)  # (a line note's end as the line
     # made it, before any step: the cut goes through the line note sounding there, as the old way picked it)
@@ -366,7 +377,8 @@ def _cut_up(whole, marks, held, way, ppq, beat0=0, kept=False):
         right = out[idx].copy()
         right[:, 0] = t
         if j >= 0:
-            v = _heard_velocity(notes, int(src_i[j]), t, way, beat0, kept)
+            among = piece0 == np.searchsorted(cut_at, after, "right") if own else None
+            v = _heard_velocity(notes, int(src_i[j]), t, way, beat0, kept, among)
             if v is not None:
                 right[idx == j, 3] = v
         out[idx, 1] = t
