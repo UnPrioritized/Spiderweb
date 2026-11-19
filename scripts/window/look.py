@@ -232,6 +232,8 @@ STROKE_POINT = pick("#7a1fe0", "#b37aff")  # the points of a custom shape's stro
 PART = pick("#7a1fe0", "#b37aff")  # a highlighted funnel line / the curve clicked
 TWIN = pick("#00a39a", "#2fd6cb")  # the curves linked to it
 LIVE_LINE = pick("#7a1fe0", "#b37aff")  # a live shape's stroke being drawn
+LIVE_ON = pick("#a066f2", "#c9a6ff")  # the toolbar's "Live shape (G)" text while ticked (user: often left on by mistake)
+MASK_ON = pick("#1aa5a5", "#7ae6e6")  # ... and "Mask (M)" while ticked (a light mask-line teal, user 2026-11-20)
 RING = pick("#b40000", "#f4f4f6")  # round the selected shapes' notes (user: #e00000 looked bright, almost pink;
 # dark: white, red was harsh and grey hid against the light notes)
 PREVIEW_LINE, PREVIEW_HALO = pick("#ff1f1f"), pick("#ffa8a8", "#7a3030")  # the outline gate's preview line

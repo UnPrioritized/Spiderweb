@@ -22,9 +22,12 @@ What's new:
 
 • Help → About Spiderweb opens the About page.
 
+• The toolbar's "Live shape (G)" text turns light purple and "Mask (M)" light teal while ticked, so they're harder to leave on by mistake.
+
 • Fixed: in Draw on Domino, dragging with the middle button did nothing while a drawing tool was picked. It now moves Domino's view as in Domino.
 • Fixed: the side panel left a blank gap under the shape settings after picking a line and then a shape without point boxes.
 • Fixed: a formula shape crossing over itself many times (like a Circle with "t from 0 to 30") froze the Custom… window for seconds. Long thick lines everywhere (drawer strokes, lasso, Conductor and velocity lines) are drawn quickly now.
+• Fixed: the dot inside the Centre point ring (Stir, Clumps, Deform…) sat half a pixel off its middle.
 • Fixed: the Hz bass window hid the bar number at the shape's start when the shape began a hair after the bar line.
 
 • Fixed: with Built-in BASSMIDI, playing from the play line right on a note started that note a little late.

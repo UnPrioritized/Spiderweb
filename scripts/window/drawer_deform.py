@@ -528,8 +528,9 @@ class DeformWindow(tk.Toplevel):
                 for (hx, hy), hr in [(p, 6 * s) for p in c] + [(p, 5 * s) for p in self.side_middles(c)]:
                     board.create_oval(hx - hr, hy - hr, hx + hr, hy + hr, outline=look.STIR_BOX_BAND,
                                       fill=look.STIR_BOX_FILL, width=line + 1)
-        x, y = dr.to_screen(*self.centre)
-        r, q = 6 * s, 2.4 * s
+        x, y = map(round, dr.to_screen(*self.centre))  # (whole pixels: else the dot sits half a pixel off its ring)
+        r = round(6 * s)
+        q = round(r * 0.4)
         board.create_oval(x - r, y - r, x + r, y + r, outline=look.PATH_LINE, fill=look.ROLL_BG, width=line)
         board.create_oval(x - q, y - q, x + q, y + q, outline="", fill=look.PATH_LINE)
 

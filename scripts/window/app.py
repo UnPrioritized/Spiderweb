@@ -644,10 +644,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if self.tool.get() != "select":  # the tool from last time (restore_window)
             self.on_tool_change()
         # (Live shape also shows the selected custom shape's stroke points)
-        self.live.trace_add("write", lambda *_: (self.sync_custom(), self.schedule_autosave(),
+        self.live.trace_add("write", lambda *_: (self.sync_custom(), self.schedule_autosave(), self.sync_live_tick(),
                                                   self.roll.request_redraw(),
                                                   self.live.get() and self.tips.show("live")))
-        self.mask.trace_add("write", lambda *_: (self.schedule_autosave(), self.roll.request_redraw(),
+        self.mask.trace_add("write", lambda *_: (self.schedule_autosave(), self.roll.request_redraw(), self.sync_live_tick(),
                                                  self.sync_toolbar_parts()))
         self.sync_toolbar_parts()
         self.mask_preview.trace_add("write", lambda *_: (self.schedule_autosave(), self.sync_mask_fade(),
@@ -750,12 +750,15 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.tool_picker.frame.pack(side="left", padx=1)
         self._tools_together = ((line, self.tool_picker.frame),)  # (wrapped: the line stays before the tools)
         self._tools_line = line
-        live = ttk.Checkbutton(bar, text=tr("app.live_shape_g"), variable=self.live)
+        live = self.live_tick = ttk.Checkbutton(bar, text=tr("app.live_shape_g"), variable=self.live)
         live.pack(side="left", padx=(12, 0))
+        ttk.Style().configure("Live.TCheckbutton", foreground=look.LIVE_ON)
+        ttk.Style().configure("Mask.TCheckbutton", foreground=look.MASK_ON)
         Tooltip(live, BY_ID["live"]["tip"])
-        b = ttk.Checkbutton(bar, text=tr("mask.tick"), variable=self.mask,
-                            command=lambda: self.mask.get() and self.tips.show("masks"))
+        b = self.mask_draw_tick = ttk.Checkbutton(bar, text=tr("mask.tick"), variable=self.mask,
+                                             command=lambda: self.mask.get() and self.tips.show("masks"))
         b.pack(side="left", padx=(8, 0))
+        self.sync_live_tick()
         Tooltip(b, tr("mask.tick_tip"))
         b = ttk.Checkbutton(bar, text=tr("mask.preview"), variable=self.mask_preview)
         b.pack(side="left", padx=(4, 0))
@@ -2042,6 +2045,14 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         off = self.edo() and self.edo31_audio.get() and self.midi_device.get() not in (BUILTIN, KESTREL, AHEAD)
         self.edo_audio_tick.config(style="Warn.TCheckbutton" if off else "TCheckbutton")
         self.edo_audio_tip.text = tr("app.edo31_audio_needs_builtin" if off else "app.edo31_audio_tip")
+
+    def sync_live_tick(self):
+        """The toolbar's Live shape text light purple and Mask text light teal while ticked (user 2026-11-20: people
+        leave them on by mistake)."""
+        for name, var, style in (("live_tick", self.live, "Live"), ("mask_draw_tick", self.mask, "Mask")):
+            tick = getattr(self, name, None)
+            if tick is not None:
+                tick.config(style=style + ".TCheckbutton" if var.get() else "TCheckbutton")
 
     def read_project(self):
         try:

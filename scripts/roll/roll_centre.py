@@ -148,11 +148,11 @@ class CentreDots:
     def draw_centre_dots(self):
         self.delete("rccentre")
         s = self.scale
-        r = 6 * s
+        r = round(6 * s)  # (whole pixels, and x, y below: else the ring and its dot round apart, half a pixel off)
         line = max(1, round(2 * s))
         room = (-10, -10, self.winfo_width() + 10, self.winfo_height() + 10)
         for _, made, spot in self.centre_boxes():
-            x, y = self.centre_xy(spot)
+            x, y = map(round, self.centre_xy(spot))
             col = look.PATH_LINE
             rings = self.reach_rings(made)
             if rings:  # (cut to the view: never one long dashed line far off screen; a solid band in the background
@@ -188,7 +188,7 @@ class CentreDots:
             if made[3] == "stir":  # (the Stir's: a ring with a dot, apart from Clumps' cross)
                 self.create_oval(x - r, y - r, x + r, y + r, outline=col, fill=look.ROLL_BG, width=line,
                                  tags="rccentre")
-                q = r * 0.4
+                q = round(r * 0.4)
                 self.create_oval(x - q, y - q, x + q, y + q, outline="", fill=col, tags="rccentre")
                 continue
             self.create_oval(x - r, y - r, x + r, y + r, outline=col, fill=look.ROLL_BG, width=line,
