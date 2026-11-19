@@ -478,8 +478,11 @@ class DrawerMouse:
         swap = {"h": "v", "v": "h", "hv": "hv", "": "", "both": "both"}
         for i in idx:
             self.strokes[i] = self.map_stroke(self.strokes[i], fn)
-            if turned and self.strokes[i]["kind"] == "arc":  # still round (see arc.py)
-                self.strokes[i]["k"] = 1 / self.strokes[i].get("k", 1.0)
+            s = self.strokes[i]
+            if turned and (s["kind"] == "arc" or s.get("free")):  # still round (see arc.py; a freehand stroke's
+                s["k"] = 1 / s.get("k", 1.0)  # Straighten k the same way)
+            if turned and s.get("pk"):  # (a wide pen's own zoom: pen.pen_k; hunt 2026-11-19)
+                s["pk"] = 1 / s["pk"]
             link = self.link_of(i)
             if link and i in whole:
                 link = dict(link, at=list(fn(*link["at"])))

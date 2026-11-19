@@ -181,6 +181,7 @@ class FreehandPanel:
         else:
             value = bool(self.pen_speed_on.get())
         self.free_pen = clean_pen({**PEN_DEFAULT, **self.free_pen, key: value}) or {}  # new strokes too
+        self.roll.pen_changed()  # (and one being drawn)
         tgts = [d for d, _ in (self.free_targets() if key == "speed" else self.pen_targets())
                 if pen_of(d)[key] != value]
         if not tgts:
@@ -205,6 +206,7 @@ class FreehandPanel:
         good(self.thick_entry)
         value = clean_thick(value)
         self.free_thick = value  # new strokes get it too
+        self.roll.pen_changed()  # (and one being drawn: a half drawn polyline / arc)
         tgts = [(d, owner) for d, owner in self.pen_targets() if clean_thick(d.get("thick", THICK_MIN)) != value]
         if not tgts:
             return self.sync_freehand()

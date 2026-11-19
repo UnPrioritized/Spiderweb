@@ -10,6 +10,7 @@ import math
 import numpy as np
 
 from notes.bezier import fit, seg_point, segments, split
+from notes.pen import pen_kept
 from notes.slice import EPS, _halves
 
 FIT_PX = 2.0  # a freehand loop smoothed on closing stays this near the drawn line (screen pixels)
@@ -509,7 +510,7 @@ def lasso_stroke(st, loops, slack=0.0):
         else:
             keep = {k: st[k] for k in ("free", "k") if k in st and st["kind"] == "poly" and exact(st)}
             pieces = [dict(keep, kind="poly", pts=[list(q) for q in p]) for p in parts]
-    pieces = [p for p in pieces if len(p["pts"]) >= 2
+    pieces = [pen_kept(st, dict(p)) for p in pieces if len(p["pts"]) >= 2  # (a wide pen kept: hunt 2026-11-19)
               and np.ptp(np.asarray(stroke_points(p), float).reshape(-1, 2), axis=0).max() > 1e-9]
     if len(pieces) < 2:
         return None

@@ -25,9 +25,14 @@ class PenCircle:
     def pen_draft(self):
         """The shape being drawn takes the shared pen (every line tool, user 2026-11-19): Thickness, the zoom it's
         round in ("pk", as the roll looks now), Ends / Taper (Width from speed: freehand only). Called whenever the
-        draft is made, so its notes show wide while drawing."""
+        draft is made, so its notes show wide while drawing, and when the pen changes while a polyline / arc is half
+        drawn (hunt 2026-11-19: it kept the pen of its first click while the circle showed the new one)."""
         d, app = self.draft, self.app
-        if not d or d.get("kind") not in PEN_KINDS or app.free_thick <= THICK_MIN:
+        if not d or d.get("kind") not in PEN_KINDS:
+            return
+        if app.free_thick <= THICK_MIN:  # (a plain line again)
+            for key in ("thick", "pk", "pen"):
+                d.pop(key, None)
             return
         k = self.sy / self.sx if self.sx else 0.25
         d.update(thick=app.free_thick, pk=d.get("k", k) if d["kind"] == "arc" else k)
@@ -36,6 +41,12 @@ class PenCircle:
             d["pen"] = pen
         else:
             d.pop("pen", None)
+
+    def pen_changed(self):
+        """The shared pen was changed (panel / [ / ]): a shape being drawn takes it at once, notes and all."""
+        if self.draft and self.draft.get("kind") in PEN_KINDS:
+            self.pen_draft()
+            self.request_redraw()
 
     def pen_motion(self, e):
         if self.pen_on() or self.pen_mouse:

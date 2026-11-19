@@ -207,6 +207,13 @@ CHECK_STEP = 0.02  # (a piece is checked at least every this much of its length,
 PLAIN_KEEP = ("role", "colour", "layer", "src")
 
 
+def _with_pen(st, out):
+    """A bent stroke keeps the wide pen it had (pen.pen_kept; hunt 2026-11-19, a Stir with Moves = Shape made a
+    thick live stroke thin)."""
+    from notes.pen import pen_kept
+    return pen_kept(st, out)
+
+
 def _checks(longest, d):
     """How many spots inside a piece of this length are checked."""
     step = CHECK_STEP
@@ -424,11 +431,12 @@ def bent_stroke(st, d, tol=TOL):
         if pts == [[float(u), float(v)] for u, v in st["pts"]]:
             return st
         if too_heavy(st["pts"], pts):  # (user 2026-11-16: a wavy curve becomes a fine line instead)
-            return dict(keep, kind="poly", pts=_thin(preview_points(st, d, step=2 * tol, thin=0.0), tol).tolist())
+            return _with_pen(st, dict(keep, kind="poly",
+                                      pts=_thin(preview_points(st, d, step=2 * tol, thin=0.0), tol).tolist()))
         out = dict(keep, kind="curve", pts=pts)
         if sharp:
             out["sharp"] = sharp
-        return out
+        return _with_pen(st, out)
     plain = _plain_line(st)
     p = np.asarray(st["pts"] if plain else stroke_points(st), np.float64)
     if len(p) < 2:
@@ -451,7 +459,7 @@ def bent_stroke(st, d, tol=TOL):
             out["ink"] = ink
         else:
             out.pop("ink", None)
-    return out
+    return _with_pen(st, out)
 
 
 # TOUCHES KEPT EXACT (the drawer's rule: a point stuck on a line counts as touching only when it's exactly on it):

@@ -14,6 +14,7 @@ from notes.custom import (CURVE_STEPS, filled_uv, frame_to_uv, has_areas, notes_
                           stroke_points)
 from notes.gaterange import part_range
 from notes.pattern import has_formula
+from notes.pen import pen_kept
 
 EPS = 1e-9
 
@@ -191,6 +192,11 @@ def stroke_pieces(st, poly, a, b, us=None):
     """One stroke (poly = its stroke_points) cut where it crosses the segment a-b -> its pieces (strokes without
     role / colour). us: a curve cut as itself, at these spots (curve_cuts' u). Closed: its last and first pieces
     are one."""
+    return [pen_kept(st, p) for p in _stroke_pieces(st, poly, a, b, us)]  # (each piece keeps a wide pen: hunt
+    # 2026-11-19, a sliced live shape's halves went thin once edited)
+
+
+def _stroke_pieces(st, poly, a, b, us):
     joins = is_closed(poly) and side([poly[0]], a, b)
     if us is not None:
         pieces = curve_pieces(st, us)

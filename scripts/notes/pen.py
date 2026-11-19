@@ -227,6 +227,16 @@ def joined_rows(notes):
     return out
 
 
+def pen_kept(st, out):
+    """out (a stroke made from stroke st: bent, cut into pieces) with st's wide pen: Thickness, Ends / Taper and
+    the zoom it's round in (in the shape's own box, which bending / cutting leaves as it is). out back."""
+    if (st.get("thick") or 0) > THICK_MIN:
+        out.update(thick=clean_thick(st["thick"]), pk=pen_k(st))
+        if st.get("pen"):
+            out["pen"] = dict(st["pen"])
+    return out
+
+
 def pen_between(a, b, f):
     """Add between's step f (0..1) of the way from shape a to b: its "thick", "pk", "pen" (user 2026-11-19: the
     width blends step by step; a thin end counts as 1). Ends switch halfway, Taper blends, Width from speed never
