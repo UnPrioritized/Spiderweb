@@ -330,12 +330,17 @@ def _cut_up(whole, marks, held, way, ppq, beat0=0, kept=False):
         return notes, tracks, owner, start0
     out = notes.copy()
     trk = None if tracks is None else np.asarray(tracks).copy()
-    prev = -np.inf
+    prev, prevs = -np.inf, {}
     for t, key, rows, u, later in sorted(marks, key=lambda m: m[3]):
         after = u if later else float(np.nextafter(u, -np.inf))
         over = (out[:, 0] < t) & (out[:, 1] > t)
         hit = np.zeros(len(out), bool)
-        mine = (owner >= prev) & (owner < u)  # (the piece just before the cut along the line)
+        # (the piece just before the cut along the line: back to the cut before it AT THE SAME TICK (one Slice's
+        # crossings, or the one crossing line); a cut of another Slice coming between on the line mustn't shrink it,
+        # or a curve going back in time lost the cut of an earlier Slice when a later Slice was made, case 211186287)
+        if t in prevs:
+            prev = prevs[t]
+        mine = (owner >= prev) & (owner < u)
         line = mine & (bend >= 0) & (out[:, 0] < t) & (bend > t)  # (line notes sounding there, as the line made them)
         q = int(np.floor(key + 0.5))
         if (mine & (out[:, 2] == q) & (start0 == t) & (bend >= 0)).any():
@@ -354,7 +359,7 @@ def _cut_up(whole, marks, held, way, ppq, beat0=0, kept=False):
                 idx = np.flatnonzero(take)
                 take[idx] = [_takes(rows, int(k)) for k in out[idx, 2].tolist()]
             hit |= take
-        prev = u
+        prev = prevs[t] = u
         idx = np.flatnonzero(hit)
         if not len(idx):
             continue
