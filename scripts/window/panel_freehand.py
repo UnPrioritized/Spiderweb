@@ -95,9 +95,15 @@ class FreehandPanel:
 
     def pen_targets(self):
         """What the pen row changes: [(the dict holding "thick", its custom shape or None)] — the selected line
-        shapes (pen.PEN_KINDS), or the picked freehand stroke of the selected custom shape."""
+        shapes (pen.PEN_KINDS), or the picked line / curve / arc stroke of the selected custom shape (not a
+        polygon's sides, not an ellipse)."""
         shapes = [(self.shapes[i], None) for i in sorted(self.sels) if self.shapes[i]["kind"] in PEN_KINDS]
-        return shapes or self.free_targets()
+        if shapes:
+            return shapes
+        sh = self.selected()
+        k = self.roll.picked_stroke(sh) if sh and len(self.sels) == 1 else None
+        st = sh["strokes"][k] if k is not None else None
+        return [(st, sh)] if st and st["kind"] in ("poly", "curve", "arc") and not st.get("sides") else []
 
     def sync_freehand(self):
         """The Straighten row (freehand) and the pen row (every line tool)."""

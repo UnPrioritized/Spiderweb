@@ -94,22 +94,26 @@ class LiveDrawing:
 
     @staticmethod
     def draft_stroke(sh):
-        """A finished (not box) draft as a stroke in beats / pitch."""
+        """A finished (not box) draft as a stroke in beats / pitch, with the pen it was drawn with (every line
+        tool: its band's notes in the live shape too, pen.py; pk: beats per key, add_stroke converts it)."""
         kind = sh.get("draw") or sh["kind"]
         if kind == "curve":
-            return {"kind": "curve", "pts": [list(p) for p in sh["pts"]]}
-        if kind == "arc":  # (stays an arc, so its notes are exactly the Arc tool's)
-            return {"kind": "arc", "pts": [list(p) for p in sh["pts"]], "k": sh.get("k", 1.0)}
-        if kind == "free":  # stays freehand, so it can be made perfect (k: beats per key, add_stroke converts it)
+            st = {"kind": "curve", "pts": [list(p) for p in sh["pts"]]}
+        elif kind == "arc":  # (stays an arc, so its notes are exactly the Arc tool's)
+            st = {"kind": "arc", "pts": [list(p) for p in sh["pts"]], "k": sh.get("k", 1.0)}
+        elif kind == "free":  # stays freehand, so it can be made perfect (k: beats per key, add_stroke converts it)
             st = {"kind": "poly", "pts": [list(p) for p in sh["pts"]], "free": True, "smooth": sh.get("smooth", 0),
                   "k": sh.get("k", 1.0)}
-            if (sh.get("thick") or 0) > 1:  # (a wide pen: its band's notes in the live shape too, pen.py)
-                st["thick"] = sh["thick"]
-            for key in ("pk", "pen", "ink"):  # (its own zoom, shape + the width its drawing speed gave each point)
-                if sh.get(key):
-                    st[key] = sh[key]
-            return st
-        return {"kind": "poly", "pts": [list(p) for p in sh["pts"]]}
+            if sh.get("ink"):  # (the width its drawing speed gave each point)
+                st["ink"] = sh["ink"]
+        else:
+            st = {"kind": "poly", "pts": [list(p) for p in sh["pts"]]}
+        if (sh.get("thick") or 0) > 1:
+            st["thick"] = sh["thick"]
+        for key in ("pk", "pen"):  # (its own zoom + shape)
+            if sh.get(key):
+                st[key] = sh[key]
+        return st
 
     def live_commit(self, sh):
         """A finished draft goes into the live shape (or a new one) as a stroke; a circle / polygon drawn without Live

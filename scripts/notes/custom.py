@@ -22,7 +22,7 @@ from notes.pattern import (baked_path, clean_pattern, clean_shape_formula, forme
                            moved_formulas)
 from notes.polygon import MIXES, clean_corners, formed_sides
 from notes.smooth import clean_level, smooth_path
-from notes.pen import THICK_MIN, band_of, clean_pen, clean_thick, clean_ink, pen_k
+from notes.pen import THICK_MIN, band_of, clean_pen, clean_thick, clean_ink, joined_rows, pen_k
 from notes.paths import (ROW_EDGE, top_key, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
                          stretch_ends)
 from notes.hzbass import (HZ_DEFAULTS, KeyGrid, even_squares, heard_layers, left_edge, off_cents, own_channels,
@@ -214,6 +214,7 @@ def clean_strokes(strokes):
                     out.append({"kind": "ellipse", "box": box})
             else:
                 pts = [[float(u), float(v)] for u, v in st["pts"]]
+                n = len(out)
                 if st.get("kind") == "curve":
                     if len(pts) >= 4:
                         out.append(clean_curve(st, pts[:len(pts) - (len(pts) - 1) % 3]))
@@ -224,14 +225,8 @@ def clean_strokes(strokes):
                     out.append({"kind": "poly", "pts": pts})
                     if st.get("free"):  # drawn freehand: can be made perfect (smooth.py)
                         out[-1].update(free=True, smooth=clean_level(st.get("smooth", 0)), k=arc_k(st))
-                        if "thick" in st and clean_thick(st["thick"]) > THICK_MIN:  # (a wide pen: pen.py)
-                            out[-1]["thick"] = clean_thick(st["thick"])
-                            if "pk" in st:  # (the pen's own zoom)
-                                out[-1]["pk"] = pen_k(st)
-                        pen, ink = clean_pen(st.get("pen")), clean_ink(st.get("ink"), len(pts))
-                        if pen:
-                            out[-1]["pen"] = pen
-                        if ink:
+                        ink = clean_ink(st.get("ink"), len(pts))
+                        if ink:  # (each point's width from the hand's speed: pen.py)
                             out[-1]["ink"] = ink
                     else:  # a line / polyline, or a polygon's (polygon.py: the shape / pattern on each side)
                         if st.get("sides"):
@@ -240,6 +235,14 @@ def clean_strokes(strokes):
                             if corners:
                                 out[-1]["corners"] = corners
                         clean_formulas(st, out[-1])
+                if len(out) > n and not out[-1].get("sides"):  # a wide pen on any line stroke (pen.py; not a
+                    if "thick" in st and clean_thick(st["thick"]) > THICK_MIN:  # polygon's sides)
+                        out[-1]["thick"] = clean_thick(st["thick"])
+                        if "pk" in st:  # (the pen's own zoom)
+                            out[-1]["pk"] = pen_k(st)
+                    pen = clean_pen(st.get("pen"))
+                    if pen:
+                        out[-1]["pen"] = pen
             if isinstance(st.get("src"), int) and out:  # which shape it came from (convert.py)
                 out[-1]["src"] = st["src"]
             if st.get("role") in ROLES and out:
@@ -698,11 +701,11 @@ def gap_lines(sh):
 def join_strokes(strokes):
     """Open lines that meet end to end become one line, so e.g. three lines drawn as a triangle make one
     closed triangle (only lines with the same role and outline colour, which they keep). Curves and circles stay as
-    they are (they still count as joined, see strokes_closed), and so do lines with a formula and freehand strokes
-    with a Thickness (joined, their pen was lost: hunt 2026-11-19, a library drawing came back thin)."""
+    they are (they still count as joined, see strokes_closed), and so do lines with a formula and lines with a
+    Thickness (joined, their pen was lost: hunt 2026-11-19, a library drawing came back thin)."""
     def plain_line(st):
         return st["kind"] == "poly" and not stroke_closed(st) and not has_formula(st) \
-            and not (st.get("free") and (st.get("thick") or 0) > THICK_MIN)
+            and not (st.get("thick") or 0) > THICK_MIN
 
     others = [st for st in strokes if not plain_line(st)]
     order = ("",) + ROLES
@@ -763,8 +766,8 @@ def normalize_strokes(strokes):
             new = dict(st, pts=[fix(u, v) for u, v in st["pts"]])
             if (st["kind"] == "arc" or st.get("free")) and w > 1e-9 and h > 1e-9:
                 new["k"] = st.get("k", 1.0) * h / w  # still round when stretched back to the drawn proportions
-                if "pk" in st:  # (the pen's own, the same way: pen.pen_k)
-                    new["pk"] = st["pk"] * h / w
+            if "pk" in st and w > 1e-9 and h > 1e-9:  # (a wide pen's own, any line stroke: pen.pen_k)
+                new["pk"] = st["pk"] * h / w
             if w > 1e-9 and h > 1e-9:
                 moved_formulas(new, lambda u, v: (u / w, v / h))
             out.append(new)
@@ -826,8 +829,8 @@ def map_stroke(st, fn, su=1.0, sv=1.0):
     new = dict(st, pts=[list(fn(u, v)) for u, v in st["pts"]])
     if st["kind"] == "arc" or st.get("free"):  # (a freehand stroke's k works like an arc's)
         new["k"] = st.get("k", 1.0) * abs(su / sv)
-        if "pk" in st:  # (the pen's own, the same way: pen.pen_k)
-            new["pk"] = st["pk"] * abs(su / sv)
+    if "pk" in st:  # (a wide pen's own, any line stroke, the same way: pen.pen_k)
+        new["pk"] = st["pk"] * abs(su / sv)
     moved_formulas(new, fn)  # (a curve's)
     return new
 
@@ -955,8 +958,8 @@ def add_stroke(sh, st, at=None):
     new = map_stroke(st, to_uv)
     if new.get("free") or new["kind"] == "arc":  # its k: beats per key on screen -> how many u one v is on screen
         new["k"] = uv_k(sh["pts"], st.get("k", 1.0))
-        if "pk" in st:  # (the pen's own, the same way: pen.pen_k)
-            new["pk"] = uv_k(sh["pts"], st["pk"])
+    if "pk" in st:  # (a wide pen's own, any line stroke, the same way: pen.pen_k)
+        new["pk"] = uv_k(sh["pts"], st["pk"])
     if new["kind"] != "ellipse":
         near = stroke_ends(sh["strokes"])
         for i in (0, len(new["pts"]) - 1) if new["kind"] != "poly" else range(len(new["pts"])):
@@ -979,7 +982,7 @@ def plain_poly(st):
     """A stroke whose points are all there is to it (no formula, freehand, polygon or curve): add_strokes can
     take it the quick way."""
     return st["kind"] == "poly" and not st.get("free") and not st.get("smooth") and not st.get("sides") \
-        and not has_formula(st)
+        and not has_formula(st) and "pk" not in st  # (a wide pen's zoom goes through add_stroke)
 
 
 def add_strokes(sh, strokes):
@@ -1177,13 +1180,15 @@ def outline_notes(sh, ppq, only=None, paths=None):
     if not sh.get("text"):
         ks = [k for k in ks if role_of(sh["strokes"][k]) != "cut"]
         wide = [k for k in ks if (sh["strokes"][k].get("thick") or 0) > THICK_MIN]
-        if wide:  # (freehand strokes with a Thickness: their band's notes, pen.py; the others as lines)
+        if wide:  # (strokes with a Thickness: their band's notes, pen.py; the others as lines)
             ks = [k for k in ks if k not in wide]
             got = [paths_outline(join_paths([paths[k] for k in ks]), ppq)] if ks else []
+            bands = []
             for k in wide:
                 st, a = sh["strokes"][k], np.asarray(paths[k], float).reshape(-1, 2)  # (in drawing order)
-                got.append(band_of(a * [ppq, 1], st, bp_k(sh["pts"], pen_k(st)), ppq, pen_k(st)))
-            return keep_longest(np.concatenate(got))
+                bands.append(band_of(a * [ppq, 1], st, bp_k(sh["pts"], pen_k(st)), ppq, pen_k(st)))
+            got.append(joined_rows(np.concatenate(bands)))  # (bands overlapping on a key = one note, like the
+            return keep_longest(np.concatenate(got))  # roll's joined curve pieces: pen.shape_band)
     return paths_outline(join_paths([paths[k] for k in ks]), ppq)
 
 

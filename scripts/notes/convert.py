@@ -19,7 +19,7 @@ from notes.custom import (CENTRE_KEYS, CUSTOM_FLAGS, add_strokes, cycle_effect,c
                           frame_to_uv, moved_at, new_live_shape, stroke_bp)
 from notes.hzbass import left_edge, shifted_hz
 from notes.joined import is_joined, join_velocity
-from notes.pen import thick_of
+from notes.pen import pen_k, thick_of
 from notes.tumour import LINE_KINDS
 
 CAN_TURN = LINE_KINDS + ("custom",)
@@ -35,7 +35,18 @@ def has_tumours(sh):
 def line_strokes(sh, paths):
     """A line kind as strokes in beats / pitch (paths: its engine.cached_strokes, used for tumours: the bumps
     become points). Its formulas stay on the stroke (user), except on a joined curve (laid across all its pieces:
-    made into ordinary curves)."""
+    made into ordinary curves). A wide pen stays on every stroke (user 2026-11-19, pen.py; pk: beats per key,
+    add_stroke converts it)."""
+    out = _line_strokes(sh, paths)
+    if thick_of(sh):
+        for st in out:
+            st.update(thick=sh["thick"], pk=pen_k(sh))
+            if sh.get("pen"):
+                st["pen"] = json.loads(json.dumps(sh["pen"]))
+    return out
+
+
+def _line_strokes(sh, paths):
     if has_tumours(sh):
         return [{"kind": "poly", "pts": [list(p) for p in path]} for path in paths]
     if sh.get("shape") or sh.get("pattern"):
@@ -64,11 +75,8 @@ def line_strokes(sh, paths):
     if kind == "free":
         st = {"kind": "poly", "pts": [list(p) for p in sh["pts"]], "free": True, "smooth": sh.get("smooth", 0),
               "k": sh.get("k", 1.0)}
-        if thick_of(sh):  # (the pen stays wide in the live shape: user 2026-11-19, pen.py)
-            st["thick"] = sh["thick"]
-        for key in ("pk", "pen", "ink"):  # (its own zoom, shape + the width its drawing speed gave each point)
-            if sh.get(key):
-                st[key] = json.loads(json.dumps(sh[key]))
+        if sh.get("ink"):  # (the width its drawing speed gave each point; the pen: line_strokes)
+            st["ink"] = list(sh["ink"])
         return [st]
     return [{"kind": "poly", "pts": [list(p) for p in sh["pts"]]}]
 
