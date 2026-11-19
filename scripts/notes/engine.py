@@ -49,7 +49,7 @@ from notes.merge import (LAP as merge_lap, clean_merge, clean_unmerge, recipe_no
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
 from notes.trim import apply_trim
-from notes.recolour import (KEEP, PAGE, box_of, can_recolour, clean_recolour, is_recoloured, page_split, recoloured,
+from notes.recolour import (KEEP, PAGE, SPLIT, box_of, can_recolour, clean_recolour, is_recoloured, page_split, recoloured,
                             rule_of, without_recolour)
 from notes.subtract import clean_subtract, is_subtracted, side_used, subtracted
 from notes.extend import clean_extend, extended, is_extended
@@ -2533,6 +2533,11 @@ def stirred_piece(sh, notes, tracks, held_, get, gate, rule):
     if tracks is None:  # (one colour before it, a line: the whole's colours all the same; partial sweep 56456115, a
         # Scattered line's pieces were coloured anew, the note cut in two changed colour)
         tracks = np.zeros(len(notes), np.int64)
+        # (a mode that doesn't split one colour leaves a shape without colours as it is (recolour._recoloured: its
+        # overlaps aren't cut): the piece's notes too, or a note the whole keeps whole was cut where another one
+        # starts and its tail took that one's velocity; partial sweep 170420406)
+        if rule.get("mode") not in SPLIT:
+            held_ = True
     # (the whole as it was cut: its own box, flipped as it was then (rc "cut_frame", recolour.carried; old pieces
     # without it: never flipped); the piece's notes mirrored back only by the flips made since)
     rc = {k: v for k, v in own.items() if k not in ("whole", "frame", "cut_frame")}
@@ -2762,12 +2767,12 @@ def _after(fn, notes, tracks, settings, ppq):
     return got[:, :-1], got[:, -1]
 
 
-def env_velocities(env, starts, t_lo, t_hi, lo=0.0):
-    """Velocities of notes starting at starts (ticks) from a velocity line env over t_lo .. t_hi (lo: read that far
-    before its start, as a share of its time; else at its start)."""
+def env_velocities(env, starts, t_lo, t_hi, lo=0.0, hi=1.0):
+    """Velocities of notes starting at starts (ticks) from a velocity line env over t_lo .. t_hi (lo / hi: read that
+    far before its start / past its end, as a share of its time; else at its start / end)."""
     if len({v for _, v in env}) == 1:  # the same velocity everywhere
         return np.full(len(starts), max(1, min(127, round(env[0][1]))), np.int64)
-    frac = np.clip((starts - t_lo) / (t_hi - t_lo), lo, 1) if t_hi > t_lo else np.zeros(len(starts))
+    frac = np.clip((starts - t_lo) / (t_hi - t_lo), lo, hi) if t_hi > t_lo else np.zeros(len(starts))
     # (rounds halves to even, like round; float noise taken off first: a point added to the line elsewhere moved a
     # value sitting on a half a hair either way, 83.5 -> 84 or 83)
     return np.clip(np.round(np.round(env_values(env, frac), 6)), 1, 127).astype(np.int64)
@@ -3157,7 +3162,11 @@ def _kind_notes_tracks(sh, ppq, keys):
         at = from0_starts(sh, raw, vel_at if carried else raw[:, 0], ppq)
         if carried and piece and not same_vel:  # (a line drawn over only a cut half's start since: there)
             at = drawn_spots(vel_sh, at, raw[:, 0], t_lo, t_hi)
-        vel = env_velocities(env, at, t_lo, t_hi, min(0.0, float(env[0][0])) if carried and not same_vel else 0.0)
+        # (a piece's note can also start past the piece's own end, when the cut parts the whole by its path and not by
+        # time: it reads the line kept from after the end too, joined.piece_velocity)
+        far = carried and not same_vel
+        vel = env_velocities(env, at, t_lo, t_hi, min(0.0, float(env[0][0])) if far else 0.0,
+                             max(1.0, float(env[-1][0])) if far else 1.0)
     if sh["kind"] in HZ_KINDS and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
         got = velocity_parts(sh, ppq, raw[:, 0], raw[:, 2])
         if got is not None:  # (a note with a loudness line drawn: its own velocity instead of the shape's)
