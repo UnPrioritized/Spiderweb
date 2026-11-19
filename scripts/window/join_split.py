@@ -104,6 +104,31 @@ def shown_slots(rows, notes, colour):
     return first[inv]
 
 
+def per_note_slots(rows, notes, slots):
+    """shown_slots' slot per COLOUR, made per NOTE where the rows show it: a recoloured shape's colours take turns
+    on several channels (stacked notes of one colour on channels apart), so a colour has no single slot. Notes with
+    the same start, key, velocity and length as rows (same count of each) take those rows' slots, in slot order;
+    others keep their colour's slot. Without this a Lasso of a Colours / scatter line put its stacked notes on one
+    channel (sweep case 472319663)."""
+    def code(a):
+        c = (shown_code(a) * 128 + np.clip(a[:, 3], 0, 127)) * (1 << 16)
+        return (c + np.clip(a[:, 1] - a[:, 0], 0, (1 << 16) - 1)).astype(np.int64)
+    cr, cn = code(rows), code(notes)
+    ur, nr = np.unique(cr, return_counts=True)
+    un, nn = np.unique(cn, return_counts=True)
+    both, ir, i_n = np.intersect1d(ur, un, return_indices=True)
+    good = both[nr[ir] == nn[i_n]]
+    if not len(good):
+        return slots
+    on_n, on_r = np.isin(cn, good), np.isin(cr, good)
+    ni, ri = np.flatnonzero(on_n), np.flatnonzero(on_r)
+    ni = ni[np.lexsort((slots[ni], cn[ni]))]
+    ri = ri[np.lexsort((rows[ri, 4], cr[ri]))]
+    out = np.array(slots, np.int64, copy=True)
+    out[ni] = rows[ri, 4]
+    return out
+
+
 def multi_slots(rows, multi):
     """A shape's rendered rows with each note's slot from its rows in Multi channel (multi; Turn into plain notes in
     Single channel / As drawn: Multi channel later shows its colours, hunt): the note starting there on its key, else
@@ -594,6 +619,7 @@ class JoinSplit:
             slots = np.full(len(notes), int(rows[0, 4]), np.int64)
         if slots is None:
             return rows  # (a colour with no note shown where it starts: can't tell its slot)
+        slots = per_note_slots(rows, notes, slots)  # (colours that take turns on several channels)
         got, got_slots = self.heard_overlaps(sh, notes, slots)
         got = np.asarray(got, np.int64)
         got_slots = np.asarray(got_slots, np.int64)
@@ -710,19 +736,32 @@ class JoinSplit:
         if across.any():
             # (several notes across beat 0 on one key ending together (stacked colours): each its own real start, by
             # its colour's slot first; one dict entry gave them all the same, and Fold merged them, sweep 177537430)
-            at, by_slot = {}, {}
-            for (s, e, k), t in zip(notes[across][:, :3].tolist(), tracks[across].tolist()):
-                at.setdefault((k, e), []).append(s)
-                by_slot.setdefault((k, e, slot_of.get(t)), []).append(s)
+            # (a colour that takes turns on several channels (a recoloured line): each note's own slot and velocity,
+            # as shown, tell the stacked notes apart; sweep case 472319663)
+            mine = np.flatnonzero(heard)
+            clipped = notes[mine].copy()
+            clipped[:, 0] = np.maximum(clipped[:, 0], 0)
+            colour_slot = np.array([slot_of.get(t, -1) for t in tracks[mine].tolist()], np.int64)
+            note_slot = np.full(len(notes), -1, np.int64)
+            note_slot[mine] = per_note_slots(rows, clipped, colour_slot)
+            at, by_slot, by_vel, spot_of = {}, {}, {}, {}  # (lists of note numbers: one note leaves all three)
+            for n, (s, e, k, v), t, sl in zip(np.flatnonzero(across).tolist(), notes[across][:, :4].tolist(),
+                                              tracks[across].tolist(), note_slot[across].tolist()):
+                sl = sl if sl >= 0 else slot_of.get(t)
+                at.setdefault((k, e), []).append(n)
+                by_slot.setdefault((k, e, sl), []).append(n)
+                by_vel.setdefault((k, e, sl, v), []).append(n)
+                spot_of[n] = (k, e, sl, v)
             for j in np.flatnonzero(rows[:, 0] == 0):
-                k, e, sl = int(rows[j, 2]), int(rows[j, 1]), int(rows[j, 4])
-                got = by_slot.get((k, e, sl)) or at.get((k, e))
+                k, e, sl, v = int(rows[j, 2]), int(rows[j, 1]), int(rows[j, 4]), int(rows[j, 3])
+                lists = (by_vel.get((k, e, sl, v)), by_slot.get((k, e, sl)), at.get((k, e)))
+                got = next((x for x in lists if x), None)
                 if got:
-                    s = got.pop(0)
-                    rows[j, 0] = s
-                    for other in (at.get((k, e)), by_slot.get((k, e, sl))):
-                        if other is not None and other is not got and s in other:
-                            other.remove(s)
+                    n = got.pop(0)
+                    rows[j, 0] = notes[n, 0]
+                    for other in (at.get(spot_of[n][:2]), by_slot.get(spot_of[n][:3]), by_vel.get(spot_of[n])):
+                        if other is not None and other is not got and n in other:
+                            other.remove(n)
         hid = ~heard
         if not hid.any():
             return rows
