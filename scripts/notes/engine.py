@@ -3236,7 +3236,8 @@ def render(note_lists, mode, split="key", tracks=None, apart=None, fixed=None, u
 
     pinned = [np.asarray(tr, np.int64) if fx and tr is not None else None for tr, fx in zip(tracks, fixed)]
     if mode == "auto":
-        pinned = pushed_solid(note_lists, pinned, fixed, split, (16 if use10 else 15) if keep else 1, use10)
+        pinned = pushed_solid(note_lists, pinned, fixed, split, (16 if use10 else 15) if keep else 1, use10,
+                              pastes)
     top = max([int(p.max()) + 1 for p in pinned if p is not None and len(p)] or [0])
     if mode == "auto":
         units, unit_of, forced = [], [], []  # the shapes, pasted notes split up by track; unit_of = each note's unit

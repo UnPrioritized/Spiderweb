@@ -659,7 +659,7 @@ def unmapped_slot(s, use10):
     return None if ch == 9 else block * 15 + place
 
 
-def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
+def pushed_solid(note_lists, pinned, fixed, split, step, use10=False, groups=None):
     """render's pinned tracks with each "solid" shape's track that clashes with an earlier "solid" shape's on the same
     slot moved up by step slots (15, 16 with channel 10 used) until it's free: the same channel (colour), another
     track (user, 2026-10-17: a copy of plain notes ate the original's notes). step 1 (Settings → General "Overlapping
@@ -669,12 +669,29 @@ def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
     the same shape's other tracks use (hunt 2026-10-20: two colours folded onto one channel). A track first tries
     its slots one by one against that slot's tracks only (a user's 32 stacked 256-key pastes: comparing each of
     3,640 tracks with every placed note took 34 s); after a few clashing slots, every slot it clashes on is found
-    in one go (hunt: trying slot after slot, 200 copies x 15 colours took 286 s)."""
+    in one go (hunt: trying slot after slot, 200 copies x 15 colours took 286 s).
+    groups: per shape None or a key (the paste id): with step > 1 (keep colours) the solid shapes with one key are ONE
+    shape, the pieces of a cut paste: they never step round each other and move as one, so a piece that no longer
+    clashes after a cut stays on the row its whole had (sweep 2026-11-19: a cut changed colours, cases 271275068 /
+    271275664 / 672318770)."""
     placed = PlacedSpans()
     out = list(pinned)
+    team, first = {}, {}  # (group key -> its solid shapes; -> the first of them, where the group is placed)
+    if groups is not None and step > 1:
+        for i, (lst, pin) in enumerate(zip(note_lists, pinned)):
+            if fixed[i] == "solid" and pin is not None and len(lst) and groups[i] is not None:
+                team.setdefault(groups[i], []).append(i)
+                first.setdefault(groups[i], i)
     for i, (lst, pin) in enumerate(zip(note_lists, pinned)):
         if fixed[i] != "solid" or pin is None or not len(lst):
             continue
+        members = [i]
+        if groups is not None and groups[i] in team and len(team[groups[i]]) > 1:
+            if first[groups[i]] != i:
+                continue  # (placed together with the first of them)
+            members = team[groups[i]]
+            lst = np.concatenate([note_lists[j] for j in members])
+            pin = np.concatenate([pinned[j] for j in members])
         ids, which = unique_inverse(pin)
         now = ids.tolist()  # (the shape's tracks' slots: moved ones' new slots, the rest as they are)
         order = np.argsort(which, kind="stable")  # (each track's notes in their own order, without a mask each)
@@ -703,7 +720,11 @@ def pushed_solid(note_lists, pinned, fixed, split, step, use10=False):
             used[s0] -= 1
             used[s] = used.get(s, 0) + 1
             now[k] = s
-        out[i] = np.asarray(now, pin.dtype)[which]
+        got = np.asarray(now, pin.dtype)[which]
+        at2 = 0
+        for j in members:
+            out[j] = got[at2:at2 + len(pinned[j])]
+            at2 += len(pinned[j])
     return out
 
 
