@@ -59,9 +59,19 @@ def with_lead(sh, base, pts):
     """base (a velocity line) with pts (in its u, sorted) drawn over it, tidied. A sliced piece keeps the line from
     before its start (u < 0, joined.piece_velocity: a note cut in two reads its velocity where it started) while the
     drawing leaves its start alone; drawn over its start, the drawing goes for those notes too."""
-    env = paint_env(base, pts)
-    if not sh.get("cut") or not any(p[0] < 0 for p in base):
-        return tidy_env(env)
+    full = paint_env(base, pts)
+    if not sh.get("cut") or not any(p[0] < 0 or p[0] > 1 for p in base):
+        return tidy_env(full)
+    out = _with_lead_front(base, pts, full) if any(p[0] < 0 for p in base) else tidy_env(full)
+    # (the line past the piece's end too, joined.piece_velocity: a note of the piece starting there reads it. tidy_env
+    # cut it off after the drawing, so every note past the end took the drawing's last value; a line drawn over part
+    # of a piece changes only the notes under it, case 711188125)
+    last = max(1.0, pts[-1][0], out[-1][0] if out else 1.0)
+    return out + [list(p) for p in full if p[0] > last]
+
+
+def _with_lead_front(base, pts, env):
+    """with_lead's line for a piece with a lead before its start (env = base painted over by pts)."""
     ua = pts[0][0]
     # (a drawing wholly in the lead (before the piece's start: it only reaches notes a cut shortened) keeps the lead
     # around it too: tidy_env cut the drawing away and flattened the line before it, sweep 572319412)
