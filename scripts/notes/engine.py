@@ -2260,6 +2260,17 @@ def stepped_piece(sh, step, notes, tracks, ppq, get, cfg=None):
     if got is None:
         return None
     src, part, same_vel = got
+    if runner and step in ("extend", "subtract"):
+        # (run as steps (the piece has its own glue / pages): the Sustain / Gate extend run before this step are fx
+        # entries, not keys of sh, so the whole was made without them: none of its notes matched, the piece's notes
+        # were made alone and Gate subtract shortened the cut end again; a glue box elsewhere changed notes outside
+        # it, case 611188159. The whole is held / extended first, as for a piece without steps)
+        fx = list(sh.get("fx") or ())
+        at = next((n for n, st in enumerate(fx) if st.get("tool") == step), len(fx))
+        earlier = {st["tool"]: st["cfg"] for st in fx[:at] if st.get("tool") in ("sustain", "extend")
+                   and isinstance(st.get("cfg"), dict) and st["tool"] not in src}
+        if earlier:
+            src = dict(src, **earlier)
     timed = (sh["kind"] in LINE_KINDS and isinstance(part[0], (int, float)) and not src.get("glue")
              and not src.get("fx"))  # (cut where the line's time reaches the cut: the piece = a stretch of time)
     if gate and not timed:
