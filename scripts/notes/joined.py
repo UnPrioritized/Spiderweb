@@ -482,9 +482,12 @@ def join_velocity(new, olds, spans, new_span):
         u = 0.0 if b - a < 1e-12 else (t - a) / (b - a)
         # (t came from a point's u and back: a hair off it would miss a jump in the line, two points on one u, so
         # a point this close counts as on it; then both sides of a jump are read: the value before t / after it)
+        # (the NEAREST point within that: a jump drawn as two points 1e-9 apart is two points, not one; the one after
+        # the jump was read as the one before it and Split + Join lost the jump, case 111187872)
         k = bisect.bisect_left(eus[i], u - 1e-9)
-        if k < len(eus[i]) and abs(eus[i][k] - u) <= 1e-9:
-            u = eus[i][k]
+        near = [j for j in (k, k + 1) if j < len(eus[i]) and abs(eus[i][j] - u) <= 1e-9]
+        if near:
+            u = eus[i][min(near, key=lambda j: abs(eus[i][j] - u))]
         if left:
             return float(env_at(envs[i], eus[i], u, left=True))
         return float(env_values(envs[i], np.array([u]))[0])
