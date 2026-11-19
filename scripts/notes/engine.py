@@ -69,7 +69,7 @@ from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_c
                           piece_knives, piece_notes, run_origins, snap_piece, source, spotted_notes, steps_kept,
                           whole_made)
 from notes.smooth import clean_level, smooth_path
-from notes.pen import THICK_MIN, band_of, clean_pen, clean_thick, clean_ink, pen_k, thick_of
+from notes.pen import THICK_MIN, clean_pen, clean_thick, clean_ink, pen_k, shape_band, thick_of
 from notes.steps import RUNNER, expanded, whole_steps
 from notes.text import clean_text, strokes_of, strokes_token
 from notes.tumour import LINE_KINDS, clean_tumour, tumour_path
@@ -549,17 +549,19 @@ def clean_shape(sh):
     if out["kind"] == "free" and "smooth" in sh:  # made perfect (smooth.py); k = beats per key on screen, like arcs
         out["smooth"] = clean_level(sh["smooth"])
         out["k"] = arc_k(sh)
-    if out["kind"] == "free" and "thick" in sh:  # a wide pen (pen.py), round as the roll looked: k too
+    if out["kind"] in LINE_KINDS and "thick" in sh:  # a wide pen (pen.py), round as the roll looked
         thick = clean_thick(sh["thick"])
         if thick > THICK_MIN:
             out["thick"] = thick
-            out["k"] = arc_k(sh)
+            if out["kind"] == "free":  # (freehand: k too, Straighten's)
+                out["k"] = arc_k(sh)
             if "pk" in sh:  # (the pen's own zoom, pen.pen_k)
                 out["pk"] = pen_k(sh)
-    if out["kind"] == "free":  # (the pen's shape + each point's width from the hand's speed: pen.py, kept with or
-        pen = clean_pen(sh.get("pen"))  # without a width)
+    if out["kind"] in LINE_KINDS:  # (the pen's shape: pen.py, kept with or without a width)
+        pen = clean_pen(sh.get("pen"))
         if pen:
             out["pen"] = pen
+    if out["kind"] == "free":  # (each point's width from the hand's speed)
         ink = clean_ink(sh.get("ink"), len(out["pts"]))
         if ink:
             out["ink"] = ink
@@ -2993,7 +2995,6 @@ def _kind_notes_tracks(sh, ppq, keys):
             vel_sh = whole
         sh = whole
     path = dedupe(np.concatenate(cached_arrays(vel_sh)))  # (drawing the line uses the same points)
-    drawn = path * [ppq, 1]  # (in drawing order: a wide pen's width from speed goes along it, pen.py)
     if path[-1, 0] < path[0, 0]:
         path = path[::-1]  # drawn right to left: the "last point" is the later end in time, same as left to right
     path = path * [ppq, 1]  # beats -> ticks
@@ -3040,8 +3041,8 @@ def _kind_notes_tracks(sh, ppq, keys):
         raw = funnel_notes(sh, ppq)
     elif sh["kind"] == "gliss":  # a Glissando run: one note per picked key, a grid step each (gliss.py)
         raw = gliss_notes(sh, ppq)
-    elif thick:  # (never turned round: its width from speed is in drawing order; user 2026-11-19, a stroke ending
-        raw = band_of(drawn, sh, pen_k(sh), ppq)  # earlier in time shifted it all)
+    elif thick:  # (in DRAWING order, never turned round: its width from speed goes along it; user 2026-11-19, a
+        raw = shape_band(sh, ppq)  # stroke ending earlier in time shifted it all. Joined pieces: a band each)
     elif sh["kind"] in LINE_KINDS and len(cached_arrays(sh)) > 1:  # a joined curve's pieces: each like a line
         pieces = []
         for a in cached_arrays(sh):

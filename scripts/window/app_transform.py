@@ -158,8 +158,8 @@ class AppTransform:
         r = abs(kx / ky)  # (k = beats per key where it looks round: see rotate)
         if new["kind"] == "arc" or new["kind"] == "free" and "k" in new:
             new["k"] = new.get("k", 1.0) * r
-            if "pk" in new:  # (a wide freehand pen's own: pen.pen_k)
-                new["pk"] = new["pk"] * r
+        if "pk" in new:  # (a wide pen's own, any line kind: pen.pen_k)
+            new["pk"] = new["pk"] * r
         if new.get("text"):
             new["text"]["k"] = new["text"].get("k", 1.0) * r
         for tm in all_tumours(new):  # (size in keys, the rest in beats)

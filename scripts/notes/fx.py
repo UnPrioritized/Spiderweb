@@ -493,8 +493,8 @@ def turn_shape(sh, clockwise, r, cb, cp):
     sh["pts"] = [[cb + sign * (p - cp) * r, cp - sign * (b - cb) / r] for b, p in sh["pts"]]
     if sh["kind"] == "arc" or sh["kind"] == "free" and "k" in sh:  # still round (arc.py, smooth.py)
         sh["k"] = r * r / sh.get("k", 1.0)
-        if "pk" in sh:  # (a wide freehand pen's own: pen.pen_k)
-            sh["pk"] = r * r / sh["pk"]
+    if "pk" in sh:  # (a wide pen's own, any line kind: pen.pen_k)
+        sh["pk"] = r * r / sh["pk"]
     if sh.get("text"):  # its size / grow are measured the same way (see text.py)
         sh["text"]["k"] = r * r / sh["text"]["k"]
     for tm in all_tumours(sh):  # the bumps turn with it (sizes as they look on screen, see tumour.py)

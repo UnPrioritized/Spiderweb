@@ -24,7 +24,7 @@ import numpy as np
 
 from notes.custom import CENTRE_KEYS, frame_to_bp, frame_to_uv, moved_at
 from notes.paths import dedupe, dot_segment_notes, path_notes
-from notes.pen import band_of, pen_k, thick_of
+from notes.pen import shape_band, thick_of
 
 # what makes a line kind's path (besides its points): changed = no longer the piece it was (end_dot too: "Last note"
 # changed on a piece is about its own last note)
@@ -505,10 +505,8 @@ def paths_of(sh):
 
 def spotted_notes(sh, ppq, end_dot):
     """A line kind's (start, end, key) notes, as engine.kind_notes_tracks makes them, and each one's spot."""
-    if thick_of(sh):  # (a wide pen's band: cut by the knife only, so every note on spot 0: the whole part)
-        from notes.engine import cached_arrays  # (in DRAWING order, like engine's: never turned round, its width
-        drawn = dedupe(np.concatenate(cached_arrays(sh)))  # from speed goes along it; hunt 2026-11-19)
-        notes = band_of(drawn * [ppq, 1], sh, pen_k(sh), ppq)
+    if thick_of(sh):  # (a wide pen's band: cut by the knife only, so every note on spot 0: the whole part; in
+        notes = shape_band(sh, ppq)  # DRAWING order like engine's, its width from speed goes along it)
         return notes, np.zeros(len(notes))
     paths = paths_of(sh)
     if len(paths) > 1:  # a joined curve's pieces: each like a line

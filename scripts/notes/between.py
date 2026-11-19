@@ -311,6 +311,8 @@ class Pair:
             p = _pattern(a, b, f, rev)
             if p:
                 out["pattern"] = p
+            from notes.pen import pen_between  # (Thickness blends step by step, user 2026-11-19)
+            out.update(pen_between(a, b, f))
         for key in ("glue", "fx", "cycle"):  # (only when both have the same: the numbers change step by step, user)
             x, y = a.get(key), b.get(key)
             if key == "cycle" and x and y:  # (Diagonal / Each key row missing at one end = 0 / Off: they blend)

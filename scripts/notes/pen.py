@@ -1,4 +1,4 @@
-"""A freehand stroke's Thickness (sh["thick"], keys): a wide pen. Every key the band around the stroke covers gets
+"""A line's Thickness (sh["thick"], keys; Line / Polyline / Freehand / Curve / Arc, user 2026-11-19): a wide pen. Every key the band around the stroke covers gets
 ONE note for as long as the band covers it (user: a filled ribbon, not stacked copies of the line). The width runs
 ACROSS the stroke as the piano roll looked when the stroke was drawn (sh["k"] = beats per key on screen, like
 Straighten / arcs), so up-and-down parts get wider in time too. A stroke crossing itself = one band.
@@ -19,6 +19,7 @@ import numpy as np
 from files.speed import loops
 from notes.shrink import near_rows
 
+PEN_KINDS = ("line", "poly", "free", "curve", "arc")  # (the line tools: tumour.LINE_KINDS)
 THICK_MIN, THICK_MAX = 1.0, 128.0
 ENDS = ("round", "flat")
 TAPER_MAX = 50
@@ -42,7 +43,7 @@ def clean_thick(value):
 
 def thick_of(sh):
     """The shape's Thickness when it's a wide pen (> 1), else None."""
-    if sh.get("kind") != "free":
+    if sh.get("kind") not in PEN_KINDS:
         return None
     t = sh.get("thick")
     return t if isinstance(t, (int, float)) and t > THICK_MIN else None
@@ -195,6 +196,53 @@ def band_of(path, st, k, ppq, k_drawn=None):
         if ink:
             speed = ink_share(st["pts"], ink, k if k_drawn is None else k_drawn)
     return band_notes(path, st["thick"], k, ppq, pen, speed)
+
+
+def shape_band(sh, ppq):
+    """A wide line shape's band notes (start, end, key) on its line as shown (tumours, formulas, an arc's /
+    curve's sampled points), in DRAWING order (width from speed goes along it). A joined curve's pieces with a gap
+    between them: each its own band (no band across the gap), joined key by key where they meet."""
+    from notes.engine import cached_arrays
+    from notes.paths import dedupe
+    arrays = [a for a in cached_arrays(sh) if len(a)]
+    if not arrays:
+        return np.zeros((0, 3), np.int64)
+    k = pen_k(sh)
+    if sh.get("kind") == "free" or len(arrays) == 1:  # (a freehand's ink goes along all its points)
+        return band_of(dedupe(np.concatenate(arrays)) * [ppq, 1], sh, k, ppq)
+    return joined_rows(np.concatenate([band_of(dedupe(a) * [ppq, 1], sh, k, ppq) for a in arrays]))
+
+
+def joined_rows(notes):
+    """(start, end, key) notes with those overlapping / touching on one key joined into one, by key then start."""
+    n = np.asarray(notes, np.int64).reshape(-1, 3)
+    if len(n) < 2:
+        return n
+    n = n[np.lexsort((n[:, 1], n[:, 0], n[:, 2]))]
+    start = np.r_[True, n[1:, 2] != n[:-1, 2]]
+    reach = _running_max(n[:, 1], start)
+    at = np.flatnonzero(start | (n[:, 0] > np.r_[0, reach[:-1]]))
+    out = n[at].copy()
+    out[:, 1] = np.maximum.reduceat(n[:, 1], at)
+    return out
+
+
+def pen_between(a, b, f):
+    """Add between's step f (0..1) of the way from shape a to b: its "thick", "pk", "pen" (user 2026-11-19: the
+    width blends step by step; a thin end counts as 1). Ends switch halfway, Taper blends, Width from speed never
+    (a step has no hand speed). {} when the step is a plain line."""
+    ta, tb = (clean_thick(s.get("thick", THICK_MIN)) if s.get("kind") in PEN_KINDS else THICK_MIN for s in (a, b))
+    t = clean_thick(ta + (tb - ta) * f)
+    if t <= THICK_MIN:
+        return {}
+    ks = [pen_k(s) for s, th in ((a, ta), (b, tb)) if th > THICK_MIN]
+    k = ks[0] + (ks[1] - ks[0]) * f if len(ks) == 2 else ks[0]
+    pa, pb = pen_of(a), pen_of(b)
+    pen = clean_pen({"ends": (pa if f < 0.5 else pb)["ends"], "taper": pa["taper"] + (pb["taper"] - pa["taper"]) * f})
+    out = {"thick": t, "pk": k}
+    if pen:
+        out["pen"] = pen
+    return out
 
 
 def finer(xy):
