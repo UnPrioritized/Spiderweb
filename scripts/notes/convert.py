@@ -141,6 +141,10 @@ def shared_settings(shapes):
     for key, name in NOTE_SETTINGS:
         # (Sustain's Auto is an empty dict)
         vals = [sh.get(key) if key == "sustain" else sh.get(key) or None for sh in shapes]
+        if key in ("subtract", "extend"):  # (pieces of one cut shape: a graph across it is cut per piece; unchanged
+            # since the cut = the whole's own, so they're alike and the shape comes back with it: hunt 2026-11-19)
+            from notes.sliced import whole_value
+            vals = [whole_value(sh, key) or None for sh in shapes]
         if all(v is None for v in vals):
             continue
         same = [cycle_effect(v) for v in vals] if key == "cycle" else vals  # (Colours: by what they do)

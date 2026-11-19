@@ -110,7 +110,7 @@ def _both(e1, e2):
 def rows_taken(loop, boxes, beat, ppq):
     """The key rows a Lasso takes in at a cut at beat: inside the loop (and the kept Select boxes, like pasted
     notes: lasso_pieces) there, a tick either way (the cut sits on the loop's edge). As [[first, last], ...]: what
-    a line piece keeps for its held notes (LASSO = ONLY ROWS IN ITS BOX, user 2026-11-19; engine.held_cuts)."""
+    a line piece keeps for its held notes (LASSO = ONLY ROWS IN ITS BOX, user 2026-11-19; cut_share)."""
     ys = [float(p[1]) for p in loop]
     t = int(round(beat * ppq))
     taken = []

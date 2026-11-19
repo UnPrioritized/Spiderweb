@@ -7,6 +7,7 @@ The maths for each kind lives in its own file: paths.py (lines, polylines, freeh
 
 import copy
 import itertools
+import hashlib
 import json
 import marshal
 import math
@@ -64,7 +65,8 @@ from notes.mask import clean_mask, is_mask
 from notes.passengers import check_cc
 from notes.strips import clean_strips
 from notes.mould import clip_to, mould_cut, piece_loops
-from notes.sliced import (clean_cut, clip_strokes, cut_through, in_part, knife_cut, made_at_cut, moved, moved_by,
+from notes import cut_share
+from notes.sliced import (clean_cut, clip_strokes, in_part, knife_cut, made_at_cut, moved, moved_by,
                           own_velocities, with_whole_velocity, drawn_spots,
                           piece_knives, piece_notes, run_origins, snap_piece, source, spotted_notes, steps_kept,
                           whole_made)
@@ -1143,7 +1145,31 @@ def shape_key(sh):
     tok = strokes_token(out.get("strokes"))
     if tok:  # (a text's strokes as their fingerprint: ~38,000 points not written out at every key)
         out["strokes"] = STROKES_MARK + tok
+    cut = out.get("cut")
+    if isinstance(cut, dict) and isinstance(cut.get("whole"), dict):  # (a piece's whole as its fingerprint: shared by
+        out = dict(out, cut=dict(cut, whole=WHOLE_MARK + whole_token(cut["whole"])))  # its pieces, never changed;
+        # every piece wrote its whole out at every key, a slice at 120 pieces took over a second: hunt 2026-11-19)
     return json.dumps(out, sort_keys=True) if not texts else (json.dumps(out, sort_keys=True), tuple(texts))
+
+
+WHOLE_MARK = "\0whole:"  # (a piece's whole in a key: its fingerprint, whole_token)
+_WHOLE_TOKENS = {}  # id(whole) -> (whole, fingerprint)
+_TOKEN_WHOLES = {}  # fingerprint -> whole (from_key)
+WHOLE_TOKENS_MOST = 512
+
+
+def whole_token(whole):
+    """A cut shape's whole's fingerprint, worked out once per whole dict (pieces share one; it's never changed in
+    place: sliced / history)."""
+    got = _WHOLE_TOKENS.get(id(whole))
+    if got is None or got[0] is not whole:
+        if len(_WHOLE_TOKENS) >= WHOLE_TOKENS_MOST:
+            _WHOLE_TOKENS.clear()
+            _TOKEN_WHOLES.clear()
+        fp = hashlib.sha1(json.dumps(whole, sort_keys=True).encode()).hexdigest()
+        got = _WHOLE_TOKENS[id(whole)] = (whole, fp)
+        _TOKEN_WHOLES[fp] = whole
+    return got[1]
 
 
 def text_unanchored(tx):
@@ -1176,6 +1202,9 @@ def with_big(sh, texts):
     for k, v in sh.items():
         if isinstance(v, str) and v.startswith(BIG_MARK):
             sh[k] = texts[int(v[len(BIG_MARK):])]
+        elif k == "cut" and isinstance(v, dict) and isinstance(v.get("whole"), str) \
+                and v["whole"].startswith(BIG_MARK):  # (a piece's whole, kept once by an undo step: history)
+            v["whole"] = texts[int(v["whole"][len(BIG_MARK):])]
         elif k in ("merge", "unmerge") and isinstance(v, dict) and isinstance(v.get("parts"), list):
             for p in v["parts"]:
                 if isinstance(p, dict):
@@ -1193,6 +1222,12 @@ def from_key(key):
         if got is None:  # (can't happen: asked right after shape_key, while the shape holds them)
             raise LookupError("a text's strokes are gone")
         sh["strokes"] = got
+    cut = sh.get("cut")
+    if isinstance(cut, dict) and isinstance(cut.get("whole"), str) and cut["whole"].startswith(WHOLE_MARK):
+        whole = _TOKEN_WHOLES.get(cut["whole"][len(WHOLE_MARK):])
+        if whole is None:  # (can't happen: asked right after shape_key, while the piece holds it)
+            raise LookupError("a piece's whole is gone")
+        sh["cut"] = dict(cut, whole=whole)
     return sh
 
 
@@ -1854,6 +1889,14 @@ def fx_notes(sh, ppq, keys, get):
     get(shape) = another shape's notes and tracks (remembered by the caller: the steps before the last one, the
     notes flipped back). A hidden "_m" = the notes made flipped along those axes (the steps before a flip)."""
     sh = made_from(sh)  # (a Hz bass's CC lines make no notes: never from them, whoever asks)
+    if "_share_of" in sh and not sh.get("fx"):  # (a piece's own glue / pages run on its share: cut_share.on_share's
+        # stand-in, asked for without its pages; its glue before them here, as with_glue below does on a shape's)
+        got = cut_share.piece_notes(sh["_share_of"], ppq, keys)
+        return got if not sh.get("glue") or sh.get("_noglue0") else with_glue(*got, sh, ppq)
+    if sh.get("cut") and cut_share.shares(sh):  # (a line piece only moved since the cut: its share of the whole's)
+        if sh.get("fx") or sh.get("glue"):
+            return get(cut_share.on_share(sh))
+        return cut_share.piece_notes(sh, ppq, keys)
     if isinstance(sh.get("recolour"), dict) and _has_shape_tab(sh["recolour"]):
         got = shape_tabs_done(sh, ppq, keys, get)  # (Stir tabs bending the shape: before every other step)
         return got if isinstance(got, tuple) else get(got)
@@ -1913,9 +1956,7 @@ def fx_notes(sh, ppq, keys, get):
         # (its own overlaps kept under the hold, as heard_way says: "_sus" keeps the notes below from being fixed as
         # heard; sweep 55660070, a sustained paste in Single had them fixed first, and a velocity line missed)
         notes, tracks = get(dict(bare, _sus=True))
-        got = held_piece(sh, notes, tracks, ppq, get)
-        if got is None:
-            got = held_knife_piece(sh, notes, tracks, ppq, get)
+        got = held_knife_piece(sh, notes, tracks, ppq, get)  # (a custom piece; a line piece shares: cut_share)
         return got if got is not None else held(notes, tracks, auto_sustain(sh, get), ppq)
     fx = sh.get("fx")
     if "picture" in sh and not (fx and fx[-1]["tool"] in RUNNER):
@@ -2124,9 +2165,7 @@ def run_step(notes, tracks, step, sh, ppq, get):
             return shown_subtracted(notes, step["cfg"], sh, ppq), tracks
         return extended(notes, step["cfg"], ppq), tracks
     sus = step["cfg"]  # (Sustain)
-    got = held_piece(dict(sh, sustain=sus), notes, tracks, ppq, get)
-    if got is None:
-        got = held_knife_piece(dict(sh, sustain=sus), notes, tracks, ppq, get)
+    got = held_knife_piece(dict(sh, sustain=sus), notes, tracks, ppq, get)
     if got is not None:
         return got
     if "gap" not in sus and sh.get("glue"):  # (Auto: worked out without glue, as auto_sustain does)
@@ -2139,8 +2178,6 @@ def run_step(notes, tracks, step, sh, ppq, get):
     return held(notes, tracks, sus, ppq)
 
 
-_held_wholes = {}  # id(whole's notes) -> (them, (sustain, ppq), held(...)): held_piece's
-_held_spots = {}  # id(whole's notes) -> (them, {(start, key): earliest place on the line}): held_piece's from_before
 
 
 def unglued(sh):
@@ -2367,205 +2404,6 @@ def _owned_rows(w0, wt, mine, pt, lo, hi, partial=False):
     return rows
 
 
-def held_cuts(sh, src, part, ppq):
-    """The cuts of a line piece's whole that hold its held notes (LASSO = ONLY ROWS IN ITS BOX, user 2026-11-19):
-    sh["cut"]["cuts"] = every cut of the shape it was cut from that still parts two of its pieces ([u, rows]: rows =
-    the key rows a Lasso's loop (and kept boxes) took in at that cut, None = every row: Slice / Split here; kept in
-    step by sliced.sync_cuts). -> (next_cut(k, t): the first such tick >= t whose cut takes in key k's row (a held
-    note is cut only there; past the last: never), starts(k): does the piece's own start cut take in k's row), or
-    None: a piece from before these lists (every cut takes in every row, as before)."""
-    cuts = sh["cut"].get("cuts") if isinstance(sh.get("cut"), dict) else None
-    if not cuts:
-        return None
-    from notes.sliced import moved_by
-    dk = int(round((moved_by(sh) or (0.0, 0.0))[1]))  # (the rows were taken where the whole sat when cut)
-    recs = []
-    for u, rows in cuts:
-        t = piece_ticks(src, (u, u), ppq)[2]
-        recs.append((t, None if rows is None else [(a + dk, b + dk) for a, b in rows], u))
-
-    def takes(rows, k):
-        return rows is None or any(a <= k <= b for a, b in rows)
-
-    def next_cut(k, t):
-        return min((tt for tt, rows, _ in recs if tt >= t and takes(rows, k)), default=1 << 62)
-
-    own = next((rows for _, rows, u in recs if part[0] and abs(u - part[0]) <= 1e-9), None)
-
-    def starts(k):
-        return takes(own, k)
-    return next_cut, starts
-
-
-def turns_back(src):
-    """Does a line's drawn path go back in time anywhere (a loop, a spiral, a curve's slices round a centre)?"""
-    from notes.sliced import paths_of
-    return any(len(a) > 1 and bool((np.diff(np.asarray(a, float)[:, 0]) < -1e-9).any()) for a in paths_of(src))
-
-
-def held_piece(sh, notes, tracks, ppq, get):
-    """A sliced piece of a sustained line (notes, tracks: its own, before Sustain): held as the WHOLE shape holds them,
-    cut at the piece's own cuts, and the held ends of earlier notes crossing its start starting again there (partial
-    sweep 11-02: held per piece, a note held across the cut ended at its own end). None: not such a piece."""
-    from notes.sliced import velocity
-    got = source(sh) if sh["kind"] in LINE_KINDS and sh.get("cut") else None
-    if got is None or not len(notes):
-        return None
-    src, part, same_vel = got
-    knife = sh["cut"].get("knife")
-    through = bool(knife and same_vel and part[0] == 0 and part[1] is None)  # (cut through its notes, see below)
-    if not isinstance(part[0], (int, float)) or src.get("glue") or src.get("fx") and not through:
-        return None
-    whole = dict({k: v for k, v in src.items() if k != "sustain"}, **velocity(sh["cut"]["whole"]))
-    if sh.get("_run") and sh.get("fx") and all(st.get("tool") in RUNNER for st in sh["fx"]):
-        # (made by the runner: the whole gets the steps that ran before this Sustain too (Gate subtract first...),
-        # not only the drawing; sweep 277542201: a subtracted note was held again over the cut)
-        # (the whole's own pages come first, then those steps: the pages are done on the whole before the piece)
-        whole["fx"], whole["_run"] = json.loads(json.dumps(list(src.get("fx") or []) + list(sh["fx"]))), True
-    w0, wt0 = get(whole)
-    if not len(w0):
-        return None
-    hold = json.dumps(sh["sustain"], sort_keys=True)
-    was = _held_wholes.get(id(w0))  # (the whole held once for all its pieces, not again per piece)
-    if was is None or was[0] is not w0 or was[1] != (hold, ppq):
-        if len(_held_wholes) > 16:
-            _held_wholes.clear()
-        was = _held_wholes[id(w0)] = (w0, (hold, ppq), held(w0, wt0, sh["sustain"], ppq))
-    w1, wt1 = was[2]
-    if through and src.get("fx"):
-        # (a piece with the whole's pages is cut through its NOTES by the knife (the whole drawing stays): held as the
-        # whole holds them, then the knife cuts the finished notes, as Gate extend / subtract do (stepped_piece);
-        # held on the cut notes alone it held them only to the next note of the piece; sweep 319165685)
-        w1 = np.asarray(w1, np.int64)[:, :4]
-        return knife_cut(w1, None if wt1 is None else np.asarray(wt1, np.int64), knife, moved_by(sh), ppq)
-    if knife and part[0] == 0 and part[1] is None:
-        # (a plain line the knife cut THROUGH its notes (both pieces keep the whole drawing): the held whole is cut by
-        # the knife too, as held_knife_piece does for pages; without it the piece before kept a held note to its
-        # whole end and the piece after started its tail again on top = stacked notes; sweep case 770590034)
-        w1, wt1 = knife_cut(np.asarray(w1, np.int64)[:, :4], None if wt1 is None else np.asarray(wt1, np.int64),
-                            knife, moved_by(sh), ppq)
-    tl, lo, hi = piece_ticks(src, part, ppq)
-    w1 = np.asarray(w1, np.int64)
-    wt1 = np.zeros(len(w1), np.int64) if wt1 is None else np.asarray(wt1, np.int64)
-    ends = {}
-    for s, e, k in w1[:, :3].tolist():
-        ends[s, k] = max(e, ends.get((s, k), e))
-    starts0 = {(s, k) for s, k in w0[:, [0, 2]].tolist()}
-    notes = np.asarray(notes, np.int64).copy()
-    mine = {(s, k): v for s, k, v in notes[:, [0, 2, 3]].tolist()}
-    env = velocity_env(sh)
-    span = np.concatenate(cached_arrays(sh))[:, 0] * ppq
-    t_lo, t_hi = float(span.min()), float(span.max())
-
-    def vel_of(k, s):  # (a note going on from an earlier one: that one's velocity, as this piece reads it)
-        on = w0[(w0[:, 2] == k) & (w0[:, 0] <= s)]
-        if not len(on):
-            return None
-        s0 = int(on[:, 0].max())
-        if (s0, k) in mine:
-            return mine[s0, k]
-        if same_vel:
-            return None
-        return int(env_velocities(env, np.array([s0]), t_lo, t_hi, min(0.0, float(env[0][0])))[0])
-    back = turns_back(src)
-    hc = None if back else held_cuts(sh, src, part, ppq)  # (LASSO = ONLY ROWS IN ITS BOX)
-
-    def held_to(k):  # (where this piece's held note on key k stops: the next cut taking in its row, else hi)
-        return hc[0](k, hi) if hc else hi
-
-    def starts_here(k):  # (does a held note on key k start a tail at this piece's start cut)
-        return hc[1](k) if hc else True
-    made_end = {}  # ((start, key) -> the whole's note's end before Sustain: looping lines / held_cuts only)
-    if back or hc:
-        for s, e, k in np.asarray(w0, np.int64)[:, :3].tolist():
-            made_end[s, k] = max(e, made_end.get((s, k), e))
-
-    def cut_here(s, e, k):
-        """Did the piece's end cut go THROUGH this note (the whole's own note, before Sustain, ran on past it)? One
-        merely ending on that tick is held on as the whole holds it (cases 672318438, 119204317)."""
-        if e != hi:
-            return False
-        made = made_end.get((s, k))
-        if made is None:  # (a cut half: the whole's note it is part of, case 172319871 cut at both box edges)
-            w0a = np.asarray(w0, np.int64)
-            on = w0a[(w0a[:, 2] == k) & (w0a[:, 0] < s) & (w0a[:, 1] > s)]
-            made = int(on[:, 1].max()) if len(on) else e
-        return made > hi
-    for i, (s, e, k) in enumerate(notes[:, :3].tolist()):
-        if (s, k) in ends:
-            e2 = ends[s, k]
-        else:  # (the second half of a note cut at the piece's start: the whole's note held over it)
-            over = w1[(w1[:, 2] == k) & (w1[:, 0] < s) & (w1[:, 1] > s)]
-            e2 = int(over[:, 1].max()) if len(over) else e
-        if back:
-            # (LOOPING HELD LINE, user 2026-11-19 (A): the line turns back in time (a loop, a spiral, slices round a
-            # centre), so a cut is a place on the line, not a moment: a held note stays WHOLE in the piece that made
-            # it; only the note the piece's own end cut goes through ends there; sweep cut families 270590240 ...)
-            notes[i, 1] = e if e < e2 and cut_here(s, e, k) else max(e2, e)
-        else:
-            # (held on to the next cut taking in its row: a Lasso's cut leaving the row out doesn't stop it, the note
-            # the end cut went through always ends there; one rule for every piece, so two pieces never both hold
-            # it or leave a hole, hunt 2026-11-19)
-            stop = hi if not hc or cut_here(s, e, k) else held_to(k)
-            notes[i, 1] = max(min(e2, stop), s + 1) if e2 > s else e
-    extra = []
-    # ((start, key) -> the earliest place on the line a whole note starts: made once a tail is asked, once a whole)
-    got_spots = _held_spots.get(id(w0))
-    if got_spots is None or got_spots[0] is not w0:
-        if len(_held_spots) > 16:
-            _held_spots.clear()
-        got_spots = _held_spots[id(w0)] = (w0, {})
-    spot_at = got_spots[1]
-
-    def from_before(s, k):
-        """Is the whole's note starting at s on key k held over this piece's start FROM A PIECE BEFORE it on the line?
-        A line turning back in time: a note sounding across the start tick can be this piece's own or a later
-        piece's (it starts later along the line): no tail for it here, or it showed twice (whole + a tail at the
-        cut); sweep 172319871 / 370420025."""
-        if (s, k) in mine:
-            return False
-        if not spot_at:
-            from notes.sliced import spotted_notes
-            raw, spots = spotted_notes(src, ppq, bool(src.get("end_dot")))
-            for (s1, k1), u in zip(np.asarray(raw, np.int64)[:, [0, 2]].tolist(), np.asarray(spots).tolist()):
-                spot_at[s1, k1] = min(u, spot_at.get((s1, k1), u))
-            spot_at[None] = 0
-        u = spot_at.get((s, k))
-        return u is None or u < part[0]
-    own_at = {k for s, k in mine if s == tl and (s, k) in starts0}
-    # (a note of the piece starting at its first tick that is only the second half of a whole note cut there: it is
-    # that one note's tail; another whole note held across the cut on the same key still has its own tail here, else
-    # two overlapping notes lost one at the cut)
-    cut_half = {k for (s, k) in mine if s == tl and (s, k) not in starts0}
-    latest = {}  # (key -> the whole note crossing the cut that started last: the one the piece's cut half is)
-    for j, (s, e, k) in enumerate(w1[:, :3].tolist()):
-        if k in cut_half and s < lo < e and (k not in latest or s >= w1[latest[k], 0]):
-            latest[k] = j
-    for j, (s, e, k, v) in enumerate(w1[:, :4].tolist()):
-        if latest.get(k) == j:
-            continue
-        if back and s < lo < e:
-            continue  # (looping: the note stays whole in its own piece, never copied into this one)
-        if s < lo < e and k not in own_at and from_before(s, k) and starts_here(k):
-            # (held over the cut from the piece before; a Lasso's cut: only on rows it took in)
-            row = [lo, min(e, held_to(k)), k, vel_of(k, s) or v]
-        elif lo <= s < hi and (s, k) not in starts0 and (s, k) not in mine:  # (starting on a Sustain stop)
-            row = [s, min(e, held_to(k)), k, vel_of(k, s) or v]
-        else:
-            continue
-        if row[1] > row[0]:
-            extra.append(row + [int(wt1[j])])
-    if extra:
-        add = np.asarray(extra, np.int64)
-        no_tracks = tracks is None and not add[:, 4].any()  # (no colours at all: still none, as stepped_piece wants)
-        notes = np.concatenate([notes[:, :4], add[:, :4]])
-        tracks = np.concatenate([np.zeros(len(notes) - len(add), np.int64) if tracks is None else
-                                 np.asarray(tracks, np.int64), add[:, 4]])
-        got = unique_rows(np.column_stack([notes, tracks]))
-        return got[:, :4], None if no_tracks else got[:, 4]
-    return notes, tracks
-
-
 def held_knife_piece(sh, notes, tracks, ppq, get):
     """A piece cut through its notes (a custom piece, or a line piece with glue / pages: its knife cuts) of a sustained
     shape (notes, tracks: its own, before Sustain): held as the WHOLE shape holds them, then cut by the piece's knives,
@@ -2584,7 +2422,7 @@ def held_knife_piece(sh, notes, tracks, ppq, get):
     if not halves or sh["cut"].get("mould") or sh.get("_whole"):
         return None
     if sh["kind"] != "custom" and not (src.get("fx") or src.get("glue")):
-        return None  # (a plain line piece: held_piece's)
+        return None  # (a plain line piece: it shares its whole's, cut_share)
     whole = {k: v for k, v in src.items() if k != "sustain"}
     if runner and sh.get("fx"):
         # (made by the runner: the whole gets the steps that ran before this Sustain too, as held_piece does)
@@ -2885,23 +2723,6 @@ def env_velocities(env, starts, t_lo, t_hi, lo=0.0, hi=1.0):
     return np.clip(np.round(np.round(env_values(env, frac), 6)), 1, 127).astype(np.int64)
 
 
-def whole_tools(whole, raw, spots, tracks, ppq):
-    """A line piece's whole's notes (raw (start, end, key), each one's spot, tracks) with its velocities, after its
-    glue and note tool pages: (start, end, key, velocity) rows, their spots, tracks."""
-    t = dedupe(np.concatenate(cached_arrays(whole)))[:, 0] * ppq
-    # (a note across beat 0 of a shape made later reads it where it shows, as the shape uncut does: from0_starts;
-    # sweep 277533358, its velocity changed when cut)
-    vel = env_velocities(velocity_env(whole), from0_starts(whole, raw, raw[:, 0], ppq), float(t.min()),
-                         float(t.max()))
-    who = tracks if tracks is not None else np.zeros(len(raw), np.int64)
-    a = np.column_stack([raw, vel, np.arange(len(raw)), who]).astype(np.int64)  # (spots ride along as row numbers)
-    fx, glued_first = whole_steps(whole)  # (its glue before the pages where its order puts it: steps.py)
-    first = glue_from(whole.get("glue"), whole.get("fx")) if len(a) and glued_first else None  # (the rest at its
-    if first:  # places: run_steps)
-        a = apply_glue(a, first, glue_box(np.concatenate(cached_arrays(whole))), ppq, True)
-    a = run_steps(a, fx, whole, ppq)
-    return a[:, :4], spots[a[:, 4]], a[:, 5] if tracks is not None or path_colours(whole) else None
-
 
 def run_steps(a, fx, sh, ppq, m=(), pre=()):
     """Notes a (start, end, key, velocity, then columns riding along) after the steps fx of sh (as fx_notes does them;
@@ -3084,6 +2905,8 @@ def clash_levels(lists):
 
 
 def kind_notes_tracks(sh, ppq, keys):
+    if sh.get("cut") and cut_share.shares(sh):  # (a line piece: its share of the whole's notes)
+        return cut_share.piece_notes(sh, ppq, keys)
     got = made_at_cut(sh, ppq, keys, _kind_notes_tracks) if sh.get("cut") else None  # (a moved sliced piece)
     return got if got is not None else _kind_notes_tracks(sh, ppq, keys)
 
@@ -3104,33 +2927,14 @@ def _kind_notes_tracks(sh, ppq, keys):
     thick = thick_of(sh)  # (a wide pen: its band's notes, pen.py; Notes by snap / Last note don't apply)
     by_snap = sh.get("by_snap") if sh["kind"] in LINE_KINDS and not thick else None  # ("Notes by snap": one step
     end_dot = sh.get("end_dot", False) and not by_snap and not thick  # each, paths.py)
-    piece = source(sh) if sh["kind"] in LINE_KINDS and sh.get("cut") else None
-    vel_sh = sh  # (whose velocities, over whose time)
-    if piece:  # cut from another shape (sliced.py): its notes are made as that one's, then its own part kept
-        whole, part, same_vel = piece
-        knife, knife_d = sh["cut"].get("knife"), moved_by(sh)  # (cut through its notes by the Slice tool)
-        mould = sh["cut"].get("mould")  # (cut with a shape, mould.py)
-        floor = sh["cut"].get("from")  # (sliced.cut_through)
-        if same_vel:
-            vel_sh = whole
-        sh = whole
+    vel_sh = sh  # (whose velocities, over whose time; a line piece shares its whole's: cut_share)
     path = dedupe(np.concatenate(cached_arrays(vel_sh)))  # (drawing the line uses the same points)
     if path[-1, 0] < path[0, 0]:
         path = path[::-1]  # drawn right to left: the "last point" is the later end in time, same as left to right
     path = path * [ppq, 1]  # beats -> ticks
     own = None  # pasted notes' own velocities and tracks
     groups = None  # a custom shape made of other shapes (convert.py): which of them each note came from
-    spots = None  # a piece's: where on the whole's path each note starts
-    came = None  # a piece's stepped notes: the line note each came from (start, end), for its cuts
-    if piece:
-        raw, spots = spotted_notes(sh, ppq, end_dot)
-        if by_snap:  # (the whole's steps, from the whole's start)
-            whole_t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
-            raw = note_array(raw, 3)
-            got, src = snap_steps(raw, by_snap * ppq, int(np.floor(whole_t.min() + 0.5)),
-                                  int(np.floor(whole_t.max() + 0.5)), sh.get("by_snap_end", "cut"))
-            raw, spots, came = got, spots[src], raw[src, :2]
-    elif sh["kind"] == "custom" and "notes" in sh:
+    if sh["kind"] == "custom" and "notes" in sh:
         # (a merged shape turned / slanted / stretched: its parts the same way, merged again; else a turned / skewed
         # picture or merged shape: each key row sampled across it, not its notes tilted)
         # ("New channels each Colours round": its parts' rounds, ridden along on the tracks: merge.with_rounds)
@@ -3176,16 +2980,13 @@ def _kind_notes_tracks(sh, ppq, keys):
         raw = dot_segment_notes(path)
     else:
         raw = path_notes(path, end_dot)
-    if by_snap and not piece:
+    if by_snap:
         raw = snap_steps(note_array(raw, 3), by_snap * ppq, int(np.floor(float(path[:, 0].min()) + 0.5)),
                          int(np.floor(float(path[:, 0].max()) + 0.5)), sh.get("by_snap_end", "cut"))[0]
     t_lo, t_hi = line_span(vel_sh, ppq, float(path[:, 0].min()), float(path[:, 0].max()))
-    if piece and vel_sh is not sh and t_hi - t_lo < 1e-6 * ppq:  # (a piece whose own outline shrank to a point has no
-        wt = np.concatenate(cached_arrays(sh))[:, 0] * ppq  # time of its own: its line runs over the whole's, as
-        t_lo, t_hi = float(wt.min()), float(wt.max())  # velocity.time_span does; sweep 770590132)
     env = velocity_env(vel_sh)
     raw = note_array(raw, 3)
-    if sh["kind"] in HZ_KINDS and sh.get("hz") and "notes" not in sh and not piece:  # (a Hz bass's Note length)
+    if sh["kind"] in HZ_KINDS and sh.get("hz") and "notes" not in sh:  # (a Hz bass's Note length)
         raw = note_lengths(sh["hz"], raw, ppq, sh["kind"] != "funnel", sh)
     if sh.get("_free"):  # (not cut at the piano roll's edges: only Recolour's box asks, free_box)
         keep = np.ones(len(raw), bool)
@@ -3193,49 +2994,7 @@ def _kind_notes_tracks(sh, ppq, keys):
         keep = (raw[:, 2] >= 0) & (raw[:, 2] < keys) & (raw[:, 1] > 0)
         raw = raw[keep]
         raw[:, 0] = np.maximum(raw[:, 0], 0)
-    tracks = made = vel_at = None
-    if spots is not None:  # (Colours count over the whole's notes, then the piece keeps its own)
-        spots = spots[keep]
-        came = came[keep] if came is not None else None
-        keep = unique_index(raw)
-        raw, spots = raw[keep], spots[keep]
-        came = came[keep] if came is not None else None
-        if cycling(sh) and len(raw):
-            tracks = cycle_turns(sh, raw, ppq, float(path[:, 1].min()))
-        def finish(src, raw, spots, tracks, came):
-            if src.get("glue") or src.get("fx"):  # the whole's glue / note tool pages first, on all its notes
-                raw, spots, tracks = whole_tools(src, raw, spots, tracks, ppq)
-                came = None  # (the pages' notes aren't the steps any more)
-                raw = np.column_stack([raw, raw[:, 0]])  # (each page note's start rides along through the cuts)
-            raw, spots, tracks = cut_through(src, raw, spots, tracks, part, ppq, came, floor,
-                                             sh.get("_cut_heard"))
-            mine = in_part(spots, part)
-            raw, tracks = raw[mine], tracks[mine] if tracks is not None else None
-            if knife:
-                raw, tracks = knife_cut(raw, tracks, knife, knife_d, ppq)
-            if mould:
-                raw, tracks = mould_cut(raw, tracks, mould, knife_d, ppq)
-            return raw, tracks
-        # (a velocity of its own on a piece of a shape with pages: its notes also as made with the velocities it had
-        # when cut, kept where its own line didn't change: sliced.own_velocities)
-        was = finish(with_whole_velocity(sh, vel_sh), raw, spots, tracks, came)[0][:, :4] \
-            if not same_vel and (sh.get("glue") or sh.get("fx")) else None
-        # (each note's own start rides along: a note the cut went through keeps its velocity in both halves, read
-        # where the note started, user 2026-11-02; pages carry their velocity column themselves)
-        carry = not (sh.get("glue") or sh.get("fx")) and raw.shape[1] == 3
-        if carry:
-            # (a note across beat 0 of a shape made later rides along with the spot it reads where it shows, as the
-            # uncut shape does (from0_starts): its half wholly before beat 0 keeps that velocity too)
-            raw = np.column_stack([raw, from0_starts(sh, raw, raw[:, 0], ppq) if same_vel else raw[:, 0]])
-        raw, tracks = finish(sh, raw, spots, tracks, came)
-        if carry:
-            vel_at, raw = raw[:, 3].copy(), raw[:, :3]
-        if raw.shape[1] == 5:  # (velocities made by the whole's pages: kept, unless the piece has its own)
-            vel_at, raw = raw[:, 4].copy(), raw[:, :4]
-            if same_vel:
-                return raw, tracks
-            ok = was is not None and was.shape == raw.shape and (was[:, :3] == raw[:, :3]).all()
-            made, raw = (was if ok else raw)[:, 3], raw[:, :3]
+    tracks = None
     if own is not None:
         own = own[keep]
         if cycling(sh):  # (a merged shape with Colours: turns across it all, not its shapes' own colours)
@@ -3254,43 +3013,11 @@ def _kind_notes_tracks(sh, ppq, keys):
     elif groups is not None:  # (the same note from two of them stays twice, like two shapes)
         got = unique_rows(np.column_stack([raw, np.asarray(groups, np.int64)[keep]]))
         raw, tracks = got[:, :3], got[:, 3]
-    elif spots is None:
+    else:
         raw = unique_rows(raw)
         if cycling(sh) and len(raw):  # "Colours" on a line / funnel
             tracks = cycle_turns(sh, raw, ppq, float(path[:, 1].min()))
-    if made is not None and len(made) == len(raw):  # (a piece of a shape with pages, with a velocity of its own)
-        # (read where each note started: a note the cut went through keeps its velocity in both halves, sweep 11-06)
-        at = from0_starts(sh, raw, vel_at if vel_at is not None and len(vel_at) == len(raw) else raw[:, 0], ppq)
-        at = drawn_spots(vel_sh, at, raw[:, 0], t_lo, t_hi)  # (a line drawn over only a cut half's start since)
-        frac = np.clip((at - t_lo) / (t_hi - t_lo), 0, 1) if t_hi > t_lo else np.zeros(len(raw))
-        vel = own_velocities(vel_sh, made, frac)
-    else:
-        carried = vel_at is not None and len(vel_at) == len(raw)
-        # (a cut note's start before a piece's own time: read on the line kept from before it, joined.piece_velocity)
-        at = at0 = from0_starts(sh, raw, vel_at if carried else raw[:, 0], ppq)
-        if carried and piece and not same_vel:  # (a line drawn over only a cut half's start since: there)
-            at = drawn_spots(vel_sh, at, raw[:, 0], t_lo, t_hi)
-        # (a piece's note can also start past the piece's own end, when the cut parts the whole by its path and not by
-        # time: it reads the line kept from after the end too, joined.piece_velocity)
-        far = carried and not same_vel
-        vel = env_velocities(env, at, t_lo, t_hi, min(0.0, float(env[0][0])) if far else 0.0,
-                             max(1.0, float(env[-1][0])) if far else 1.0)
-        was_vel = (vel_sh["cut"].get("vel") or {}) if vel_sh is not sh else {}
-        if far and was_vel.get("vel0") is not None and t_hi > t_lo and (
-                vel_sh.get("vel0"), vel_sh.get("vel1")) == (was_vel.get("vel0"), was_vel.get("vel1")):
-            # (only while its velocity at both ends is still the one it had when cut: a new velocity for the whole
-            # piece reaches every note, test sliced)
-            # (a line drawn on a piece changes only the notes under it: a note whose spot reads the same on its line
-            # as on the line it had when cut keeps the velocity the whole gave it, as before the drawing. A note
-            # starting past the piece's own time took the whole's line; the piece's own line, ended at 1, flattened
-            # it, sweep 572319412)
-            frac = np.clip((at - t_lo) / (t_hi - t_lo), min(0.0, float(env[0][0])), max(1.0, float(env[-1][0])))
-            moved_line = np.abs(env_values(env, frac) - env_values(velocity_env(vel_sh["cut"]["vel"]), frac)) > 1e-6
-            if not moved_line.all():
-                whole_sh = with_whole_velocity(sh, vel_sh)
-                wt = dedupe(np.concatenate(cached_arrays(whole_sh)))[:, 0] * ppq
-                w_lo, w_hi = line_span(whole_sh, ppq, float(wt.min()), float(wt.max()))
-                vel = np.where(moved_line, vel, env_velocities(velocity_env(whole_sh), at0, w_lo, w_hi))
+    vel = env_velocities(env, from0_starts(sh, raw, raw[:, 0], ppq), t_lo, t_hi)
     if sh["kind"] in HZ_KINDS and own is None and (sh.get("hz") or {}).get("tones"):  # Hz bass velocity effects
         got = velocity_parts(sh, ppq, raw[:, 0], raw[:, 2])
         if got is not None:  # (a note with a loudness line drawn: its own velocity instead of the shape's)

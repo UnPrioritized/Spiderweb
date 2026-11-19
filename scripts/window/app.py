@@ -2127,7 +2127,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             sh = with_most(sh, self.all16())
         if "notes" in sh or "cut" in sh:  # (its own overlaps fixed as shown before any tool works on them: heard_way;
             # a cut line piece: its cut halves read as heard, as_heard)
-            sh = as_heard(sh, self.channel_mode.get(), self.heard_rule())
+            sh = as_heard(sh, self.channel_mode.get(), self.heard_rule(), self.keeps_offrange())
         keys = self.keys if keys is None else keys
         key = (shape_key(sh), self.ppq, keys)
         if not edges and keys == self.keys and past_edges(sh, keys, self.ppq) is not None:
@@ -2241,7 +2241,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # (the user's own new steps placed first, so Add between sees a step's order as it'll be kept; the steps it
         # remakes come with their own order: noted as they are, sweep 69812094)
         self.steps_noted()
-        sync_cuts(self.shapes)  # (pieces of one cut shape share its cuts + rows: engine.held_cuts)
+        sync_cuts(self.shapes)  # (pieces of one cut shape share its cuts + rows: cut_share)
         if sync_groups(self.shapes):  # Add between: the steps follow their first / last shape (between.py)
             self.after_idle(self.sync_title)  # (a step changed by hand is a key now)
             self.steps_noted(only_seen=True)
@@ -2940,7 +2940,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         known = self._notes_cache  # (only read in the thread; its own new notes go to job["own"])
         key_took = self._key_took  # (only read in the thread too)
         voiced, wide = self.channel_mode.get() == "auto", self.all16()
-        heard = (self.channel_mode.get(), self.heard_rule())
+        heard = (self.channel_mode.get(), self.heard_rule(), self.keeps_offrange())
 
         def notes_tracks(sh, keys=None, edges=True):
             if job["stop"]:

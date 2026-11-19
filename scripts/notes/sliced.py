@@ -43,6 +43,48 @@ def keys_of(sh):
     return {"custom": CUSTOM_OUTLINE, "funnel": FUNNEL_OUTLINE}.get(sh["kind"], OUTLINE)
 
 
+SET_SKIP = set(OUTLINE) | set(VELOCITY) | set(WHOLE_TOOLS) | {"cut", "name", "cut_of", "colour_cut", "sel"}
+
+
+def settings_of(sh):
+    """A line's settings besides its outline, velocity, glue / pages (its Sustain, Gate steps, Colours, ...): a cut
+    keeps the whole's (whole["_set"]) and each piece's right after the cut (cut["set_at"]), so a piece's notes come
+    from the whole exactly as it was, its own changes since on top (notes/cut_share.py; a cut rewrites some per
+    piece: a Gate subtract / extend graph across the shape, Sustain stops, "only touching" marks)."""
+    return {k: json.loads(json.dumps(v)) for k, v in sh.items() if k not in SET_SKIP and not k.startswith("_")}
+
+
+GONE = "\0gone"  # (own_was: a setting the piece didn't have right after its cut)
+
+
+def own_was(*pieces):
+    """What these pieces changed since their cut: {setting: its value right after the cut (GONE: none)}; a piece cut
+    again / joined hands it to the new pieces (cut["own_was"]), so their own change stays theirs (hunt 2026-11-19:
+    Sustain off on a piece came back after slicing it again). None: nothing changed."""
+    out = {}
+    for sh in pieces:
+        cut = sh.get("cut") or {}
+        at = cut.get("set_at")
+        if not isinstance(at, dict):
+            out.update(cut.get("own_was") or {})
+            continue
+        now = settings_of(sh)
+        for k in set(now) | set(at):
+            if now.get(k) != at.get(k):
+                out.setdefault(k, json.loads(json.dumps(at[k])) if k in at else GONE)
+    return out or None
+
+
+def whole_value(sh, key):
+    """A piece's setting as its WHOLE had it, when the piece hasn't changed it since the cut (a cut rewrites a Gate
+    subtract / extend graph per piece: Join compares the whole's, hunt 2026-11-19), else its own."""
+    cut = sh.get("cut") or {}
+    ws, at = (cut.get("whole") or {}).get("_set"), cut.get("set_at")
+    if isinstance(ws, dict) and isinstance(at, dict) and sh.get(key) == at.get(key):
+        return ws.get(key)
+    return sh.get(key)
+
+
 def snap_piece(sh):
     """A line cut through its notes while it had Notes by snap (knife_in_two marks it "sided"): drawn and picked on
     its side of the knife only, like a funnel piece, also once unticked (hunt 2026-10-28: it drew the whole line over
@@ -376,7 +418,9 @@ def source(sh):
     same_vel = cut.get("vel") is not None and close(velocity(sh), cut["vel"])
     own = keys_of(sh) + VELOCITY + (GATE if sh["kind"] == "custom" else ()) + WHOLE_TOOLS
     src = {k: v for k, v in sh.items() if k not in own and k != "cut"}
-    src.update(outline(moved(cut["whole"], d)))
+    whole = cut["whole"]  # (its outline: the moved points are a new list already, only the rest copied; writing a long
+    src.update({k: json.loads(json.dumps(whole[k])) for k in keys_of(whole) if k in whole and k != "pts"})
+    src["pts"] = [[b + d[0], p + d[1]] for b, p in whole["pts"]]  # line's points out per piece made slicing crawl)
     src.update(tools(cut["whole"]))
     if src.get("_glue_off"):  # (the piece's Glue is switched off: the whole's too, steps.expanded)
         src.pop("glue", None)
@@ -499,7 +543,7 @@ def clean_cuts(cuts):
 
 def sync_cuts(shapes):
     """Every line piece of one cut shape (cut["id"]) gets the SAME list of the cuts parting its pieces, with the rows
-    each took in (LASSO = ONLY ROWS IN ITS BOX, user 2026-11-19; engine.held_cuts): the cuts are the pieces' part
+    each took in (LASSO = ONLY ROWS IN ITS BOX, user 2026-11-19; cut_share): the cuts are the pieces' part
     ends still there (a join took one away; a cut on a sibling added one), rows from any piece that knows them
     (else None = every row, a cut from before the lists). So no two pieces both hold a held note or both leave it
     out (hunt 2026-11-19). Changes only pieces whose list differs (a new cut dict). -> changed anything."""
@@ -518,22 +562,50 @@ def sync_cuts(shapes):
         if last is not None and len(last) == len(sig) and all(a[0] is b[0] and a[1] == b[1] for a, b in zip(last, sig)):
             seen[key] = last
             continue
-        ends, rows = set(), {}
+        ends, rows, exact = set(), {}, {}
         for i in members:
             c = shapes[i]["cut"]
             a, b = c["part"]
-            ends.update(round(float(u), 9) for u in (a, b) if u)
+            for u in (a, b):
+                if u:
+                    ends.add(round(float(u), 9))
+                    exact.setdefault(round(float(u), 9), float(u))  # (the pieces' own ends as they are: cut_share
+                    # compares them with its parts' owners, a rounded one fell inside the piece before)
             for u, r in c.get("cuts") or ():
                 if r is not None:
                     rows.setdefault(round(float(u), 9), r)
         # (only where a Lasso cut it: with every cut taking in every row, the piece's own ends say it all, and a line
         # sliced into hundreds of pieces would keep hundreds of cuts on each)
         want = [[u, rows.get(u)] for u in sorted(ends)] if any(u in rows for u in ends) else None
+        from notes import cut_share
+        full = None
+        if cut_share.SHARE[0]:  # (pieces sharing the whole's notes read EVERY cut of their shape, cut["group"]: one
+            full = [[exact[u], rows.get(u)] for u in sorted(ends)]  # list object shared by all its pieces, PLAN.md)
+        first = shapes[members[0]]["cut"].get("whole")
         for i in members:
             c = shapes[i]["cut"]
-            if (c.get("cuts") or None) != want:
-                shapes[i]["cut"] = dict(c, cuts=json.loads(json.dumps(want))) if want else \
-                    {k: v for k, v in c.items() if k != "cuts"}
+            if c.get("whole") is not first and c.get("whole") == first:  # (equal wholes made ONE shared dict (a file
+                c = shapes[i]["cut"] = dict(c, whole=first)  # load cleans each piece's): undo steps keep it once
+                changed = True
+            if "set_at" not in c and isinstance((c.get("whole") or {}).get("_set"), dict):
+                # (the piece's settings right after its cut (every cut is followed by this): what it changes later is
+                # its own, on top of the whole's, cut_share; settings_of. What the piece it came from had changed
+                # (own_was) stays a change)
+                at = settings_of(shapes[i])
+                for k, v in (c.get("own_was") or {}).items():
+                    if v == GONE:
+                        at.pop(k, None)
+                    else:
+                        at[k] = v
+                c = shapes[i]["cut"] = dict({k: v for k, v in c.items() if k != "own_was"}, set_at=at)
+                changed = True
+            if (c.get("cuts") or None) != want or (c.get("group") or None) != full:
+                c = dict(c, cuts=json.loads(json.dumps(want))) if want else {k: v for k, v in c.items() if k != "cuts"}
+                if full:
+                    c["group"] = full
+                else:
+                    c.pop("group", None)
+                shapes[i]["cut"] = c
                 changed = True
         seen[key] = [(shapes[i]["cut"], str(shapes[i]["cut"]["part"])) for i in members]
     _SYNCED.clear()
@@ -995,6 +1067,8 @@ def knife_in_two(sh, halves, a, b, segs, hits=()):
                                                                                cut.get("knife", []))]
         own = cut.get("own_vel") or cut.get("vel") is not None and not same_vel
         whole = dict(outline(src), **velocity(cut["whole"]), **tools(cut["whole"]), **inner(src))
+        if not custom and isinstance(cut["whole"].get("_set"), dict):  # (the whole's own settings: settings_of)
+            whole["_set"] = cut["whole"]["_set"]
         if custom:
             whole.update(velocity(src, GATE))
         if cut.get("mould"):
@@ -1003,6 +1077,8 @@ def knife_in_two(sh, halves, a, b, segs, hits=()):
     else:
         part, marks, knives, own = [0.0, None], [], [], False
         whole = dict(outline(sh), **velocity(sh), **tools(sh))
+        if not custom:
+            whole["_set"] = settings_of(sh)
         if custom:
             whole.update(velocity(sh, GATE))
         for h in halves:  # (the whole's glue / pages are done before the cut now)
@@ -1019,6 +1095,9 @@ def knife_in_two(sh, halves, a, b, segs, hits=()):
         knife = knives + [[float(a[0]), float(a[1]), float(b[0] - a[0]), float(b[1] - a[1]), sd]]
         h["cut"] = {"whole": whole, "was": outline(h), "part": needed_halves(knife) if custom else part, "vel": None,
                     "marks": mine + [new]}
+        changes = own_was(sh) if got and not custom else None  # (the piece cut again: its changes stay the halves')
+        if changes:
+            h["cut"]["own_was"] = changes
         if custom:
             h["cut"]["gate"] = velocity(h, GATE)
         else:
@@ -1072,124 +1151,6 @@ def beat_on(a, r):
         return a[0][0] if len(a) else 0.0
     i = max(0, min(int(r), len(a) - 2))
     return a[i][0] + (a[i + 1][0] - a[i][0]) * (r - i)
-
-
-def cut_through(whole, raw, spots, tracks, part, ppq, came=None, floor=None, heard=False):
-    """A line piece's notes (the whole's, before its part is kept): the note sounding at each of the piece's cuts is
-    cut in two there (user: slicing adds a note at the cut), the second half starting on the cut's spot, so the piece
-    before keeps the first half and the piece after starts with the second (same key and colour).
-    floor: cut["from"], the starts of the pieces this one was cut from (oldest first): each start is cut again here
-    as that piece cut it, and at each start only notes of the piece before are cut (a long page note of an EARLIER
-    piece sounding there stays whole in its own piece, which never learns of the new cut; case 488603472).
-    came: "Notes by snap" steps, the line note each came from (start, end): the steps of the line note sounding at
-    the cut that start after it go to the piece after (they all share that note's spot); a step held on its own is
-    cut in two where the knife goes through it (user 2026-10-28: "a knife sliced through"), a stack of keys goes
-    by key row."""
-    paths = paths_of(whole)
-    chain = [u for u in floor or () if u and (part[0] is None or u < part[0])]
-    starts = chain + ([part[0]] if part[0] else [])
-    low = dict(zip(starts[1:], starts))  # (each start: the start before it, only notes from there on are cut)
-    for c in starts + ([part[1]] if part[1] else []):
-        k = int(c // BIG)
-        if k >= len(paths) or len(paths[k]) < 2:
-            continue
-        a = paths[k]
-        r = c - k * BIG
-        i = max(0, min(int(r), len(a) - 2))
-        beat, key = a[i] + (a[i + 1] - a[i]) * (r - i)
-        t = int(round(float(beat) * ppq))
-        mine = spots >= low[c] if c in low and c != part[1] else True
-        if c == part[1] and starts:
-            # (this piece's END cut looks at the same notes as the piece after, whose START cut (above) sees only
-            # notes from the piece before on: else the two pieces cut different notes at one tick, one reading
-            # the fallback of a key further off, and a note stayed whole before it with its tail made after;
-            # sweep case 872318617)
-            mine = spots >= starts[-1]
-        if came is not None:
-            over = mine & (spots < c) & (came[:, 0] < t) & (came[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 1)
-            if over.any():
-                spots = spots.copy()
-                spots[over & (spots == spots[over].max()) & (raw[:, 0] >= t)] = c
-            # a stacked step goes by key row (each key to the piece where the line reaches it: user 2026-10-28, a flat
-            # knife across a steep stack separates the keys above from those below); only a key held on its own
-            # (a flat part, one key a step) is cut in two in time where the knife goes through it
-            row = key + 0.5 - np.floor(key + 0.5)
-            if min(row, 1 - row) < 1e-6:
-                continue  # (the knife on the edge between two rows: no note under it)
-            q = int(np.floor(key + 0.5))
-            idx = np.flatnonzero((raw[:, 0] < t) & (raw[:, 1] > t) & (raw[:, 2] == q))
-            if len(idx) != 1:
-                continue
-            same = (raw[:, 0] == raw[idx[0], 0]) & (np.abs(raw[:, 2] - q) == 1)
-            if same.any():
-                continue  # (a stack: by key row)
-            second = raw[idx].copy()
-            second[:, 0] = t
-            raw[idx, 1] = t
-            was = spots[idx]
-            spots = spots.copy()
-            spots[idx] = np.minimum(was, np.nextafter(c, -np.inf))
-            raw = np.concatenate([raw, second])
-            spots = np.append(spots, np.maximum(was, c))
-            came = np.concatenate([came, came[idx]])
-            if tracks is not None:
-                tracks = np.append(tracks, tracks[idx])
-            continue
-        near = np.abs(raw[:, 2] - key) <= 1
-        late = np.flatnonzero(mine & (spots < c) & (raw[:, 0] == t) & (raw[:, 1] > t) & near)
-        if len(late):  # (starting under half a tick before the cut, rounded onto it: nothing of it is before the cut,
-            # it goes to the piece after whole, partial sweep 11-02: it stayed with the piece before, uncut)
-            ks = (spots[late] // BIG).astype(np.int64)
-            rs = spots[late] - ks * BIG
-            exact = np.array([float(beat_on(paths[kk], rr)) for kk, rr in zip(ks.tolist(), rs.tolist())]) * ppq
-            # (an upright part: its keys start right on it, they stay; a note starting at the cut's own spot, a
-            # slanted line cut where its note begins, is not before the cut at all: it goes after; triage
-            # 2026-11-13: a float hair under the cut's spot left a 1-tick sliver before it and lost the rest)
-            late = late[(exact < t - 1e-9) | (c - spots[late] < 1e-6)]
-            if len(late):
-                spots = spots.copy()
-                spots[late] = c
-        hit = mine & (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & near
-        if not hit.any():
-            # (a curve's notes are spread evenly in time, so the one sounding at the cut can be a hair more than a
-            # key from where the drawing is: its second half went missing, sweep 319217754)
-            hit = mine & (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 2)
-        if not hit.any():
-            continue
-        at = np.flatnonzero(hit)
-        j = int(at[np.argmax(spots[hit])])  # (the one started last along the path)
-        sound = None
-        # (Single's overlap rule: the note that STARTS last sounds, the earlier ones are cut where
-        # it starts and the later one is stretched to the earlier's end if shorter (channels.md "Same-pitch
-        # overlap"). A curve that doubles back has an earlier note later along the path: cutting that one left
-        # the sounding note whole, and the cut half took the quieter note's velocity. So the cut goes through the
-        # note starting last that crosses it, and the half after it reads the velocity of the note SOUNDING at
-        # the cut (the last start on the key, maybe a short one stretched over the cut), slice-1.md "keeps its
-        # velocity in both halves" / "a cut where a stretched loud note covers a quiet one keeps both pieces loud")
-        # (LINES' OWN OVERLAPS, user 2026-11-19: only where the Channels mode fixes them (heard: not As drawn, not
-        # held); As drawn keeps the overlap as stored, the cut as before)
-        if heard:
-            late = at[raw[at, 0] == raw[at, 0].max()]
-            j = int(late[np.argmax(spots[late])])
-        before = (raw[:, 2] == raw[j, 2]) & (raw[:, 0] < t)  # (also notes of the pieces after: they sound too)
-        if heard and before.any():
-            p = np.flatnonzero(before)
-            p = p[raw[p, 0] == raw[p, 0].max()]
-            p = int(p[np.argmax(spots[p])])
-            if p != j and raw[p, 0] > raw[j, 0] and raw.shape[1] > 3 and (heard != "split" or raw[p, 1] > t):
-                # (split around: a later note doesn't stretch, so it gives its velocity only while it still sounds
-                # at the cut; the earlier note's leftover is what is heard after it, hunt 2026-11-19)
-                sound = raw[p, 3]
-        second = raw[j:j + 1].copy()  # (any other columns, a velocity, go along)
-        second[0, 0] = t
-        if sound is not None:
-            second[0, 3] = sound
-        raw = np.concatenate([raw, second])
-        raw[j, 1] = t
-        spots = np.append(spots, c)
-        if tracks is not None:
-            tracks = np.append(tracks, tracks[j])
-    return raw, spots, tracks
 
 
 def spot_of(sh, at, scale, part=None):
@@ -1269,12 +1230,16 @@ def cut_in_two(sh, halves, at, scale, mark):
         # (its velocities changed since it was cut: the halves keep their own, cut from its)
         own = cut.get("own_vel") or cut.get("vel") is not None and not same_vel
         whole = dict(outline(cut["whole"]), **velocity(cut["whole"]), **tools(cut["whole"]), **inner(cut["whole"]))
+        if isinstance(cut["whole"].get("_set"), dict):  # (the whole's own settings, as when first cut)
+            whole["_set"] = cut["whole"]["_set"]
+        if whole == cut["whole"]:  # (the same whole: the SAME dict, shared with the other pieces; an undo step
+            whole = cut["whole"]  # keeps one whole for them all, history._kept_wholes; never changed in place)
         # (cut through its notes by the Slice tool before: both halves keep that cut)
         knives = [[b0, k0, db, dk, sd] for b0, k0, db, dk, sd in cut.get("knife", [])]
     else:
         d = (0.0, 0.0)
         src, part, marks, own, knives = sh, [0.0, None], [], False, []
-        whole = dict(outline(sh), **velocity(sh), **tools(sh))
+        whole = dict(outline(sh), **velocity(sh), **tools(sh), _set=settings_of(sh))
         for h in halves:  # (the whole's glue / pages are done before the cut now)
             for k in WHOLE_TOOLS:
                 h.pop(k, None)
@@ -1298,6 +1263,9 @@ def cut_in_two(sh, halves, at, scale, mark):
         was = outline(h) if not (d[0] or d[1]) else moved(outline(h), (-d[0], -d[1]))
         h["cut"] = {"whole": whole, "was": was, "part": [a, b], "vel": None, "marks": mine + [new],
                     "cuts": json.loads(json.dumps(sorted(cuts, key=lambda c: c[0])))}
+        changes = own_was(sh) if got else None  # (what the piece cut again had changed stays the halves' own)
+        if changes:
+            h["cut"]["own_was"] = changes
         floor = list(cut.get("from") or []) if got else []  # (cut_through's floor: the starts it came from)
         if a == uc and part[0]:
             floor.append(part[0])
@@ -1454,8 +1422,13 @@ def rejoined(olds, new, join=None):
         was = outline(moved(new, (-ds[0][0], -ds[0][1])))
     if src.get("cut"):
         whole["cut"] = json.loads(json.dumps(src["cut"]))
+    if isinstance(olds[0]["cut"]["whole"].get("_set"), dict):  # (the whole's own settings: settings_of)
+        whole["_set"] = olds[0]["cut"]["whole"]["_set"]
     out = dict(new, cut={"whole": whole, "was": was, "part": list(part), "vel": None,
                          "marks": list(marks.values())})
+    changes = own_was(*olds)  # (what the joined pieces had changed since their cut stays the bigger piece's own)
+    if changes:
+        out["cut"]["own_was"] = changes
     known = {}  # (the pieces' cuts + rows: sync_cuts keeps the ones still parting pieces)
     for sh in olds:
         for u, r in sh["cut"].get("cuts") or ():
@@ -1809,6 +1782,13 @@ def clean_cut(c):
     out = {"whole": dict(outline(whole), **velocity(whole), **(velocity(whole, GATE) if whole["kind"] == "custom"
                                                                else {}), **tools(whole), **inner(whole)),
            "was": outline(was), "part": part, "vel": snaps["vel"], "marks": marks}
+    try:  # (the whole's own settings and the piece's right after the cut, settings_of: cleaned like a shape's)
+        for at, key in ((c["whole"], "_set"), (c, "set_at")):  # (the file's whole: the cleaned one has no "_set")
+            if isinstance(at.get(key), dict) and whole["kind"] != "custom":
+                got = settings_of(clean_shape(dict(outline(whole), **velocity(whole), **at[key])) or {})
+                (out["whole"] if key == "_set" else out)[key] = got
+    except (KeyError, TypeError, ValueError, IndexError, AttributeError):
+        pass
     if whole["kind"] == "custom":
         out["gate"] = snaps["gate"]
     elif knife:
