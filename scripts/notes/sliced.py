@@ -1012,7 +1012,7 @@ def beat_on(a, r):
     return a[i][0] + (a[i + 1][0] - a[i][0]) * (r - i)
 
 
-def cut_through(whole, raw, spots, tracks, part, ppq, came=None, floor=None):
+def cut_through(whole, raw, spots, tracks, part, ppq, came=None, floor=None, heard=False):
     """A line piece's notes (the whole's, before its part is kept): the note sounding at each of the piece's cuts is
     cut in two there (user: slicing adds a note at the cut), the second half starting on the cut's spot, so the piece
     before keeps the first half and the piece after starts with the second (same key and colour).
@@ -1094,9 +1094,32 @@ def cut_through(whole, raw, spots, tracks, part, ppq, came=None, floor=None):
             hit = mine & (spots < c) & (raw[:, 0] < t) & (raw[:, 1] > t) & (np.abs(raw[:, 2] - key) <= 2)
         if not hit.any():
             continue
-        j = int(np.flatnonzero(hit)[np.argmax(spots[hit])])  # (the one started last along the path)
+        at = np.flatnonzero(hit)
+        j = int(at[np.argmax(spots[hit])])  # (the one started last along the path)
+        sound = None
+        # (Single's overlap rule: the note that STARTS last sounds, the earlier ones are cut where
+        # it starts and the later one is stretched to the earlier's end if shorter (channels.md "Same-pitch
+        # overlap"). A curve that doubles back has an earlier note later along the path: cutting that one left
+        # the sounding note whole, and the cut half took the quieter note's velocity. So the cut goes through the
+        # note starting last that crosses it, and the half after it reads the velocity of the note SOUNDING at
+        # the cut (the last start on the key, maybe a short one stretched over the cut), slice-1.md "keeps its
+        # velocity in both halves" / "a cut where a stretched loud note covers a quiet one keeps both pieces loud")
+        # (LINES' OWN OVERLAPS, user 2026-11-19: only where the Channels mode fixes them (heard: not As drawn, not
+        # held); As drawn keeps the overlap as stored, the cut as before)
+        if heard:
+            late = at[raw[at, 0] == raw[at, 0].max()]
+            j = int(late[np.argmax(spots[late])])
+        before = (raw[:, 2] == raw[j, 2]) & (raw[:, 0] < t)  # (also notes of the pieces after: they sound too)
+        if heard and before.any():
+            p = np.flatnonzero(before)
+            p = p[raw[p, 0] == raw[p, 0].max()]
+            p = int(p[np.argmax(spots[p])])
+            if p != j and raw[p, 0] > raw[j, 0] and raw.shape[1] > 3:
+                sound = raw[p, 3]
         second = raw[j:j + 1].copy()  # (any other columns, a velocity, go along)
         second[0, 0] = t
+        if sound is not None:
+            second[0, 3] = sound
         raw = np.concatenate([raw, second])
         raw[j, 1] = t
         spots = np.append(spots, c)

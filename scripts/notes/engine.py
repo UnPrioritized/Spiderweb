@@ -3160,7 +3160,8 @@ def _kind_notes_tracks(sh, ppq, keys):
                 raw, spots, tracks = whole_tools(src, raw, spots, tracks, ppq)
                 came = None  # (the pages' notes aren't the steps any more)
                 raw = np.column_stack([raw, raw[:, 0]])  # (each page note's start rides along through the cuts)
-            raw, spots, tracks = cut_through(src, raw, spots, tracks, part, ppq, came, floor)
+            raw, spots, tracks = cut_through(src, raw, spots, tracks, part, ppq, came, floor,
+                                             bool(sh.get("_cut_heard")))
             mine = in_part(spots, part)
             raw, tracks = raw[mine], tracks[mine] if tracks is not None else None
             if knife:

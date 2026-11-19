@@ -20,6 +20,7 @@ from notes import hz_cc
 from notes.passengers import spans as passenger_spans
 from notes.paths import rows_up_to
 from notes.sustain import sustain_on
+from notes.tumour import LINE_KINDS
 from roll.roll_draw import track_ranks
 
 
@@ -635,7 +636,14 @@ def as_heard(sh, mode, rule):
     """sh as its notes are made in this Channels mode: a notes shape whose own overlaps the mode fixes carries the
     way ("_heard", engine.heard_way / heard_notes), so it's made, kept and looked up apart from the other modes."""
     way = heard_way(sh, mode, rule)
-    return dict(sh, _heard=way) if way else sh
+    if way:
+        return dict(sh, _heard=way)
+    if (mode != "raw" and isinstance(sh.get("cut"), dict) and sh.get("kind") in LINE_KINDS and not sustain_on(sh)
+            and sh.get("held") is not True):
+        # (a cut LINE piece where the mode fixes the line's own overlaps: a cut half reads the velocity heard there,
+        # sliced.cut_through heard=; LINES' OWN OVERLAPS, user 2026-11-19)
+        return dict(sh, _cut_heard=True)
+    return sh
 
 
 def fix_rows(rows, way="stretch"):

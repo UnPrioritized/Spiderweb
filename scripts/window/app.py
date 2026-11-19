@@ -2125,7 +2125,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             sh = recolour_alone(one_voice(sh))  # Domino paste keeps its tracks, so its Recolour stays)
         elif "recolour" in sh:  # (a colour set holds 16 with channel 10 used)
             sh = with_most(sh, self.all16())
-        if "notes" in sh:  # (its own overlaps fixed as shown before any tool works on them: engine.heard_way)
+        if "notes" in sh or "cut" in sh:  # (its own overlaps fixed as shown before any tool works on them: heard_way;
+            # a cut line piece: its cut halves read as heard, as_heard)
             sh = as_heard(sh, self.channel_mode.get(), self.heard_rule())
         keys = self.keys if keys is None else keys
         key = (shape_key(sh), self.ppq, keys)
@@ -2948,7 +2949,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 sh = recolour_alone(one_voice(sh))
             elif "recolour" in sh:
                 sh = with_most(sh, wide)
-            if "notes" in sh:  # (as App.notes_cache_key)
+            if "notes" in sh or "cut" in sh:  # (as App.notes_cache_key)
                 sh = as_heard(sh, *heard)
             keys = key[2] if keys is None else keys
             k = (shape_key(sh), key[1], keys)
