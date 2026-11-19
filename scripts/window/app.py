@@ -3655,6 +3655,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.push_undo(name=name)
         first = len(self.shapes)
         left_out = 0
+        # (moved by WHOLE ticks: a part of a tick moved where the notes' edges round, so a copy made other notes
+        # than its original, sweep 2026-11-19)
+        shift = round(shift * self.ppq) / self.ppq
         for sh in shapes:
             new = copy.deepcopy(sh)
             new["pts"] = [[b + shift, p] for b, p in new["pts"]]
