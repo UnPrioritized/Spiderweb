@@ -18,7 +18,8 @@ from notes.gateflip import is_pasted_flipped, mirrored_runs
 from notes.pattern import SOFT_DEFAULT, flattened, loop_points
 from notes.pen import band_reach
 from notes.ripples import free_span, grows_free
-from notes.sliced import note_drawn
+from notes.sliced import note_drawn, source
+from notes.tumour import LINE_KINDS
 from roll.roll_shared import (ALT, CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, SELECTED_COLOR, SLOT_COLORS,
                               bind_double_right, box_kind, cached_path, draw_boxes, fade, grab_while_panning, note_colours, ruler_boxes,
                               set_cursor, slot_colours)
@@ -45,6 +46,12 @@ def time_span(sh, ppq):
     if got:
         return got[0] / ppq, got[1] / ppq
     bs = [b for b, _ in cached_path(sh)]
+    if max(bs) - min(bs) < 1e-6 and sh.get("cut") and sh["kind"] in LINE_KINDS:
+        # (a piece whose own outline shrank to a point has no time of its own: its line runs over its whole's, where
+        # the engine reads it, or a line drawn on it had no room and flattened its other notes)
+        got = source(sh)
+        if got:
+            bs = [b for b, _ in cached_path(got[0])]
     return min(bs), max(bs)
 
 
@@ -56,7 +63,9 @@ def with_lead(sh, base, pts):
     if not sh.get("cut") or not any(p[0] < 0 for p in base):
         return tidy_env(env)
     ua = pts[0][0]
-    if ua > 0:
+    # (a drawing wholly in the lead (before the piece's start: it only reaches notes a cut shortened) keeps the lead
+    # around it too: tidy_env cut the drawing away and flattened the line before it, sweep 572319412)
+    if ua > 0 or pts[-1][0] < 0:
         return [p for p in env if p[0] < 0] + tidy_env([p for p in env if p[0] >= 0])
     env = [p for p in env if p[0] >= ua]
     if len(env) > 1 and env[0][0] == env[1][0]:  # (paint_env's value just before the drawing: not wanted)

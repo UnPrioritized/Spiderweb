@@ -3068,6 +3068,9 @@ def _kind_notes_tracks(sh, ppq, keys):
         raw = snap_steps(note_array(raw, 3), by_snap * ppq, int(np.floor(float(path[:, 0].min()) + 0.5)),
                          int(np.floor(float(path[:, 0].max()) + 0.5)), sh.get("by_snap_end", "cut"))[0]
     t_lo, t_hi = line_span(vel_sh, ppq, float(path[:, 0].min()), float(path[:, 0].max()))
+    if piece and vel_sh is not sh and t_hi - t_lo < 1e-6 * ppq:  # (a piece whose own outline shrank to a point has no
+        wt = np.concatenate(cached_arrays(sh))[:, 0] * ppq  # time of its own: its line runs over the whole's, as
+        t_lo, t_hi = float(wt.min()), float(wt.max())  # velocity.time_span does; sweep 770590132)
     env = velocity_env(vel_sh)
     raw = note_array(raw, 3)
     if sh["kind"] in HZ_KINDS and sh.get("hz") and "notes" not in sh and not piece:  # (a Hz bass's Note length)
