@@ -17,7 +17,7 @@ import json
 
 import numpy as np
 
-from notes.sliced import BIG, beat_on, moved_by, source, spotted_notes, thick_of, tools
+from notes.sliced import BIG, beat_on, moved_by, source, spotted_notes, thick_of, tools, wraps
 
 SHARE = [True]  # (always: the old way each piece re-made its notes is gone, PLAN stage E)
 _wholes = {}  # (src json, ppq, keys) -> the whole made once for all its pieces
@@ -207,7 +207,10 @@ def _share(sh, ppq, keys):
         got = _keep(_parts, pkey, _cut_up(whole, marks, held, way, ppq, beat0, kept))
     notes, tracks, owner, start0 = got
     a, b = part
-    mine = (owner >= (a if a else -np.inf)) & ((owner < b) if b is not None else True)
+    if wraps(part):  # (across a closed line's start: from a to the end, then from the start to b)
+        mine = (owner >= a) | (owner < b)
+    else:
+        mine = (owner >= (a if a else -np.inf)) & ((owner < b) if b is not None else True)
     out, start0 = notes[mine], start0[mine]
     tracks = None if tracks is None else tracks[mine]
     knife = sh["cut"].get("knife")
@@ -216,6 +219,9 @@ def _share(sh, ppq, keys):
         from notes.sliced import knife_cut
         got, tracks = knife_cut(np.column_stack([out, start0]), tracks, knife, moved_by(sh), ppq)
         out, start0 = np.ascontiguousarray(got[:, :4]), got[:, 4]
+        if way and len(out):  # (a knife half takes the velocity heard there too, LINES' OWN OVERLAPS: it also cuts
+            # a note another note on its key already took over, the halves then start together, case 172320124)
+            out = _knife_heard(whole[1], out, start0, way, beat0, kept)
     mould = sh["cut"].get("mould")
     if mould and len(out):  # (cut with a shape, an old cookie cutter piece: mould.py)
         from notes.mould import mould_cut
@@ -290,6 +296,23 @@ def _heard_velocity(notes, j, t, way, beat0, kept):
     if p != j and starts.max() >= s_j and (way != "split" or notes[p, 1] > t):
         return int(notes[p, 3])
     return None
+
+
+def _knife_heard(wnotes, out, start0, way, beat0, kept):
+    """out's parts starting later than their note did (cut halves) with _heard_velocity's velocity, each found in
+    the whole's notes by its start, key and end."""
+    cut = np.flatnonzero(out[:, 0] > start0)
+    if not len(cut):
+        return out
+    out = out.copy()
+    for i in cut.tolist():
+        k, s, e = int(out[i, 2]), int(start0[i]), int(out[i, 1])
+        j = np.flatnonzero((wnotes[:, 0] == s) & (wnotes[:, 2] == k) & (wnotes[:, 1] >= e))
+        if len(j):
+            v = _heard_velocity(wnotes, int(j[0]), int(out[i, 0]), way, beat0, kept)
+            if v is not None:
+                out[i, 3] = v
+    return out
 
 
 def _cut_up(whole, marks, held, way, ppq, beat0=0, kept=False):

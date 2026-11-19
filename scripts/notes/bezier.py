@@ -420,6 +420,40 @@ def nearest(pts, to_screen, x, y, n=64, gaps=()):
     return best
 
 
+def nearest_exact(pts, to_screen, x, y, n=64, gaps=()):
+    """nearest(), the curve point found exactly: every sampled dip refined (a Slice's crossing: on a big spiral
+    part 64 samples sat far apart, the nearest one on another loop; case 671275067)."""
+    def dist(seg, t):
+        sx, sy = to_screen(seg_point(*seg, t))
+        return math.hypot(sx - x, sy - y)
+    dips, low = [], math.inf
+    for s, seg in enumerate(segments(pts)):
+        if s in gaps:
+            continue
+        xy = [to_screen(seg_point(*seg, i / n)) for i in range(n + 1)]
+        d = [math.hypot(sx - x, sy - y) for sx, sy in xy]
+        step = max(math.dist(xy[i], xy[i + 1]) for i in range(n))  # (the true nearest is at most this much nearer)
+        low = min(low, min(d))
+        dips += [(d[i] - step, s, seg, i) for i in range(n + 1)
+                 if not ((i and d[i - 1] < d[i]) or (i < n and d[i + 1] < d[i]))]
+    best = None
+    for reach, s, seg, i in sorted(dips, key=lambda x: x[0]):
+        if reach > low or (best is not None and reach > best[2]):
+            continue  # (can't come nearer than what's found)
+        lo, hi = max(0.0, (i - 1) / n), min(1.0, (i + 1) / n)
+        for _ in range(40):  # (golden section)
+            m1, m2 = hi - (hi - lo) * 0.618034, lo + (hi - lo) * 0.618034
+            if dist(seg, m1) < dist(seg, m2):
+                hi = m2
+            else:
+                lo = m1
+        t = (lo + hi) / 2
+        got = (s, t, dist(seg, t))
+        if best is None or got[2] < best[2]:
+            best = got
+    return best
+
+
 def resample(points, n=300):
     """The polyline as n+1 points evenly spaced along its length."""
     lens = [0.0]

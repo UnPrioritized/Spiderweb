@@ -16,7 +16,7 @@ from notes.arc import arc_circle, arc_points
 from notes.between import group_of, turns as between_turns
 from notes.convert import (CAN_TURN, has_edge_strum, losses, originals, shared_settings, to_live, velocity_changed,
                            without_edge_strums)
-from notes.bezier import nearest, split
+from notes.bezier import nearest, nearest_exact, split
 from notes.custom import notes_shape, pack_notes, unpack_notes
 from notes.even_steps import even_joined
 from notes.fillgaps import fill_gaps as filled, needs_fill
@@ -42,7 +42,8 @@ from notes.pattern import bake_shape, has_formula
 from notes.lasso import inside_point, knife_spans, lasso_notes, loop_crossings, path_middle, rows_taken, takes, touches
 from notes.slice import EPS, clip_segment, crossings, slice_custom, slice_notes
 from notes.pen import band_reach, thick_of
-from notes.sliced import (CANT, carry_drawn, completed, cut_group, cut_in_two, keep_velocity, keep_was, keyed_pieces,
+from notes.sliced import (BIG, CANT, carry_drawn, completed, cut_group, cut_in_two, keep_velocity, keep_was, keyed_pieces,
+                          line_crossings, paths_of, source, spot_inside,
                           knife_hits, knife_in_two, moved_by, notes_across, rejoined, slice_in_two, split_here_ok, tooled)
 from notes.smooth import smooth_path
 from notes.joined import (custom_groups, join_shapes, join_velocity, joined_end_dot, piece_velocity, sections,
@@ -1057,17 +1058,18 @@ class JoinSplit:
         self.status.config(text=tr("join_split.split_in_two_baked" if baked else "join_split.split_in_two"))
         self.tips.show("join", wait=True)
 
-    def cut_at(self, sh, at, mark=None, exact=False, spot=None):
+    def cut_at(self, sh, at, mark=None, exact=False, spot=None, u=None):
         """A line kind cut in two at the spot at (x, y on screen) -> its two halves, or None (too near an end).
         They're pieces that keep their notes (sliced.py); mark: the cut's mark ({"kind": "slice", "dir": ...}; default
         Split here's scissors). exact (Slice / Lasso: where their line crosses it): never moved onto a corner near it
         (a right-click is). spot: that crossing (beat, key): the notes are cut there, not where the curve's drawing
-        was split (found to the nearest of 64 points a part: a Slice cut a curve's note 2 ticks off, sweep 53101035)."""
+        was split (found to the nearest of 64 points a part: a Slice cut a curve's note 2 ticks off, sweep 53101035).
+        u: that crossing's spot on the whole's path (sliced.line_crossings)."""
         got = self._cut_at(sh, at, exact)
         if got:
             roll = self.roll
             scale = (abs(roll.t2x(1) - roll.t2x(0)), abs(roll.p2y(0) - roll.p2y(1)))
-            cut_in_two(sh, got, got[0]["pts"][-1] if spot is None else spot, scale, mark or {"kind": "split"})
+            cut_in_two(sh, got, got[0]["pts"][-1] if spot is None else spot, scale, mark or {"kind": "split"}, u)
         return got
 
     def _cut_at(self, sh, at, exact=False):
@@ -1077,7 +1079,7 @@ class JoinSplit:
             bake_shape(sh)
         if sh["kind"] == "curve":
             c = copy.deepcopy(sh)
-            seg, t, _ = nearest(sh["pts"], roll.to_xy, at.x, at.y, gaps=sh.get("gaps", ()))
+            seg, t, _ = (nearest_exact if exact else nearest)(sh["pts"], roll.to_xy, at.x, at.y, gaps=sh.get("gaps", ()))
             a = self.anchor_near(sh["pts"], seg, at, exact)
             if a is None:  # a new anchor there first
                 c["pts"] = split(sh["pts"], seg, t)
@@ -1160,12 +1162,14 @@ class JoinSplit:
             elif sh["kind"] in LINE_KINDS:
                 pieces = [sh]
                 for sa, sb in segs:
-                    for pt, _ in crossings(cached_path(sh), sa, sb):
+                    for u, pt in line_crossings(sh, sa, sb):
                         at = SimpleNamespace(x=roll.t2x(pt[0]), y=roll.p2y(pt[1]), state=0)
-                        # (the piece the crossing is on)
-                        k = min(range(len(pieces)), key=lambda j: self.path_dist(pieces[j], at))
+                        # (the piece holding that spot of the line; none = on a cut already)
+                        k = next((j for j, p in enumerate(pieces) if spot_inside(p, u)), None)
+                        if k is None:
+                            continue
                         got = self.cut_at(pieces[k], at, {"kind": "slice", "dir": [sb[0] - sa[0], sb[1] - sa[1]]},
-                                          exact=True, spot=(float(pt[0]), float(pt[1])))
+                                          exact=True, spot=pt, u=u)
                         if got:
                             pieces[k:k + 1] = got
             else:
@@ -1560,25 +1564,40 @@ class JoinSplit:
         def boxed(pt):
             return boxes is None or any(min(b[0], b[2]) <= pt[0] <= max(b[0], b[2])
                                         and min(b[1], b[3]) <= pt[1] <= max(b[1], b[3]) for b in boxes)
-        hits = [(pt, way) for pt, way in loop_crossings(path, loop) if boxed(pt)]
+        knife = isinstance(loop, dict)  # (a knife's spans: lines are made plain notes first, never here)
+        if knife:
+            hits = [(None, pt, way) for pt, way in loop_crossings(path, loop) if boxed(pt)]
+        else:  # (each crossing's spot on the whole's path itself, sliced.line_crossings: by the nearest point a
+            # spiral passing close to itself was cut at another loop's crossing, case 872320488)
+            got = source(sh)
+            src = got[0] if got else sh
+            hits = [(k * BIG + u, pt, way) for k, p in enumerate(paths_of(src))
+                    for u, pt, way in loop_crossings(p, loop, spots=True) if boxed(pt)]
         for b in boxes or ():  # (the kept boxes' edges inside the loop cut it too, like the notes; hunt 10-23)
             b0, b1, p0, p1 = min(b[0], b[2]), max(b[0], b[2]), min(b[1], b[3]), max(b[1], b[3])
             for a, c in (([b0, p0], [b1, p0]), ([b1, p0], [b1, p1]), ([b1, p1], [b0, p1]), ([b0, p1], [b0, p0])):
-                hits += [(pt, [c[0] - a[0], c[1] - a[1]]) for pt, _ in crossings(path, a, c)
-                         if inside_point(loop, pt)]
+                way = [c[0] - a[0], c[1] - a[1]]
+                if knife:
+                    hits += [(None, pt, way) for pt, _ in crossings(path, a, c) if inside_point(loop, pt)]
+                else:
+                    hits += [(u, pt, way) for u, pt in line_crossings(sh, a, c) if inside_point(loop, pt)]
         if not hits:
             mid = path_middle(path)
             return True if inside_point(loop, mid) and boxed(mid) else None
         pieces = [sh]
-        knife = isinstance(loop, dict)  # (a knife's spans: lines are made plain notes first, never here)
-        for pt, way in hits:
+        for u, pt, way in hits:
             at = SimpleNamespace(x=roll.t2x(pt[0]), y=roll.p2y(pt[1]), state=0)
-            k = min(range(len(pieces)), key=lambda j: self.path_dist(pieces[j], at))  # (the piece it's on)
+            if u is None:
+                k = min(range(len(pieces)), key=lambda j: self.path_dist(pieces[j], at))  # (the piece it's on)
+            else:  # (the piece holding that spot; none = on a cut already)
+                k = next((j for j, p in enumerate(pieces) if spot_inside(p, u)), None)
+                if k is None:
+                    continue
             mark = {"kind": "slice", "dir": way}  # (its mark along the loop)
             if not knife:  # (the rows the loop + kept boxes take in there: held notes are cut only on those,
                 # user 2026-11-19, engine.held_cuts)
                 mark["rows"] = rows_taken(loop, boxes, float(pt[0]), self.ppq)
-            got = self.cut_at(pieces[k], at, mark, exact=True, spot=(float(pt[0]), float(pt[1])))
+            got = self.cut_at(pieces[k], at, mark, exact=True, spot=(float(pt[0]), float(pt[1])), u=u)
             if got:
                 pieces[k:k + 1] = got
         if len(pieces) == 1:  # (only too near an end to cut)
@@ -1593,6 +1612,11 @@ class JoinSplit:
             # (a closed line's last and first pieces meet at its start: one piece, hunt 10-23)
             side = bool(pieces[0].get("_inside"))
             got = self.joined_shape([{k: v for k, v in q.items() if k != "_inside"} for q in (pieces[-1], pieces[0])])
+            if got is not None and isinstance(got.get("cut"), dict) and not any(
+                    q["cut"].get("own_vel") for q in (pieces[-1], pieces[0])):
+                # (fresh pieces of this cut, no velocities given yet (put_pieces gives them): the joined one is fresh
+                # too, not one with its own line; it read that line over its stretch and changed notes' velocities)
+                got["cut"].pop("own_vel", None)
             if got is not None:
                 if side:
                     got["_inside"] = True

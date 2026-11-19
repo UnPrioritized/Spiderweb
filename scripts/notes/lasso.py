@@ -213,10 +213,10 @@ def inside_point(loop, pt):
     return int(np.sum(np.where(y1[on] > y0[on], 1, -1)[x < pt[0]])) != 0
 
 
-def loop_crossings(path, loop):
+def loop_crossings(path, loop, spots=False):
     """Where the polyline path ((N, 2) points) crosses the closed loop: [(point, the loop's way there)], every loop
     edge at once (one edge at a time took seconds with hundreds of lines and a curved loop; hunt 10-23). A crossing on
-    a loop point counts once."""
+    a loop point counts once. spots: (spot along the path = point number + share, point, way)."""
     p = np.asarray(path, float).reshape(-1, 2)
     lp = np.asarray(loop, float).reshape(-1, 2)
     if len(p) < 2 or len(lp) < 2:
@@ -245,9 +245,9 @@ def loop_crossings(path, loop):
             out.append((j[pi] + t[pi, ei], pt, d[ei]))
     out.sort(key=lambda h: h[0])
     got = []
-    for _, pt, way in out:
-        if not got or np.hypot(*(pt - got[-1][0])) > 1e-7:
-            got.append((pt, [float(way[0]), float(way[1])]))
+    for u, pt, way in out:
+        if not got or np.hypot(*(pt - got[-1][-2])) > 1e-7:
+            got.append(((float(u),) if spots else ()) + (pt, [float(way[0]), float(way[1])]))
     return got
 
 

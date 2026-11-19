@@ -1140,9 +1140,32 @@ def run_origins(sh, notes, ppq):
     return np.where(hit, rs[order[i]], notes[:, 0]).astype(float)
 
 
+def wraps(part):
+    """A piece of a CLOSED line running across its start: part [a, b] with a > b = spots from a to the end, then from
+    the start to b (a Lasso biting a closed line round its start: one piece, user 2026-11-20, hunt 10-23)."""
+    return part[1] is not None and part[0] is not None and part[0] > part[1]
+
+
 def in_part(u, part):
     a, b = part
+    if wraps(part):
+        return (u >= a) | (u < b)
     return (u >= a) & (u < b) if b is not None else u >= a
+
+
+def along(u, part, end):
+    """Spot u's place along the piece (part) from its start: a wrapping piece's spots before b count after the end
+    (end: the closed line's last spot)."""
+    return u + end if wraps(part) and u < part[0] else u
+
+
+def closed_line(src):
+    """The line kind's path is one closed loop (its last point on its first): (True, its last spot)."""
+    paths = paths_of(src)
+    if len(paths) != 1 or len(paths[0]) < 3:
+        return False, 0.0
+    a = paths[0]
+    return bool(np.hypot(*(np.asarray(a[0], float) - np.asarray(a[-1], float))) < 1e-9), float(len(a) - 1)
 
 
 def beat_on(a, r):
@@ -1156,6 +1179,15 @@ def beat_on(a, r):
 def spot_of(sh, at, scale, part=None):
     """The spot on sh's path nearest the point at (beat, key); scale = (px per beat, px per key) to measure in.
     part: only there."""
+    if part is not None and wraps(part):  # (both stretches of a piece across a closed line's start)
+        got = [_spot_of(sh, at, scale, p) for p in ([part[0], None], [0.0, part[1]])]
+        got = [g for g in got if g]
+        return min(got)[1] if got else 0.0
+    best = _spot_of(sh, at, scale, part)
+    return best[1] if best else 0.0
+
+
+def _spot_of(sh, at, scale, part):
     best = None
     for k, a in enumerate(paths_of(sh)):
         if len(a) < 2:
@@ -1177,7 +1209,7 @@ def spot_of(sh, at, scale, part=None):
         j = int(np.argmin(d))
         if best is None or d[j] < best[0]:
             best = (float(d[j]), float(u[j]))
-    return best[1] if best else 0.0
+    return best
 
 
 def spot_on_line(sh, at, way, scale, part, near):
@@ -1212,7 +1244,65 @@ def spot_on_line(sh, at, way, scale, part, near):
     return near if best is None else best
 
 
-def cut_in_two(sh, halves, at, scale, mark):
+def line_crossings(sh, a, b):
+    """Where the segment a-b (beat, key) crosses line kind sh's path (its whole's, a piece: every spot on it):
+    [(spot u, (beat, key))] along the path. A Slice's spots read straight off the path: picking each crossing's
+    piece / spot by the nearest point took another loop's crossing a key away where a spiral passes close to itself
+    (an empty piece, a cut at the wrong place; case 872320488)."""
+    got = source(sh)
+    src = got[0] if got else sh
+    a0 = np.asarray(a, float)
+    d = np.asarray(b, float) - a0
+    out = []
+    for k, p in enumerate(paths_of(src)):
+        if len(p) < 2:
+            continue
+        p0, r = p[:-1], p[1:] - p[:-1]
+        den = r[:, 0] * d[1] - r[:, 1] * d[0]
+        ok = np.abs(den) > 1e-12
+        w = a0 - p0
+        sd = np.where(ok, den, 1)
+        t = np.where(ok, (w[:, 0] * d[1] - w[:, 1] * d[0]) / sd, -1.0)  # (along the path's piece)
+        s = np.where(ok, (w[:, 0] * r[:, 1] - w[:, 1] * r[:, 0]) / sd, -1.0)  # (along the knife)
+        for j in np.flatnonzero(ok & (t >= 0) & (t < 1) & (s >= 0) & (s <= 1)):
+            pt = p0[j] + r[j] * t[j]
+            out.append((k * BIG + int(j) + float(t[j]), (float(pt[0]), float(pt[1]))))
+    out.sort()
+    return [c for i, c in enumerate(out) if not i or c[0] - out[i - 1][0] > 1e-9]
+
+
+def _ends_way(src, path, part, scale):
+    """True: path (a half's drawing, cut end last) starts at part's start end on src's path; False: at its other end;
+    None: can't tell (both ends one place: a closed line)."""
+    paths = paths_of(src)
+
+    def at(u):
+        k = min(int(u // BIG), len(paths) - 1)
+        a = np.asarray(paths[k], float)
+        r = u - k * BIG
+        i = max(0, min(int(r), len(a) - 2))
+        return a[i] + (a[i + 1] - a[i]) * (r - i) if len(a) > 1 else a[0]
+    if not len(path) or not len(paths):
+        return None
+    sc = np.asarray(scale, float)
+    a = at(float(part[0] or 0.0))
+    b = at(float(part[1])) if part[1] is not None else np.asarray(paths[-1][-1], float)
+    p0 = np.asarray(path[0], float)
+    da, db = float(np.hypot(*((p0 - a) * sc))), float(np.hypot(*((p0 - b) * sc)))
+    if abs(da - db) < 1.0:  # (pixels)
+        return None
+    return da < db
+
+
+def spot_inside(sh, u):
+    """u strictly inside the part line kind sh holds (a whole: anywhere but its ends)."""
+    part = sh["cut"]["part"] if isinstance(sh.get("cut"), dict) and sh["cut"].get("part") else [0.0, None]
+    if wraps(part):
+        return u > part[0] + 1e-9 or u < part[1] - 1e-9
+    return u > (part[0] or 0.0) + 1e-9 and (part[1] is None or u < part[1] - 1e-9)
+
+
+def cut_in_two(sh, halves, at, scale, mark, u=None):
     """sh (a line kind, maybe a piece already) cut in two at at (beat, key): each half made a piece of the shape sh
     was cut from (or of sh). mark: {"kind", "dir"?} for the cut's marks."""
     import uuid
@@ -1243,8 +1333,8 @@ def cut_in_two(sh, halves, at, scale, mark):
         for h in halves:  # (the whole's glue / pages are done before the cut now)
             for k in WHOLE_TOOLS:
                 h.pop(k, None)
-    uc = spot_of(src, at, scale, part)
-    if mark.get("dir") is not None:
+    uc = spot_of(src, at, scale, part) if u is None else float(u)  # (u: the spot itself, line_crossings)
+    if mark.get("dir") is not None and u is None:
         uc = spot_on_line(src, at, mark["dir"], scale, part, uc)
     mids = []
     for h in halves:
@@ -1255,11 +1345,20 @@ def cut_in_two(sh, halves, at, scale, mark):
     dk = int(round(d[1]))
     rec = [uc, None if rows is None else [[int(a) - dk, int(b) - dk] for a, b in rows]]
     cuts = [c for c in ((cut.get("cuts") or []) if got else []) if abs(c[0] - uc) > 1e-9] + [rec]
-    order = sorted(range(2), key=lambda i: mids[i])
+    end = closed_line(src)[1] if wraps(part) else 0.0
+    order = sorted(range(2), key=lambda i: along(mids[i], part, end))
+    if u is not None:  # (the spot known: the half starting where the piece's drawing starts holds the part's start
+        # end (the drawing may run either way along the path). By the halves' middles a spiral's middle sat nearer
+        # another loop: sides swapped, the next cuts sliced the wrong drawing, case 671275067)
+        first = _ends_way(src, cached_path(halves[0]), part, scale)
+        if first is not None:
+            order = [0, 1] if first else [1, 0]
     for i, (a, b) in zip(order, ((part[0], uc), (uc, part[1]))):
         h = halves[i]
         # (a cut through the notes, its stretch over them: both halves have notes along it)
-        mine = [m for m in marks if m.get("segs") or m["u"] >= a - 1e-9 and (b is None or m["u"] <= b + 1e-9)]
+        mine = [m for m in marks if m.get("segs") or (
+            (m["u"] >= a - 1e-9 or m["u"] <= b + 1e-9) if wraps([a, b]) else
+            m["u"] >= a - 1e-9 and (b is None or m["u"] <= b + 1e-9))]
         was = outline(h) if not (d[0] or d[1]) else moved(outline(h), (-d[0], -d[1]))
         h["cut"] = {"whole": whole, "was": was, "part": [a, b], "vel": None, "marks": mine + [new],
                     "cuts": json.loads(json.dumps(sorted(cuts, key=lambda c: c[0])))}
@@ -1366,7 +1465,7 @@ def rejoined(olds, new, join=None):
     for sh, g in zip(olds, got):
         d = moved_by(sh)
         items.append([g[1], [[b0 + d[0], k0 + d[1], db, dk, sd] for b0, k0, db, dk, sd in sh["cut"].get("knife", [])]])
-    items = [[[0.0, None], []]] if two else merged_parts(items)
+    items = [[[0.0, None], []]] if two else merged_parts(items, closed_line(got[0][0])[0])
     if len(items) > 1:
         return fail
     part, knives = items[0]
@@ -1465,17 +1564,17 @@ def rejoined(olds, new, join=None):
     return out
 
 
-def merged_parts(items):
+def merged_parts(items, closed=False):
     """Pieces of one shape, [part, knives] each (knives where they are now), joined as far as they go: two pieces
     next to each other on the path with the same cuts through their notes, or the two sides of one such cut with
-    the same part, become one."""
+    the same part, become one. closed: a closed line, its end meeting its start (a piece may run across it)."""
     items = [[list(p), list(k)] for p, k in items]
     again = True
     while again:
         again = False
         for i in range(len(items)):
             for j in range(len(items)):
-                got = i != j and _merged(items[i], items[j])
+                got = i != j and (_merged(items[i], items[j]) or closed and _merged_round(items[i], items[j]))
                 if got:
                     items[i] = got
                     del items[j]
@@ -1486,10 +1585,26 @@ def merged_parts(items):
     return items
 
 
+def _merged_round(x, y):
+    """x ending at a closed line's end, y starting at its start: one piece across the start; together all of it =
+    the whole line."""
+    (pa, ka), (pb, kb) = x, y
+    if pa[1] is not None or abs(pb[0] or 0.0) > 1e-9 or ka or kb or pb[1] is None:
+        return None
+    if abs(pb[1] - pa[0]) <= 1e-9:  # (the two leave nothing out)
+        return [[0.0, None], ka]
+    return [[pa[0], pb[1]], ka]
+
+
 def _merged(x, y):
     (pa, ka), (pb, kb) = x, y
     if pa[1] is not None and abs(pa[1] - pb[0]) <= 1e-9 and _same_knives(ka, kb):
-        return [[pa[0], pb[1]], ka]
+        if wraps(pa) and (pb[1] is None or not wraps(pb) and pb[1] >= pa[0] - 1e-9):
+            return [[0.0, None], ka]  # (round the closed line to where it began: all of it)
+        got = [pa[0], pb[1]]
+        if got[1] is not None and abs(got[0] - got[1]) <= 1e-9:
+            return [[0.0, None], ka]  # (a wrapping piece + the rest)
+        return [got, ka]
     if abs(pa[0] - pb[0]) > 1e-9 or (pa[1] is None) != (pb[1] is None) or (
             pa[1] is not None and abs(pa[1] - pb[1]) > 1e-9):
         return None

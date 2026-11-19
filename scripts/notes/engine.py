@@ -2208,7 +2208,9 @@ def auto_sustain(sh, get):
 def piece_ticks(src, part, ppq):
     """A line piece's own stretch: (its first tick or None at the line's start, lo, hi), the ticks its cuts sit on
     (no cut at an end = no limit there). src / part: sliced.source's."""
-    from notes.sliced import BIG, beat_on, paths_of
+    from notes.sliced import BIG, beat_on, paths_of, wraps
+    if wraps(part):  # (across a closed line's start: its stretch of time is no one span, so no limits)
+        return None, -1 << 62, 1 << 62
     paths = paths_of(src)
 
     def tick(c):
