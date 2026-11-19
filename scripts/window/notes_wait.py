@@ -17,7 +17,7 @@ import time
 import tkinter as tk
 from tkinter import ttk
 
-from window import lost_release
+from window import lost_release, tk_threads
 
 VIEW, PASS, WAIT = "view", "pass", "wait"
 BUTTONS = 0x100 | 0x400 | 0x800 | 0x1000  # (left, right, 4, 5 held; the middle one pans)
@@ -51,6 +51,7 @@ def install(app):
         tk.CallWrapper.__call__ = _call
         tk.CallWrapper._notes_wait = True
     lost_release.install()
+    tk_threads.install()  # (a Tk object deleted in the notes thread froze the window: tk_threads)
     if freeze_log:
         _log("start", 0.0, 0.0, "", "")
         app.after(5, _heartbeat)
@@ -111,6 +112,8 @@ def _timer(func):
 def _call(self, *args):
     """tkinter.CallWrapper.__call__ (the same, plus sort; plus the freeze timer when it's on)."""
     global _waited, _timing
+    if tk_threads._owed and threading.current_thread() is _main:  # (Tk objects other threads let go of)
+        tk_threads.tidy()
     if not freeze_log or _timing or threading.current_thread() is not _main:
         return _call_sorted(self, *args)
     _waited, _timing = 0.0, True
