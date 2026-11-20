@@ -31,7 +31,7 @@ from notes.meter import bar_lines, beat_lines, key_name, sig_text, sigs_of
 from notes.tempo import bpm_text, heard_marks, kept_bpms, ruler_cols, ruler_marks, short_bpm, tempo_key
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
                               PlayFollow, SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_colours,
-                              note_name, slot_colours, velocity_shades)
+                              note_name, recheck_pointer, slot_colours, velocity_shades)
 from roll.tiles import Tiles, see_through_strips
 from window import look
 from window.notes_wait import stale_ok
@@ -801,6 +801,7 @@ class RollDrawing:
                 self.redraw_all()
             finally:
                 self._raise_later = self._redrawing = False
+        recheck_pointer(self, self.recheck_pointer)  # (what's under a resting mouse may have changed)
 
     def redraw_all(self):
         self._redraw_pending = False

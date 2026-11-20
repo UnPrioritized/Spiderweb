@@ -22,7 +22,7 @@ from notes.sliced import note_drawn, source
 from notes.tumour import LINE_KINDS
 from roll.roll_shared import (ALT, CTRL, DRAFT_COLOR, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, SELECTED_COLOR, SLOT_COLORS,
                               bind_double_right, box_kind, cached_path, draw_boxes, fade, grab_while_panning, note_colours, ruler_boxes,
-                              set_cursor, slot_colours)
+                              recheck_pointer, set_cursor, slot_colours)
 from window import look
 from window.notes_wait import stale_ok
 from window.widgets import long_line
@@ -817,6 +817,11 @@ class VelocityPane(KeepsItems, tk.Canvas):
             self._redraw()
         finally:
             self.keep_finish()
+        recheck_pointer(self, self.recheck_pointer)  # (what's under a resting mouse may have changed)
+
+    def recheck_pointer(self, e):
+        if not self.band_drag and not self.edit:
+            self.on_motion(e)
 
     def _redraw(self):
         roll = self.app.roll

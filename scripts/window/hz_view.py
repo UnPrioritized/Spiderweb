@@ -11,7 +11,7 @@ from files.mathexpr import fmt
 from notes.hzbass import (HZ_DEFAULTS, NOTE_BEND_MOST, all_tones, auto_state, bend_range, can_slide, glide, handle_u, heard, hz_of, layers_of,
                           bends, funnel_box, left_edge, links, pitch, slide_knob, slide_part, tone_keys)
 from roll.roll_shared import (ALT, CTRL, MAX_SX, MIN_SX, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name,
-                              ruler_boxes)
+                              recheck_pointer, ruler_boxes)
 from notes.meter import bar_lines, beat_lines, sigs_of
 from window import look
 from window.canvas_keep import KeptItems
@@ -258,6 +258,13 @@ class HzView:
             keep.finish(rest=True)  # (only what changed is made again; anything else drawn on it goes, as a wipe did)
         if drawn:
             self.after_board()
+            recheck_pointer(self.canvas, self.recheck_pointer, self.app)  # (what's under a resting mouse changed?)
+
+    def recheck_pointer(self, e):
+        """After a redraw (roll_shared.recheck_pointer): the pointer for the resting mouse; not while something is
+        held or being drawn (a drawing tool's path follows the mouse)."""
+        if not getattr(self, "drag", None) and not getattr(self, "draft", None):
+            self.on_motion(e)
 
     def draw_board(self, c):
         """Everything on the notes canvas (c = the kept items, see redraw). False: too small to draw anything."""

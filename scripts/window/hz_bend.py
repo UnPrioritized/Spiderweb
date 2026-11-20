@@ -474,7 +474,8 @@ class HzBend:
         empty space)."""
         if not self.bending():
             return False
-        self.sketch_alt_to(self.curving(e.state))
+        if not getattr(e, "recheck", False):  # (a pointer recheck after a redraw: Alt's squares left as they are)
+            self.sketch_alt_to(self.curving(e.state))
         hit = self.bend_hit(e.x, e.y)
         if not hit or hit[0] == "slide":
             return False

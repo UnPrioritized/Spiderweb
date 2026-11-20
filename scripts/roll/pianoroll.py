@@ -2195,19 +2195,42 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.warp_hover(e.x, e.y)  # (Warp: the point under the mouse lights its mirror twins)
         if not self.drag and self.lasso_motion(e):  # (a Polygonal loop's next line follows the mouse)
             return
-        if not self.drag and not self.draft and (self.path_motion(e) or self.path_hit(e.x, e.y)):
-            self.set_cursor("fleur")  # (Copy along a path: B follows the mouse, or a point of its path is under it)
+        if not self.drag and not self.draft and self.path_motion(e):
+            self.set_cursor("fleur")  # (Copy along a path: B follows the mouse)
             return
+        if self.pick_pointer(e):
+            return
+        if self.follow:  # a shape started with a click follows the mouse
+            self.drag, self.follow = self.follow, None
+            self.on_drag(e)
+            self.follow, self.drag = self.drag, None
+        elif self.draft and self.draft["kind"] in ("poly", "arc"):
+            self.draft["pts"][1 if self.arc_bend else -1] = self.draw_pt(e)
+            self.request_redraw()
+
+    def recheck_pointer(self, e):
+        """After a redraw (roll_shared.recheck_pointer): the pointer for the resting mouse, nothing else moved."""
+        if self.drag or self.draft or self.follow or getattr(self, "_panning", None):
+            return
+        if self.warp_on() or getattr(self, "wp_hover", None):
+            self.warp_hover(e.x, e.y)
+        self.pick_pointer(e)
+
+    def pick_pointer(self, e):
+        """The mouse pointer for where e is (on_motion's part that only picks it). True = on_motion stops there."""
+        if not self.drag and not self.draft and self.path_hit(e.x, e.y):
+            self.set_cursor("fleur")  # (Copy along a path: a point of its path is under it)
+            return True
         if not self.drag and not self.draft and not self.follow and self.ruler_band(e, self.kept_box()):
             self.set_cursor("sb_h_double_arrow")  # (the ruler's black band: drag what it holds sideways)
-            return
+            return True
         if not self.drag and self.stop_hit(e.x, e.y, e.state) is not None:
             self.set_cursor("sb_h_double_arrow")  # (a sustained shape's stop line: drag it sideways)
-            return
+            return True
         if (not self.drag and not self.draft and e.x < self.kb_w and e.y >= self.ruler_h
                 and self.app.gliss_picks() is not None):
             self.set_cursor("hand2")  # (the piano keys pick Glissando keys: key_press; user 11-02)
-            return
+            return True
         if not self.drag:
             over = not self.draft and self.hit_handle(e.x, e.y, self.app.tool.get() == "select") is not None
             # (a Stir / Clumps Centre point dot or Stir area spot: any tool grabs it, centre_press; user 11-17)
@@ -2224,13 +2247,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.set_cursor(self.gliss_cursor(e.x, e.y))
             else:
                 self.set_cursor("fleur" if over else BOX_CURSORS[on_box] if on_box else self.hover_cursor(e, hit))
-        if self.follow:  # a shape started with a click follows the mouse
-            self.drag, self.follow = self.follow, None
-            self.on_drag(e)
-            self.follow, self.drag = self.drag, None
-        elif self.draft and self.draft["kind"] in ("poly", "arc"):
-            self.draft["pts"][1 if self.arc_bend else -1] = self.draw_pt(e)
-            self.request_redraw()
+        return False
 
     def hover_cursor(self, e, hit):
         """The pointer away from handles and boxes (user 2026-10-30): Select over a shape a press grabs = the move

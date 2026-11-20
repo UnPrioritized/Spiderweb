@@ -45,7 +45,7 @@ from roll.roll_draw import screen_lines
 from roll.zoombar import add_zoom_bars
 from roll.roll_shared import (ALT, BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
                               grab_while_panning,
-                              set_cursor)
+                              recheck_pointer, set_cursor)
 from window import look
 from window.notes_wait import stale_ok
 from window.canvas_keep import KeepsItems
@@ -3593,6 +3593,7 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
 
     @stale_ok  # (notes being made in the background: the ones on screen, notes_wait.py)
     def redraw(self):
+        recheck_pointer(self, self.recheck_pointer)  # (what's under a resting mouse may have changed)
         got = self.copies_preview() if self.box.mode != "heard" else None
         if got is None:
             return self.draw_all()
@@ -3604,6 +3605,12 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
         finally:
             self.app.tempo, self.sel = keep
             hold_tempo(None)
+
+    def recheck_pointer(self, e):
+        """After a redraw (roll_shared.recheck_pointer): the pointer + hint for the resting mouse. Not while placing
+        a catch-up (its area follows the mouse and redraws: that would go round)."""
+        if not self.drag and not self.placing:
+            self.on_motion(e)
 
     def draw_all(self):
         self._redraw_pending = False

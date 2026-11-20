@@ -37,7 +37,7 @@ from notes import loaded_shown as LS, loaded_view as LV
 from roll import roll_loaded as RL
 from roll.roll_draw import TRACK_FADE
 from roll.roll_shared import (BOX_STILL, COLOURS_16, MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, PlayFollow,
-                              draw_boxes as outline_boxes, grab_while_panning, slot_colours)
+                              draw_boxes as outline_boxes, grab_while_panning, recheck_pointer, slot_colours)
 from roll.tiles import see_through
 from window import look
 from window.notes_wait import stale_ok
@@ -2823,7 +2823,8 @@ class TrackList(tk.Canvas):
     def on_speaker(self, x):
         return abs(x - self.speaker_x()) <= 9 * self.scale
 
-    def on_motion(self, e):
+    def pick_pointer(self, e):
+        """The mouse pointer for where e is; its row (row_at)."""
         row = self.row_at(e.y)
         cursor = SELECT_CURSOR if row is not None and e.x >= self.name_w else "arrow"  # (the Select tool's, like
         if self.box_at(e.x, e.y):                                                       # many MIDI programs)
@@ -2832,6 +2833,10 @@ class TrackList(tk.Canvas):
         if getattr(self, "_cursor", None) != cursor:
             self._cursor = cursor
             self.config(cursor=cursor)
+        return row
+
+    def on_motion(self, e):
+        row = self.pick_pointer(e)
         line = self.line_at(e.y) if row is not None and row >= 0 else None
         c = int(self.lines()[1][line]) if line is not None else -1
         if c >= 0 and e.x < self.name_w:  # (a folder's sub-row)
@@ -3046,6 +3051,7 @@ class TrackList(tk.Canvas):
         w, h = self.winfo_width(), self.winfo_height()
         if w < 2 or h < 2 or not self.winfo_ismapped():
             return
+        recheck_pointer(self, self.pick_pointer)  # (what's under a resting mouse may have changed)
         if self.sx is None:
             self.fit()
         self.tracks()

@@ -5,6 +5,7 @@ import ctypes
 import math
 import os
 import time
+from tkinter import TclError
 
 import numpy as np
 
@@ -147,6 +148,51 @@ def set_cursor(widget, name):
         widget.config(cursor=name)
     except Exception:  # (tk.TclError: the pointer's file can't be read)
         widget.config(cursor={SELECT_CURSOR: "arrow", PENCIL_CURSOR: "pencil"}.get(name, "arrow"))
+
+
+def recheck_pointer(widget, check, app=None):
+    """Call after widget redrew: once the program is idle, check(e) (the pointer part of its mouse-move handler)
+    runs again for where the mouse rests, so the pointer fits what is under it now. Pointers were worked out only
+    when the mouse moved: after undo / Delete / a change made elsewhere the old one stayed (user 2026-11-20: the
+    move pointer over a shape that was gone). Nothing while a mouse button is held, or when the mouse last moved
+    over another widget / outside this one. e = a made-up mouse move (x, y, x_root, y_root, state = the keys
+    held), read with the notes on screen (notes_wait: never waits for notes being made)."""
+    if getattr(widget, "_pointer_due", False):
+        return
+    widget._pointer_due = True
+    widget.after_idle(lambda: _recheck(widget, check, app))
+
+
+def _recheck(widget, check, app):
+    from types import SimpleNamespace
+    from window import lost_release
+    widget._pointer_due = False
+    seen = lost_release.last_move
+    if seen is None or seen[0] is not widget or seen[1] is None or lost_release.any_held():
+        return
+    try:
+        if not widget.winfo_viewable():
+            return
+        x, y = seen[1] - widget.winfo_rootx(), seen[2] - widget.winfo_rooty()
+        if not (0 <= x < widget.winfo_width() and 0 <= y < widget.winfo_height()):
+            return
+    except TclError:  # (the widget is gone)
+        return
+    e = SimpleNamespace(x=x, y=y, x_root=seen[1], y_root=seen[2], state=lost_release.mods, widget=widget,
+                        type="Motion", num="??", delta=0, keysym="??", char="", time=0, serial=0, recheck=True)
+    app = app or getattr(widget, "app", None)
+    stale = app is not None and hasattr(app, "stale_ok")
+    if stale:
+        app.stale_ok += 1
+    try:
+        check(e)
+    except TclError:  # (closed meanwhile)
+        pass
+    finally:
+        if stale:
+            app.stale_ok -= 1
+
+
 PIANO_88 = range(21, 109)  # A0 to C8, the keys of a real piano
 BOX_STILL = 4  # a Select box moved less than this many pixels from where it started is still a click
 BOX_SCROLL_MS = 100  # a Select box dragged past the edge scrolls the view a beat (3 keys up / down) this often
