@@ -53,6 +53,10 @@ def seen(e):
     if kind in ("Motion", "6"):
         global last_move
         last_move = (w, getattr(e, "x_root", None), getattr(e, "y_root", None))
+    elif kind in ("Leave", "8") and last_move is not None and last_move[0] is w:
+        # (the mouse left: a redraw's pointer recheck must not bring back a hover from its last place inside, user
+        # 2026-11-21: the purple time signature line's preview stayed after leaving the Conductor pane)
+        last_move = None
     if kind in ("ButtonPress", "4"):
         if not _modal and getattr(e, "num", 0) in (1, 2, 3):  # (the answering window's own clicks: not noted)
             _held[e.num] = [w, e.x, e.y, e.state if isinstance(e.state, int) else 0]
