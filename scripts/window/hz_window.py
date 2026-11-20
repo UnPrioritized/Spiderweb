@@ -268,6 +268,8 @@ class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzLfo, 
         c.bind("<Return>", lambda e: self.make_draft() or self.rail_enter() or self.loudness.confirm())  # (the path
         # drawn: made; Quick detune's rail: done; the last loudness line drawn: done)
         self.bind("<space>", self.on_space)  # (anywhere in the window: the buttons don't take the keyboard)
+        self.bind("<F1>", lambda e: (app.open_help(self.help_topic()), "break")[1])  # (the tool's own page: the
+        # Sketch tool's tip is short and sends here)
         for k in ("<Control-a>", "<Control-A>"):
             c.bind(k, lambda e: (self.drag or self.loudness.held() or self.select_all_notes(), "break")[1])
         for seq, fn in (("<Delete>", self.on_delete),  # (a toolbar button / another pane has the keyboard: the
@@ -302,6 +304,10 @@ class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzLfo, 
         self.trace_win = TraceWindow(self, hidden=True)  # (... and Hz shape…: Note length rows, always there)
         if app.hz_preview["on"]:  # (on last time: on again, if its soundfont is still there)
             self.after_idle(self.preview_again)
+
+    def help_topic(self):
+        """The Help page F1 opens here: the Sketch / Bend tool's own page, else the main window's (Hz bass)."""
+        return {"sketch": "hz_sketch", "bend": "hz_slides"}.get(self.tool.get())
 
     # ------------------------------------------------------------ what it shows
 
