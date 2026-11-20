@@ -190,11 +190,14 @@ def find_slots(build, read, check=True):
         k = want.get(first[p])
         if k:
             hits[k].append((build.data_at + o, p))
-    if len(hits["p_slot"]) != 1 or len(hits["h_slot"]) != 1 or not hits["c_slot"]:
+    if not hits["p_slot"] or len(hits["h_slot"]) != 1 or not hits["c_slot"]:
         return None
-    if len({p for _, p in hits["c_slot"]}) != 1:
-        return None  # (two main windows: can't be)
-    out = replace(build, p_slot=hits["p_slot"][0][0], h_slot=hits["h_slot"][0][0], c_slot=hits["c_slot"][-1][0])
+    # (several places holding the SAME object = one view, the last place = the usual one: 1.45 64-bit fills a 2nd
+    # piano roll place while it's used, until Domino closes (user 2026-11-20, "isn't known"). Different objects =
+    # two views / main windows: refused)
+    if len({p for _, p in hits["p_slot"]}) != 1 or len({p for _, p in hits["c_slot"]}) != 1:
+        return None
+    out = replace(build, p_slot=hits["p_slot"][-1][0], h_slot=hits["h_slot"][0][0], c_slot=hits["c_slot"][-1][0])
     return out if not check or adds_up(out, read) else None
 
 
