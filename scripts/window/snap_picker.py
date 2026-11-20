@@ -172,7 +172,7 @@ class CustomSnapWindow(tk.Toplevel):
         self.title(tr("snap.customised_snap"))
         self.transient(app)
         self.resizable(False, False)
-        count, note, div = custom_parts(var.get()) or ("3", 16, 1)
+        count, note, div = custom_parts(var.get()) or ("", 16, 1)  # not a custom snap yet: the empty kind
         self.count = tk.StringVar(value=count if count not in DOTS else "3")
         self.kind = tk.StringVar(value=count if count in DOTS else "/")
         self.note, self.div = tk.StringVar(value=str(note)), tk.StringVar(value=str(div))
