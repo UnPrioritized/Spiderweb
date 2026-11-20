@@ -176,6 +176,8 @@ def with_slots(d):
     if b.file_base:  # (64-bit / a 32-bit one that moves: everything moved by where Windows loaded it this time)
         base = _module_base(ph)
         if not base:  # (e.g. Spiderweb run by a 32-bit Python: a 64-bit Domino can't be read from there)
+            from files import domino_builds
+            domino_builds.last_found = "where Windows loaded it couldn't be read"
             return _failed(d, key, None) if time.monotonic() - _slot_tries.get(key, -1e9) >= SLOT_AGAIN_S else \
                 _mark(d, key)
         key += (base,)
@@ -215,18 +217,45 @@ def _failed(d, key, got):
 
 
 def _log_unknown(d, got):
-    """A Domino just called unknown: one line in the error log naming the check that failed (user 2026-11-18:
-    "isn't known" until Domino was restarted; not seen on our copies)."""
+    """A Domino just called unknown: the error log says which check failed, and enough to find out why without the
+    user's Domino (user 2026-11-18: "isn't known" until Domino was restarted; 2026-11-20: the line alone wasn't
+    useful): its version + sha256, how long it had run, and what the search for its reading spots found where."""
     try:
         import time
         from files import domino_builds, errors
         why = domino_builds.why_not if got is not None else "its reading spots weren't found"
-        bits = "" if not d.build else ", 64-bit" if d.build.ptr == 8 else ", 32-bit"
+        b = d.build
+        bits = "" if not b else ", 64-bit" if b.ptr == 8 else ", 32-bit"
+        lines = [f"  version: {b.name if b else '?'}",
+                 f"  sha256: {fingerprint(d.path) or '?'}",
+                 f"  running for: {_run_time(d)}",
+                 f"  found: {domino_builds.last_found or '?'}"]
         text = (f"==== {time.strftime('%Y-%m-%d %H:%M:%S')}   Draw on Domino: a Domino was called unknown "
-                f"({os.path.basename(d.path)}{bits}): {why}\n\n")
+                f"({os.path.basename(d.path)}{bits}): {why}\n" + "\n".join(lines) + "\n\n")
         errors.append(errors.LOG, errors.OLD_LOG, text)
     except Exception:
         pass
+
+
+def _run_time(d):
+    """How long this Domino has been running ("4 min 12 s"), "?" when Windows won't say (unknown right after its
+    start or only later is the first thing to tell apart)."""
+    if not system.WINDOWS:
+        return "?"
+    try:
+        import ctypes
+        import time
+        from files.system import wintypes
+        ph = d.handle()
+        c, e, k, u = (wintypes.FILETIME() for _ in range(4))
+        if not ph or not ctypes.windll.kernel32.GetProcessTimes(ph, ctypes.byref(c), ctypes.byref(e),
+                                                                  ctypes.byref(k), ctypes.byref(u)):
+            return "?"
+        start = ((c.dwHighDateTime << 32) | c.dwLowDateTime) / 1e7 - 11644473600  # (FILETIME: 100 ns from 1601)
+        s = max(0, int(time.time() - start))
+        return f"{s // 60} min {s % 60} s"
+    except Exception:  # (only a log line)
+        return "?"
 
 
 def _mark(d, key):

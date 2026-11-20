@@ -170,8 +170,10 @@ def find_slots(build, read, check=True):
     """The build with the spots where this running Domino keeps its piano roll view, ruler and main window, or
     None (not found / more than one view / numbers that don't add up). read(addr, n) -> bytes or None. check=False:
     the spots found without adds_up (domino_view asks it apart: "Try anyway" may use them)."""
+    global last_found
     raw = read(build.data_at, build.data_size) or b""
     if len(raw) < 1024:
+        last_found = f"its data part couldn't be read ({len(raw)} of {build.data_size} bytes)"
         return None
     first = {}
     hits = {k: [] for k in SLOTS}
@@ -190,6 +192,7 @@ def find_slots(build, read, check=True):
         k = want.get(first[p])
         if k:
             hits[k].append((build.data_at + o, p))
+    last_found = found_text(hits, build.data_at)
     if not hits["p_slot"] or len(hits["h_slot"]) != 1 or not hits["c_slot"]:
         return None
     # (several places holding the SAME object = one view, the last place = the usual one: 1.45 64-bit fills a 2nd
@@ -203,6 +206,24 @@ def find_slots(build, read, check=True):
 
 why_not = ""  # (which check adds_up failed last: written to the log when a Domino is called unknown, user
 # 2026-11-18 "isn't known" until Domino restarts, not seen here)
+last_found = ""  # (what find_slots' last look found, for that log line too: user 2026-11-20 "not that useful")
+SLOT_NAMES = {"p_slot": "piano roll", "h_slot": "ruler", "c_slot": "main window"}
+
+
+def found_text(hits, data_at):
+    """"piano roll: 2 places (+0x1ef8, +0x1f10), 1 object; ruler: 1 place (+0x1f50); main window: none": each kind's
+    places in Domino's data part (from its start, the same every run of one build) and how many objects they hold."""
+    out = []
+    for k, name in SLOT_NAMES.items():
+        got = hits.get(k) or []
+        if not got:
+            out.append(f"{name}: none")
+            continue
+        places = ", ".join(f"+{a - data_at:#x}" for a, _ in got[:4]) + (", …" if len(got) > 4 else "")
+        objs = len({p for _, p in got})
+        out.append(f"{name}: {len(got)} place{'s' if len(got) > 1 else ''} ({places})"
+                   + (f", {objs} object{'s' if objs > 1 else ''}" if len(got) > 1 else ""))
+    return "; ".join(out)
 
 
 def adds_up(b, read):
