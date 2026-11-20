@@ -158,12 +158,24 @@ class CustomBox:
         ps = sorted({p for _, p in orig})
         if len(ps) != 2:
             return orig, False
-        if all(abs(p - math.floor(p) - 0.5) < 1e-9 for p in ps):
-            return orig, True
+        if all(abs(p - math.floor(p) - 0.5) < 1e-9 for p in ps) or even_on(sh):
+            return orig, True  # (Even steps: its flat sides go on the lines anyway; its box hugs the drawing a
+            # millionth of a key inside them, or at a tip: the dragged edge on a line still, hunt 2026-11-20)
         if all(float(p).is_integer() for p in ps) and box_drawn(sh):
             lo, hi = ps
             return [[b, lo - 0.5 if p == lo else hi + 0.5] for b, p in orig], True
         return orig, False
+
+    def keep_rows(self, orig, k, box):
+        """A Ctrl corner resize (box = resize_custom's, proportions kept) of a box on the lines between keys: the
+        dragged corner moved so the height is whole keys from the corner that stays (rounded out, keep_aspect) and the
+        width follows (hunt 2026-11-20: a sideways Ctrl drag left the top at 86.3125)."""
+        c0, c1 = self.custom_corners({"pts": orig}), self.custom_corners({"pts": box})
+        stay, moved = c0[(k + 2) % 4], c1[k]
+        w, h = abs(c0[1][0] - c0[0][0]) * self.sx, abs(c0[3][1] - c0[0][1]) * self.sy
+        if w < 1e-9 or h < 1e-9:
+            return box
+        return self.resize_custom(orig, k, self.keep_aspect(stay, moved, w / h), False)
 
     def row_edge(self, orig, k, side, e):
         """The dragged top / bottom of a box on the lines between keys: the line past the mouse's key seen from the
@@ -279,13 +291,23 @@ class CustomBox:
         return math.atan2(y - self.p2y((p1 + p2) / 2), x - self.t2x((b1 + b2) / 2))
 
     def keep_aspect(self, start, pt, aspect):
-        """pt moved so the box from start has the drawing's width/height, as it looks on screen."""
+        """pt moved so the box from start has the drawing's width/height, as it looks on screen. start on a line
+        between keys (row_box): the height rounded OUT to whole keys and the width following it, so the box stays on
+        those lines, as round as that lets it be (hunt 2026-11-20: an exact circle's top at 75.504 gave the row it
+        grazed stray notes)."""
         dx, dy = (pt[0] - start[0]) * self.sx, (pt[1] - start[1]) * self.sy
         if abs(dx) > abs(dy) * aspect:
             dy = math.copysign(abs(dx) / aspect, dy or 1)
         else:
             dx = math.copysign(abs(dy) * aspect, dx or 1)
         b0, lo, hi = self.room_edges()  # (beat 0 and the keys, or the Space past them)
+        if abs(start[1] - math.floor(start[1]) - 0.5) < 1e-9:
+            keys = max(1, math.ceil(abs(dy) / self.sy - 1e-6))
+            top = start[1] + math.copysign(keys, dy or 1)
+            top = min(max(top, lo - 0.5), hi + 0.5)  # (at the keys' ends: their outer lines)
+            keys = abs(top - start[1])
+            dx = math.copysign(keys * self.sy * aspect, dx or 1)
+            return [max(b0, start[0] + dx / self.sx), top]
         return [max(b0, start[0] + dx / self.sx), min(max(start[1] + dy / self.sy, lo), hi)]
 
     def draw_custom_box(self, sh):

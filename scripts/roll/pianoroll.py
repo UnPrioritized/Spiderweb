@@ -1748,9 +1748,11 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             kind, pt = self.draft.get("draw") or self.draft["kind"], self.draw_pt(e)
             if kind in BOX_TOOLS:
                 start = self.drag[1]
+                flat = False
                 if not self.app.live.get():  # (its own shape: keys on the lines between keys; live shapes' strokes
                     start, pt = self.row_box(start, pt, e.state & SHIFT)  # stay lines, user)
-                if e.state & CTRL:  # a perfect circle / polygon on screen
+                    flat = start[1] == pt[1] and float(pt[1]).is_integer()  # (one key: nothing, Ctrl or not)
+                if e.state & CTRL and not flat:  # a perfect circle / polygon on screen
                     pt = self.keep_aspect(start, pt, self.box_aspect(kind))
                 self.draft = self.box_draft(kind, start, pt)
             else:
@@ -1774,11 +1776,15 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             step = self.held_step([self.app.sel])
             later = self.grid_later  # (a step stopped at the edge: its snap for let go is dropped too)
             sh = self.app.selected()
-            sh["pts"] = self.frame_for_box(self.resize_custom(orig, k, pt, e.state & CTRL, side))
+            box = self.resize_custom(orig, k, pt, e.state & CTRL, side)
+            rows_keep = bool(e.state & CTRL and not side and self.resize_rows and not e.state & SHIFT)
+            if rows_keep:  # (Ctrl on a box on the lines between keys: whole keys tall, width following, hunt)
+                box = self.keep_rows(orig, k, box)
+            sh["pts"] = self.frame_for_box(box)
             even = even_on(sh)
             if even:  # (Even steps: the moved side whole gates from the other, even_steps.py)
                 sh["pts"] = whole_width(sh["pts"], orig, sh, self.app.ppq)
-            if not e.state & SHIFT and not even:
+            if not e.state & SHIFT and not even and not rows_keep:
                 keep = e.state & CTRL
                 self.notes_onto_grid(
                     self.app.selected(), lambda b: self.frame_for_box(self.resize_custom(orig, k, [b, pt[1]], keep, side)),
@@ -1828,7 +1834,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         elif kind == "place":
             _, start, _, _, aspect = self.drag
             start, pt = self.row_box(start, self.event_pt(e), e.state & SHIFT)  # (keys on the lines between keys)
-            if e.state & CTRL and aspect:
+            flat = start[1] == pt[1] and float(pt[1]).is_integer()  # (one key: nothing, Ctrl or not)
+            if e.state & CTRL and aspect and not flat:
                 pt = self.keep_aspect(start, pt, aspect)
             self.draft["pts"] = box_frame(start[0], start[1], pt[0], pt[1])
             self.draft_moved()
