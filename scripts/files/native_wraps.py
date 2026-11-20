@@ -370,6 +370,36 @@ class Wraps:
                                  len(k) >= ROWS_MANY)
         return out if got >= 0 else None
 
+    def chop_cut(self, a, origin, k0, reps, ps, pe, vk, vmode, keep, cycle, out):
+        """chop._pieces for every note at once into out -> how many pieces, or None = not run (its NumPy way, the
+        same notes). Not in NEEDS (NumPy's way is the twin)."""
+        if not hasattr(self.x, "chop_cut"):
+            return None
+        f, i = np.float64, np.int64
+        got = self.x.chop_cut(np.ascontiguousarray(a, i), np.ascontiguousarray(origin, f), np.ascontiguousarray(k0, i),
+                              np.ascontiguousarray(reps, i), np.ascontiguousarray(ps, f), np.ascontiguousarray(pe, f),
+                              np.ascontiguousarray(vk, f), int(vmode), float(keep), float(cycle), out)
+        return got if got >= 0 else None
+
+    def row_gaps(self, notes, order):
+        """sustain.row_order's gaps (+ gateflip's exact copies: 1 = same start, end, key as the note before in
+        order), or None = not run (the NumPy way)."""
+        if not hasattr(self.x, "row_gaps"):
+            return None
+        gap, dup = np.empty(len(order), np.int64), np.empty(len(order), np.uint8)
+        got = self.x.row_gaps(np.ascontiguousarray(notes, np.int64), np.ascontiguousarray(order, np.int64), gap, dup)
+        return (gap, dup.view(bool)) if got >= 0 else None
+
+    def run_mirror(self, notes, order, gap, dup, usual, carry):
+        """gateflip.mirrored_runs' notes, or None = not run (its NumPy way, the same notes)."""
+        if not hasattr(self.x, "run_mirror"):
+            return None
+        notes = np.ascontiguousarray(notes, np.int64)
+        out = np.empty_like(notes)
+        got = self.x.run_mirror(notes, np.ascontiguousarray(order, np.int64), np.ascontiguousarray(gap, np.int64),
+                                np.ascontiguousarray(dup).view(np.uint8), int(usual), bool(carry), out)
+        return out if got >= 0 else None
+
     def key_wrap(self, key, base, h):
         """recolour.Rows.key_wrapped's numbers, or None = not run (its NumPy way)."""
         if not hasattr(self.x, "key_wrap"):

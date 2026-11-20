@@ -154,6 +154,9 @@ def apply_chop(a, chop, ppq):
     if not len(ends) or ends[-1] > TOO_MANY:
         return a  # (left unchopped: the window says why)
     out = np.empty((int(ends[-1]), a.shape[1]), np.int64)
+    got = _compiled(a, chop, pieces, ps, pe, cycle, origin, k0, reps, out)
+    if got is not None:
+        return out[:got]
     n = start = 0
     while start < len(a):  # (in batches of notes, so the working out takes little memory besides the pieces)
         done = ends[start - 1] if start else 0
@@ -163,6 +166,22 @@ def apply_chop(a, chop, ppq):
         out[n:n + len(got)] = got
         n, start = n + len(got), stop
     return out[:n]
+
+
+def _compiled(a, chop, pieces, ps, pe, cycle, origin, k0, reps, out):
+    """apply_chop's pieces from the compiled loop (pages.rs chop_cut, every note in one pass) into out -> how many,
+    or None: _pieces' NumPy way (its twin: the same notes)."""
+    from files.speed import loops
+    fast = getattr(loops(), "chop_cut", None)
+    if fast is None or a.dtype != np.int64:
+        return None
+    amt = chop["vel"] / 100
+    vmode, keep, vk = 0, 0.0, pieces[:, 2]
+    if amt and chop.get("fixed"):  # (_pieces' sums, piece by piece: the same numbers)
+        vmode, keep, vk = 2, 1 - amt, amt * pieces[:, 2]
+    elif amt:
+        vmode, vk = 1, 1 - amt + amt * pieces[:, 2] / 100
+    return fast(a, origin, k0, reps, ps, pe, vk, vmode, keep, cycle, out)
 
 
 def _pieces(a, chop, pieces, ps, pe, cycle, origin, k0, reps):

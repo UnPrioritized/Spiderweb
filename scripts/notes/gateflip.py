@@ -14,7 +14,7 @@ import numpy as np
 
 from notes.custom import SPAM_FILLS
 from notes.fx import reverse_velocity
-from notes.sustain import gap_of, row_order
+from notes.sustain import compiled_gaps, gap_of, row_order, row_order_only
 
 NOT_DRAWN = ("merge", "notes", "picture", "hz")  # (pasted notes and merged shapes: each run mirrored, is_pasted)
 LEFT_OUT = ("cut",) + NOT_DRAWN  # (a sliced piece: its whole's notes are made with the piece's setting, sliced.source)
@@ -106,6 +106,9 @@ def unflipped_starts(notes):
     """Where each of these gate flipped notes starts unflipped (mirroring the runs again puts them back)."""
     if len(notes) < 2:
         return notes[:, 0]
+    got = _compiled(notes, True)
+    if got is not None:
+        return got[:, 0]
     order, _, out, _ = _mirrored(notes)
     back = np.empty(len(notes), np.int64)
     back[order] = out[:, 0]
@@ -120,12 +123,31 @@ def mirrored_runs(notes, tracks, carry_vel):
     flip)."""
     if len(notes) < 2:
         return notes, tracks
+    got = _compiled(notes, carry_vel)
+    if got is not None:
+        return got, tracks
     order, a, out, other = _mirrored(notes)
     if not carry_vel and a.shape[1] > 3:  # (the note at the other end of its run had this place's velocity)
         out[:, 3] = a[other, 3]
     back = np.empty_like(notes)
     back[order] = out
     return back, tracks
+
+
+def _compiled(notes, carry_vel):
+    """mirrored_runs' notes from the compiled loops (pages.rs row_gaps + run_mirror: the runs found and mirrored
+    in one walk each), or None = _mirrored's NumPy way (their twin: the same notes)."""
+    from files.speed import loops
+    fast = loops()
+    if getattr(fast, "run_mirror", None) is None or notes.dtype != np.int64 or notes.ndim != 2:
+        return None
+    order = row_order_only(notes)
+    got = compiled_gaps(notes, order)
+    if got is None:
+        return None
+    gaps, dup = got
+    usual = gap_of(gaps[~dup]) if dup.any() else gap_of(gaps)  # (exact copies left out, as _mirrored does)
+    return fast.run_mirror(notes, order, gaps, dup, usual, carry_vel)
 
 
 def _mirrored(notes):

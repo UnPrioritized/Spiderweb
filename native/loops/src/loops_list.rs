@@ -91,6 +91,12 @@ py_loops! {
     unique_keep(a: Nd<i64, 2>, kc: i64, keep: &mut [u8], many: bool) => crate::rows::unique_keep;
     repeat_rows(k: &[i64], s: &[f64], e: &[f64], keys: &[i64], starts: &[f64], ends: &[f64], out: NdMut<f64, 2>,
                 many: bool) => crate::rows::repeat_rows;
+    // ---- note tool pages on big pastes: Chop, Gate aware flip, Sustain's rows (pages.rs)
+    chop_cut(a: Nd<i64, 2>, origin: &[f64], k0: &[i64], reps: &[i64], ps: &[f64], pe: &[f64], vk: &[f64], vmode: i64,
+             keep: f64, cycle: f64, out: NdMut<i64, 2>) => crate::pages::chop_cut;
+    row_gaps(notes: Nd<i64, 2>, order: &[i64], gap: &mut [i64], dup: &mut [u8]) => crate::pages::row_gaps;
+    run_mirror(notes: Nd<i64, 2>, order: &[i64], gap: &[i64], dup: &[u8], usual: i64, carry: bool, out: NdMut<i64, 2>)
+               => crate::pages::run_mirror;
     // ---- pasted notes in a stretched box (block.rs)
     block_count(rows: Nd<i64, 2>, g: &[f64], cnt: &mut [i64], many: bool) => crate::block::block_count;
     block_fill(rows: Nd<i64, 2>, g: &[f64], offs: &[i64], out: NdMut<i64, 2>, many: bool) => crate::block::block_fill;

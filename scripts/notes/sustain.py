@@ -85,7 +85,10 @@ def row_order(notes):
     """notes (start, end, pitch, ...) -> (the order key row by key row, in time; each note's gap to the notes
     before it on its key: what has sounded until then, -1 for a row's first note). Every colour together (user: a
     row is held whole, colours stacking on each other)."""
-    order = key_sort(notes[:, 2], notes[:, 0])  # (= np.lexsort((start, key)); the compiled sort when it can)
+    order = row_order_only(notes)
+    got = compiled_gaps(notes, order)
+    if got is not None:
+        return order, got[0]
     s, e, p = notes[order, 0], notes[order, 1], notes[order, 2]
     gap = np.full(len(s), -1, np.int64)
     if len(s) > 1:
@@ -95,6 +98,21 @@ def row_order(notes):
         ran = np.maximum.accumulate(e - e.min() + row * shift) - row * shift + e.min()
         gap[1:] = np.where(same, np.maximum(s[1:] - ran[:-1], 0), -1)
     return order, gap
+
+
+def row_order_only(notes):
+    """row_order's order alone: key by key, in time (= np.lexsort((start, key)); the compiled sort when it can)."""
+    return key_sort(notes[:, 2], notes[:, 0])
+
+
+def compiled_gaps(notes, order):
+    """row_order's gaps from the compiled loop (pages.rs row_gaps), + which notes are exact copies of the one before
+    them in order (same start, end, key): (gaps, copies), or None = row_order's NumPy way (the same gaps)."""
+    from files.speed import loops
+    fast = getattr(loops(), "row_gaps", None)
+    if fast is None or len(order) < 2 or notes.dtype != np.int64 or notes.ndim != 2 or notes.shape[1] < 3:
+        return None
+    return fast(notes, order)
 
 
 def runs_in(notes, order, gap, k=None):
