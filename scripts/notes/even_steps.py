@@ -1,4 +1,4 @@
-"""Symmetrical steps (sh["even"], custom.even_on; PLAN.md "Even steps", a tester's idea, user 2026-11-17): the even
+"""Even steps (sh["even"], custom.even_on; PLAN.md "Even steps", a tester's idea, user 2026-11-17): the even
 version of a Spam / Outline spam / Nested-with-Spam shape. Every straight side of its drawing becomes the nearest
 CLEAN line: each key row moves by the same whole number of gates, or one gate every few rows. The corners land
 where those lines meet (so the closing side is corrected too), and every key row's stretch is widened to whole
@@ -22,7 +22,7 @@ NOISE = 1e-6  # float noise of a snapped corner taken to the shape's box and bac
 
 
 def even_version(sh, ppq):
-    """sh as its notes are made with Symmetrical steps on (sh itself when off or nothing to do): straight sides
+    """sh as its notes are made with Even steps on (sh itself when off or nothing to do): straight sides
     snapped to clean lines, hidden "_even" = the grid's start tick for chop. A gate Range by keys: keys_version
     (its strokes then lie in the stand-in space, see there); by time: as it is (hidden in its window)."""
     if not even_on(sh):
@@ -177,7 +177,7 @@ def hugging_box(pts, strokes, g):
 
 
 def even_joined(new, olds, ppq):
-    """Turn into live shape (Ctrl+R) made new (a live shape) of olds: with Symmetrical steps on it's stored snapped
+    """Turn into live shape (Ctrl+R) made new (a live shape) of olds: with Even steps on it's stored snapped
     at once, and the drawing Split compares against (new["from"]) is that snapped one, so Split still gives the old
     shapes back after a click (hunt 2026-11-17). True = some notes moved: a shape wasn't on the joined shape's gate
     grid (Auto counts from the joined box's left edge) or wasn't ticked (user picked: tell, don't refuse)."""
@@ -212,7 +212,7 @@ def drawing_mark(strokes):
 
 
 def ticked(sh, ppq):
-    """The changes ticking Symmetrical steps makes to sh: snapped, and the drawing as it was kept in "even_free"
+    """The changes ticking Even steps makes to sh: snapped, and the drawing as it was kept in "even_free"
     (pts / strokes before, "at" = the snapped box, "mark" = the snapped strokes' fingerprint) so unticking gives it
     back (user 2026-11-17: unticking left it snapped, with leftovers)."""
     pts, strokes = snapped_shape(dict(sh, even=True), ppq)
@@ -255,7 +255,7 @@ def same_drawing(pts, strokes, pts2, strokes2):
 
 def whole_width(new, orig, sh, ppq):
     """Frame points new (a resize of orig) with the moved left / right side put a whole number of gates from the
-    side that stayed (Symmetrical steps: resizing jumps in whole steps, user). Turned boxes / both sides moved:
+    side that stayed (Even steps: resizing jumps in whole steps, user). Turned boxes / both sides moved:
     new as it is."""
     if not (even_on(sh) and axis_box(new) and axis_box(orig)) or sh.get("fit"):
         return new
@@ -326,7 +326,7 @@ def keys_middle(sh, ppq):
 
 
 class RangeSpace:
-    """A gate Range's stand-in space for Symmetrical steps: fwd(tick, pitch) -> x (whole numbers = where that row's
+    """A gate Range's stand-in space for Even steps: fwd(tick, pitch) -> x (whole numbers = where that row's
     notes may start / end), back(x, pitch) -> tick. kind "keys" = Bend with the gates (each row's gates from the
     box's middle). Stand-in ticks = origin + x * a (a = the first gate)."""
 
@@ -414,7 +414,7 @@ def keys_version(sh, ppq, sp):
 
 
 def range_chop(sh, stretches, g, count=False):
-    """custom_chop.chop for a Range with Symmetrical steps (g = range_grid's): None when it isn't one.
+    """custom_chop.chop for a Range with Even steps (g = range_grid's): None when it isn't one.
     Bend with the gates: stand-in stretches widened to whole a, taken to each row's own gates from the middle.
     Straight sides ("_even_rows"): each row's own stretch rounded out to its own gates from the middle; along time
     (g = the cut squares) rounded out to the cut lines. Then back to back notes (count: how many each)."""

@@ -24,7 +24,7 @@ What it can do
   pen (round or flat ends, tapered, thinner where drawn fast) that fills
   the band around them with long notes.
 - Fill: shapes with notes, one long note per key or chopped into notes of
-  any length (spam), with Symmetrical steps for perfectly even staircases.
+  any length (spam), with Even steps for perfectly even staircases.
   Inside fills can be smaller copies of the shape (Nested), another shape
   repeated like wallpaper (Tiles), or rings growing out from shapes drawn
   inside (Ripples).

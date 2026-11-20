@@ -55,7 +55,7 @@ def clean_range(r):
             "dir": r["dir"] if r.get("dir") in DIRS else "time", "fit": bool(r.get("fit")), "rows": bool(r.get("rows")),
             "join": bool(r.get("join")), "halves": bool(r.get("halves")),
             **({"exact": True} if r.get("exact") is True and not r.get("fit") else {}),
-            **({"even_bend": True} if r.get("even_bend") is True else {}),  # (Symmetrical steps by keys: bent sides)
+            **({"even_bend": True} if r.get("even_bend") is True else {}),  # (Even steps by keys: bent sides)
             **({"follow": "curve"} if r.get("follow") == "curve" else {})}
 
 

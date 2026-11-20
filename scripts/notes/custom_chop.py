@@ -225,7 +225,7 @@ def chop(sh, stretches, g, count=False):
     """stretches: NumPy array of (start, end, key) rows in ticks -> each filled with back-to-back notes of gate g,
     as an array of (start, end, key) rows in the same order. Where they start: ALIGNS; what happens to the bit that
     doesn't fit a whole gate: ENDS. count: just how many notes each stretch gets."""
-    if sh.get("_even") is not None and isinstance(g, (int, np.integer)):  # Symmetrical steps (even_steps.py)
+    if sh.get("_even") is not None and isinstance(g, (int, np.integer)):  # Even steps (even_steps.py)
         stretches = on_grid(stretches, int(g), int(sh["_even"]))
     elif sh.get("_even_space") or sh.get("_even_rows"):  # (... with a gate Range: by keys / along time)
         from notes.even_steps import range_chop
@@ -307,7 +307,7 @@ def chop(sh, stretches, g, count=False):
 
 
 def on_grid(stretches, g, start):
-    """Symmetrical steps: each (start, end, key) stretch widened to whole gates on the grid counted from tick start
+    """Even steps: each (start, end, key) stretch widened to whole gates on the grid counted from tick start
     (its start back to a gate line, its end on to one; at least one gate), so no row has a leftover."""
     st = np.array(stretches, np.int64).reshape(-1, 3)
     st[:, 0] = start + (st[:, 0] - start) // g * g

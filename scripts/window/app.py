@@ -1311,7 +1311,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         home.pack(fill="x", pady=(8, 0))
         self.settings = ttk.LabelFrame(home, text=tr("app.new_shape_defaults"), padding=6)
         self.settings.pack(fill="x")
-        # Symmetrical steps (PLAN.md "Even steps"): the FIRST row for drawn custom shapes, greyed until the Inside
+        # Even steps (PLAN.md "Even steps"): the FIRST row for drawn custom shapes, greyed until the Inside
         # fill has a gate (sync_even)
         self.even_var = tk.BooleanVar(value=False)
         self.even_tick = ttk.Checkbutton(self.settings, text=tr("panel_custom.even"), variable=self.even_var,
@@ -3355,7 +3355,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
     def add_shape(self, sh, name=None):
         if self.mask.get() and not is_mask(sh) and can_mask(sh):  # (drawn with the Mask tick on: a mask, mask.py)
             sh["mask"] = self.new_mask()
-        if sh.get("kind") == "custom" and even_on(sh):  # (drawn with Symmetrical steps on: stored even)
+        if sh.get("kind") == "custom" and even_on(sh):  # (drawn with Even steps on: stored even)
             sh["pts"], sh["strokes"] = snapped_shape(sh, self.ppq)
         self.push_undo(name=name or tr("app.draw", shape_label=self.shape_label(sh)))
         left_out = self.put_into_current(sh)

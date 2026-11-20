@@ -239,7 +239,7 @@ RING = pick("#b40000", "#f4f4f6")  # round the selected shapes' notes (user: #e0
 PREVIEW_LINE, PREVIEW_HALO = pick("#ff1f1f"), pick("#ffa8a8", "#7a3030")  # the outline gate's preview line
 SHAPE_LINE = pick("#c0392b", "#a4a4a8")  # a shape's line (shown lines), an arrow for a shape above the top key
 SHAPE_LINE_PICKED = pick("#ff1f1f", "#dcdce0")  # ... selected (dark: greyish white like the ring, user)
-EVEN_LANDING = pick("#ff9c9c", "#85858b")  # Symmetrical steps: where a dragged shape's corners land (faded line)
+EVEN_LANDING = pick("#ff9c9c", "#85858b")  # Even steps: where a dragged shape's corners land (faded line)
 STROKE = pick("#c0392b", "#dcdce0")  # the drawer's strokes, its Empty cross (dark: greyish white, user)
 ABOVE_EDGE = pick("#ffffff")  # round that arrow
 # "Show wrapped notes" (user 2026-11-08): a landing note sitting on a real note (red: it MEANS a clash), and the

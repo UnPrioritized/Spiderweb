@@ -37,7 +37,7 @@ Colours: how many channels the steps take turns over. Every other one empty leav
 
 Shortest piece: pieces of a step shorter than this many ticks on a key take the colour of the pieces beside them (both sides' colour when they match, else the longer side's; at the shape's edge, the one beside it). Use it to clean up thin slivers where steps bunch up against the outline. 0 keeps every piece.
 
-With [page:even_steps|Symmetrical steps] ticked on a Spam shape, Scaling and Even band make every step one row thick along flat sides and one gate thick along slopes.
+With [page:even_steps|Even steps] ticked on a Spam shape, Scaling and Even band make every step one row thick along flat sides and one gate thick along slopes.
 
 ## Tiles
 

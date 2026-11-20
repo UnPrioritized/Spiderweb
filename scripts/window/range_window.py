@@ -69,7 +69,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
         for i, t in enumerate(self.tgts[1:], 1):  # (shapes without a Range on take the one shown: the first's)
             if not t.get("range"):
                 self.memo[i] = json.loads(json.dumps(self.memo[0]))
-        # Symmetrical steps on a shape (user 2026-11-17): every direction works; by keys its sides stay straight or
+        # Even steps on a shape (user 2026-11-17): every direction works; by keys its sides stay straight or
         # bend with the gates (the "even" dropdown), "Each key row by itself" is off (each row whole cut squares)
         self.even = not self.funnel and any(even_on(t) for t in self.tgts)
         self.dirs = DIRS
@@ -138,7 +138,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
         self.ends_box.pack(side="left", padx=4)
         self.ends_box.bind("<<ComboboxSelected>>", lambda e: self.change_ends(ENDS[self.ends_box.current()]))
         Tooltip(self.ends_box, tr("range_window.ends_tip"))
-        even_row = ttk.Frame(box)  # (Symmetrical steps shapes, by keys: straight sides or bent with the gates)
+        even_row = ttk.Frame(box)  # (Even steps shapes, by keys: straight sides or bent with the gates)
         ttk.Label(even_row, text=tr("range_window.even")).pack(side="left")
         self.even_box = ttk.Combobox(even_row, values=[tr("range_window.even_straight"), tr("range_window.even_bend")],
                                      state="readonly", width=24)
@@ -229,7 +229,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
             t.pop("range", None)
             t.pop("range_kept", None)
             t["range" if on else "range_kept"] = json.loads(json.dumps(m))
-            if self.even and self.placed(t) and even_on(t) and stores_snap(t):  # (Symmetrical steps: stored for
+            if self.even and self.placed(t) and even_on(t) and stores_snap(t):  # (Even steps: stored for
                 t["pts"], t["strokes"], free = range_restored(before, t, self.app.ppq)  # the new Range)
                 if free:
                     t["even_free"] = free
@@ -367,7 +367,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
         self.rows_var.set(self.memo[0]["rows"])
         self.even_box.current(1 if self.memo[0].get("even_bend") else 0)
         self.even_box.config(state="readonly" if on else "disabled")  # (time too: user 2026-11-17, the curve)
-        time = time and not self.even  # (Symmetrical steps: every row whole cut squares, never its own graph)
+        time = time and not self.even  # (Even steps: every row whole cut squares, never its own graph)
         self.rows_check.config(state="normal" if time else "disabled")
         self.join_var.set(self.memo[0]["join"])
         self.join_check.config(state="normal" if time and self.memo[0]["rows"] else "disabled")

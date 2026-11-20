@@ -54,7 +54,7 @@ CUSTOM_DEFAULTS = {"fill": "empty", "gate": 0.0625, "align": "auto", "ends": "ro
 # overlaps cancel out, even-odd); "apart" = Fill / Spam "Outline": the outline's notes on a channel of their own
 # (with Multi channel), the inside's on another; "borders" = with "Outline" and areas coloured by hand (areas.py),
 # where two colours meet is outline too (else only where the filled part ends)
-# "even" = Symmetrical steps (even_on; PLAN.md "Even steps"): every key row steps by the same whole gates
+# "even" = Even steps (even_on; PLAN.md "Even steps"): every key row steps by the same whole gates
 CUSTOM_FLAGS = ("union", "apart", "borders", "even")
 # "Colours" (any shape but pasted notes): sh["cycle"] = {"by", "n", "every"} (only when on) = the notes take turns
 # over n channels (with Multi channel each turn gets a channel, so a colour, of its own). "step" = by the step the
@@ -1723,20 +1723,20 @@ def has_areas(sh):
 
 
 def even_kind(sh):
-    """A shape that could take Symmetrical steps with another Inside fill (its tick shown, greyed until then;
+    """A shape that could take Even steps with another Inside fill (its tick shown, greyed until then;
     user 2026-11-17): a drawn custom shape, never text, pasted notes, pictures or a Hz bass."""
     return (sh.get("kind", "custom") == "custom" and not sh.get("text") and "notes" not in sh
             and "picture" not in sh and not sh.get("hz"))
 
 
 def even_can(sh):
-    """Symmetrical steps (sh["even"], PLAN.md "Even steps") can be used on sh: a shape whose notes have a gate =
+    """Even steps (sh["even"], PLAN.md "Even steps") can be used on sh: a shape whose notes have a gate =
     Spam, Outline spam, Nested with Spam notes (never text, pasted notes, pictures, Hz bass, Tiles / Ripples)."""
     return even_kind(sh) and sh.get("fill") in SPAM_FILLS and not sh.get("tiles") and not sh.get("ripples")
 
 
 def even_on(sh):
-    """Symmetrical steps ticked on a shape that can use it (kept but unused while it can't: back when it can)."""
+    """Even steps ticked on a shape that can use it (kept but unused while it can't: back when it can)."""
     return bool(sh.get("even")) and even_can(sh)
 
 
@@ -2601,7 +2601,7 @@ def custom_note_count(sh, ppq):
     """How many notes a custom shape makes, without making them (spam can be millions)."""
     if "notes" in sh:
         return len(unpack_notes(sh["notes"]))
-    if sh.get("even"):  # Symmetrical steps: counted on the even version (even_steps.py)
+    if sh.get("even"):  # Even steps: counted on the even version (even_steps.py)
         from notes.even_steps import even_version
         sh = even_version(sh, ppq)
     if sh.get("apart") and sh["fill"] == "fill":
@@ -2676,7 +2676,7 @@ def custom_notes(sh, ppq):
 def custom_notes_groups(sh, ppq):
     """custom_notes, and which group each note belongs to (None = all one: see outline_groups). "Colours"
     (sh["cycle"]): every group split into its turns (cycle_turns); with "Outline" the outline stays one group."""
-    if sh.get("even"):  # Symmetrical steps: made from the even version (even_steps.py)
+    if sh.get("even"):  # Even steps: made from the even version (even_steps.py)
         from notes.even_steps import even_version
         sh = even_version(sh, ppq)
     notes, groups = _notes_groups(sh, ppq)

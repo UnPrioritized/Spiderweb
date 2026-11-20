@@ -1,4 +1,4 @@
-Tick Symmetrical steps, the first row of a custom shape's settings, for perfectly even staircases. Every key row moves by the same whole number of gates, or by one gate every few rows. Diagonals come out even, mirrored halves match exactly, and [page:nested_tiles|Nested] bands are equally thick everywhere.
+Tick Even steps, the first row of a custom shape's settings, for perfectly even staircases. Every key row moves by the same whole number of gates, or by one gate every few rows. Diagonals come out even, mirrored halves match exactly, and [page:nested_tiles|Nested] bands are equally thick everywhere.
 
 The tick works with a gate: Inside set to Spam, Outline spam, or Nested with Spam notes. With any other Inside it shows greyed, and its tip says what to pick. Text, pasted notes, pictures and a [page:hz_bass|Hz bass] don't have it.
 
@@ -24,7 +24,7 @@ While it's on, these are hidden because they would break the steps: Ends, Centre
 
 With a [page:fill#Range… (next to|gate Range], every note is still a whole gate and no row has a bit left over.
 
-The Range window's "Symmetrical steps" choice decides the sides. Straight sides (the usual) keeps the outline where you drew it and only rounds each key row out to whole gates. Bend with the gates makes every side step by exactly the same amount every row, so the sides bend along the Range's graph. With Bend, your drawing stays as you drew it and its corners are what you drag; the notes and a thin faded line show the bent edge.
+The Range window's "Even steps" choice decides the sides. Straight sides (the usual) keeps the outline where you drew it and only rounds each key row out to whole gates. Bend with the gates makes every side step by exactly the same amount every row, so the sides bend along the Range's graph. With Bend, your drawing stays as you drew it and its corners are what you drag; the notes and a thin faded line show the bent edge.
 
 Across time: every note starts and ends on the Range's cut lines. With Straight sides the steps grow or shrink along the shape with the gates. With Bend with the gates your drawing is laid over the cut squares, and each side moves by the same number of squares every row, so it curves as the gates grow. The corners at the box's left and right edges stay there; when From, To or the graph changes, the far corner (a triangle's top) can jump to the nearest even slope. "Each key row by itself" is off for these shapes.
 

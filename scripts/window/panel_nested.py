@@ -116,7 +116,7 @@ class NestedPanel:
                     Tooltip(w, tr("panel_custom." + text + "_tip"))
                 self.nested_boxes[key] = (e, var)
             self.nested_rows.append(row)
-            if line[0][0] in ("angle", "turn"):  # (hidden with Symmetrical steps)
+            if line[0][0] in ("angle", "turn"):  # (hidden with Even steps)
                 self.nested_turn_rows.add(row)
             if line[0][0] in ONLY_FOR:
                 self.nested_way_rows[row] = ONLY_FOR[line[0][0]]
@@ -149,13 +149,13 @@ class NestedPanel:
         self._loading = False
 
     def nested_row_states(self, t, on, even=False):
-        """{row: shown} for sync_custom's show_custom_rows (on: Nested is the Inside fill shown; even: Symmetrical
+        """{row: shown} for sync_custom's show_custom_rows (on: Nested is the Inside fill shown; even: Even
         steps on = no Copy angle / Turn: the copies stay level, PLAN.md "Even steps")."""
         cfg = t.get("nested") or NESTED_DEFAULTS
         way = cfg.get("way", "scale")
         out = {w: on and self.nested_way_rows.get(w, way) == way and not (even and w in self.nested_turn_rows)
                for w in self.nested_rows}
-        # (Symmetrical steps making the bands by depth: Last size / Spacing do nothing there, hidden; user 2026-11-17)
+        # (Even steps making the bands by depth: Last size / Spacing do nothing there, hidden; user 2026-11-17)
         bare = on and even_nested(t)
         for key in ("last", "spacing"):
             for w in self.nested_parts[key]:

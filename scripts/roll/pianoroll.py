@@ -1772,7 +1772,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             sh = self.app.selected()
             sh["pts"] = self.frame_for_box(self.resize_custom(orig, k, pt, e.state & CTRL, side))
             even = even_on(sh)
-            if even:  # (Symmetrical steps: the moved side whole gates from the other, even_steps.py)
+            if even:  # (Even steps: the moved side whole gates from the other, even_steps.py)
                 sh["pts"] = whole_width(sh["pts"], orig, sh, self.app.ppq)
             if not e.state & SHIFT and not even:
                 keep = e.state & CTRL
@@ -2076,7 +2076,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if kind in ("handle", "move", "stretch", "resize", "turn", "skew"):
             self.app.let_go()  # (Hz bass warnings, the path window's boxes)
         if not self.draft and kind in ("handle", "move", "stretch", "resize", "create", "free", "segment", "place"):
-            self.app.even_settle()  # (Symmetrical steps: the corners snap where the notes show them, even_steps.py)
+            self.app.even_settle()  # (Even steps: the corners snap where the notes show them, even_steps.py)
         self.drag = None
         self.draw_select_box()  # (the box stays, see kept_box)
         if self.box_kept and getattr(self.app, "loaded", None) is not None:  # (the red outline round the loaded notes

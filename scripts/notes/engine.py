@@ -422,7 +422,7 @@ def clean_shape(sh):
         if sh.get("gate_flip") is True:  # its gates laid from the right (gateflip.py)
             out["gate_flip"] = True
         free = sh.get("even_free") if out.get("even") else None
-        if isinstance(free, dict):  # (Symmetrical steps: the drawing before the tick, given back on untick)
+        if isinstance(free, dict):  # (Even steps: the drawing before the tick, given back on untick)
             try:
                 fp, at = [[float(a), float(b)] for a, b in free["pts"]], [[float(a), float(b)] for a, b in free["at"]]
                 fs = clean_strokes(free["strokes"])
@@ -1580,7 +1580,7 @@ def shape_tabs_done(sh, ppq, keys, get):
         else:
             out.pop("off", None)
     if (not tabs and wp is None and lq is None) or not can_recolour(sh) or even_on(sh):
-        return out  # (Symmetrical steps: its Shape steps bend nothing while ticked, they'd break the even steps)
+        return out  # (Even steps: its Shape steps bend nothing while ticked, they'd break the even steps)
     if sh.get("cut") and not sh["cut"].get("mould"):
         # (A SLICED PIECE of a bent shape, hunt 2026-11-17, user took A: the WHOLE bent, then cut by the knife where it
         # was drawn over the bent notes; the piece keeps its Shape tab, its pages / colour steps run on its part)

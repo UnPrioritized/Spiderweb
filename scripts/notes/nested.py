@@ -86,13 +86,13 @@ def centre_key(sh):
 def uses_centre(sh):
     """The shape's fill uses the centre point (its handle shows): Nested but not Even band, and Tiles."""
     key = centre_key(sh)
-    if key == "nested" and even_nested(sh):  # (Symmetrical steps: bands by depth, no centre)
+    if key == "nested" and even_nested(sh):  # (Even steps: bands by depth, no centre)
         return False
     return key == "tiles" or key == "nested" and sh["nested"].get("way") != "band"
 
 
 def even_nested(sh):
-    """Nested steps made by depth for Symmetrical steps (even_steps.nested_even): Spam, Scaling / Even band, the
+    """Nested steps made by depth for Even steps (even_steps.nested_even): Spam, Scaling / Even band, the
     shape's own drawing (not Blend, not Copies of another drawing, not a Range by keys)."""
     cfg = sh.get("nested") or {}
     return (even_on(sh) and sh.get("fill") == "spam" and cfg.get("way") != "blend" and not cfg.get("of")
@@ -205,7 +205,7 @@ def nested_steps(sh, ppq):
     base = inside_rows(sh, ppq)
     if not len(base):
         return []
-    if sh.get("_even") is not None and even_nested(sh):  # (Symmetrical steps: bands of whole rows / gates)
+    if sh.get("_even") is not None and even_nested(sh):  # (Even steps: bands of whole rows / gates)
         from notes.even_steps import nested_even
         return shortest_pieces(nested_even(sh, ppq, base, cfg), cfg.get("shortest", 0))
     centre, view = centre_bp(sh, ppq), view_of(sh)

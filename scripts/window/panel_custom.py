@@ -319,13 +319,13 @@ class CustomPanel:
         return {id(p) for sh in self.shapes if sh.get("merge") for p in sh["merge"]["parts"]}
 
     def even_targets(self):
-        """What the Symmetrical steps tick changes: the custom targets but a merged shape's parts (their outline
+        """What the Even steps tick changes: the custom targets but a merged shape's parts (their outline
         never changes, user) and shapes it can't be used on."""
         parts = self.merge_part_ids()
         return [t for t in self.custom_targets() if id(t) not in parts and even_can(t)]
 
     def sync_even(self):
-        """The Symmetrical steps tick: the panel's first row for drawn custom shapes; greyed (its tip says why) until
+        """The Even steps tick: the panel's first row for drawn custom shapes; greyed (its tip says why) until
         every one has an Inside fill with a gate (user 2026-11-17: it couldn't be found before)."""
         tgts = self.custom_targets() if self._rows["custom"] else []
         if tgts and tgts[0] is self.custom_defaults and self.tool.get() in ("text", "hz"):
@@ -346,7 +346,7 @@ class CustomPanel:
         return usable and True in ons  # (on: the rows it replaces hidden)
 
     def on_even(self):
-        """Symmetrical steps ticked / unticked: one undo step for every shape it changes."""
+        """Even steps ticked / unticked: one undo step for every shape it changes."""
         if self._loading:
             return
         self.even_tick.state(["!alternate"])
@@ -377,7 +377,7 @@ class CustomPanel:
 
     def even_settle(self, remake=True):
         """A let go on the piano roll (move, resize, a point, a stroke drawn into it), a turn / flip, an Inside
-        change: selected shapes with Symmetrical steps on have their corners snapped where the notes already show
+        change: selected shapes with Even steps on have their corners snapped where the notes already show
         them (user: "let go = the corners snap there"), in that action's own undo step (hunt 2026-11-17: a turn
         left the landing line, the next click snapped it as a "Move"). Only a box change since the tick (no stroke
         edited) keeps unticking able to give the drawing back. remake=False: the caller makes the notes after."""
@@ -546,7 +546,7 @@ class CustomPanel:
                 self.cancel_box: fill in ("fill", "spam") and not text,
                 self.borders_box: fill in ("fill", "spam") and apart and shown not in PATTERN_FILLS
                 and self.coloured_areas(tgts, placed, name)}
-        if even:  # (Symmetrical steps: no leftover to end, no free turn of the copies)
+        if even:  # (Even steps: no leftover to end, no free turn of the copies)
             rows[self.ends_row] = False
         rows.update(self.nested_row_states(tgts[0], shown == "nested", even))
         rows.update(self.tiles_row_states(tgts[0], shown == "tiles"))
@@ -675,7 +675,7 @@ class CustomPanel:
         for t in tgts:
             was = dict(t)  # (as it was: a Range's bent outline is read with its own gate)
             if key == "gate" and t is not self.custom_defaults and even_on(t) and not t.get("range"):
-                t["pts"], t["strokes"] = gate_stretched(t, value, self.ppq)  # (Symmetrical steps: the shape
+                t["pts"], t["strokes"] = gate_stretched(t, value, self.ppq)  # (Even steps: the shape
                 # stretches, every step the same number of gates; user)
                 if t.get("even_free"):  # (unticking still gives the drawing back, stretched too)
                     t["even_free"] = remarked(t, t["strokes"])
@@ -684,13 +684,13 @@ class CustomPanel:
                 shelve_patterns(t)
             if key == "gate" and t.get("range"):  # (a new gate typed in the panel = one flat gate again, user;
                 t["range_kept"] = t.pop("range")  # kept for the Range window to bring back)
-                if t is not self.custom_defaults and even_on(t):  # (Symmetrical steps: a bent outline straight)
+                if t is not self.custom_defaults and even_on(t):  # (Even steps: a bent outline straight)
                     t["pts"], t["strokes"], free = range_restored(was, t, self.ppq)
                     if free:
                         t["even_free"] = free
             if not value and (key in ("edge", "edge_mode") or key in CUSTOM_FLAGS and t is not self.custom_defaults):
                 t.pop(key, None)  # (shapes only have them when they're on)
-        if key == "fill":  # (Spam again on a shape with Symmetrical steps ticked: snapped in this step)
+        if key == "fill":  # (Spam again on a shape with Even steps ticked: snapped in this step)
             self.even_settle(remake=False)
         self.shapes_changed()
         self.sync_custom()

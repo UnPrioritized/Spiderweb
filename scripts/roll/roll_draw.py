@@ -2653,7 +2653,7 @@ class RollDrawing:
                              fill=look.ORIGIN_PICKED if picked else look.ORIGIN, dash=(6, 4), tags=tags)
 
     def draw_even_landing(self):
-        """Symmetrical steps (PLAN.md "Even steps", user): a selected shape whose drawing isn't where its notes show
+        """Even steps (PLAN.md "Even steps", user): a selected shape whose drawing isn't where its notes show
         it (being dragged freely) gets a thin faded line in its line colour where its corners will land on let go."""
         self.delete("even_landing")
         app = self.app

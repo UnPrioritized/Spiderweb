@@ -1,5 +1,13 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+## Version 1.7.6
+
+What's new:
+
+• Fixed: the toolbar's "Live shape (G)" and "Mask (M)" texts stayed white when Spiderweb started with them already ticked. Now they're light purple and light teal from the start.
+
+• Symmetrical steps is now called [page:even_steps|Even steps]: the same tick at the top of a custom shape's settings. It makes evenly stepped staircases; it doesn't mirror anything, so the old name was misleading.
+
 ## Version 1.7.5
 ^^ 2026/11/20 04:37:50 UTC+07:00 · 29438645
 
