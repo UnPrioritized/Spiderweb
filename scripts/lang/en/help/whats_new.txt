@@ -4,6 +4,10 @@ What changed in each version, newest first. This page opens by itself the first 
 
 What's new:
 
+• Custom shapes, Circle and Polygon now make proper staircases: a sloped side steps the same on every key row, the bottom and top rows too (they stepped half as far since the first custom shapes). The box you drag covers every key you drag over, its top and bottom on the lines between keys; dragging to the bottom and top keys covers all of them. Resizing keeps it that way. A drag that stays on one key makes nothing. Lines and live drawings work as before. See [page:custom|Custom shapes].
+
+• [page:even_steps|Even steps] puts flat sides on the lines between keys too, so the first and last rows step as far as the others.
+
 • Fixed: the toolbar's "Live shape (G)" and "Mask (M)" texts stayed white when Spiderweb started with them already ticked. Now they're light purple and light teal from the start.
 
 • Symmetrical steps is now called [page:even_steps|Even steps]: the same tick at the top of a custom shape's settings. It makes evenly stepped staircases; it doesn't mirror anything, so the old name was misleading.

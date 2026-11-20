@@ -4,7 +4,7 @@ The tick works with a gate: Inside set to Spam, Outline spam, or Nested with Spa
 
 ## How the sides snap
 
-Each straight side of the drawing goes to the nearest clean angle: 1, 2, 3 or more gates a row, or 1 gate every 2, 3 or more rows. The corners land where those sides meet, so the side that closes the shape is corrected too. Every key row then starts and ends exactly on a gate, so no row has a bit left over.
+Each straight side of the drawing goes to the nearest clean angle: 1, 2, 3 or more gates a row, or 1 gate every 2, 3 or more rows. The corners land where those sides meet, so the side that closes the shape is corrected too. Flat sides go on the lines between keys, so the first and last rows step as far as the others. Every key row then starts and ends exactly on a gate, so no row has a bit left over.
 
 Curves, ovals and freehand lines stay as drawn: only their rows are made whole gates.
 

@@ -731,13 +731,9 @@ def custom_strokes(sh):
     if lines is None:
         return paths
     lo, hi = lines
-
-    def held(p):
-        if abs(p - lo) < ROW_HOLD:
-            return lo + ROW_INSET
-        return hi - ROW_INSET if abs(p - hi) < ROW_HOLD else p
-
-    return [[(b, held(p)) for b, p in path] for path in paths]
+    la, lb, ha, hb, li, hi_in = lo - ROW_HOLD, lo + ROW_HOLD, hi - ROW_HOLD, hi + ROW_HOLD, lo + ROW_INSET, hi - ROW_INSET
+    return [[(b, li if la < p < lb else hi_in if ha < p < hb else p) for b, p in path] for path in paths]  # (inline:
+    # a call per point cost ~0.1 us more, 250,000 points of a patterned polygon)
 
 
 ROW_INSET = 1e-4  # keys: an outline on a box's top / bottom line between keys is made this far inside it
