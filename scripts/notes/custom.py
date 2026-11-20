@@ -726,7 +726,41 @@ def custom_strokes(sh):
     # note, user; roll_custom.tidy keeps new ones clean)
     (b0, p0), (b1, p1), (b2, p2) = ([round(b, 9), round(p, 9)] for b, p in sh["pts"])
     ub, up, vb, vp = b1 - b0, p1 - p0, b2 - b0, p2 - p0
-    return [[(b0 + u * ub + v * vb, p0 + u * up + v * vp) for u, v in stroke_points(st)] for st in sh["strokes"]]
+    paths = [[(b0 + u * ub + v * vb, p0 + u * up + v * vp) for u, v in stroke_points(st)] for st in sh["strokes"]]
+    lines = row_lines(sh)
+    if lines is None:
+        return paths
+    lo, hi = lines
+
+    def held(p):
+        if abs(p - lo) < ROW_HOLD:
+            return lo + ROW_INSET
+        return hi - ROW_INSET if abs(p - hi) < ROW_HOLD else p
+
+    return [[(b, held(p)) for b, p in path] for path in paths]
+
+
+ROW_INSET = 1e-4  # keys: an outline on a box's top / bottom line between keys is made this far inside it
+ROW_HOLD = 0.02  # keys: outline points this near such a line are held on it (row_lines)
+
+
+def row_lines(sh):
+    """(bottom, top) of an upright custom shape box lying on the lines between keys (box shapes are drawn there:
+    PLAN "Custom shapes on the lines between keys"), else None. Its outline points within ROW_HOLD of them are
+    made a hair inside (custom_strokes): an outline lying on such a line, or wobbling round it (a pattern's flat
+    stretches between spikes, Turn into plain curve's fitted curves, float noise after a turn) gave the row past
+    it stray notes, or moved its notes between two keys. Old shapes with sides on key middles are made as before;
+    points past the hold (spikes going out of the box) as they are."""
+    pts = sh.get("pts")
+    if not pts or len(pts) < 3 or "notes" in sh:
+        return None
+    (b0, p0), (_, p1), (b2, p2) = pts[:3]
+    if p0 != p1 or b0 != b2 or abs(p2 - p0) <= 4 * ROW_HOLD:
+        return None
+    lo, hi = sorted((p0, p2))
+    if abs(lo - math.floor(lo) - 0.5) > 1e-9 or abs(hi - math.floor(hi) - 0.5) > 1e-9:
+        return None
+    return lo, hi
 
 
 def role_paths(sh):
@@ -2595,6 +2629,23 @@ def merged_rows(spans):
     """(start, end, key) stretches -> the same merged per key where they touch (whatever their colour)."""
     ks, ss, es = merged_by_key(np.asarray(spans, np.int64).reshape(-1, 3))
     return np.column_stack([ss, es, ks]).astype(np.int64).reshape(-1, 3)
+
+
+def box_drawn(sh):
+    """A custom shape drawn as a box (Circle, Polygon, a library shape placed), not a live drawing: such boxes go on
+    the lines between keys (PLAN "Custom shapes on the lines between keys"). Live drawings: their own name, or the
+    strokes Turn into live shape gave them ("src"; it keeps the first shape's name)."""
+    if sh.get("kind") != "custom" or sh.get("text") or "notes" in sh or sh.get("hz"):
+        return False
+    if sh.get("polygon"):
+        return True
+    name = sh.get("name", "")
+    if name == tr("custom.live_drawing") or any("src" in st for st in sh.get("strokes", ())):
+        return False
+    if name == "Circle":
+        return True
+    from window.drawer_library import library_names  # (late: the library lives with the drawer)
+    return name.lower() in {n.lower() for n in library_names()}
 
 
 def custom_note_count(sh, ppq):

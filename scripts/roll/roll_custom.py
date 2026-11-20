@@ -6,7 +6,7 @@ import math
 import tkinter as tk
 
 from notes.basics import seg_dist
-from notes.custom import box_pts, even_on, frame_from_box
+from notes.custom import box_drawn, box_pts, even_on, frame_from_box
 from roll.roll_shared import SELECT_CURSOR, SHIFT
 from window import look
 
@@ -29,6 +29,19 @@ class CustomBox:
                 if (ya <= p) != (yb <= p) and b < xa + (xb - xa) * (p - ya) / (yb - ya):
                     inside = not inside
         return inside
+
+    @staticmethod
+    def row_box(a, b, shift=False):
+        """A custom shape's box being drawn from the pressed point a to the mouse's b (both key middles when snapped)
+        -> its two corners with the keys on the LINES BETWEEN KEYS, both keys whole inside (like the Select box; user
+        2026-11-20, PLAN "Custom shapes on the lines between keys": a corner on a key's middle left that row half
+        inside = half a step). One key = flat (nothing is made, user). Shift / free keys: as they are."""
+        if shift or not (float(a[1]).is_integer() and float(b[1]).is_integer()):
+            return list(a), list(b)
+        if a[1] == b[1]:
+            return [a[0], a[1]], [b[0], b[1]]
+        lo, hi = min(a[1], b[1]) - 0.5, max(a[1], b[1]) + 0.5
+        return ([a[0], lo], [b[0], hi]) if a[1] < b[1] else ([a[0], hi], [b[0], lo])
 
     def to_su(self, b, p):
         return b * self.sx, p * self.sy
@@ -134,6 +147,36 @@ class CustomBox:
         flat = lambda db, dp: abs(db) < 1e-9 or abs(dp) < 1e-9
         return flat(b1 - b0, p1 - p0) and flat(b2 - b0, p2 - p0)
 
+    def row_lines(self, sh, orig):
+        """(box, on lines) for a resize starting: an upright custom shape box whose top and bottom lie on the lines
+        between keys keeps them there (resize_point); an older Circle / Polygon / library shape with them on key
+        middles is moved onto the lines first, half a key out each way (user 2026-11-20: "whole box at first edit").
+        Live drawings, text, pasted notes, Hz bass: as they are."""
+        if (not sh or sh.get("kind") != "custom" or sh.get("text") or "notes" in sh or sh.get("hz")
+                or not self.grid_aligned(orig)):
+            return orig, False
+        ps = sorted({p for _, p in orig})
+        if len(ps) != 2:
+            return orig, False
+        if all(abs(p - math.floor(p) - 0.5) < 1e-9 for p in ps):
+            return orig, True
+        if all(float(p).is_integer() for p in ps) and box_drawn(sh):
+            lo, hi = ps
+            return [[b, lo - 0.5 if p == lo else hi + 0.5] for b, p in orig], True
+        return orig, False
+
+    def row_edge(self, orig, k, side, e):
+        """The dragged top / bottom of a box on the lines between keys: the line past the mouse's key seen from the
+        side that stays (both keys whole, like drawing it; at least one key tall). None: not a top / bottom."""
+        c = self.custom_corners({"pts": orig})
+        hp = c[k][1] if not side else (c[k][1] + c[(k + 1) % 4][1]) / 2
+        ps = sorted({p for _, p in orig})
+        if not any(abs(hp - p) < 1e-9 for p in ps):
+            return None
+        stay = ps[1] if abs(hp - ps[0]) < 1e-9 else ps[0]
+        key = self.event_pt(e)[1]  # (a key's middle: snapped)
+        return key + 0.5 if key > stay else key - 0.5
+
     def resize_point(self, orig, k, side, start, e):
         """Where the dragged corner / side is going (beats/pitch). A grid-aligned box snaps it onto the grid; a
         turned or skewed one moves it from where it was by the mouse's movement in whole grid steps (snapping the
@@ -146,6 +189,10 @@ class CustomBox:
                 y = min(max(e.y, self.ruler_h), self.winfo_height())
                 _, lo, hi = self.room_edges()
                 pt[1] = min(max(round(self.y2p(y) - 0.5) + 0.5, lo - 0.5), hi + 0.5)
+            elif getattr(self, "resize_rows", False) and self.app.snap_beats() and not e.state & SHIFT:
+                edge = self.row_edge(orig, k, side, e)  # (a box on the lines between keys stays on them)
+                if edge is not None:
+                    pt[1] = edge
             return pt
         c = self.custom_corners({"pts": orig})
         b, p = c[k] if not side else [(c[k][i] + c[(k + 1) % 4][i]) / 2 for i in (0, 1)]

@@ -1433,7 +1433,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                              steps_kept(app.selected()))  # (a piece of a shape with pages: a turn step too)
             elif hit[0] == "skew":
                 self.drag = ("skew", hit[1], orig, self.event_pt(e, snap=False))
-            else:
+            else:  # (a box shape: its top / bottom on the lines between keys, roll_custom.row_lines)
+                orig, self.resize_rows = self.row_lines(app.selected(), orig)
                 self.drag = ("resize", hit[1], orig, hit[0] == "side", self.event_pt(e, snap=False))
             return
 
@@ -1746,9 +1747,12 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         elif kind == "create":
             kind, pt = self.draft.get("draw") or self.draft["kind"], self.draw_pt(e)
             if kind in BOX_TOOLS:
+                start = self.drag[1]
+                if not self.app.live.get():  # (its own shape: keys on the lines between keys; live shapes' strokes
+                    start, pt = self.row_box(start, pt, e.state & SHIFT)  # stay lines, user)
                 if e.state & CTRL:  # a perfect circle / polygon on screen
-                    pt = self.keep_aspect(self.drag[1], pt, self.box_aspect(kind))
-                self.draft = self.box_draft(kind, self.drag[1], pt)
+                    pt = self.keep_aspect(start, pt, self.box_aspect(kind))
+                self.draft = self.box_draft(kind, start, pt)
             else:
                 self.draft = make_shape(kind, [self.drag[1], pt], self.app.new_defaults(kind))
                 self.pen_draft()
@@ -1823,7 +1827,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.hz_drag(e)
         elif kind == "place":
             _, start, _, _, aspect = self.drag
-            pt = self.event_pt(e)
+            start, pt = self.row_box(start, self.event_pt(e), e.state & SHIFT)  # (keys on the lines between keys)
             if e.state & CTRL and aspect:
                 pt = self.keep_aspect(start, pt, aspect)
             self.draft["pts"] = box_frame(start[0], start[1], pt[0], pt[1])
@@ -2060,7 +2064,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.arc_bend = True
             self.request_redraw()
         elif kind == "place":
-            if still:
+            pts = self.draft["pts"]
+            if still or pts[0][1] == pts[2][1]:  # (one key tall: nothing is made, user 2026-11-20)
                 self.cancel_draft()
             elif self.keep_draft() or self.app.confirm_big([self.draft]):
                 self.commit_draft()
