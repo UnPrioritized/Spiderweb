@@ -705,6 +705,8 @@ class ProjectFiles:
                               "ahead_slow_down": self.slow_ahead.get(),
                               **{"ahead_" + k: v for k, v in self.ahead_opts.items()},
                               "domino_256": self.domino256.get(), "copy_domino": self.copy_domino.get(),
+                              "domino_remember": self.domino_remember.get(),
+                              "domino_onion": self.domino_onion.get(),
                               "copy_notes": self.copy_notes.get(),
                               "keep_colours": self.keep_colours.get(), "stacked_notes": self.stack_order.get(),
                               "loud_on_top": self.stack_order.get() == "loud",
@@ -956,6 +958,8 @@ class ProjectFiles:
             self.slow_ahead.set(win.get("ahead_slow_down") is True)
             self.take_ahead_opts({k: win.get("ahead_" + k) for k in self.ahead_opts})
             self.domino256.set(win.get("domino_256") is True)
+            self.domino_remember.set(win.get("domino_remember") is True)
+            self.domino_onion.set(win.get("domino_onion") is True)
             self.copy_domino.set(win.get("copy_domino") is True)
             self.copy_notes.set(win.get("copy_notes") is True)
             self.keep_colours.set(win.get("keep_colours") is True)

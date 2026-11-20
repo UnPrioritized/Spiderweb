@@ -323,6 +323,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.synths_var = tk.StringVar(self, value=str(GROUP_DEFAULT))
         self.synths_entry = None  # (in Settings → Sound)
         self.domino256 = tk.BooleanVar(self, value=False)  # Settings → General: keys above 127 to / from Domino (mod)
+        # Settings → General, Draw on Domino (user 2026-11-20, both off by default): shapes remembered inside Domino
+        # (records + the .spiderweb file beside the song), and Take taking the onion-skinned tracks' notes too
+        self.domino_remember = tk.BooleanVar(self, value=False)
+        self.domino_onion = tk.BooleanVar(self, value=False)
         self.copy_domino = tk.BooleanVar(self, value=False)  # Settings → General: Ctrl+C also copies for Domino
         self.copy_notes = tk.BooleanVar(self, value=False)  # ... and as Spiderweb Notes (files/notes_clip.py)
         self.keep_colours = tk.BooleanVar(self, value=False)  # Settings → General: overlapping shapes move whole to

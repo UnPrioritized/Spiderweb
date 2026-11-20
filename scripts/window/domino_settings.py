@@ -87,9 +87,35 @@ class DominoSettings:
         # 11-18. Not the window's own tag: controls with a tip have their tags fixed, the main window's in them)
         app.bind_class(KEY_TAG, "<Escape>", self.settings_escape)
         app.bind_class(KEY_TAG, "<KeyPress>", self.settings_key)
+        self.add_more_button()
         self.tag_keys(True)
         self.settings_out = True
         app.build_points()  # (the Point / Tick / Pitch table left out while here)
+
+    def add_more_button(self):
+        """Under the shape settings while lifted out (never in the side panel): Spiderweb's Settings on the Copying
+        page, where the Draw on Domino ticks are (user 2026-11-20)."""
+        from tkinter import ttk
+        from window.widgets import Tooltip
+        b = self._more_button = ttk.Button(self.app.settings_home, text=tr("companion.more_settings"),
+                                           takefocus=False, command=self.open_more_settings)
+        b.pack(anchor="w", padx=6, pady=(4, 6))
+        Tooltip(b, tr("companion.more_settings_tip"))
+
+    def open_more_settings(self):
+        """Settings opened on its Copying page, shown over Domino (it belongs to the hidden main window otherwise)."""
+        from window.settings_window import open_settings
+        w = open_settings(self.app, "copying")
+        try:
+            if str(w.wm_transient()) == str(self.app):
+                w.transient(self.bar)
+            w.deiconify()
+            w.lift()
+            w.focus_force()
+            if not any(w is a for a in self.adopted):
+                self.adopted.append(w)
+        except tk.TclError:
+            pass
 
     def tag_keys(self, on):
         """KEY_TAG first on every control in the window (on), or taken off again (back in the side panel)."""
@@ -130,6 +156,10 @@ class DominoSettings:
             self.tag_keys(False)
             app.unbind_class(KEY_TAG, "<Escape>")
             app.unbind_class(KEY_TAG, "<KeyPress>")
+            b = getattr(self, "_more_button", None)
+            if b is not None:
+                b.destroy()
+                self._more_button = None
             app.tk.call("wm", "forget", home)
             nxt = self._settings_next
             if nxt is not None and nxt.winfo_exists() and nxt.winfo_manager() == "pack":

@@ -38,6 +38,8 @@ With Rendered ahead picked: its engine and settings (see [page:ahead|Rendered ah
 
 Copying: what Ctrl+C puts on the clipboard besides Spiderweb's own copy (a copy for Domino, Spiderweb Notes), and Domino's 256 keys (Experimental): [page:domino|Copy, Paste and Export to Domino] keep notes above key 127; only the 256 keys mod of Domino can open them.
 
+Draw on Domino (Experimental), on the Copying page (both off at first): "Remember shapes inside Domino" keeps sent shapes as shapes in a .spiderweb file beside the song; "Take also takes onion-skinned notes" lets Take reach the tracks Domino's onion skin shows. See [page:companion].
+
 Loaded MIDI: the saved indexes [page:load_midi|Load MIDI] keeps so a big MIDI opens faster the next time, each with its size and a Delete button.
 
 Language: the language of every text, shown after a restart. Start a translation saves a copy of the English texts to fill in.

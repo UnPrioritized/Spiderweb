@@ -169,6 +169,8 @@ APP_KEYS = {
     "tips_on": ("tips", "show_tips", bool),
     "tips_seen": ("tips", "seen", list),
     "domino_256": ("domino", "keys_256", bool),
+    "domino_remember": ("domino", "remember_shapes", bool),
+    "domino_onion": ("domino", "take_onion_skin_notes", bool),
     "copy_domino": ("domino", "with_ctrl_c", bool),
     "copy_notes": ("copying", "spiderweb_notes", bool),
     "keep_colours": ("channels", "keep_colours", bool),

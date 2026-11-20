@@ -612,6 +612,14 @@ class SettingsWindow(tk.Toplevel):
         f.head(tr("settings.head_domino"))
         f.row(None, self.tick(f.page, "settings.domino_256_short", self.app.domino256, self.app.schedule_autosave),
               tip=tr("settings.domino_256_hint"))
+        from files import system
+        if not system.REAL_WINDOWS:  # (Draw on Domino only exists on real Windows: no rows for it elsewhere)
+            return
+        f.head(tr("settings.head_companion"))
+        f.row(None, self.tick(f.page, "settings.domino_remember", self.app.domino_remember,
+                              self.app.schedule_autosave), tip=tr("settings.domino_remember_hint"))
+        f.row(None, self.tick(f.page, "settings.domino_onion", self.app.domino_onion, self.app.schedule_autosave),
+              tip=tr("settings.domino_onion_hint"))
 
     # ------------------------------------------------------------ language (lang.languages; next start, like the look)
 

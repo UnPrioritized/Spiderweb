@@ -62,7 +62,9 @@ Take says no, and takes nothing, when Domino's Conductor track is selected too (
 
 ## Onion skin
 
-With Domino's onion skin on (View → Onion Skin), Take also takes the notes of the tracks it shows behind the current one: the previous or next track, the tracks you picked, or the tracks of the same colour. Only the notes inside your select boxes come: drag a box in Domino's piano roll as usual, and Ctrl+drag (or Shift+drag) to add more boxes. A note counts when it starts inside a box, the same way Domino's own box picks the current track's notes.
+This is off at first: turn on "Take also takes onion-skinned notes" in [page:settings#Draw on Domino|Settings → Copying] (or press "Draw on Domino settings…" in the bar's Settings window). Off, Take takes only the current track's notes.
+
+With it on and Domino's onion skin on (View → Onion Skin), Take also takes the notes of the tracks it shows behind the current one: the previous or next track, the tracks you picked, or the tracks of the same colour. Only the notes inside your select boxes come: drag a box in Domino's piano roll as usual, and Ctrl+drag (or Shift+drag) to add more boxes. A note counts when it starts inside a box, the same way Domino's own box picks the current track's notes.
 
 A box over only onion skin notes takes them too. Without a dragged box (notes clicked, or Select All), only the current track's notes are taken and the line under the bar says so. The ↔ and ↕ flips on Domino's selection never take onion skin tracks.
 
@@ -72,7 +74,9 @@ A track whose notes can't be taken safely, or that you switch away from in Domin
 
 ## Shapes Spiderweb remembers
 
-A shape you sent stays a shape for Spiderweb after it goes into Domino. Select all its notes in Domino and press Take, and it comes back as the shape itself, with its curve, points and handles, ready to change, wherever it is now. Notes you select that aren't part of a sent shape come out as plain notes, as before.
+This is off at first: turn on "Remember shapes inside Domino" in [page:settings#Draw on Domino|Settings → Copying]. Off, nothing is remembered and no ".spiderweb" file is written or read; files made earlier stay as they are.
+
+With it on, a shape you sent stays a shape for Spiderweb after it goes into Domino. Select all its notes in Domino and press Take, and it comes back as the shape itself, with its curve, points and handles, ready to change, wherever it is now. Notes you select that aren't part of a sent shape come out as plain notes, as before.
 
 • Select notes of a remembered shape in Domino and an outline (a white line with orange dashes) shows around the whole shape.
 

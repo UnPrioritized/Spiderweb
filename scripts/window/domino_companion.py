@@ -288,8 +288,13 @@ class Companion(DominoBar, DominoSettings):
             if d is not None and not self.busy:
                 dl.to_domino(d)
         self.overlay.set_drawing(self.drawing())
-        self.box_watch.sync(not self.drawing())
+        self.sync_box_watch()
         self.sync_keys()
+
+    def sync_box_watch(self):
+        """Domino's drags watched only while its mouse is picked AND Take reaches onion-skinned tracks (the boxes
+        are only used there; Settings → Copying, user 2026-11-20). Each tick too: the tick may change meanwhile."""
+        self.box_watch.sync(not self.drawing() and self.app.domino_onion.get())
 
     def sync_keys(self):
         """Domino's piano keys pick Glissando keys while the tool is in use or a run is selected (user 2026-11-06:
@@ -419,6 +424,7 @@ class Companion(DominoBar, DominoSettings):
             self.unlink()
         self.close_list_elsewhere()
         try:
+            self.sync_box_watch()
             self.box_watch.tick()
         except Exception:  # (a failed look never stops following Domino; logged once a minute at most)
             self.log_once("_box_err", "(Draw on Domino: watching the boxes dragged)")
@@ -1134,6 +1140,8 @@ class Companion(DominoBar, DominoSettings):
         got, self.sending = self.sending, None
         if got is None or not any(s is x for s, x in zip(got[0], shapes)) or got[2] is None and len(got) < 4:
             return
+        if not self.remembering():
+            return
         rows, first = got[1], got[2]
         if len(got) > 3:  # (send_back: each note's own track)
             track = np.asarray(got[3], np.int64)
@@ -1165,8 +1173,16 @@ class Companion(DominoBar, DominoSettings):
     def mine(self, d):
         """The records of the song Domino d has open (a saved song: whichever Domino has it; an unsaved one: that
         Domino's own; hunt 2026-11-06: tied to the Domino, a restart of it deleted the file beside the song)."""
+        if not self.remembering():
+            return []
         song = self.song
         return [r for r in self.records if r.get("song") == song and (song or r.get("pid") == d.pid)]
+
+    def remembering(self):
+        """Settings → Copying "Remember shapes inside Domino" (user 2026-11-20, off by default). Off = no records
+        made, shown, lifted by Take, read or written (.spiderweb files left as they are); records made while it
+        was on stay in memory, unused, until it's on again."""
+        return self.app.domino_remember.get()
 
     def song_records(self):
         return [r for r in self.records if self.song and r.get("song") == self.song]
@@ -1305,7 +1321,7 @@ class Companion(DominoBar, DominoSettings):
                 for r in before:
                     r["song"], r["pid"] = path, d.pid
                 carried = True
-        if path and not carried and not here:
+        if path and not carried and not here and self.remembering():
             for r in dsh.load(path):
                 r["pid"], r["song"] = d.pid, path
                 self.records.append(r)
@@ -1328,7 +1344,7 @@ class Companion(DominoBar, DominoSettings):
 
     def keep_saved(self, now):
         """The song's records written beside it once they stop changing for a second."""
-        if not self.song:
+        if not self.song or not self.remembering():
             return
         sig = self.saved_sig()
         if sig == self._saved:
@@ -1340,7 +1356,7 @@ class Companion(DominoBar, DominoSettings):
             self.save_now()
 
     def save_now(self, d=None):
-        if not self.song:
+        if not self.song or not self.remembering():  # (off: never written, never removed)
             return
         sig = self.saved_sig()
         if sig == self._saved or not sig and not self._saved:  # (never removes a file it didn't fill itself)
@@ -1417,7 +1433,9 @@ class Companion(DominoBar, DominoSettings):
         # PLAN.md stage D). The flips on Domino's selection never reach onion tracks (user 2026-11-12: like
         # Domino's own flip, only what's selected)
         self._onion_hint = False
-        self._onion = self.onion_plan(d) if dl.alive(d) and then is None else None
+        # (Settings → Copying "Take also takes onion-skinned notes", user 2026-11-20, off by default: off = the
+        # current track only, as when Domino's onion skin is off)
+        self._onion = self.onion_plan(d) if dl.alive(d) and then is None and self.app.domino_onion.get() else None
         self.busy, self.was_front, self._then, self.job = True, dl.front_window(), then, d
         self._rides = []  # (the copied tracks' other events (CC...): Domino's Delete takes the selected ones out too)
         dl.Copy(self.bar, d, lambda rows, ppq, start: self.safely(self.took, rows, ppq, start),
