@@ -1,4 +1,4 @@
-Drag a box on the piano roll, or click two corners. Ctrl makes it perfect as it looks on screen (a circle, a square, an equal-sided triangle or star).
+Drag a box on the piano roll, or click two corners. Ctrl makes it perfect as it looks on screen (a circle, a square, an equal-sided triangle or star). The box covers every key you drag over, so sloped sides step evenly on every row (see [page:custom|Custom shapes]); a drag along one key makes nothing.
 
 The panel sets how many Points the polygon has (3 = triangle, 4 = square, 5 = pentagon…; 2 = a flat line until a pattern on its sides pulls its two sides apart) and its Kind:
 
