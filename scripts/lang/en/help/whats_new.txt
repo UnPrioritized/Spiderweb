@@ -1,5 +1,11 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+## Version 1.7.7
+
+What's new:
+
+• Chop and Gate aware flip are much faster on big pastes: on a million pasted notes, changing a Chop setting takes about a seventh of the time it did, and Chop with Gate aware flip about a fifth. Sustain is a little faster too. The notes come out exactly the same as before.
+
 ## Version 1.7.6
 ^^ 2026/11/20 16:42:37 UTC+07:00 · b780038b
 
