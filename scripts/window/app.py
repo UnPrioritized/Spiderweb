@@ -650,6 +650,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.mask.trace_add("write", lambda *_: (self.schedule_autosave(), self.roll.request_redraw(), self.sync_live_tick(),
                                                  self.sync_toolbar_parts()))
         self.sync_toolbar_parts()
+        self.sync_live_tick()  # (ticks put back from last time (restore_window) came before these traces)
         self.mask_preview.trace_add("write", lambda *_: (self.schedule_autosave(), self.sync_mask_fade(),
                                                          any(map(is_mask, self.shapes)) and self.shapes_changed()))
         self.snap.trace_add("write", lambda *_: self.roll.request_redraw())
