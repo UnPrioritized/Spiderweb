@@ -634,13 +634,17 @@ def clean_line(p, q, span=None):
     (x0, y0), (x1, y1) = p, q
     dy, dx = y1 - y0, x1 - x0
     if abs(dy) < FLAT_ROWS - NOISE:  # (NOISE: a side snapped to exactly half a row stays sloped next time)
-        return ("flat", math.floor((y0 + y1) + 0.5) / 2)  # (on a line between rows or through a row's middle)
+        # (on a line BETWEEN rows, never through a row's middle: a flat side there left its row half inside, so the
+        # sloped sides meeting it stepped half as far on that row; user 2026-11-20, PLAN "Custom shapes on the
+        # lines between keys")
+        return ("flat", float(math.floor((y0 + y1) / 2 + 0.5)))
     s = dx / dy
     m = math.floor(1 / abs(s) + 0.5) if SAME < abs(s) < 1 - NOISE else 0
     if abs(s) >= 1 - NOISE or m == 1:
         slope, step = float(math.floor(s + 0.5)), 1.0
     else:
-        if m == 0 or m > abs(dy) + NOISE:  # (less than one gate over the whole side: upright)
+        if m == 0 or m > abs(dy) + 3 * NOISE:  # (less than one gate over the whole side: upright; 3 x: both its
+            # ends may sit on flat sides moved INSIDE off their row lines, and 2 rows read 1.999999 then)
             slope, step = 0.0, 1.0
         else:
             slope, step = math.copysign(1.0 / m, s), 1.0 / m
@@ -750,7 +754,7 @@ def _snapped_loop(pts, span=None):
         elif l1[0] == "flat" or l2[0] == "flat":
             out.append((cx, cy))  # (a flat side and a sloped one always meet near: the slope is steep there)
         else:
-            yr = math.floor(2 * y + 0.5) / 2
+            yr = float(math.floor(y + 0.5))  # (on a line between rows, like flat sides)
             out += [_on(l1, y=yr), _on(l2, y=yr)]
     keep = []
     for p in out:  # (corners landing on one spot = one)
