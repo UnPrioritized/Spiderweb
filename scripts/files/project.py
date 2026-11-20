@@ -2148,7 +2148,8 @@ class ProjectFiles:
         """What a copy out (Copy to Domino, Spiderweb Notes) holds, as Export MIDI would write it: {"notes" (rows,
         file ticks), "cc" {slot: messages}, "plan" (file_plan, None without a tempo line / signatures), "sels" (the
         shapes copied, [] = all), "heard" (first start, last end in beats), "time" (the time selection's (start,
-        end) in file ticks, or None)}; None when the track list's boxes hold none of Spiderweb's notes."""
+        end) in file ticks, or None), "box" (the earliest kept Select box's / track list box's start in file ticks, or
+        None)}; None when the track list's boxes hold none of Spiderweb's notes."""
         self.catch_up_notes(late=False)  # (a shape dragged in a big project: its notes wait for the mouse to rest)
         boxed = self.list_boxed()
         if boxed is not None and not boxed.any():
@@ -2180,6 +2181,11 @@ class ProjectFiles:
             cc = self.cc_messages(ppq, bpm, only)  # (the export's layout: the notes copied are App.outgoing's)
         if time is not None:
             time = round(time[0] * ppq), round(time[1] * ppq)
+        # (the earliest Select box / ruler band / track list box's left side: Domino start "From the select box")
+        kept = getattr(self.roll, "kept_box", lambda: None)() if sels and boxed is None else None
+        box = (min(b["t0"] for b in boxes) if boxed is not None else
+               min(min(a[0], a[2]) for a in kept) if kept else None)
+        box = None if box is None else round(max(box, 0) * ppq)
         if boxed is not None:  # (their CC lines: only on a box's rows inside its time, hunt 2026-10-29: a box
             # over one track took the shape's other tracks' controllers too)
             spans = [(round(b["t0"] * ppq), round(b["t1"] * ppq), b["rows"]) for b in boxes]
@@ -2211,7 +2217,9 @@ class ProjectFiles:
                 notes = timed[np.isin(timed[:, 5], sels)] if sels else timed
             if time is not None:
                 time = tuple(int(t) for t in plan["map"](np.array(time, np.int64)).tolist())
-        return {"notes": notes, "cc": cc, "plan": plan, "sels": sels, "heard": heard, "time": time}
+            if box is not None:
+                box = int(plan["map"](np.array([box], np.int64))[0])
+        return {"notes": notes, "cc": cc, "plan": plan, "sels": sels, "heard": heard, "time": time, "box": box}
 
     def domino_copy(self, quiet=False, got=False):
         """Copy to Domino's clipboard bytes of what it copies -> (raw, status text, warning text), or None when
@@ -2253,8 +2261,18 @@ class ProjectFiles:
         span = conductor = None
         # (CCs before the first note: the copy starts at the earliest, so a lead-in keeps its timing, hunt 2026-10-22)
         early = min([int(notes[:, 0].min())] + [ms[0][0] for ms in cc.values() if ms])
-        if plan:  # (bar lines from the file's time signatures; only "from the bar line" takes them along)
-            bar = self.domino_start() == "bar"
+        start = self.domino_start()
+        box = got.get("box") if start == "box" else None
+        if start == "box" and box is None:  # (no Select box: as "First note at tick 0", user 2026-11-20)
+            start = "note"
+        if box is not None:  # (from the earliest box's left side, like Domino's copy; never after a note / CC
+            first = min(box, early)  # sticking out past it)
+            span = first, max(int(notes[:, 1].max()) - first, 1)
+            if plan and self.copied_whole():
+                conductor = tempo_items(plan["events"], domino_sigs(plan["sigs"], first, ppq), first,
+                                        first + span[1], plan["keys"], plan.get("typed"))[0]
+        elif plan:  # (bar lines from the file's time signatures; only "from the bar line" takes them along)
+            bar = start == "bar"
             lo, hi = early, int(notes[:, 1].max())
             first = bar_line(plan["sigs"], lo, ppq) if bar else lo
             span = first, max((bar_line(plan["sigs"], hi, ppq, True) if bar else hi) - first, 1)
@@ -2264,10 +2282,10 @@ class ProjectFiles:
                 conductor = tempo_items(plan["events"], domino_sigs(plan["sigs"], first, ppq), first,
                                         first + span[1], plan["keys"], plan.get("typed"))[0]
         elif early < int(notes[:, 0].min()):
-            first, length = clip_span(notes, beats * ppq, self.domino_start())
-            start = early if self.domino_start() == "note" else early // (beats * ppq) * beats * ppq
-            span = start, length + first - start
-        first = span[0] if span else clip_span(notes, beats * ppq, self.domino_start())[0]
+            first, length = clip_span(notes, beats * ppq, start)
+            lead = early if start == "note" else early // (beats * ppq) * beats * ppq
+            span = lead, length + first - lead
+        first = span[0] if span else clip_span(notes, beats * ppq, start)[0]
         if int(notes[:, 1].max()) - first > LONGEST:  # (pasting it back would say "damaged")
             return fail(tr("project.too_long_to_copy_for_domino", longest=LONGEST))
         if len(notes) > MOST_NOTES:
@@ -2288,7 +2306,7 @@ class ProjectFiles:
         self.busy(tr("project.copying_for_domino"))  # (millions of notes take a few seconds)
         notes, long = cut_gates(notes)
         try:
-            raw = clip_data(notes, ppq, beats * ppq, self.domino_start(), pad_from, cc, span, conductor,
+            raw = clip_data(notes, ppq, beats * ppq, start, pad_from, cc, span, conductor,
                             self.with_file_tracks(), self.filled_slots(notes))
         except MemoryError:
             return fail(tr("big_ask.out_of_memory"))
@@ -2298,7 +2316,7 @@ class ProjectFiles:
                 trn("project.all_notes", len(notes), n=len(notes)))
         where = (tr("project.the_conductor_track") if conductor is not None else
                  tr("project.the_track") if tracks == 1 else tr("project.the_first_of_tracks", tracks=tracks))
-        how = (tr("project.paste_at_the_cursor") if self.domino_start() == "note" else
+        how = (tr("project.paste_at_the_cursor") if start != "bar" else
                tr("project.double_click_a_bar_line_to"))
         text = (tr("project.copied_for_domino_ppq_in_domino", what=what, ppq=ppq, where=where, how=how)
                 + (tr("project.copied_keys_256") if mod else
@@ -2445,7 +2463,9 @@ class ProjectFiles:
         self.update_idletasks()
 
     def domino_start(self):
-        """The start dropdown above the Domino buttons: "note" (first note at tick 0) or "bar" (from the bar line)."""
+        """The start dropdown above the Domino buttons: "box" (from the select box: the earliest kept box's left
+        side; no box = as "note"), "note" (first note at tick 0) or "bar" (from the bar line). Paste from Domino:
+        "box" and "bar" take Domino's copy as it is (it starts at Domino's own selection)."""
         return DOMINO_STARTS[max(self.domino_box.current(), 0)][0]
 
     def paste_from_domino(self, at=None):

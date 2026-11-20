@@ -70,6 +70,7 @@ MOST_NOTES = (2 ** 32 - 2 ** 25) // NOTE.itemsize
 
 
 DOMINO_STARTS = [  # (saved value, dropdown text): where copied / pasted notes start (app.domino_start)
+    ("box", tr("domino_clip.from_the_select_box")),  # (first = the default, user 2026-11-20)
     ("note", tr("domino_clip.first_note_at_tick_0")),
     ("bar", tr("domino_clip.from_the_bar_line")),
 ]

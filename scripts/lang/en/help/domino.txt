@@ -4,6 +4,8 @@ To skip the extra step, tick "Ctrl+C also copies for Domino" in [page:settings#C
 
 The Domino start dropdown above the row sets where the notes start, for copying and pasting both:
 
+• From the select box (the first choice): the empty space from the left side of your Select box (or ruler band, or track list box) to the first note comes along, like a copy in Domino. With several boxes, the earliest one counts. Without a box, it works like First note at tick 0. Pasting from Domino keeps the empty space Domino's own copy starts with.
+
 • First note at tick 0: the first note lands right on Domino's cursor (or on the play line here).
 
 • From the bar line: the empty space from the bar line before the first note comes along, so paste on a bar line and the notes keep their place in the bar.
