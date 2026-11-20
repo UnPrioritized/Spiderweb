@@ -3152,10 +3152,32 @@ class RollDrawing:
                     if any(x0 < cx + measure(ch) and x1 > cx for x0, x1 in bands):
                         self.create_text(cx, self.bar_y(), text=ch, anchor="w", font=font, tags=tags,
                                          fill=look.RULER_PICK_TEXT if pick(cx + measure(ch) / 2) else look.RULER_TEXT)
+        if not self.__dict__.get("_raise_later"):
+            self.under_top_marks("selbox")
         self.draw_tempo_marks(boxes)
         self.draw_cc_marks(boxes)
         # (trackmark: over the corner's patch: a Select box drag hid the track's name, user 10-26)
         self.raise_on_top("tempomark", "ccmark", "trackmark", "playhead")
+
+    def under_top_marks(self, tag):
+        """The items of tag just made (on top of the canvas) go straight under the ruler marks + play line when only
+        those and they are above the lowest mark: the same order raise_on_top would make, but raising the marks
+        made Tk paint again the box around them all (full-height play line + marks along the ruler = most of the
+        piano roll, every note in it) each Select box mouse step: ~40 ms, the box lagged behind the mouse (user
+        2026-11-20)."""
+        marks = self.find_withtag("tempomark||ccmark||trackmark||playhead")
+        mine = self.find_withtag(tag)
+        if not marks or not mine:
+            return
+        allowed, i = set(marks) | set(mine), marks[0]
+        for _ in range(len(allowed)):
+            above = self.find_above(i)
+            if not above:
+                break
+            i = above[0]
+            if i not in allowed:
+                return
+        self.tag_lower(tag, marks[0])
 
     def cc_y(self):
         """The ruler's CC row's middle: under the tempo changes, over the bar numbers (user 2026-10-29)."""
