@@ -716,7 +716,6 @@ class ProjectFiles:
                               "offrange_opacity": self.offrange_opacity.get(),
                               "wrap_offrange": self.wrap_offrange.get(),
                               "show_wrapped": self.show_wrapped.get(),
-                              "draw_grab": self.draw_grab.get(),
                               "live": (getattr(getattr(self, "stir_window", None), "drawing", None)
                                        or {"live": self.live.get()})["live"],  # (a Stir area being drawn turned
                               # Live shape off for a while: the user's own tick is saved, hunt 11-04 4)
@@ -973,7 +972,6 @@ class ProjectFiles:
                 getattr(self, key).set(v if v in steps and not isinstance(v, bool) else 0)
             self.keep_offrange.set(win.get("keep_offrange") is True)
             self.wrap_offrange.set(win.get("wrap_offrange") is True)
-            self.draw_grab.set(win.get("draw_grab") is not False)  # (on unless turned off)
             from files.settings import OFFRANGE_OPACITY, WRAP_SHOWN
             shown = win.get("show_wrapped")
             self.show_wrapped.set(shown if shown in WRAP_SHOWN else WRAP_SHOWN[0])

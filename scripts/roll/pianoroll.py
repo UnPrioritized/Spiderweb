@@ -2269,11 +2269,11 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         waiting to go into Domino): its line, inside, notes, points / handles, box corners / sides, the turn / skew
         spots just outside its box, a stop line. Then the press works exactly as Select's; anywhere else it draws.
         Domino's mouse sends the shape in, so this is the only way to change it there (user 2026-11-21: Draw on
-        Domino ONLY, main window unchanged; "fully like Select", turn / skew and insides too; Settings → Copying tick,
-        on by default; off with Live shape ticked: strokes are drawn into the shape there)."""
+        Domino ONLY, main window unchanged; "fully like Select", turn / skew and insides too; always on (its Settings
+        tick dropped, user 2026-11-21: Ctrl draws instead); off with Live shape ticked: strokes go into the shape)."""
         app = self.app
         if (getattr(app, "companion", None) is None or app.roll is not self or self.draft or self.follow
-                or self.drag or not app.sels or not app.draw_grab.get() or app.live.get()
+                or self.drag or not app.sels or app.live.get()
                 or app.tool.get() in GRAB_NOT or e.x < self.kb_w or e.state & CTRL):
             return False  # (Ctrl held: the drawing tool's own Ctrl, never Select's Ctrl+click; hunt 2026-11-21)
         way = {id(s) for s in app.companion.on_the_way() or ()}  # (queued / being pasted: never grabbed, hunt 11-21)

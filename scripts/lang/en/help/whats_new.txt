@@ -4,7 +4,7 @@ What changed in each version, newest first. This page opens by itself the first 
 
 What's new:
 
-• Draw on Domino: while a shape waits on Domino (before it goes in), your drawing tool works like Select on it. Drag its line or inside to move it, drag its points or a curve's handles, drag its box corners and sides to resize it, or just outside a corner to turn it. Press anywhere else to draw a new shape; hold Ctrl to draw even on top of it. The pointer shows the move arrows where a press changes the shape. It's on at first; turn it off in [page:settings#Draw on Domino|Settings → Copying] ("Drawing tools can move the shape waiting on Domino"). See [page:companion|Draw on Domino].
+• Draw on Domino: while a shape waits on Domino (before it goes in), your drawing tool works like Select on it. Drag its line or inside to move it, drag its points or a curve's handles, drag its box corners and sides to resize it, or just outside a corner to turn it. Press anywhere else to draw a new shape; hold Ctrl to draw even on top of it. The pointer shows the move arrows where a press changes the shape. See [page:companion|Draw on Domino].
 
 • Fixed: Draw on Domino flashed black and stuttered while you resized Domino's panes (dragging the event list wider, for example).
 

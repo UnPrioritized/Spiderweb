@@ -344,9 +344,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # ... "Keep notes made there" (off; user 2026-11-08): shapes keep the notes they make in that space, kept
         # apart from the real notes (App.offrange_tracks), so nothing that leaves Spiderweb ever gets them
         self.keep_offrange = tk.BooleanVar(self, value=False)
-        # Settings → Copying "Drawing tools can move the shape waiting on Domino" (on; user 2026-11-21): drawing on
-        # Domino, a drawing tool pressed on the selected shape's line moves it (pianoroll.draw_grab)
-        self.draw_grab = tk.BooleanVar(self, value=True)
         self.offrange_opacity = tk.IntVar(self, value=50)  # (how see-through they're drawn, %: roll_draw.OFF_FADE)
         self.wrap_offrange = tk.BooleanVar(self, value=False)  # ("Wrap them around": App.outgoing)
         # ("Show wrapped notes": settings.WRAP_SHOWN "selected" / "always" / "off"; App.wrapped_rows)

@@ -36,7 +36,7 @@ The mouse wheel scrolls and zooms Domino as if you turned it over Domino itself 
 
 A shape you draw stays on Spiderweb's layer until you're done with it, so you can still change it. It goes into Domino's current track, at the spot where you drew it, when you draw the next shape, go back to Domino's mouse, press Enter or Send, or press one of Domino's keys. Then it leaves Spiderweb's layer.
 
-While it waits, your drawing tool works like Select on it: drag its line or inside to move it, drag its points or a curve's handles, drag its box corners and sides to resize it, or just outside a corner to turn it. Press anywhere else to draw a new shape; hold Ctrl to draw even on top of it. The pointer shows the move arrows where a press changes the shape. You can turn this off in [page:settings|Settings] → Copying ("Drawing tools can move the shape waiting on Domino").
+While it waits, your drawing tool works like Select on it: drag its line or inside to move it, drag its points or a curve's handles, drag its box corners and sides to resize it, or just outside a corner to turn it. Press anywhere else to draw a new shape; hold Ctrl to draw even on top of it. The pointer shows the move arrows where a press changes the shape. With Live shape ticked, drawing near the shape adds strokes to it instead.
 
 [page:gliss|Glissando]: while the Glissando tool is in use, or a run is selected, Domino's piano keys on the left pick the run's keys, just like Spiderweb's own piano keys: click a key to hear it and pick that note in every octave, Ctrl+click for just that key. Picked keys light up blue over Domino's keys. With any other tool, or Domino's mouse, a click there is Domino's again.
 

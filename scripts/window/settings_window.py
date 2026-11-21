@@ -620,10 +620,6 @@ class SettingsWindow(tk.Toplevel):
                               self.app.schedule_autosave), tip=tr("settings.domino_remember_hint"))
         f.row(None, self.tick(f.page, "settings.domino_onion", self.app.domino_onion, self.app.schedule_autosave),
               tip=tr("settings.domino_onion_hint"))
-        # (user 2026-11-21: Draw on Domino only, on by default; some may not get used to it)
-        self.grab_tick = f.row(None, self.tick(f.page, "settings.draw_grab", self.app.draw_grab,
-                                               lambda: (self.app.roll.request_redraw(), self.app.schedule_autosave())),
-                               tip=tr("settings.draw_grab_tip"))
 
     # ------------------------------------------------------------ language (lang.languages; next start, like the look)
 
