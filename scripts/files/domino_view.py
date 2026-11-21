@@ -16,6 +16,7 @@ import struct
 import hashlib
 import os
 import re
+import time
 from dataclasses import dataclass
 
 from files import system
@@ -325,6 +326,7 @@ def view_from(numbers, grid_win, scale, keys=128):
 
 
 ROWS_OFF_MOST = 40  # (reads: about 0.6 s of ticks)
+HID_GRACE_S = 0.3  # (the grid window not shown this long = another view (track list); shorter = mid-layout)
 
 
 def rows_fit(nums, grid_h, scale, ruler_h):
@@ -415,6 +417,7 @@ class Domino:
     odd: bool = False    # found by name, but its numbers didn't add up (a version not known: refused)
     forced: bool = False  # read anyway, the user's "Try anyway" (no checks)
     rows_off: int = 0    # (reads in a row whose key rows didn't match the grid's height)
+    hid_at: float = 0.0  # (when its known grid window last stopped looking shown; 0 = shown)
 
     def handle(self):
         if not self._handle:
@@ -987,6 +990,17 @@ def view(d, tries=4):
         if u.IsIconic(d.top):
             return None, "hidden"
         g = d.grid
+        if g and all(u.IsChild(d.top, h) for h in g) and not all(u.IsWindowVisible(h) for h in g):
+            # (Domino turns drawing off while it lays its windows out, e.g. the event list's edge dragged: its
+            # windows then say "not shown" for a moment, a third of the reads, measured 2026-11-21. Hiding the
+            # overlay each time flashed it black: a short gap = busy, keep the picture; longer = really gone)
+            now_s = time.monotonic()
+            if not d.hid_at:
+                d.hid_at = now_s
+            if now_s - d.hid_at < HID_GRACE_S:
+                return None, "busy"
+        else:
+            d.hid_at = 0.0
         if not g or not all(u.IsChild(d.top, h) and u.IsWindowVisible(h) for h in g):
             g = d.grid = grid_window(d.top)  # (looked for again only when the old one is gone / hidden)
         if g is None:  # (another view shown, e.g. the track list: Tab)

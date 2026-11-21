@@ -17,6 +17,7 @@ from files import system
 
 SEE_THROUGH = "#ff00fe"  # the colour Windows leaves see-through (never used for drawing)
 TICK_MS = 16
+SHOW_AFTER_MS = 40  # (the overlay shown again stays see-through this long: painted meanwhile)
 FIND_MS = 500  # how often the front-most Domino is looked for again
 
 
@@ -99,7 +100,8 @@ class DominoOverlay:
         # (make_canvas(parent): what draws on it, e.g. roll.overlay_roll; a plain canvas otherwise)
         self.canvas = (make_canvas(self.win) if make_canvas else
                        tk.Canvas(self.win, bg=SEE_THROUGH, highlightthickness=0, bd=0))
-        self.canvas.pack(fill="both", expand=True)
+        self.canvas.place(x=0, y=0, width=1, height=1)  # (placed over the grid inside a screen-sized window: _place)
+        self._host = None  # (the overlay window's own spot: Domino's monitor)
         # Windows lets clicks on see-through pixels go through whatever the style says, so while drawing a
         # nearly invisible window (1/255) lies over the overlay and takes the mouse: bind drawing on .mouse
         self.catch = tk.Toplevel(root)
@@ -313,14 +315,51 @@ class DominoOverlay:
             return
         g = self.view.grid
         x0 = g[0] - self.keys_px
-        spot = f"{max(1, g[2] - x0)}x{max(1, g[3] - g[1])}+{x0}+{g[1]}"
+        w, h = max(1, g[2] - x0), max(1, g[3] - g[1])
+        spot = f"{w}x{h}+{x0}+{g[1]}"
+        # THE OVERLAY WINDOW STAYS PUT (user's video 2026-11-21: a see-through window RESIZED shows black until
+        # painted = black blocks while Domino's event list edge was dragged): it covers Domino's whole monitor
+        # (re-sized only when that changes) and only the canvas moves inside it. The catcher (1/255) stays sized
+        # to the grid: its black never shows and the mouse goes to the grid only.
+        host = self._screen_of((x0, g[1], x0 + w, g[1] + h))
         # (update_idletasks at once: else the z-order SetWindowPos made Tk forget a move, the catcher stayed over
         # Domino's keyboard after picking Glissando keys there; same as the bar's GOTCHA)
-        self.win.geometry(spot)
+        if host != self._host:
+            self._host = host
+            self.win.geometry(f"{host[2] - host[0]}x{host[3] - host[1]}+{host[0]}+{host[1]}")
+        self.canvas.place(x=x0 - host[0], y=g[1] - host[1], width=w, height=h)
         self.win.update_idletasks()
         if self.drawing:
             self.catch.geometry(spot)
             self.catch.update_idletasks()
+
+    def _painted(self):
+        try:
+            if self._last is not None:
+                self.win.update_idletasks()
+                self.win.attributes("-alpha", 1.0)
+        except tk.TclError:
+            pass
+
+    def _screen_of(self, r):
+        """(left, top, right, bottom) of the monitor holding most of screen rect r, grown to hold all of r."""
+        import ctypes
+        from files.system import wintypes as W
+
+        class MONITORINFO(ctypes.Structure):
+            _fields_ = [("cbSize", W.DWORD), ("rcMonitor", W.RECT), ("rcWork", W.RECT), ("dwFlags", W.DWORD)]
+
+        u = ctypes.windll.user32
+        u.MonitorFromRect.restype = W.HANDLE
+        u.MonitorFromRect.argtypes = [ctypes.POINTER(W.RECT), W.DWORD]
+        u.GetMonitorInfoW.argtypes = [W.HANDLE, ctypes.POINTER(MONITORINFO)]
+        mi = MONITORINFO()
+        mi.cbSize = ctypes.sizeof(MONITORINFO)
+        m = u.MonitorFromRect(ctypes.byref(W.RECT(*r)), 2)  # MONITOR_DEFAULTTONEAREST
+        if not m or not u.GetMonitorInfoW(m, ctypes.byref(mi)):
+            return tuple(r)
+        s = mi.rcMonitor
+        return min(s.left, r[0]), min(s.top, r[1]), max(s.right, r[2]), max(s.bottom, r[3])
 
     def _tick(self):
         self._job = self.root.after(TICK_MS, self._tick)
@@ -360,7 +399,11 @@ class DominoOverlay:
             self._last = self.view = v
             self._place()
             if first:
+                # (shown again = Windows shows it BLACK until Tk has painted it (seen in the user's video,
+                # 2026-11-21): shown fully see-through first, made visible once painted)
+                self.win.attributes("-alpha", 0.0)
                 self.win.deiconify()
+                self.root.after(SHOW_AFTER_MS, self._painted)
                 self._style(self.hwnd, click_through=True)
                 if self.drawing:
                     self.catch.deiconify()
