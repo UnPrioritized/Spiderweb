@@ -50,10 +50,12 @@ What it can do
   drag to change their order.
 - Draw on Domino (Experimental, Windows): Spiderweb's drawing tools right
   on Domino's piano roll; each finished shape goes into Domino's current
-  track by itself. Take brings Domino's selected notes (several tracks, and
-  the tracks onion skin shows) into Spiderweb to change, and Send puts them
-  back into their own tracks. Real Windows only: the button isn't there on Linux or
-  macOS, or under Wine / Bottles / Proton.
+  track by itself. Take brings Domino's selected notes (several tracks,
+  and with a tick in Settings the tracks onion skin shows) into
+  Spiderweb to change, and Send puts them back into their own tracks.
+  Another tick remembers sent shapes, so Take brings back the shape itself.
+  Real Windows only: the button isn't there on Linux or macOS, or under
+  Wine / Bottles / Proton.
 - Load MIDI: open a MIDI file, even a huge dense one, draw on top of it,
   change its tempo or time signature, reorder or draw into its tracks; the
   export changes only what you changed.

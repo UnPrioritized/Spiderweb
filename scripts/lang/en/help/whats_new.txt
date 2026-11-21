@@ -6,7 +6,7 @@ What's new:
 
 • Domino start has a new first choice, From the select box: the empty space from the left side of your Select box (or ruler band, or track list box) to the first note comes along, like a copy in Domino. With no box it works like First note at tick 0. See [page:domino|Copy to Domino].
 
-• Draw on Domino: two new ticks in [page:settings#Draw on Domino|Settings → Copying], both off at first. "Remember shapes inside Domino" keeps sent shapes as shapes, so Take brings back the shape itself; "Take also takes onion-skinned notes" lets Take reach the tracks Domino's onion skin shows. Off, Take takes only the current track's notes and no .spiderweb file is written. A "Draw on Domino settings…" button in the bar's Settings window opens them. See [page:companion|Draw on Domino].
+• Draw on Domino: two new ticks in [page:settings#Draw on Domino|Settings → Copying], both off at first. "Remember shapes inside Domino" keeps sent shapes as shapes, so Take brings back the shape itself; "Take also takes onion-skinned notes" lets Take reach the tracks Domino's onion skin shows. Off, Take leaves the onion skin tracks out (tracks picked in Domino's track list still come) and no .spiderweb file is written. A "Draw on Domino settings…" button in the bar's Settings window opens them. See [page:companion|Draw on Domino].
 
 • Chop and Gate aware flip are much faster on big pastes: on a million pasted notes, changing a Chop setting takes about a seventh of the time it did, and Chop with Gate aware flip about a fifth. Sustain is a little faster too. The notes come out exactly the same as before.
 
