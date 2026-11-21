@@ -1512,10 +1512,13 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 return
             # clicking the one selected funnel again: its line / curve under the mouse gets highlighted;
             # the one selected custom shape again: its stroke under the mouse gets picked (none: unpicked)
-            again = i is not None and app.sels == {i} and app.shapes[i]["kind"] == "funnel"
+            # (a drawing tool on Domino working as Select: drags only, a click picks nothing more: no part / stroke,
+            # no next shape, no "just this one of several"; user took the hunt's pick 2026-11-21)
+            tap = not self.as_select
+            again = tap and i is not None and app.sels == {i} and app.shapes[i]["kind"] == "funnel"
             part = self.part_at(app.shapes[i], e.x, e.y) if again else None
-            if (i is not None and app.sels == {i} and app.shapes[i]["kind"] == "custom" and not app.shapes[i].get("text")
-                    and "notes" not in app.shapes[i] and not e.state & CTRL):
+            if (tap and i is not None and app.sels == {i} and app.shapes[i]["kind"] == "custom"
+                    and not app.shapes[i].get("text") and "notes" not in app.shapes[i] and not e.state & CTRL):
                 again, part = True, ("stroke", self.stroke_at(app.shapes[i], e.x, e.y))
             if part and e.state & CTRL:  # Ctrl+click: highlight just this one too (or not any more)
                 app.set_parts(app.parts ^ {part})
@@ -1533,7 +1536,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             # dragging = the next shape under the mouse (user: masks, their Masked notes and the pattern lie stacked)
             # (not inside a kept Select box: a click there keeps it, user; not the press of a double-click)
             hard = part and (part[0] != "stroke" or part[1] is not None)
-            self.cycle = ((i, e.x, e.y) if app.sels == {i} and not e.state & CTRL and not hard and not on_box
+            self.cycle = ((i, e.x, e.y) if tap and app.sels == {i} and not e.state & CTRL and not hard and not on_box
                           and not self.doubled and len(app.shapes) > 1 else None)
             if e.state & CTRL:  # Ctrl+click adds or removes a shape
                 app.select(i, toggle=True)
@@ -1548,7 +1551,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             orig = {j: copy.deepcopy(app.shapes[j]["pts"]) for j in app.sels}
             # clicking one shape of several without dragging selects just that one; clicking the selected funnel
             # without dragging highlights the part under the mouse (none: clears it)
-            self.drag = ("move", pt, orig, None if e.state & CTRL else i, False, part if again else False)
+            self.drag = ("move", pt, orig, None if e.state & CTRL or not tap else i, False, part if again else False)
             return
         if tool == "poly":  # click its points, or drag each segment
             if self.draft is None:
@@ -2271,15 +2274,19 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         app = self.app
         if (getattr(app, "companion", None) is None or app.roll is not self or self.draft or self.follow
                 or self.drag or not app.sels or not app.draw_grab.get() or app.live.get()
-                or app.tool.get() in GRAB_NOT or e.x < self.kb_w):
+                or app.tool.get() in GRAB_NOT or e.x < self.kb_w or e.state & CTRL):
+            return False  # (Ctrl held: the drawing tool's own Ctrl, never Select's Ctrl+click; hunt 2026-11-21)
+        way = {id(s) for s in app.companion.on_the_way() or ()}  # (queued / being pasted: never grabbed, hunt 11-21)
+        free = {i for i in app.sels if id(app.shapes[i]) not in way}
+        if not free:
             return False
         old, self.as_select = self.as_select, True  # (custom_hit / stop_hit answer as for Select)
         try:
-            if self.hit_handle(e.x, e.y, True) is not None or self.custom_hit(e.x, e.y) is not None:
+            if free == app.sels and (self.hit_handle(e.x, e.y, True) is not None
+                                     or self.custom_hit(e.x, e.y) is not None
+                                     or self.stop_hit(e.x, e.y, e.state) is not None):
                 return True
-            if self.stop_hit(e.x, e.y, e.state) is not None:
-                return True
-            near = [i for i in self.near_shapes(e.x, e.y) if i in app.sels]  # (only shapes reaching the mouse)
+            near = [i for i in self.near_shapes(e.x, e.y) if i in free]  # (only shapes reaching the mouse)
             return bool(near) and (self.hit_shape(e.x, e.y, near) is not None
                                    or self.note_owner(e.x, e.y, near) is not None)
         finally:

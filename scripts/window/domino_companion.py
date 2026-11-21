@@ -51,6 +51,7 @@ NOT_DRAWING = ("select", "slice", "lasso")  # (tools that pick Spiderweb's shape
 LEFT_OUT = ("hz", "picture")  # (they open windows of their own: from the main window)
 DOMINO_KEYS = 128
 MARK = "domino_send"  # (a shape key: drawn / taken here, goes into Domino with Send; dropped when this ends)
+WAIT = "domino_wait"  # (a shape key: the waiting shape's own number, found again after undo made a new copy)
 # (a shape key: a Take's [Domino's pid, [[copied track, Domino track, its track object (0 = the current track at
 # Send)], ...]]: Send puts each colour back into its own track, send_back; user 2026-11-12)
 BACK = "domino_back"
@@ -503,10 +504,36 @@ class Companion(DominoBar, DominoSettings):
         return time.monotonic() - self._gen[1] >= REST_S
 
     # --- notes into Domino ---
+    @property
+    def pending(self):
+        """The shape drawn last, still waiting (a list). Undo / redo / History put back NEW copies of the shapes:
+        a waiting shape no longer in the list is found again by its WAIT number (hunt 2026-11-21: after Ctrl+Z
+        of a move it never went into Domino); one gone for good (its drawing undone) is left out."""
+        shapes = self.app.shapes
+        here = {id(s) for s in shapes}
+        found = []
+        for i, sh in enumerate(self._waiting):
+            if id(sh) not in here:
+                w = sh.get(WAIT)
+                again = [s for s in shapes if w is not None and s.get(WAIT) == w]
+                if not again:
+                    continue
+                sh = self._waiting[i] = again[-1]
+            found.append(sh)
+        return found
+
+    @pending.setter
+    def pending(self, shapes):
+        self._waiting = list(shapes)
+
+    _wait_n = 0
+
     def drawn(self, sh):
         """App.add_shape: a shape drawn here waits, to be changed still; the one drawn before it is done now (user
         2026-11-06: it goes into Domino when you start the next one)."""
         sh[MARK] = 1
+        Companion._wait_n += 1
+        sh[WAIT] = Companion._wait_n
         done = [s for s in self.pending if s is not sh]
         self.pending = [sh]
         self.queue(done)
@@ -521,11 +548,25 @@ class Companion(DominoBar, DominoSettings):
         gone = [s for shs, *_ in self.landed for s in shs]
         return [sh for sh in shapes if any(sh is s for s in self.app.shapes) and not any(sh is s for s in gone)]
 
+    going = ()
+
+    def on_the_way(self):
+        """Shapes queued for Domino, being pasted, or in it already but still shown: drawing tools never grab them
+        (hunt 2026-11-21: a move made while it pasted was lost; pianoroll.select_hit)."""
+        out = list(self.ready) + [s for shs, *_ in self.landed for s in shs]
+        return out + list(self.going) if self.busy else out
+
     def queue(self, shapes):
         shapes = [sh for sh in self.alive(shapes) if not any(sh is s for s in self.ready)]
         if shapes:
             self.ready += shapes
             self.app.after_idle(self.flush)
+            app = self.app  # (done with: deselected at once, it reads as sent; user 2026-11-21. Never mid-drag)
+            if not (self.roll.drag or self.roll.draft):
+                ids = {id(s) for s in shapes}
+                keep = {i for i in app.sels if id(app.shapes[i]) not in ids}
+                if keep != app.sels:
+                    app.select_many(keep, app.sel if app.sel in keep else max(keep, default=None))
         elif self.after_send and not self.busy and not self.ready:
             self.pass_waiting_key()
 
@@ -542,6 +583,7 @@ class Companion(DominoBar, DominoSettings):
             return  # (also while Domino shows its track list: they go in once the piano roll is back)
         shapes, self.ready = self.ready, []
         if shapes:
+            self.going = shapes  # (on_the_way while the paste goes on)
             self.send(shapes)
         if not self.busy and self.after_send:  # (nothing went: the key of Domino's goes on anyway)
             self.pass_waiting_key()
@@ -2120,6 +2162,7 @@ class Companion(DominoBar, DominoSettings):
         self.take_off(now=True)  # (in Domino already: never left behind as shapes of the project)
         for sh in app.shapes:  # (not sent: normal shapes of the project now)
             sh.pop(MARK, None)
+            sh.pop(WAIT, None)
         self.drop_own_steps()  # (Domino's own Ctrl+Z for what went into it)
         for w in self.adopted:  # (back to the main window they belong to)
             try:

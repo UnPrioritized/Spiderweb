@@ -131,6 +131,15 @@ class DominoOverlay:
         self._click = None
         m = self.mouse
 
+        def copy_cursor():
+            cur = widget.cget("cursor")
+            if m.cget("cursor") != (cur or "crosshair"):
+                m.configure(cursor=cur or "crosshair")
+
+        # (every pointer change of widget shows at once, not only on the next mouse event: after a let go, undo,
+        # Delete the pointer seen is the catcher's, hunt 2026-11-21; OverlayRoll.set_cursor)
+        widget.cursor_out = copy_cursor
+
         def send(e, seq):
             if seq == "ButtonPress-2" and system.WINDOWS:  # (Domino's own middle button: its pan, user 2026-11-18)
                 if not self._middle:
@@ -153,9 +162,7 @@ class DominoOverlay:
                     widget.forwarded_double(e)
                     return "break"
                 widget.event_generate(f"<{seq}>", x=e.x, y=e.y, state=e.state, when="now")
-                cur = widget.cget("cursor")
-                if m.cget("cursor") != (cur or "crosshair"):
-                    m.configure(cursor=cur or "crosshair")
+                copy_cursor()
             except tk.TclError:
                 pass
             return "break"

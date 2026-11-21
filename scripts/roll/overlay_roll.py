@@ -3,6 +3,7 @@ grid, keyboard, ruler and play line, lying exactly over Domino's note grid. Whil
 app.roll, so every tool, the undo steps and the shapes work as in the main window; only the view comes from Domino
 (set_domino_view): Domino's scroll and zoom, never our own (the wheel goes to Domino, see window/domino_companion)."""
 
+import tkinter as tk
 from types import SimpleNamespace
 
 from roll.pianoroll import PianoRoll
@@ -121,6 +122,16 @@ class OverlayRoll(PianoRoll):
         if e.num == 3:
             return self.right_twice(ev)
         return self.on_double(ev)
+
+    cursor_out = None  # (DominoOverlay.forward_to: the mouse catcher's pointer = ours, the one seen over Domino)
+
+    def set_cursor(self, name):
+        super().set_cursor(name)
+        if self.cursor_out:
+            try:
+                self.cursor_out()
+            except tk.TclError:  # (the catcher closed)
+                pass
 
     def idle(self):
         return not (self.draft or self.drag or self.follow or self.typing)
