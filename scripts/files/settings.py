@@ -183,6 +183,7 @@ APP_KEYS = {
     "offrange_opacity": ("view", "kept_notes_opacity", int),  # (% 1-100; roll_draw.OFF_FADE)
     "wrap_offrange": ("view", "wrap_kept_notes_around", bool),  # (App.outgoing)
     "show_wrapped": ("view", "show_wrapped_notes", str),  # (WRAP_SHOWN; App.wrapped_rows)
+    "draw_grab": ("domino", "drawing_tools_move_waiting_shape", bool),  # (pianoroll.draw_grab; on by default)
 }
 OFFRANGE_OPACITY = (1, 100, 50)  # Settings → Piano roll "Opacity" of the notes kept there: least, most, default (user)
 WRAP_SHOWN = ("selected", "always", "off")  # ... "Show wrapped notes": Selected shapes (default) / Always / Off (user)

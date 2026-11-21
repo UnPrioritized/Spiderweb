@@ -60,7 +60,7 @@ class CustomBox:
         1 right, 2 top, 3 left as drawn), ("skew", k) just outside the middle of side k, ("turn", k) just outside
         a corner, ("inside",) inside its box, or None. Only with the Select and Custom shape tools."""
         sh = self.point_shape()
-        if not sh or sh["kind"] != "custom" or self.draft or self.app.tool.get() not in ("select", "custom"):
+        if not sh or sh["kind"] != "custom" or self.draft or self.tool_now() not in ("select", "custom"):
             return None
         corners = [(self.t2x(b), self.p2y(p)) for b, p in self.custom_corners(sh)]
         s = self.scale
@@ -122,9 +122,9 @@ class CustomBox:
             else:  # a side moves along the neighbouring sides
                 (ax, ay), (bx, by) = c[(k + 1) % 4], c[(k + 2) % 4]
             return self.arrow_cursor(bx - ax, by - ay)
-        if kind == "inside" and self.app.tool.get() == "select":
+        if kind == "inside" and self.tool_now() == "select":
             return "fleur"
-        return {"select": SELECT_CURSOR, "text": "xterm"}.get(self.app.tool.get(), "crosshair")
+        return {"select": SELECT_CURSOR, "text": "xterm"}.get(self.tool_now(), "crosshair")
 
     @staticmethod
     def arrow_cursor(dx, dy):

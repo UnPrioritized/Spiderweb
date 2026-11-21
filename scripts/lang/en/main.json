@@ -2275,6 +2275,8 @@
  "settings.hidden_shade_hint": "Your own notes get a little darker where a note hidden under them starts or ends, so you can see notes that are covered.\nA loaded MIDI's notes always show this.",
  "settings.head_space": "Piano roll",
  "settings.roll_tab": "Piano roll",
+ "settings.draw_grab": "Drawing tools can move the shape waiting on Domino",
+ "settings.draw_grab_tip": "While drawing on Domino, press on the line of the shape that hasn't gone into Domino yet and drag to move it, without switching to Domino's mouse. Press anywhere else to draw a new shape.\nThe pointer shows the move arrows where a press moves the shape.\nOff while Live shape is ticked: there, drawing near the shape adds strokes to it.",
  "settings.keep_offrange": "Keep notes made there",
  "settings.keep_offrange_tip": "Shapes keep the notes they make below the lowest key, above the highest key and before the first beat. They're drawn see-through.\nThey're kept only in the project file: they're never exported, played or copied to other programs, unless Wrap them around is ticked.",
  "settings.wrap_offrange": "Wrap them around in exports and Domino copies",

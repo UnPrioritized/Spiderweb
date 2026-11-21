@@ -48,7 +48,7 @@ class SustainStops:
     def stop_hit(self, x, y, state=0):
         """The stop line under the mouse (Select tool, nothing being drawn): (shape number, place in "at"), or None.
         Ctrl held: none (Ctrl+click / Ctrl+drag keep their meaning over the line, hunt)."""
-        if self.app.tool.get() != "select" or self.draft or self.sx is None or state & CTRL:
+        if self.tool_now() != "select" or self.draft or self.sx is None or state & CTRL:
             return None
         g = GRAB * self.scale
         for i, k, tick, k0, k1 in reversed(self.stop_lines()):

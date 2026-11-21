@@ -58,7 +58,8 @@ from roll.roll_text import TextTyping
 
 EDGE = 0.5  # keys a shape's lines may go past the lowest / highest key's middle: its notes stay on that key
 DOUBLE_MS = double_click_ms()  # how quick a second click has to be to make a double click (the system's setting)
-W_REPEAT_MS = 60  # W let go: back from "what the export gets" only if no press followed this soon (Linux repeats)
+GRAB_NOT = ("select", "slice", "lasso", "text", "hz", "picture")  # tools a press never moves the selection with (draw_grab)
+W_REPEAT_MS = 60 # W let go: back from "what the export gets" only if no press followed this soon (Linux repeats)
 
 
 def grid_x(sh, make, x, sb, ppq, notes_of):
@@ -1398,9 +1399,11 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         if not self.draft and self.liquify_press(e):  # Liquify window open: a brush stroke on a selected shape
             return
+        # (drawing on Domino: a press on the waiting shape works as Select's, user 2026-11-21; select_hit)
+        self.as_select = self.select_hit(e)
         if self.stop_press(e):  # a sustained shape's stop line held (the Select tool)
             return
-        tool = app.tool.get()
+        tool = self.tool_now()
         pt = self.draw_pt(e)
 
         if not self.draft:  # first: a picked curve stroke's handles can be near its custom shape's box
@@ -2218,6 +2221,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
 
     def pick_pointer(self, e):
         """The mouse pointer for where e is (on_motion's part that only picks it). True = on_motion stops there."""
+        if not self.drag:  # (drawing on Domino over the waiting shape: Select's pointers, select_hit)
+            self.as_select = self.select_hit(e)
         if not self.drag and not self.draft and self.path_hit(e.x, e.y):
             self.set_cursor("fleur")  # (Copy along a path: a point of its path is under it)
             return True
@@ -2232,15 +2237,15 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.set_cursor("hand2")  # (the piano keys pick Glissando keys: key_press; user 11-02)
             return True
         if not self.drag:
-            over = not self.draft and self.hit_handle(e.x, e.y, self.app.tool.get() == "select") is not None
+            select = self.tool_now() == "select"
+            over = not self.draft and self.hit_handle(e.x, e.y, select) is not None
             # (a Stir / Clumps Centre point dot or Stir area spot: any tool grabs it, centre_press; user 11-17)
             over = over or (not self.draft and self.centre_hit(e) is not None)
             # (the arrow of a shape put away above the top key can be grabbed: the move pointer shows it, user)
-            over = over or (not self.draft and self.app.tool.get() == "select"
-                            and self.above_mark_at(e.x, e.y) is not None)
+            over = over or (not self.draft and select and self.above_mark_at(e.x, e.y) is not None)
             hit = None if over else self.custom_hit(e.x, e.y)
             on_box = (self.on_kept_box(self.kept_box(), e) if not over and not (hit and hit[0] != "inside")
-                      and self.app.tool.get() == "select" and not self.draft else None)
+                      and select and not self.draft else None)
             if e.y < self.ruler_h and not over:  # (the bar numbers: the plain pointer, like many MIDI programs)
                 self.set_cursor("arrow")
             elif not over and not self.draft and self.gliss_cursor(e.x, e.y):  # (a Glissando run's handle / note end)
@@ -2249,12 +2254,43 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.set_cursor("fleur" if over else BOX_CURSORS[on_box] if on_box else self.hover_cursor(e, hit))
         return False
 
+    as_select = False  # (select_hit's answer for the press / hover now: tool_now() is "select" then)
+
+    def tool_now(self):
+        """The tool a press here works as: Select over the waiting shape on Domino (select_hit), else the tool picked.
+        Code asking "is it Select?" for a press / pointer asks this, not app.tool."""
+        return "select" if self.as_select else self.app.tool.get()
+
+    def select_hit(self, e):
+        """Drawing on Domino with a drawing tool: True when a Select press here would grab a SELECTED shape (the one
+        waiting to go into Domino): its line, inside, notes, points / handles, box corners / sides, the turn / skew
+        spots just outside its box, a stop line. Then the press works exactly as Select's; anywhere else it draws.
+        Domino's mouse sends the shape in, so this is the only way to change it there (user 2026-11-21: Draw on
+        Domino ONLY, main window unchanged; "fully like Select", turn / skew and insides too; Settings → Copying tick,
+        on by default; off with Live shape ticked: strokes are drawn into the shape there)."""
+        app = self.app
+        if (getattr(app, "companion", None) is None or app.roll is not self or self.draft or self.follow
+                or self.drag or not app.sels or not app.draw_grab.get() or app.live.get()
+                or app.tool.get() in GRAB_NOT or e.x < self.kb_w):
+            return False
+        old, self.as_select = self.as_select, True  # (custom_hit / stop_hit answer as for Select)
+        try:
+            if self.hit_handle(e.x, e.y, True) is not None or self.custom_hit(e.x, e.y) is not None:
+                return True
+            if self.stop_hit(e.x, e.y, e.state) is not None:
+                return True
+            near = [i for i in self.near_shapes(e.x, e.y) if i in app.sels]  # (only shapes reaching the mouse)
+            return bool(near) and (self.hit_shape(e.x, e.y, near) is not None
+                                   or self.note_owner(e.x, e.y, near) is not None)
+        finally:
+            self.as_select = old
+
     def hover_cursor(self, e, hit):
         """The pointer away from handles and boxes (user 2026-10-30): Select over a shape a press grabs = the move
         pointer (not a mask found only by its area: a drag there draws a Select box); Slice with shape = the plain
         arrow, a hand over a shape it can cut with."""
         name = self.custom_cursor(hit)
-        app, tool = self.app, self.app.tool.get()
+        app, tool = self.app, self.tool_now()
         if not self.draft and self.warp_split_mode():
             return "crosshair"  # (a Warp Split button picked: the next click on a grid adds the line)
         if not self.draft and self.warp_on() and getattr(self, "wp_hover_h", None) is not None:
