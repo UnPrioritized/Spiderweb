@@ -100,7 +100,8 @@ class DominoOverlay:
         # (make_canvas(parent): what draws on it, e.g. roll.overlay_roll; a plain canvas otherwise)
         self.canvas = (make_canvas(self.win) if make_canvas else
                        tk.Canvas(self.win, bg=SEE_THROUGH, highlightthickness=0, bd=0))
-        self.canvas.place(x=0, y=0, width=1, height=1)  # (placed over the grid inside a screen-sized window: _place)
+        # (fills the window until _place puts it over the grid inside a screen-sized window)
+        self.canvas.place(x=0, y=0, relwidth=1, relheight=1)
         self._host = None  # (the overlay window's own spot: Domino's monitor)
         # Windows lets clicks on see-through pixels go through whatever the style says, so while drawing a
         # nearly invisible window (1/255) lies over the overlay and takes the mouse: bind drawing on .mouse
@@ -327,7 +328,7 @@ class DominoOverlay:
         if host != self._host:
             self._host = host
             self.win.geometry(f"{host[2] - host[0]}x{host[3] - host[1]}+{host[0]}+{host[1]}")
-        self.canvas.place(x=x0 - host[0], y=g[1] - host[1], width=w, height=h)
+        self.canvas.place(x=x0 - host[0], y=g[1] - host[1], width=w, height=h, relwidth=0, relheight=0)
         self.win.update_idletasks()
         if self.drawing:
             self.catch.geometry(spot)
