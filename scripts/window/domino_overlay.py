@@ -111,12 +111,25 @@ class DominoOverlay:
         self.catch.attributes("-alpha", 1 / 255)
         self.mouse = tk.Canvas(self.catch, bg="#000000", highlightthickness=0, bd=0, cursor="crosshair")
         self.mouse.pack(fill="both", expand=True)
+        # the held piano key's row while picking Glissando keys, a little darker / lighter over Domino's own row
+        # (user 2026-11-21, like the main piano roll's): a faint window right under the overlay (our notes on top)
+        from window import look
+        self.shade = tk.Toplevel(root)
+        self.shade.withdraw()
+        self.shade.overrideredirect(True)
+        self.shade.configure(bg=look.ROW_HELD_TINT)
+        self.shade.attributes("-alpha", look.ROW_HELD_DOMINO)
+        self.shade_span = None  # (top, bottom) canvas pixels of the row shaded, or None
+        self._shade_at = None   # (where it was put: geometry string)
         self.win.update_idletasks()
         self.catch.update_idletasks()
+        self.shade.update_idletasks()
         self.hwnd = self._own_hwnd(self.win)
         self.catch_hwnd = self._own_hwnd(self.catch)
+        self.shade_hwnd = self._own_hwnd(self.shade)
         self._style(self.hwnd, click_through=True)
         self._style(self.catch_hwnd, click_through=False)
+        self._style(self.shade_hwnd, click_through=True)
         self.forwarded = None
         self._middle = False  # (a middle press handed to Domino: the catcher click-through until it's up)
         self._job = root.after(1, self._tick)  # (not at once: the caller gets the overlay first)
@@ -250,11 +263,12 @@ class DominoOverlay:
         u.GetWindow.restype = W.HWND
         u.SetWindowPos.argtypes = [W.HWND, W.HWND, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, W.UINT]
         extra = [h for h in (self._own_hwnd(w) for w in self.above if w.winfo_exists() and w.winfo_viewable())]
-        mine = (self.hwnd, self.catch_hwnd, *extra)
+        mine = (self.shade_hwnd, self.hwnd, self.catch_hwnd, *extra)
         above = u.GetWindow(self.domino.top, 3)  # GW_HWNDPREV
         while above in mine:
             above = u.GetWindow(above, 3)
-        want = [self.hwnd] + ([self.catch_hwnd] if self.drawing else []) + extra[::-1]
+        want = (([self.shade_hwnd] if self._shade_at else []) + [self.hwnd] + ([self.catch_hwnd] if self.drawing else [])
+                + extra[::-1])
         now, h = [], u.GetWindow(self.domino.top, 3)
         while h in mine:
             now.append(h)
@@ -308,6 +322,7 @@ class DominoOverlay:
             self.win.withdraw()
             self.catch.withdraw()
             self._last = None
+            self._place_shade()
         self._set_state(reason)
 
     def _place(self):
@@ -333,6 +348,36 @@ class DominoOverlay:
         if self.drawing:
             self.catch.geometry(spot)
             self.catch.update_idletasks()
+        self._place_shade()
+
+    def shade_row(self, span):
+        """span = (top, bottom) in canvas pixels: that row shaded over Domino's grid (the held piano key's); None =
+        none."""
+        if span != self.shade_span:
+            self.shade_span = span
+            self._place_shade()
+
+    def _place_shade(self):
+        at = None
+        if self.shade_span is not None and self.view is not None and self._last is not None:
+            g, (a, b) = self.view.grid, sorted(self.shade_span)
+            y0, y1 = max(g[1], g[1] + round(a)), min(g[3], g[1] + round(b))
+            if y1 > y0 and g[2] > g[0]:
+                at = f"{g[2] - g[0]}x{y1 - y0}+{g[0]}+{y0}"
+        if at == self._shade_at:
+            return
+        try:
+            if at is None:
+                self.shade.withdraw()
+            else:
+                self.shade.geometry(at)
+                if self._shade_at is None:
+                    self.shade.deiconify()
+                    self._style(self.shade_hwnd, click_through=True)
+                self.shade.update_idletasks()
+        except tk.TclError:
+            return
+        self._shade_at = at  # (put right under the overlay by the next tick's _keep_above)
 
     def _painted(self):
         try:
@@ -425,7 +470,7 @@ class DominoOverlay:
         if self.domino is not None:
             self.domino.close()
             self.domino = None
-        for w in (self.win, self.catch):
+        for w in (self.win, self.catch, self.shade):
             try:
                 w.destroy()
             except tk.TclError:

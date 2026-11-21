@@ -19,8 +19,12 @@ class OverlayRoll(PianoRoll):
     ghosts = ()        # (remembered shapes whose notes are selected in Domino, where Domino has their notes now:
     # window/domino_companion.show_selected) = a white line with orange dashes over it, 3 px (look.COMPANION_OUTLINE)
 
+    shade_out = None  # (span or None) -> the held piano key's row shaded over Domino's (window/domino_overlay.shade_row)
+
     def redraw(self):
         super().redraw()
+        if self.shade_out:  # (picking Glissando keys: the held key's row a little darker, like the main piano roll's)
+            self.shade_out(None if self.held_key is None or self.sx is None else self.row_y(self.held_key))
         self.delete("ghost")
         from window import look
         w = max(3, round(3 * self.scale))

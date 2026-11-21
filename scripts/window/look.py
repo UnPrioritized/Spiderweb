@@ -191,6 +191,20 @@ KEY_HALF, KEY_HALF_OUTSIDE = pick("#8c8c8c", "#6a6a6c"), pick("#b4b4b4", "#58585
 KEY_EDGE_C, KEY_EDGE_F = pick("#606060", "#5a5a5c"), pick("#b0b0b0", "#8a8a8c")  # under C, under F
 KEY_TEXT = pick("#333", "#363637")
 KEY_HELD = pick("#f2b35c", "#d99a45")  # a piano key held while picking Glissando keys (whole row, roll_gliss)
+# ...and its row across the piano roll while held: a little darker (dark look: lighter; user 2026-11-21). Draw on
+# Domino: a window of this colour at this strength over Domino's row (window/domino_overlay.shade_row)
+ROW_HELD_TINT, ROW_HELD_STRENGTH = pick("#000000", "#ffffff"), pick(0.08, 0.1)
+ROW_HELD_DOMINO = pick(0.16, 0.18)  # (Domino's strength: 0.08 was hard to see over Domino's grid, user 2026-11-22)
+_held = {}
+
+
+def held_row(colour):
+    """colour as drawn in the held piano key's row ("#rrggbb")."""
+    got = _held.get(colour)
+    if got is None:
+        f = ROW_HELD_STRENGTH
+        got = _held[colour] = hex_of(round(v + (t - v) * f) for v, t in zip(rgb(colour), rgb(ROW_HELD_TINT)))
+    return got
 GLISS_COPY = pick("#5b8fd6", "#8ab4f0")  # a thick Glissando run's outermost copy (dashed, roll_gliss)
 KEY_PICKED, KEY_PICKED_BLACK = pick("#8cbcf4", "#7aa6e0"), pick("#2a64b4", "#3d6fb8")  # Glissando's picked keys (lit)
 ROLL_EDGE = pick("#808080", "#656567")  # beside the keys, under the ruler

@@ -883,6 +883,9 @@ class RollDrawing:
             self._note_pic = None
         elif old is not None and old[0] is pic[0] and old[1] == pic[1]:
             self.place_tiles(int(self.kb_w), int(self.ruler_h))
+        elif (old is not None and old[0] is pic[0] and old[1][:3] == pic[1][:3] and old[1][4:] == pic[1][4:]
+              and self.repaint_rows(w, h, rows, cols, old[1][3])):
+            self._note_pic = pic
         elif moved:
             # only the view moved, by whole pixels: the picture is moved along and just the new edge is painted.
             # (A pixel here and there can round the other way, so it's painted whole once the view rests.)
@@ -1575,14 +1578,20 @@ class RollDrawing:
                 rows.append((self.row_y(-1)[0], self.row_y(p_lo)[1], look.space_shade(look.ROLL_BG)))
             if p_hi >= keys:
                 rows.append((self.row_y(p_hi)[0], self.row_y(keys)[1], look.space_shade(look.ROLL_BG)))
+        held = getattr(self, "held_key", None)  # (a piano key held while picking Glissando keys: its row a little
+        # darker / lighter, user 2026-11-21; roll_gliss)
         for p in range(p_lo, p_hi + 1):
             y0, y1 = self.row_y(p)
+            lit = look.held_row if p == held else (lambda c: c)
             if p % size in black:
-                rows.append((y0, y1, shade(p, look.ROW_BLACK_EDO if edo else look.ROW_BLACK)))
+                rows.append((y0, y1, lit(shade(p, look.ROW_BLACK_EDO if edo else look.ROW_BLACK))))
             elif edo and p % size not in EDO_WHITE:
-                rows.append((y0, y1, shade(p, look.ROW_HALF)))
-            elif self.sy >= 4:
-                rows.append((y1, None, shade(p, look.ROW_LINE)))
+                rows.append((y0, y1, lit(shade(p, look.ROW_HALF))))
+            else:
+                if p == held:
+                    rows.append((y0, y1, lit(shade(p, look.ROLL_BG))))
+                if self.sy >= 4:
+                    rows.append((y1, None, shade(p, look.ROW_LINE)))
         for p in range(p_lo, p_hi + 1):
             if p % size == 0:
                 rows.append((self.row_y(p)[1], None, shade(p, look.OCTAVE_LINE)))
@@ -2141,6 +2150,33 @@ class RollDrawing:
         if (dx, dy) == (0, 0) or abs(dx) > iw // 2 or abs(dy) > ih // 2:
             return None
         return dx, dy
+
+    def repaint_rows(self, w, h, rows, cols, was):
+        """Only some grid rows changed since the picture was painted (the held piano key's row, picking Glissando
+        keys): just those pixel rows painted again (a whole paint of millions of notes per key moved over lagged).
+        False when it isn't a few rows (painted whole then)."""
+        kb, top = int(self.kb_w), int(self.ruler_h)
+        if self._img is None or self._img.shape[:2] != (h - top, w - kb):
+            return False
+        spans = sorted((int(y0), int(y0) + 1 if y1 is None else int(y1)) for y0, y1, _ in set(was) ^ set(rows))
+        strips = []
+        for a, b in spans:
+            a, b = max(a, top), min(b, h)
+            if a >= b:
+                continue
+            if strips and a <= strips[-1][1]:
+                strips[-1][1] = max(strips[-1][1], b)
+            else:
+                strips.append([a, b])
+        if sum(b - a for a, b in strips) > (h - top) // 4:
+            return False
+        img = self._img.copy()  # (show_image sends what differs from the picture shown: not changed in place)
+        for a, b in strips:
+            rects = self.note_rects(w, h, clip=(kb, a, w, b))
+            img[a - top:b - top] = self.paint_region(rows, cols, rects, (kb, a, w, b))
+        self._img = img
+        self.show_image()
+        return True
 
     def shift_image(self, w, h, rows, cols, dx, dy):
         """The picture moved by (dx, dy) pixels; the strips that come into view are painted."""

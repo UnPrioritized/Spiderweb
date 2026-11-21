@@ -210,6 +210,7 @@ class Companion(DominoBar, DominoSettings):
                                          make_canvas=lambda p: OverlayRoll(p, app, app.scale, dov.SEE_THROUGH,
                                                                            wheel=self.wheel))
         self.roll = self.overlay.canvas
+        self.roll.shade_out = self.overlay.shade_row
         self.roll.fit_view()
         self.overlay.forward_to(self.roll, wheel=self.wheel, pressed=self.pressed)
         self.overlay.may_switch = self.may_switch
