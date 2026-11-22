@@ -348,6 +348,8 @@ class ToolWindow(DefaultPin, tk.Toplevel):
         self.retarget()
         if not self.editing_default:
             self.after_idle(lambda: app.tips.show(self.KEY, parent=self))
+            if self.saved_default() is not None and not self.has_pages():  # (a default saved: on at once, user
+                self.preview()  # 2026-11-23, like Chop on unchopped shapes)
 
     def knob_pressed(self, knob):
         """A knob's turn starts (Knob pressed): remembered for Ctrl+Z while it's held."""
