@@ -4,6 +4,7 @@ gets its own button next to it. The tool shown and the pins are remembered in th
 The main window's toolbar has one; the Hz bass window has its own (var / owner / tips / group / fit, user 2026-10-09)."""
 
 import base64
+import math
 import tkinter as tk
 from tkinter import font as tkfont
 from tkinter import ttk
@@ -11,7 +12,7 @@ from tkinter import ttk
 from files.lang import tr
 from window import look
 from window.help_texts import BY_ID, TOOL_TOPICS
-from window.snap_picker import SIZE, png_bytes, near_segment
+from window.snap_picker import SIZE, png_bytes
 from window.widgets import Tooltip, good
 
 FIRST = "line"  # the tool the button shows on the very first start
@@ -21,10 +22,27 @@ LIST_OPEN = "ToolListOpen"  # a bind tag put first on every other widget while t
 GROUP = ("custom", "circle", "polygon")
 
 
-def _pin_inside(x, y):
-    """A push pin, leaning right."""
-    return (near_segment(x, y, 2.5, 13.5, 6.5, 9.5, 1.3) or near_segment(x, y, 4.2, 7.6, 8.4, 11.8, 1.8) or
-            near_segment(x, y, 6.0, 10.0, 10.5, 5.5, 4.2) or near_segment(x, y, 8.2, 2.2, 13.8, 7.8, 2.6))
+def pin_inside(deg=0):
+    """A push pin seen from the side, its needle pointing deg degrees clockwise from right (user 2026-11-23: 0 = not
+    pinned / no default saved, 90 = straight down = pinned / saved). Used by the tool list and the Gate windows'
+    "use as default" pin."""
+    a = math.radians(deg)
+    ca, sa = math.cos(a), math.sin(a)
+
+    def inside(x, y):
+        dx, dy = x - 8, y - 8
+        lx, ly = dx * ca + dy * sa, -dx * sa + dy * ca  # (back into the pin's own way round)
+        return (-7 <= lx <= -5 and abs(ly) <= 4.2 or -5 <= lx <= 0 and abs(ly) <= 2.2
+                or 0 <= lx <= 1.6 and abs(ly) <= 3.6 or 1.6 <= lx <= 7.5 and abs(ly) <= 0.6)
+    return inside
+
+
+def pin_picture(scale, rgb, deg=0):
+    """The pin as a picture (16 px at 100 %)."""
+    return _picture(max(SIZE, round(SIZE * scale)), rgb, pin_inside(deg))
+
+
+_pin_inside = pin_inside(0)
 
 
 def _arrow_inside(x, y):
@@ -82,7 +100,8 @@ class ToolPicker:
         self.label = {key: f"{label} ({hot.upper()})" for key, label, hot in tools}
         self.last, self.pins, self.popup = tools[0][0] if FIRST not in self.label else FIRST, [], None
         size = max(SIZE, round(SIZE * app.scale))
-        self.pin_on, self.pin_off = _picture(size, look.rgb(look.ICON)), _picture(size, look.rgb(look.ICON_OFF))
+        self.pin_on, self.pin_off = (_picture(size, look.rgb(look.ICON), pin_inside(90)),
+                                     _picture(size, look.rgb(look.ICON_OFF), pin_inside(0)))
         box = self.frame = ttk.Frame(parent)
         self.main = ttk.Radiobutton(box, variable=self.var, style="Toolbutton", takefocus=False)
         self.main.pack(side="left")

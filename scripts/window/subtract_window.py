@@ -22,9 +22,10 @@ from tkinter import ttk
 import numpy as np
 
 from files.lang import texts, tr, trn
+from files import shape_defaults
 from files.mathexpr import amount, fmt
 from notes.gaterange import DIRS, STRAIGHT, few_steps, gate_steps, y_gate
-from notes.subtract import (MOST, MOST_PCT, box_of, cut_marks, empty_side, end_side, is_subtracted, marked, part_subtract,
+from notes.subtract import (MOST, MOST_PCT, box_of, clean_subtract, cut_marks, empty_side, end_side, is_subtracted, marked, part_subtract,
                             side_used, subtracts, ticks_of, touched, touching, with_sides)
 from window import look
 from window.range_window import PRESETS
@@ -190,7 +191,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     # not in the list; shapes that differ = Mixed); picking Ticks or % turns every number into that unit (50% + 10
     # -> 60 ticks). Text that can't work = the box red + why under it.
 
-    BOX_WIDTH = 12  # (letters the amount boxes show: "50% + 10")
+    BOX_WIDTH = 14  # (letters the amount boxes show: "120% + 20" whole)
 
     def as_shown(self, s):
         """A stored side with its amounts as the window keeps them ([% or None, beats])."""
@@ -222,6 +223,64 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     def first_amount(self):
         """What a shape gets where it has no amount yet: 1 tick."""
         return [None, 1 / self.app.ppq]
+
+    # ---- the user's own default ("use as default" pin, user 2026-11-22/23, PLAN.md stage D: one per window by OK /
+    # Cancel; black pointing right = none saved, green pointing down = saved; saves EVERYTHING the window sets on a
+    # shape, from the first shape worked on; "Forget my default" never changes the window open)
+
+    def clean_saved(self, v):
+        return clean_subtract(v)
+
+    def saved_default(self):
+        """The default saved for this window, as a shape would store it (None: the program's own)."""
+        v = shape_defaults.get(self.KEY).get("settings")
+        return None if v is None else self.clean_saved(v)
+
+    def pin_row(self, row):
+        """The pin, left of OK."""
+        self.pin = ttk.Label(row, cursor="hand2")
+        self.pin.pack(side="left", padx=(0, 8))
+        self.pin.bind("<ButtonRelease-1>", lambda e: self.pin_menu())
+        self.pin_tip = Tooltip(self.pin, "")
+        self.show_pin()
+
+    def show_pin(self):
+        from window.tool_picker import pin_picture
+        saved = self.saved_default() is not None
+        self.pin_image = pin_picture(self.s, look.rgb(look.PIN_ON if saved else look.PIN_OFF), 90 if saved else 0)
+        self.pin.config(image=self.pin_image)
+        self.pin_tip.set_text(tr("defaults.pin_saved_tip" if saved else "defaults.pin_tip", name=self.tx("title")))
+
+    def pin_menu(self):
+        m = tk.Menu(self, tearoff=0)
+        m.add_command(label=tr("defaults.save"), command=self.save_default,
+                      state="normal" if self.idx and any(self.ons) else "disabled")
+        m.add_command(label=tr("defaults.forget"), command=self.forget_default,
+                      state="normal" if self.saved_default() is not None else "disabled")
+        m.tk_popup(self.pin.winfo_rootx(), self.pin.winfo_rooty() + self.pin.winfo_height())
+
+    def save_default(self):
+        """The first shape's settings shown here = what shapes get from now on."""
+        if not self.idx:
+            return
+        self.take_typing()
+        i = next((i for i, on in enumerate(self.ons) if on), 0)
+        mine = self.made_of(i)
+        mine.pop("cuts", None)  # (a piece's own marks: never a default)
+        if isinstance(mine.get("start"), dict):
+            mine["start"] = {k: v for k, v in mine["start"].items() if k != "cuts"}
+        try:
+            shape_defaults.put(self.KEY, {"settings": mine})
+        except OSError:
+            self.app.status.config(text=tr("defaults.cant_save"))
+        self.show_pin()
+
+    def forget_default(self):
+        try:
+            shape_defaults.forget(self.KEY)
+        except OSError:
+            self.app.status.config(text=tr("defaults.cant_save"))
+        self.show_pin()
 
     def made_of(self, i):
         """Shape i's stored settings from the window's."""
@@ -371,6 +430,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         row.pack(anchor="e", pady=(10, 0))
         from window.edit_line import EditLine  # ("Hidden while you edit this one: ..." + Preview all, stage C)
         self.edit_line = EditLine(box, app, self.KEY, None, order=False, before=row)
+        self.pin_row(row)
         ttk.Button(row, text=tr("range_window.ok"), command=self.ok).pack(side="left")
         ttk.Button(row, text=tr("range_window.cancel"), command=self.cancel).pack(side="left", padx=(4, 0))
         self.bind("<Escape>", lambda ev: self.cancel())
@@ -487,6 +547,9 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         on the Note end tab unless only the start side is used."""
         subs = [t.get(self.KEY) if self.has_it(t) else None for t in self.tgts]
         self.ons = [start or s is not None for s in subs]
+        mine = self.saved_default()  # (shapes without it yet start from the user's own default, stage D)
+        if mine is not None:
+            subs = [mine if s is None else s for s in subs]
         for side in self.SIDES:
             # (an empty side = none: one a flip left with 0 ticks gets 1 tick when used, hunt 2026-10-20)
             ss = [s and (end_side(s) if side == "end" else s.get("start")) for s in subs]

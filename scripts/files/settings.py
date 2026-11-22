@@ -13,12 +13,13 @@ from files.safefile import write_text
 SETTINGS_FILE = os.path.join(USER, "settings.ini")
 
 
-def _lines(writing=False):
+def _lines(writing=False, path=None):
     """The file's lines ([] when it's missing). Saved by an editor in another text format ("Unicode", the system's
     own code page): read in that one, so a single odd line never makes the others count as missing. A file that's
-    there but can't be opened reads as empty, and raises OSError when writing (it would be emptied)."""
+    there but can't be opened reads as empty, and raises OSError when writing (it would be emptied). path: another
+    file read the same way (files/shape_defaults.py)."""
     try:
-        with open(SETTINGS_FILE, "rb") as f:
+        with open(path or SETTINGS_FILE, "rb") as f:
             data = f.read()
     except FileNotFoundError:
         return []

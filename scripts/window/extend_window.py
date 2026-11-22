@@ -10,7 +10,7 @@ from tkinter import ttk
 import numpy as np
 
 from files.lang import tr
-from notes.extend import is_extended, part_extend
+from notes.extend import clean_extend, is_extended, part_extend
 from window.subtract_window import SubtractWindow, side_data, target_indices
 from window.widgets import Tooltip
 
@@ -109,9 +109,13 @@ class ExtendWindow(SubtractWindow):
             side["same"] = True
         return side
 
+    def clean_saved(self, v):
+        return clean_extend(v)
+
     def load(self, start):
-        """As Gate subtract's; "Same amount" per shape."""
-        exts = [t.get("extend") if is_extended(t) else None for t in self.tgts]
+        """As Gate subtract's; "Same amount" per shape (a shape without it yet: the user's default's)."""
+        mine = self.saved_default() or {}
+        exts = [t.get("extend") if is_extended(t) else mine for t in self.tgts]
         self.sides["end"]["sames"] = [bool(e and e.get("same")) for e in exts]
         super().load(start)
 
