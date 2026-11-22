@@ -80,9 +80,13 @@ class TrimWindow(ToolWindow):
         self.slider = ttk.Scale(box, from_=0, to=100, variable=self.slider_var,
                                 length=round(SLIDER_PX * self.app.scale), command=lambda v: self.on_slider())
         self.slider.grid(row=2, column=0, columnspan=2, sticky="ew", pady=(6, 0))
-        for b in (1, 2, 3):  # (Tk's own: the middle / right button jumps there and drags too)
+        for b in (1, 3):  # (Tk's own: the right button jumps there and drags too)
             self.slider.bind(f"<ButtonPress-{b}>", self.slider_press, add="+")
             self.slider.bind(f"<ButtonRelease-{b}>", lambda e: self.slider_release(), add="+")
+        # (THE CONTROL SCHEME, user 2026-11-23: middle-click = back to its default, 100 % = nothing cut)
+        self.slider.bind("<ButtonPress-2>", self.slider_middle)
+        self.slider.bind("<B2-Motion>", lambda e: "break")
+        self.slider.bind("<ButtonRelease-2>", lambda e: "break")
         Tooltip(self.slider, tr("trim.tip_slider"))
         self.hold = Hold()
         self.pressed_at = None  # where the slider was when pressed
@@ -192,6 +196,13 @@ class TrimWindow(ToolWindow):
         self.knob_pressed(self.hold)  # (a step of its own; Ctrl+Z while held: back to the press)
         self.hold.down, self.hold.dead = True, False
         self.pressed_at = self.slider_var.get()
+
+    def slider_middle(self, e):
+        """Middle-click the slider: Keep back to 100 % (one step; nothing while another button holds it)."""
+        if not self.ticks() and not self.hold.down and self.cfg["keep"] != 100:
+            self.undo.key = None
+            self.put("keep", 100.0, True)
+        return "break"
 
     def slider_release(self):
         held, self.hold.down = self.hold.down, False

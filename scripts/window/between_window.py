@@ -547,6 +547,7 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
         pad.bind("<B1-Motion>", self.pad_motion)
         pad.bind("<ButtonRelease-1>", self.pad_release)
         bind_double(pad, self.pad_reset, self.pad_press)
+        pad.bind("<ButtonPress-2>", self.pad_middle)  # (THE CONTROL SCHEME: middle-click = back to no push)
         self.pad_info = ttk.Label(parent, text="", foreground=look.HINT, font=look.font(8))
         self.pad_info.grid(row=2, column=1, sticky="nw", padx=(8, 0), pady=(2, 0))
         for w in (self.pad_title, self.pad_info):  # (not on the pad itself: it covered the stick, user)
@@ -646,6 +647,15 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
         self.set_push([0.0, 0.0])
         self.app.catch_up_notes()
         h.mark()
+
+    def pad_middle(self, e):
+        """Middle-click the pad: no push (one step of its own; nothing while the left button holds it)."""
+        if self.pad_drag is not None:
+            return "break"
+        self.set_push([0.0, 0.0])
+        self.app.catch_up_notes()
+        self.hist.mark()
+        return "break"
 
     # ---- the graph (left = the first shape, right = the last; up = changed more towards the last)
 

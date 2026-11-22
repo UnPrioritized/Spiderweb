@@ -534,6 +534,9 @@ class ImageWindow(DefaultPin, tk.Toplevel):
         scale.bind("<ButtonPress-1>", press)
         scale.bind("<ButtonRelease-1>", release, add="+")
         bind_double(scale, reset, press)
+        scale.bind("<ButtonPress-2>", reset)  # (THE CONTROL SCHEME: middle-click = back to its default too)
+        scale.bind("<B2-Motion>", lambda e: "break")
+        scale.bind("<ButtonRelease-2>", lambda e: "break")
         self.scales[key] = scale
         if ends:
             ttk.Label(r, text=ends[1], foreground=look.HINT).pack(side="left")
