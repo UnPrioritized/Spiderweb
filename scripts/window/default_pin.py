@@ -39,6 +39,8 @@ WINDOWS = {
     "chop": "window.chop_window:ChopWindow",
     "trim": "window.trim_window:TrimWindow",
     "melody": "window.melody_window:MelodyWindow",
+    "warp": "window.warp_window:WarpWindow",
+    "liquify": "window.liquify_window:LiquifyWindow",
 }
 
 

@@ -22,6 +22,7 @@ from notes import warp as wp_
 from notes import warp_presets as pr
 from notes.recolour import KEEP, STIR_EDGES, clean_recolour, new_seed
 from window import look
+from window.default_pin import DefaultPin
 from window.edit_line import EditLine
 from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, open_or_lift, remember_place, \
     same_or_blank, unchanged
@@ -33,7 +34,37 @@ SPLITS = ("across", "down", "both")  # (the Split buttons: a line side to side /
 
 
 def put(name, value):
-    settings.put_quiet("warp", name, value)
+    """Only Mirror (a drawing aid) is kept in settings.ini; the picks for shapes without a Warp start from the
+    program's own (or the user's pinned default) at every open (user 2026-11-23, replacing 2026-11-09's kept picks)."""
+    if name == "mirror":
+        settings.put_quiet("warp", name, value)
+
+
+# the picks a shape without a Warp takes (its first drag / a preset), as the program has them
+PROGRAM = {"cols": 4, "rows": 4, "custom": False, "smooth": True, "edge": "escape", "edges": wp_.DEFAULTS["edges"],
+           "folds": wp_.DEFAULTS["folds"], "moves": "colours", "bend_colours": True, "chop": True, "preset": "arc",
+           "preset_bend": 50.0, "preset_way": "across"}
+
+
+def clean_picks(v):
+    """A saved Warp default: only usable picks (None: none)."""
+    if not isinstance(v, dict):
+        return None
+    out = {}
+    for k in ("cols", "rows"):
+        if isinstance(v.get(k), int) and not isinstance(v[k], bool) and wp_.cells_ok(v[k]):
+            out[k] = v[k]
+    for k in ("custom", "smooth", "bend_colours", "chop"):
+        if isinstance(v.get(k), bool):
+            out[k] = v[k]
+    for k, ok in (("edge", STIR_EDGES), ("edges", wp_.EDGES), ("folds", wp_.FOLDS), ("moves", ("colours", "shape")),
+                  ("preset", pr.PRESETS), ("preset_way", pr.WAYS)):
+        if v.get(k) in ok:
+            out[k] = v[k]
+    b = v.get("preset_bend")
+    if isinstance(b, (int, float)) and not isinstance(b, bool) and 0 < abs(b) <= pr.MOST_BEND:
+        out["preset_bend"] = float(b)
+    return out or None
 
 
 def fit_key(w):
@@ -41,52 +72,82 @@ def fit_key(w):
     return json.dumps(wp_.clean_warp(w), sort_keys=True)
 
 
-def _number(text, default):
-    try:
-        return float(text)
-    except (TypeError, ValueError):
-        return default
-
-
-def saved_cells(name):
-    try:
-        v = int(settings.get("warp", name, "4"))
-    except (TypeError, ValueError):
-        return 4
-    return v if wp_.cells_ok(v) else 4
-
-
-class WarpWindow(tk.Toplevel):
+class WarpWindow(DefaultPin, tk.Toplevel):
     notes_pass = True  # (its clicks / keys don't wait for notes made in the background: notes_wait.pass_window)
+    KEY = "warp"  # (its section in shape-defaults.ini)
+    ATTR = "warp_window"
+
+    # ---- the user's own default ("use as default" pin, window/default_pin.py): the picks a shape without a Warp
+    # takes (grid size, Cells, edges, folds, At the edges, Moves + ticks, Preset + Bend % + way); never points,
+    # handles, split lines (placed on the piano roll), Strength / show (a Warp's own) or Mirror (a drawing aid)
+
+    @classmethod
+    def clean_saved(cls, v):
+        return clean_picks(v)
+
+    @classmethod
+    def default_title(cls):
+        return tr("warp.title")
+
+    @classmethod
+    def editor_class(cls):
+        return warp_editor(cls)
+
+    @classmethod
+    def program_default(cls):
+        return dict(PROGRAM)
+
+    def can_save_default(self):
+        return True
+
+    def picks(self):
+        return {"cols": self.cols, "rows": self.rows, "custom": self.custom, "smooth": self.smooth,
+                "edge": self.edge, "edges": self.edges, "folds": self.folds, "moves": self.moves,
+                "bend_colours": self.bend_colours_pick, "chop": self.chop_pick, "preset": self.preset,
+                "preset_bend": self.preset_bend, "preset_way": self.preset_way}
+
+    def default_now(self):
+        """The first selected Warp's settings (a shape without one: the window's picks)."""
+        out = self.picks()
+        tgts = self.targets()
+        w = self.cleaned(tgts[0])[1] if tgts else None
+        if w:
+            for k in ("cols", "rows", "smooth", "edge", "edges", "folds"):
+                out[k] = w[k]
+            out["custom"] = (w["cols"], w["rows"]) not in wp_.GRIDS
+            out["moves"] = self.kind_of(tgts[0])
+            out["bend_colours"], out["chop"] = w.get("bend_colours", True), w.get("chop", True)
+            p = self.preset_of(w)
+            if p and p[1]:
+                out["preset"], out["preset_bend"], out["preset_way"] = p
+        return clean_picks(out)
+
+    @classmethod
+    def describe_default(cls, v, ppq):
+        v = dict(PROGRAM, **v)
+        words = [tr("warp.grid_n", cols=v["cols"], rows=v["rows"]),
+                 tr("warp.smooth" if v["smooth"] else "warp.straight"),
+                 tr("stir.moves_shape" if v["moves"] == "shape" else "stir.moves_colours"),
+                 f"{tr('warp.preset')} {tr('warp.preset_' + v['preset'])} {fmt(v['preset_bend'])}%"]
+        return ", ".join(words)
+
     def __init__(self, app):
         super().__init__(app)
         self.withdraw()
         self.app = app
-        app.warp_window = self
+        setattr(app, self.ATTR, self)
         self.title(tr("warp.title"))
         self.transient(app)
         self.resizable(False, False)
-        self.cols, self.rows = saved_cells("cols"), saved_cells("rows")  # (a shape's first drag takes these)
-        self.custom = settings.get("warp", "custom", "0") == "1"  # (Custom… picked: the boxes stay shown)
-        self.smooth = settings.get("warp", "smooth", "1") != "0"
-        edge = settings.get("warp", "edge", "escape")
-        self.edge = edge if edge in STIR_EDGES else "escape"
-        edges = settings.get("warp", "edges", wp_.DEFAULTS["edges"])
-        self.edges = edges if edges in wp_.EDGES else wp_.DEFAULTS["edges"]
-        folds = settings.get("warp", "folds", wp_.DEFAULTS["folds"])
-        self.folds = folds if folds in wp_.FOLDS else wp_.DEFAULTS["folds"]
-        # (Moves: Colours / Shape, PLAN.md "Deform shapes" stage F; + Colours bend too: shapes without a Warp take
-        # them at their first drag, settings.ini [warp] moves / bend_colours)
-        self.moves = "shape" if settings.get("warp", "moves", "colours") == "shape" else "colours"
-        self.bend_colours_pick = settings.get("warp", "bend_colours", "1") != "0"
-        self.chop_pick = settings.get("warp", "chop", "1") != "0"  # (Cut notes where bent, user 2026-11-17)
+        # (a shape's first drag / preset takes these: the program's own, or the user's pinned default)
+        p = dict(PROGRAM, **(self.saved_default() or {}))
+        self.cols, self.rows, self.custom, self.smooth = p["cols"], p["rows"], p["custom"], p["smooth"]
+        self.edge, self.edges, self.folds = p["edge"], p["edges"], p["folds"]
+        # (Moves: Colours / Shape, PLAN.md "Deform shapes" stage F; + Colours bend too / Cut notes where bent)
+        self.moves, self.bend_colours_pick, self.chop_pick = p["moves"], p["bend_colours"], p["chop"]
         self._fit = {}  # fit_key(the Warp a size change left) -> the Warp before the first size change
-        # (Preset: the last one picked + its Bend % / way, for shapes without one yet; settings.ini [warp])
-        p = pr.ok([settings.get("warp", "preset", "arc"), _number(settings.get("warp", "preset_bend", "50"), 50.0),
-                   settings.get("warp", "preset_way", "across")]) or ["arc", 50.0, "across"]
-        self.preset, self.preset_bend, self.preset_way = p
-        if not self.preset_bend:  # (0 % is never the next pick's bend: picks did nothing; hunt 2026-11-10)
-            self.preset_bend = 50.0
+        # (Preset: the last one picked + its Bend % / way, for shapes without one yet)
+        self.preset, self.preset_bend, self.preset_way = p["preset"], p["preset_bend"], p["preset_way"]
         self._warps = {}  # id(a shape's recolour) -> (that recolour, its Warp in full): each cleaned once (hunt 11-10)
         self._keys = {}  # id(a Warp from warps()) -> (it, fit_key(it))
         self._seen = {}  # fit_key(a Warp) -> pr.matches (what the Preset row shows for it)
@@ -234,9 +295,13 @@ class WarpWindow(tk.Toplevel):
             self.split_buttons[mode] = b
         buttons = ttk.Frame(box)
         buttons.pack(anchor="w", fill="x", pady=(10, 0))
-        b = ttk.Button(buttons, text=tr("warp.reset"), command=self.on_reset)
+        b = self.reset_button = ttk.Button(buttons, text=tr("warp.reset"), command=self.on_reset)
         b.pack(side="left")
         Tooltip(b, tr("warp.reset_tip"))
+        self.buttons = buttons
+        right = ttk.Frame(buttons)
+        right.pack(side="right")
+        self.pin_row(right)
         self.hint = ttk.Label(box, text=tr("warp.hint"), foreground=look.HINT,
                               wraplength=int(280 * app.scale), justify="left")
         self.hint.pack(anchor="w", fill="x", pady=(10, 0))
@@ -793,12 +858,92 @@ class WarpWindow(tk.Toplevel):
         if self.split_mode:
             self.set_split("")
         roll.warp_drop_pick()  # (opened again: no point picked; Warp Split hunt 2026-11-10)
-        self.app.warp_window = None
+        setattr(self.app, self.ATTR, None)
         self.app.colour_edit_leave("warp")  # (its later colour steps worked out again, PLAN.md stage C)
         self.app.colour_window_closed()  # (quick drags' kept work let go: memory use, user 2026-11-10)
         self.destroy()
         roll.focus_set()
         roll.draw_warp_grid()
+
+
+def warp_editor(cls):
+    """The Warp window changing the user's DEFAULT only (Settings → User set defaults; like
+    default_pin.default_editor): no shape at all, so it shows and changes only the picks for shapes without a Warp;
+    Split greyed; OK saves, Esc / X change nothing."""
+    class Editor(cls):
+        ATTR = cls.ATTR + "_defaults"
+        editing_default = True
+
+        def __init__(self, app, done=None):
+            self.done = done
+            super().__init__(app)
+            self.title(tr("defaults.edit_title", name=cls.default_title()))
+            ok = ttk.Button(self.buttons, text=tr("range_window.ok"), command=self.ok)
+            ok.pack(side="right")
+            self.protocol("WM_DELETE_WINDOW", self.cancel)
+            self.bind("<Escape>", lambda e: self.cancel())
+
+        def targets(self):
+            return []
+
+        def pin_row(self, row):
+            """(no pin here: OK is what saves)"""
+
+        def _change(self, set_to, name, keep_kind=True):
+            self.sync()  # (no shape: only the window's picks changed)
+
+        def _lay(self, name, bend, way, undo):
+            self.preset = name
+            if bend:
+                self.preset_bend = bend
+            if way is not None:
+                self.preset_way = way
+            self.sync()
+
+        def sync(self):
+            super().sync()
+            self.what.config(text="")
+            self.moves_box.config(state="readonly")  # (greyed with nothing selected in the real window)
+            for b in list(self.split_buttons.values()) + [self.reset_button]:
+                b.state(["disabled"])
+
+        def sync_preset(self, ws):
+            """The preset a shape without a Warp gets: picked, its Bend % and way changeable."""
+            self.boxes["preset"].current(pr.PRESETS.index(self.preset))
+            try:
+                typing = self.focus_get() is self.amount_entry
+            except (KeyError, tk.TclError):
+                typing = False
+            if not typing:  # (never under the typing)
+                self.amount_var.set(fmt(self.preset_bend))
+            self.way_var.set(self.preset_way)
+            self.amount_entry.state(["!disabled"])
+            for w in self.way_buttons:
+                w.state(["disabled"] if self.preset in pr.NO_WAY else ["!disabled"])
+
+        def on_amount(self, left=None):
+            try:
+                v = calc(self.amount_var.get().strip().rstrip("%"))
+            except (ValueError, ZeroDivisionError):
+                return bad(self.amount_entry)
+            if not 0 < abs(v) <= pr.MOST_BEND:
+                return bad(self.amount_entry)
+            good(self.amount_entry)
+            self.preset_bend = round(v, 3)
+
+        def on_way(self):
+            self.preset_way = self.way_var.get()
+
+        def ok(self):
+            self.on_amount()
+            self.save_default()
+            self.cancel()
+
+        def cancel(self):
+            setattr(self.app, self.ATTR, None)
+            self.destroy()
+    Editor.__name__ = cls.__name__ + "Default"
+    return Editor
 
 
 def open_warp(app):

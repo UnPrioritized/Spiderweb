@@ -16,6 +16,7 @@ from files.mathexpr import calc, fmt
 from notes import liquify as lq
 from notes.recolour import KEEP, STIR_EDGES, clean_recolour
 from window import look
+from window.default_pin import DefaultPin
 from window.edit_line import EditLine
 from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, open_or_lift, remember_place, \
     same_or_blank, unchanged
@@ -42,17 +43,79 @@ def saved(name):
     return min(max(v, lo), hi) if v == v else d
 
 
+# what a shape without a Liquify takes at its first stroke, as the program has it (user 2026-11-23: never remembered
+# from last time, only the user's pinned default; the brush is a drawing aid and stays in settings.ini)
+PROGRAM = {"edge": "escape", "moves": "colours", "bend_colours": True, "chop": True}
+
+
 def put(name, value):
-    settings.put_quiet("liquify", name, value)
+    if name not in PROGRAM:
+        settings.put_quiet("liquify", name, value)
 
 
-class LiquifyWindow(tk.Toplevel):
+def clean_picks(v):
+    """A saved Liquify default: only usable picks (None: none)."""
+    if not isinstance(v, dict):
+        return None
+    out = {k: v[k] for k in ("bend_colours", "chop") if isinstance(v.get(k), bool)}
+    out.update({k: v[k] for k, ok in (("edge", STIR_EDGES), ("moves", ("colours", "shape"))) if v.get(k) in ok})
+    return out or None
+
+
+class LiquifyWindow(DefaultPin, tk.Toplevel):
     notes_pass = True  # (its clicks / keys don't wait for notes made in the background: notes_wait.pass_window)
+    KEY = "liquify"  # (its section in shape-defaults.ini)
+    ATTR = "liquify_window"
+
+    # ---- the user's own default ("use as default" pin, window/default_pin.py): At the edges + Moves + its ticks for
+    # a shape's first stroke; never the bends / freeze mask (on the piano roll), Strength / show (a Liquify's own) or
+    # the brush (a drawing aid)
+
+    @classmethod
+    def clean_saved(cls, v):
+        return clean_picks(v)
+
+    @classmethod
+    def default_title(cls):
+        return tr("liquify.title")
+
+    @classmethod
+    def editor_class(cls):
+        return liquify_editor(cls)
+
+    @classmethod
+    def program_default(cls):
+        return dict(PROGRAM)
+
+    def can_save_default(self):
+        return True
+
+    def default_now(self):
+        """The first selected Liquify's settings (a shape without one: the window's picks)."""
+        out = {"edge": self.edge, "moves": self.moves, "bend_colours": self.bend_colours_pick, "chop": self.chop_pick}
+        tgts = self.targets()
+        g = (clean_recolour(tgts[0].get("recolour")) or {}).get("liquify") if tgts else None
+        if g:
+            out.update(edge=g.get("edge", "escape"), moves=self.kind_of(tgts[0]),
+                       bend_colours=g.get("bend_colours", True), chop=g.get("chop", True))
+        return clean_picks(out)
+
+    @classmethod
+    def describe_default(cls, v, ppq):
+        v = dict(PROGRAM, **v)
+        return ", ".join([tr("stir.moves_shape" if v["moves"] == "shape" else "stir.moves_colours"),
+                          tr("stir.edge_" + v["edge"])])
+
+    def change_rc(self, change, name):
+        """The selected shapes' Recolour changed (one undo step)."""
+        self.app.change_recolour(change, name)
+
     def __init__(self, app):
         super().__init__(app)
         self.withdraw()
         self.app = app
-        app.liquify_window = self
+        setattr(app, self.ATTR, self)
+        mine = dict(PROGRAM, **(self.saved_default() or {}))
         self.title(tr("liquify.title"))
         self.transient(app)
         self.resizable(False, False)
@@ -61,8 +124,7 @@ class LiquifyWindow(tk.Toplevel):
         self.tool = tk.StringVar(value=tool if tool in TOOLS else "push")
         way = settings.get("liquify", "twirl", "right")
         self.twirl = tk.StringVar(value=way if way in ("left", "right") else "right")
-        edge = settings.get("liquify", "edge", "escape")
-        self.edge = edge if edge in STIR_EDGES else "escape"  # (a shape's first stroke takes it)
+        self.edge = mine["edge"]  # (a shape's first stroke takes it)
         self.show_mask = tk.BooleanVar(value=settings.get("liquify", "show_mask", "1") != "0")
         box = ttk.Frame(self, padding=12)
         box.pack(fill="both", expand=True)
@@ -72,10 +134,8 @@ class LiquifyWindow(tk.Toplevel):
         form.pack(anchor="w", fill="x", pady=(8, 0))
         form.columnconfigure(3, weight=1)  # (the wide rows' room goes there: the units stay by their boxes)
         # (Moves: Colours / Shape on top, like Stir's and Warp's (PLAN.md "Deform shapes" stage G); Colours bend too
-        # beside it; a shape without a Liquify takes them with its first stroke: settings.ini [liquify])
-        self.moves = "shape" if settings.get("liquify", "moves", "colours") == "shape" else "colours"
-        self.bend_colours_pick = settings.get("liquify", "bend_colours", "1") != "0"
-        self.chop_pick = settings.get("liquify", "chop", "1") != "0"  # (Cut notes where bent, user 2026-11-17)
+        # beside it; a shape without a Liquify takes them with its first stroke: the program's own / the pinned default)
+        self.moves, self.bend_colours_pick, self.chop_pick = mine["moves"], mine["bend_colours"], mine["chop"]
         word = ttk.Label(form, text=tr("stir.moves"))
         word.grid(row=0, column=0, sticky="nw", pady=(0, 6))
         Tooltip(word, tr("liquify.moves_tip"))
@@ -166,9 +226,15 @@ class LiquifyWindow(tk.Toplevel):
         Tooltip(t, tr("liquify.shown_tip"))
         buttons = ttk.Frame(box)
         buttons.pack(anchor="w", fill="x", pady=(10, 0))
-        b = ttk.Button(buttons, text=tr("liquify.restore_all"), command=lambda: self.on_all("restore"))
+        b = self.restore_button = ttk.Button(buttons, text=tr("liquify.restore_all"),
+                                             command=lambda: self.on_all("restore"))
         b.pack(side="left")
         Tooltip(b, tr("liquify.restore_all_tip"))
+        self.buttons = buttons
+        right = ttk.Frame(buttons)
+        right.pack(side="right")
+        self.pin_row(right)
+        self.mask_buttons = []
         mask = ttk.Frame(box)
         mask.pack(anchor="w", fill="x", pady=(10, 0))
         t = ttk.Checkbutton(mask, text=tr("liquify.show_mask"), variable=self.show_mask, command=self.on_show_mask)
@@ -179,6 +245,7 @@ class LiquifyWindow(tk.Toplevel):
         for kind in ("freeze", "thaw", "invert"):
             b = ttk.Button(row2, text=tr(f"liquify.{kind}_all"), command=lambda k=kind: self.on_all(k))
             b.pack(side="left", padx=(0, 6))
+            self.mask_buttons.append(b)
             Tooltip(b, tr(f"liquify.{kind}_all_tip"))
         self.hint = ttk.Label(box, text=tr("liquify.hint"), foreground=look.HINT,
                               wraplength=int(300 * app.scale), justify="left")
@@ -248,7 +315,7 @@ class LiquifyWindow(tk.Toplevel):
             new = {k: v for k, v in got.items() if k not in ("moves", "bend_colours", "chop", "map", "forward")}
             new = dict(new, forward=True, **self.kind_picks(sh)) if kind == "shape" else new  # (+ the window's ticks)
             return dict(old, liquify=new)
-        self.app.change_recolour(change, tr("liquify.undo_moves"))
+        self.change_rc(change, tr("liquify.undo_moves"))
         self.sync()
 
     def on_chop(self):
@@ -263,7 +330,7 @@ class LiquifyWindow(tk.Toplevel):
                 return old
             new = {k: x for k, x in got.items() if k != "chop"}
             return dict(old, liquify=new if v else dict(new, chop=False))
-        self.app.change_recolour(change, tr("liquify.undo_chop"))
+        self.change_rc(change, tr("liquify.undo_chop"))
         self.sync()
 
     def on_bend_colours(self):
@@ -278,7 +345,7 @@ class LiquifyWindow(tk.Toplevel):
                 return old
             new = {k: x for k, x in got.items() if k != "bend_colours"}
             return dict(old, liquify=new if v else dict(new, bend_colours=False))
-        self.app.change_recolour(change, tr("liquify.undo_bend_colours"))
+        self.change_rc(change, tr("liquify.undo_bend_colours"))
         self.sync()
 
     def size_px(self):
@@ -345,7 +412,7 @@ class LiquifyWindow(tk.Toplevel):
             if not got or got.get("edge", "escape") == edge:
                 return old
             return dict(old, liquify=dict(got, edge=edge))
-        self.app.change_recolour(change, tr("liquify.undo_edge"))
+        self.change_rc(change, tr("liquify.undo_edge"))
         self.sync()
 
     def on_shown(self, what, left=None):
@@ -375,7 +442,7 @@ class LiquifyWindow(tk.Toplevel):
             if not got:
                 return old
             return dict(old, liquify=dict(got, **set_to))
-        self.app.change_recolour(changed, tr("liquify.undo_show" if what == "on" else "liquify.undo_strength"))
+        self.change_rc(changed, tr("liquify.undo_show" if what == "on" else "liquify.undo_strength"))
         self.sync()
 
     def on_all(self, kind):
@@ -479,7 +546,7 @@ class LiquifyWindow(tk.Toplevel):
         self.take_typed()
         if not unchanged(self.strength_entry):
             self.on_shown("strength", self.strength_entry)
-        self.app.liquify_window = None
+        setattr(self.app, self.ATTR, None)
         self.app.colour_edit_leave("liquify")  # (its later colour steps worked out again, PLAN.md stage C)
         self.app.colour_window_closed()  # (quick strokes' kept work let go: memory use, user 2026-11-10)
         roll.lq_end = None  # (a straight stroke's start: forgotten with the window)
@@ -487,6 +554,49 @@ class LiquifyWindow(tk.Toplevel):
         roll.focus_set()
         roll.draw_liquify_mask()
         roll.draw_liquify_brush()
+
+
+def liquify_editor(cls):
+    """The Liquify window changing the user's DEFAULT only (Settings → User set defaults; like
+    default_pin.default_editor): no shape at all, so it shows and changes only the picks for a shape's first stroke;
+    Restore All and the mask buttons greyed; OK saves, Esc / X change nothing."""
+    class Editor(cls):
+        ATTR = cls.ATTR + "_defaults"
+        editing_default = True
+
+        def __init__(self, app, done=None):
+            self.done = done
+            super().__init__(app)
+            self.title(tr("defaults.edit_title", name=cls.default_title()))
+            ttk.Button(self.buttons, text=tr("range_window.ok"), command=self.ok).pack(side="right")
+            self.protocol("WM_DELETE_WINDOW", self.cancel)
+            self.bind("<Escape>", lambda e: self.cancel())
+
+        def targets(self):
+            return []
+
+        def pin_row(self, row):
+            """(no pin here: OK is what saves)"""
+
+        def change_rc(self, change, name):
+            """(no shape: only the window's picks changed)"""
+
+        def sync(self):
+            super().sync()
+            self.what.config(text="")
+            self.moves_box.config(state="readonly")  # (greyed with nothing selected in the real window)
+            for b in [self.restore_button] + self.mask_buttons:
+                b.state(["disabled"])
+
+        def ok(self):
+            self.save_default()
+            self.cancel()
+
+        def cancel(self):
+            setattr(self.app, self.ATTR, None)
+            self.destroy()
+    Editor.__name__ = cls.__name__ + "Default"
+    return Editor
 
 
 def open_liquify(app):
