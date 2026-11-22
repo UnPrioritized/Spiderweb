@@ -17,6 +17,7 @@ from notes.fx import copied, is_page, pages
 from notes.recolour import clean_recolour, page_added, page_removed
 from notes.sliced import steps_kept
 from window import look
+from window.default_pin import DefaultPin
 from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, fit_screen, placed, wheel_ready, wheel_turns
 
 NEW = "new"  # the "+" tab
@@ -53,6 +54,17 @@ def put_colours(shapes, rcs):
                 shapes[i]["recolour"] = r
             else:
                 shapes[i].pop("recolour", None)
+def _same_kind(d, x):
+    """x is the kind of value the program's own setting d is (True / False, a number, a text, a list...)."""
+    if d is None:
+        return True
+    if isinstance(d, bool):
+        return isinstance(x, bool)
+    if isinstance(d, (int, float)):
+        return isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x)
+    return isinstance(x, type(d))
+
+
 TOOL_WINDOWS = ("claw_window", "strum_window", "chop_window", "trim_window", "path_window")  # (the app's open note tool windows)
 TAB_STYLE = "ToolTab.Toolbutton"  # (text in the middle: "+" sat at the left of its button)
 
@@ -224,15 +236,63 @@ class ThinBar(tk.Canvas):
             self.scroll("moveto", lo + (e.x - x) / max(1, self.winfo_width()))
 
 
-class ToolWindow(tk.Toplevel):
+class ToolWindow(DefaultPin, tk.Toplevel):
     """The shared part. Each window sets KEY (the tool: a page's "tool"; also the start of its text keys:
     KEY.window_title, KEY.nothing, KEY.shape, KEY.n_shapes, KEY.tab (a page's tab), and KEY.step = the undo step's
     name), DEFAULTS, ATTR (the app's attribute holding the open window), POS (the app's attribute remembering where
     it was), and has clean(settings) -> the page's settings (None = changes nothing), build(box) (its widgets; row 0
-    is taken) and show() (the widgets show self.cfg). put(key, value, done) = a setting changed."""
+    is taken; its Accept made by accept_row) and show() (the widgets show self.cfg). put(key, value, done) = a
+    setting changed."""
 
     KEY, ATTR, POS, DEFAULTS = "", "", "", {}
     notes_pass = True  # (its clicks / keys don't wait for notes made in the background: notes_wait.pass_window)
+    LEFT_OUT = ()  # (settings never in a default: ones placed on the piano roll)
+
+    # ---- the user's own default ("use as default" pin, window/default_pin.py; user 2026-11-23): what a NEW page
+    # ("+", the window opening) starts with; pages already made never change; Reset = "does nothing" as before
+
+    @classmethod
+    def clean_saved(cls, v):
+        """A saved page: only this tool's settings, each of the kind the program's own has (a number stays a number:
+        the window's clean() makes it valid when used)."""
+        if not isinstance(v, dict):
+            return None
+        out = {k: v[k] for k, d in cls.DEFAULTS.items()
+               if k in v and k not in cls.LEFT_OUT and _same_kind(d, v[k])}
+        return out or None
+
+    @classmethod
+    def default_title(cls):
+        return tr(f"{cls.KEY}.window_title")
+
+    @classmethod
+    def editor_class(cls):
+        return page_editor(cls)
+
+    @classmethod
+    def program_default(cls):
+        return copied(dict(cls.DEFAULTS))
+
+    def start_cfg(self):
+        """What a new page starts with: the user's default, else the program's."""
+        return dict(self.DEFAULTS, **copied(self.saved_default() or {}))
+
+    def can_save_default(self):
+        return True
+
+    def default_now(self):
+        self.catch_up()
+        return {k: v for k, v in copied(self.cfg).items() if k in self.DEFAULTS and k not in self.LEFT_OUT}
+
+    def accept_row(self, row, text):
+        """The pin + Accept at the right of the bottom row."""
+        right = ttk.Frame(row)
+        right.pack(side="right")
+        self.pin_row(right)
+        ttk.Button(right, text=text, command=self.accept).pack(side="left")
+
+    def pick_targets(self):
+        return sorted(self.app.note_tool_sels())  # (not pictures)
 
     @classmethod
     def open(cls, app):
@@ -259,7 +319,7 @@ class ToolWindow(tk.Toplevel):
         if placed(self, getattr(app, self.POS)):  # (not off every screen)
             self.geometry(placed(self, getattr(app, self.POS)))
         fit_screen(self)  # (once it's made: whole on the screen)
-        self.cfg = dict(self.DEFAULTS)
+        self.cfg = self.start_cfg()
         self.at = None  # the page shown: {shape number: its place in the shape's fx}, None = "+" (a new page)
         self.late, self.took = None, 0.0  # (preview)
         box = ttk.Frame(self, padding=10)
@@ -286,7 +346,8 @@ class ToolWindow(tk.Toplevel):
         self.bind("<Configure>", self.remember, add="+")
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.retarget()
-        self.after_idle(lambda: app.tips.show(self.KEY, parent=self))
+        if not self.editing_default:
+            self.after_idle(lambda: app.tips.show(self.KEY, parent=self))
 
     def knob_pressed(self, knob):
         """A knob's turn starts (Knob pressed): remembered for Ctrl+Z while it's held."""
@@ -495,11 +556,11 @@ class ToolWindow(tk.Toplevel):
         self.keep_page()
 
     def new_page(self):
-        """"+": the settings start from the defaults; a page is added once one changes."""
+        """"+": the settings start from the defaults (the user's own if saved); a page is added once one changes."""
         self.catch_up()
         self.app.colour_edit_leave("fx")
         self.at = None
-        self.cfg = dict(self.DEFAULTS)
+        self.cfg = self.start_cfg()
         self.show()
         self.sync_tabs()
         self.keep_page()
@@ -549,7 +610,7 @@ class ToolWindow(tk.Toplevel):
                 page_place_gone(sh, len(pages(fx[:k])), len(pages(fx)))
         self.change_steps(lambda fx, k: fx[:k] + fx[k + 1:])
         self.at = None
-        self.cfg = dict(self.DEFAULTS)
+        self.cfg = self.start_cfg()
         self.show()
         self.sync_tabs()
         self.undo.mark()
@@ -609,15 +670,16 @@ class ToolWindow(tk.Toplevel):
     def retarget(self):
         """Work on the selected shapes, on a new page ("+")."""
         app = self.app
-        self.targets = sorted(app.note_tool_sels())  # (not pictures)
+        self.targets = self.pick_targets()
         self.saved_sel = app.sel_state()  # (for the undo step)
         self.before = self.now = self.settings()  # (before: put back by X / Esc; now: as this window last left them)
         self.before_rc = self.colour_orders()
         self.at = None
-        self.cfg = dict(self.DEFAULTS)
+        self.cfg = self.start_cfg()
         n = len(self.targets)
-        self.what.config(text=tr(f"{self.KEY}.nothing") if not n else tr(f"{self.KEY}.n_shapes", n=n) if n > 1
-                         else tr(f"{self.KEY}.shape", shape_label=app.shape_label(app.shapes[self.targets[0]])))
+        self.what.config(text="" if self.editing_default else tr(f"{self.KEY}.nothing") if not n else
+                         tr(f"{self.KEY}.n_shapes", n=n) if n > 1 else
+                         tr(f"{self.KEY}.shape", shape_label=app.shape_label(app.shapes[self.targets[0]])))
         self.show()
         self.sync_tabs()
         self.undo.reset()
@@ -629,7 +691,7 @@ class ToolWindow(tk.Toplevel):
     def sync(self):
         """The main window changed the selection or the shapes."""
         at, now = self.at, self.now
-        if sorted(self.app.note_tool_sels()) != self.targets:
+        if self.pick_targets() != self.targets:
             self.settle()
             at = None
         elif self.settings() == self.now:
@@ -800,3 +862,46 @@ class ToolWindow(tk.Toplevel):
         self.app.colour_edit_leave("fx")  # (a page being edited: the steps after it worked out again)
         self.destroy()
         self.app.roll.focus_set()
+
+
+def page_editor(cls):
+    """A note tool window changing the user's DEFAULT page only (Settings → User set defaults; like
+    default_pin.default_editor): no shape at all, so only "+" and nothing previewed; the On tick greyed; Accept saves
+    what it shows, X / Esc changes nothing."""
+    class Editor(cls):
+        ATTR = cls.ATTR + "_defaults"
+        editing_default = True
+
+        def __init__(self, app, done=None):
+            self.done = done
+            super().__init__(app)
+            self.title(tr("defaults.edit_title", name=cls.default_title()))
+
+        def pick_targets(self):
+            return []
+
+        def pin_row(self, row):
+            """(no pin here: Accept is what saves)"""
+
+        def sync(self):
+            """(the main window's selection doesn't matter here)"""
+
+        def settle(self, also=()):
+            """(nothing tried on shapes to keep)"""
+
+        def accept(self):
+            self.catch_up()
+            self.save_default()
+            self.close()
+
+        def cancel(self):
+            self.close()
+
+        def close(self):
+            if self.late:
+                self.after_cancel(self.late)
+            self.drop_jobs()
+            setattr(self.app, self.ATTR, None)
+            self.destroy()
+    Editor.__name__ = cls.__name__ + "Default"
+    return Editor

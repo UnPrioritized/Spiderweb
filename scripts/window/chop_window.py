@@ -202,6 +202,15 @@ class ChopWindow(ToolWindow):
     def clean(self, cfg):
         return clean_chop(cfg)
 
+    @classmethod
+    def describe_default(cls, v, ppq):
+        """Settings → User set defaults: the rhythm, its steps and step length."""
+        v = dict(CHOP_DEFAULTS, **v)
+        name = tr(f"chop.rhythm_{v['name']}") if v["name"] in RHYTHMS else v["name"] or tr("chop.drawn")
+        length = snap_text(v["snap"]) if v["snap"] else f"{fmt(round(step_ticks(v, ppq), 2))} {tr('chop.ticks')}"
+        return (f"{tr('chop.rhythm')} {name}, {tr('chop.steps')} {v['steps']}, {tr('chop.step_length')} {length}"
+                + (", " + tr("chop.absolute") if v["abs"] else ""))
+
     def build(self, box):
         s = self.app.scale
         self.long = None  # (the pieces before Steps was made smaller: back when it's made bigger again)
@@ -298,7 +307,7 @@ class ChopWindow(ToolWindow):
         reset = ttk.Button(row, text=tr("chop.reset"), command=self.reset)
         reset.pack(side="left")
         Tooltip(reset, tr("chop.tip_reset"))
-        ttk.Button(row, text=tr("chop.accept"), command=self.accept).pack(side="right")
+        self.accept_row(row, tr("chop.accept"))
 
     # ---- the rhythm list
 

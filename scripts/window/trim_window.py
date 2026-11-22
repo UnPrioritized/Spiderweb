@@ -45,6 +45,16 @@ class TrimWindow(ToolWindow):
     def clean(self, cfg):
         return clean_trim(cfg)
 
+    @classmethod
+    def describe_default(cls, v, ppq):
+        """Settings → User set defaults: how much each row keeps and which end stays."""
+        v = dict(TRIM_DEFAULTS, **v)
+        if v["by"] == "ticks":
+            amount = f"{fmt(round(v['length'] * ppq))} {tr('trim.ticks_of_each_row')}"
+        else:
+            amount = f"{fmt(round(v['keep'], 3))}{tr('trim.of_each_row')}"
+        return f"{tr('trim.keep')} {amount}, {tr('trim.' + v['side'])}"
+
     def build(self, box):
         self.typed = None  # (value, text typed for it): the box keeps showing it while that value is in use
         row = ttk.Frame(box)
@@ -94,7 +104,7 @@ class TrimWindow(ToolWindow):
         reset = ttk.Button(buttons, text=tr("trim.reset"), command=self.reset)
         reset.pack(side="left")
         Tooltip(reset, tr("trim.tip_reset"))
-        ttk.Button(buttons, text=tr("trim.accept"), command=self.accept).pack(side="right")
+        self.accept_row(buttons, tr("trim.accept"))
 
     # ---- the number: keep % (up to 3 decimals) or ticks (whole, kept in beats)
 

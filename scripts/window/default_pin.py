@@ -34,6 +34,10 @@ WINDOWS = {
     "range": "window.range_window:RangeGraph",
     "funnel_range": "window.range_window:FunnelRangeGraph",
     "tumour": "window.tumour_window:TumourWindow",
+    "claw": "window.claw_window:ClawWindow",
+    "strum": "window.strum_window:StrumWindow",
+    "chop": "window.chop_window:ChopWindow",
+    "trim": "window.trim_window:TrimWindow",
 }
 
 
@@ -194,6 +198,12 @@ class DefaultPin:
     def default_now(self):
         return None
 
+    @classmethod
+    def program_default(cls):
+        """The program's own default, when a window has one to compare with (saving the same = forgetting: Settings
+        lists only defaults that differ, user 2026-11-23)."""
+        return None
+
     def can_save_default(self):
         """"Save current as default" usable (asked when the menu opens: no typing taken yet)."""
         return self.default_now() is not None
@@ -253,6 +263,8 @@ class DefaultPin:
         mine = self.default_now()
         if mine is None:
             return
+        if mine == self.program_default():
+            return self.forget_default()
         try:
             shape_defaults.put(self.KEY, {"settings": mine})
         except OSError:

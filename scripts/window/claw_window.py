@@ -51,6 +51,22 @@ class ClawWindow(ToolWindow):
     def clean(self, cfg):
         return clean_claw(cfg)
 
+    @classmethod
+    def describe_default(cls, v, ppq):
+        """Settings → User set defaults: the mode and its main numbers."""
+        v = dict(CLAW_DEFAULTS, **v)
+        m = v["mode"]
+        words = [dict(MODES).get(m, m)]
+        if m == "time":
+            words.append(f"{tr('claw.period')} {period_name(fmt(v['period']))}")
+            if v.get("trash"):
+                words.append(trash_name(v["trash"]))
+        elif m == "random":
+            words.append(f"{fmt(v['pct'])}%")
+        else:
+            words.append(f"{tr('claw.keep')} {v['keep']} / {v['skip']}")
+        return ", ".join(words)
+
     def build(self, box):
         s = self.app.scale
         self.shown_mode = None  # (show)
@@ -131,7 +147,7 @@ class ClawWindow(ToolWindow):
         reset = ttk.Button(row, text=tr("claw.reset"), command=self.reset)
         reset.pack(side="left")
         Tooltip(reset, tr("claw.tip_reset"))
-        ttk.Button(row, text=tr("claw.accept"), command=self.accept).pack(side="right")
+        self.accept_row(row, tr("claw.accept"))
 
     def mode_box(self, box):
         """The settings of one mode (only the picked mode's show)."""

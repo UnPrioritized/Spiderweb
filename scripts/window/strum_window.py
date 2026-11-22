@@ -29,6 +29,19 @@ class StrumWindow(ToolWindow):
     def clean(self, cfg):
         return clean_strum(cfg)
 
+    @classmethod
+    def describe_default(cls, v, ppq):
+        """Settings → User set defaults: each panel's time / velocity that does something."""
+        v = dict(STRUM_DEFAULTS, **v)
+        words = []
+        if v["start"] and v["time"]:
+            words.append(f"{tr('strum.start')} {tr('strum.time')} {fmt(round(v['time'] * ppq))} {tr('unit.ticks')}")
+        if v["start"] and v["vel"]:
+            words.append(f"{tr('strum.velocity')} {fmt(round(v['vel'], 1))}")
+        if v["end"] and v["end_time"]:
+            words.append(f"{tr('strum.end')} {tr('strum.time')} {fmt(round(v['end_time'] * ppq))} {tr('unit.ticks')}")
+        return ", ".join(words) or tr("defaults.nothing_strummed")
+
     def build(self, box):
         self.knobs, self.vars, self.entries, self.ticks, self.checks, self.scrubs = {}, {}, {}, {}, {}, {}
         panels = {}
@@ -70,7 +83,7 @@ class StrumWindow(ToolWindow):
         reset = ttk.Button(row, text=tr("strum.reset"), command=self.reset)
         reset.pack(side="left")
         Tooltip(reset, tr("strum.tip_reset"))
-        ttk.Button(row, text=tr("strum.accept"), command=self.accept).pack(side="right")
+        self.accept_row(row, tr("strum.accept"))
 
     def build_keys(self, panel):
         """Keys per step: two whole-number boxes (keys .. keys_to; the same number twice = groups of that many)."""
