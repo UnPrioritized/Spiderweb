@@ -183,6 +183,7 @@ class Companion(DominoBar, DominoSettings):
         self.busy = False      # (a paste / copy going on with Domino)
         self.was_front = None  # (the window with the keyboard before it: given back after, domino_link.give_back)
         self._own = 0.0        # (when Spiderweb last sent something to Domino: Domino in front just then = ours)
+        self._song_seen = None  # (Domino's song as last seen while nothing was the user's: changed since = unlink)
         self._gen = (app.shapes_gen, time.monotonic())
         self._said = None
         self.old_ppq = None    # the project's PPQ before Domino's was put in (back when this ends)
@@ -214,6 +215,7 @@ class Companion(DominoBar, DominoSettings):
         self.roll.fit_view()
         self.overlay.forward_to(self.roll, wheel=self.wheel, pressed=self.pressed)
         self.overlay.may_switch = self.may_switch
+        self.overlay.after_middle = self.after_pan
         self.box_watch = BoxWatch(self)  # (the boxes dragged in Domino's piano roll: PLAN.md stage B)
         self._switch_wait = None  # (since when another Domino in front waits for what goes into this one)
         self._offered = set()     # (Domino versions not known that "Try anyway" was offered for)
@@ -374,6 +376,13 @@ class Companion(DominoBar, DominoSettings):
         except (tk.TclError, ValueError):
             pass
 
+    def after_pan(self):
+        """A middle-drag pan handed to Domino is over (still drawing): the keyboard back to Spiderweb's layer, so
+        the next Ctrl+Z is ours again (user 2026-11-22: it went to Domino's own Undo, the waiting line stayed)."""
+        d = self.overlay.domino
+        if d is not None and self.drawing():
+            self.keys_here(d)
+
     def pressed(self):
         """A press on the overlay: Spiderweb takes the keyboard (Esc, Ctrl+Z, Delete... for what's drawn)."""
         try:
@@ -421,12 +430,7 @@ class Companion(DominoBar, DominoSettings):
         d = self.overlay.domino
         if d is None:
             return
-        if self.busy:  # (OUR send / Take going on: its ruler click gave Domino the keyboard, that's not the user;
-            # 2026-11-22 report: a slow paste unlinked, a line stayed on the overlay that Ctrl+Z couldn't take off)
-            self._own = time.monotonic()
-        elif self.linked and dl.in_front(d) and time.monotonic() - self._own > 0.6:  # (the user works in Domino:
-            # its own Ctrl+Z from now on)
-            self.unlink()
+        self.check_unlink(d)
         self.close_list_elsewhere()
         try:
             self.sync_box_watch()
@@ -2037,6 +2041,38 @@ class Companion(DominoBar, DominoSettings):
         self.pending = []  # (a shape given back stays on the overlay until Send)
         self._gen = (app.shapes_gen, time.monotonic())
         return True
+
+    def check_unlink(self, d):
+        """Each tick: the user CHANGED Domino's song (an edit, its own Undo) = unlink. Domino merely in front is not
+        enough (user 2026-11-22: a middle-drag pan, our own paste's ruler click and a Ctrl+Z passed on to Domino all
+        unlinked, leaving a line on the overlay Ctrl+Z couldn't take off). The song is read while it's ours (Spiderweb
+        in front, a send / Take going on, just after our own Undo / Redo there) and compared once Domino is in front;
+        unreadable song = the old rule (in front = unlinked). Read ONCE after each action of ours, then every
+        LOOK_SONG_S while Domino is in front (a few ms at a million notes; ticks are 16 ms)."""
+        if not self.linked:
+            self._song_seen = None
+            return
+        now = time.monotonic()
+        if self.busy:  # (our ruler click gave Domino the keyboard: not the user)
+            self._own = now
+        if self.busy or now - self._own <= 0.6:
+            self._song_seen = "stale"  # (read again once our action is over)
+            return
+        if self._song_seen in (None, "stale"):
+            self._song_seen, self._song_look = dv.song_mark(d) or "unreadable", now
+        if not dl.in_front(d):
+            return
+        if self._song_seen == "unreadable":
+            return self.unlink()
+        if now - self._song_look < self.LOOK_SONG_S:
+            return
+        self._song_look = now
+        mark = dv.song_mark(d)
+        if mark is None or mark != self._song_seen:
+            self.unlink()
+
+    LOOK_SONG_S = 0.1
+    _song_look = 0.0
 
     def unlink(self):
         """Domino was used: its own Ctrl+Z takes over. The steps that changed Domino leave Spiderweb's history (undoing

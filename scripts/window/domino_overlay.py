@@ -82,6 +82,7 @@ class DominoOverlay:
         self.on_tick = on_tick      # () each tick while following (after the windows were placed)
         self.pid = pid              # follow only this Domino (None = the front-most one)
         self.may_switch = None      # (old, new) -> False = keep following old for now (what was drawn on it goes in)
+        self.after_middle = None    # () a middle drag handed to Domino is over while drawing (keyboard back to us)
         self.above = []             # more windows of ours kept above Domino (the floating bar), top-most first
         self.domino = None
         self.view = None
@@ -228,6 +229,8 @@ class DominoOverlay:
             self._middle = False
             if self.drawing:
                 self._style(self.catch_hwnd, click_through=False)
+                if self.after_middle is not None:
+                    self.after_middle()
 
     def _doubled(self, e):
         """This press and the one before: the same button, quick and close enough for Windows' double click (a 3rd
