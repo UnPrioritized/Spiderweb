@@ -395,7 +395,7 @@
  "defaults.cant_save": "The defaults file couldn't be saved (user/shape-defaults.ini).",
  "defaults.page": "User set defaults",
  "defaults.page_note": "Tool windows whose defaults you saved with their pin.",
- "defaults.page_tip": "A tool window's pin (next to OK) saves its settings as what shapes start with there.\nEvery window with a default of yours is listed here.\nDouble-click a row (or press Enter) to change that default; pick rows with Ctrl / Shift and press Reset… to go back to the program's own.",
+ "defaults.page_tip": "A tool window's pin (next to OK) saves its settings as what shapes start with there.\nEvery window with a default of yours is listed here.\nDouble-click a row (or press Enter) to change that default; pick rows (Ctrl / Shift click, drag over them, Ctrl+A for all) and press Reset… to go back to the program's own.",
  "defaults.col_where": "Window",
  "defaults.col_what": "Default",
  "defaults.change": "Change…",

@@ -681,6 +681,32 @@ class SettingsWindow(tk.Toplevel):
         tree.bind("<Double-1>", lambda e: (self.open_default(tree.identify_row(e.y)), "break")[1])
         tree.bind("<Return>", lambda e: (self.open_default(tree.focus()), "break")[1])
         tree.bind("<Delete>", lambda e: self.reset_defaults())
+        # (more ways to pick several, user 2026-11-23: Ctrl+A, dragging over rows; Ctrl / Shift click and Shift+Up /
+        # Down are the list's own)
+        for key in ("<Control-a>", "<Control-A>"):
+            tree.bind(key, lambda e: (tree.selection_set(tree.get_children()), "break")[1])
+        drag = {}
+
+        def pressed(e):
+            drag.clear()
+            row_at = tree.identify_row(e.y)
+            if row_at and tree.identify_region(e.x, e.y) != "heading":
+                drag.update(start=row_at, had=tuple(tree.selection()), ctrl=bool(e.state & 0x4))
+
+        def dragged(e):
+            if not drag:
+                return
+            rows = tree.get_children()
+            at = tree.identify_row(e.y) or (rows[0] if e.y < 0 else rows[-1] if rows else "")
+            if not at:
+                return
+            a, b = sorted((rows.index(drag["start"]), rows.index(at)))
+            span = rows[a:b + 1]
+            tree.selection_set(tuple(dict.fromkeys(drag["had"] + span)) if drag["ctrl"] else span)
+            tree.focus(at)
+            tree.see(at)
+        tree.bind("<ButtonPress-1>", pressed, add="+")
+        tree.bind("<B1-Motion>", dragged, add="+")
         fill()
         self.tabs.on_show[str(self.pages["defaults"])] = fill  # (a default saved with a pin meanwhile: listed)
 
