@@ -460,7 +460,7 @@ class DrawerLayers:
         m = tk.Menu(self, tearoff=0)
         self.layer_menu_items(m, idx)
         m.add_separator()
-        m.add_command(label=tr("layers.rename"), accelerator="F2", command=lambda: self.rename_layer(row))
+        m.add_command(label=tr("layers.rename"), accelerator=tr("menu.key_f2"), command=lambda: self.rename_layer(row))
         m.add_command(label=tr("layers.delete"), accelerator=tr("drawer.del"), command=self.delete_layers)
         try:
             m.tk_popup(e.x_root, e.y_root)

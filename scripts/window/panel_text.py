@@ -96,7 +96,8 @@ class TextPanel:
                     Tooltip(b, TIPS["unit"])
             r += 1
             if key == "size":  # weight and italic under the size
-                ttk.Label(box, text=tr("panel_text.weight")).grid(row=r, column=0, sticky="w", pady=1)
+                word = ttk.Label(box, text=tr("panel_text.weight"))
+                word.grid(row=r, column=0, sticky="w", pady=1)
                 row = ttk.Frame(box)
                 row.grid(row=r, column=1, sticky="w", padx=(5, 0), pady=1)
                 w = ttk.Combobox(row, textvariable=self.text_weight, state="readonly", width=10,
@@ -104,12 +105,17 @@ class TextPanel:
                 w.pack(side="left")
                 w.bind("<<ComboboxSelected>>", lambda ev: self.set_text_setting(
                     {"weight": WEIGHTS[ev.widget.current()][0]}))  # (the place: alike words stay apart)
-                ttk.Checkbutton(row, text=tr("panel_text.italic"), variable=self.text_italic,
-                                command=lambda: self.set_text_setting({"italic": self.text_italic.get()})
-                                ).pack(side="left", padx=(8, 0))
+                for t in (word, w):
+                    Tooltip(t, tr("panel_text.weight_tip"))
+                it = ttk.Checkbutton(row, text=tr("panel_text.italic"), variable=self.text_italic,
+                                     command=lambda: self.set_text_setting({"italic": self.text_italic.get()}))
+                it.pack(side="left", padx=(8, 0))
+                Tooltip(it, tr("panel_text.italic_tip"))
                 r += 1
             if key == "leading":  # alignment under the spacing
-                ttk.Label(box, text=tr("panel_text.align")).grid(row=r, column=0, sticky="w", pady=1)
+                word = ttk.Label(box, text=tr("panel_text.align"))
+                word.grid(row=r, column=0, sticky="w", pady=1)
+                Tooltip(word, tr("panel_text.align_tip"))
                 row = ttk.Frame(box)
                 row.grid(row=r, column=1, sticky="w", padx=(5, 0), pady=1)
                 self.align_buttons = []
@@ -117,6 +123,7 @@ class TextPanel:
                     b = ttk.Radiobutton(row, text=text, value=value, variable=self.text_align, style="Toolbutton",
                                         command=lambda: self.set_text_setting({"align": self.text_align.get()}))
                     b.pack(side="left", padx=(0, 1))
+                    Tooltip(b, tr("panel_text.align_tip"))
                     self.align_buttons.append(b)
                 r += 1
                 # which way the letters go (and each letter turned / flipped on its own spot)

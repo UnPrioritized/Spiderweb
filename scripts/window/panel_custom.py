@@ -98,7 +98,11 @@ class CustomPanel:
         # (shape names can be long: widens with the panel, Drawer… after it; user 2026-11-10)
         self.custom_combo.pack(side="left", padx=(5, 0), fill="x", expand=True)
         self.custom_combo.bind("<<ComboboxSelected>>", lambda e: self.on_custom_pick())
-        ttk.Button(row, text=tr("panel_custom.drawer"), command=self.open_drawer).pack(side="left", padx=(4, 0))
+        b = ttk.Button(row, text=tr("panel_custom.drawer"), command=self.open_drawer)
+        b.pack(side="left", padx=(4, 0))
+        Tooltip(b, tr("panel_custom.drawer_tip"))
+        for w in (self.shape_word, self.custom_combo):
+            Tooltip(w, tr("panel_custom.shape_tip"))
         # under the Shape box while a placed shape's library shape was renamed or deleted (not_in_library)
         self.missing_note = ttk.Label(box, text=tr("panel_custom.not_in_library"), foreground=GAP_COLOR,
                                       font=look.font(8), wraplength=int(300 * self.scale), justify="left")
@@ -179,7 +183,9 @@ class CustomPanel:
         self.hz_stale = ttk.Frame(opts)  # the BPM changed since: its tone is off until it's updated
         ttk.Label(self.hz_stale, text=tr("panel_custom.hz_stale"), foreground=GAP_COLOR, font=look.font(8),
                   wraplength=int(HZ_WRAP * self.scale), justify="left").pack(anchor="w")
-        ttk.Button(self.hz_stale, text=tr("panel_custom.hz_update"), command=self.update_hz).pack(anchor="w", pady=(1, 2))
+        b = ttk.Button(self.hz_stale, text=tr("panel_custom.hz_update"), command=self.update_hz)
+        b.pack(anchor="w", pady=(1, 2))
+        Tooltip(b, tr("panel_custom.hz_update_tip"))
         for w in (self.hz_info, self.hz_stale):
             self.custom_rows.append((w, dict(anchor="w")))
         e = self.ends_row = ttk.Frame(opts)

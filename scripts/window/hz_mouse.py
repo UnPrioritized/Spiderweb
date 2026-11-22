@@ -901,7 +901,7 @@ class HzMouse:
             menu.add_command(label=tr("hz.slide_add"), command=lambda: self.set_slide(True),
                              state="normal" if pairs else "disabled")
         menu.add_separator()
-        menu.add_command(label=tr("hz.box_delete", n=len(self.sel)), accelerator="Del", command=self.delete_selected)
+        menu.add_command(label=tr("hz.box_delete", n=len(self.sel)), accelerator=tr("roll_menu.del"), command=self.delete_selected)
         menu.tk_popup(e.x_root, e.y_root)
 
     def show_menu(self, e, hit):

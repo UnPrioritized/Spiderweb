@@ -38,6 +38,8 @@ class ColoursPanel:
         self.cycle_n_entry.pack(side="left", padx=(4, 0))
         self.cycle_n_scrub = Scrub(self, [(self.cycle_n_entry, self.cycle_n_var, lambda: self.on_cycle("n"))],
                                    (1, 3, 1), 2, self.cycle_most(), label=lb)
+        for w in (lb, self.cycle_n_entry):
+            Tooltip(w, tr("colours.channels_tip"))
         rows = self.cycle_every_row = ttk.Frame(box)  # (channels + these rows: only shown while Colours is on, user)
         rows.pack(anchor="w", pady=(1, 0))  # (under the dropdown: app._build_shape_settings)
         c = ttk.Frame(rows)
