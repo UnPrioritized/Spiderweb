@@ -23,8 +23,9 @@ from notes.melody import (CATCH_LEAST, CATCH_SHAPES, HOLD, HOWS, MOST_ANCHORS, R
                           top_notes)
 from notes.tempo import MAX_BPM, MIN_BPM, drawn_bpm, plans
 from window import look
+from window.default_pin import DefaultPin
 from window.jump_areas import JumpChain
-from window.jump_graph import JumpGraph, graph_pts
+from window.jump_graph import SCALES, START, JumpGraph, graph_pts
 from window.load_extract import boxes_now
 from window.widgets import Scrub, centre_over, open_or_lift, read_number, remember_place, traced, unhighlight
 
@@ -36,19 +37,89 @@ WORDS = {"burst": ("melody.w_from", "melody.w_to", "melody.bpm"), "jump": ("melo
 PREVIEW_MOST = 500  # jumps: more = no faint preview line (each change would wait on it)
 PREVIEW_CATCH = 200  # the same for the catch-up way (each catch-up worked out, tried up to 3 times)
 MOST_LOADED = 5_000_000  # a loaded track's notes read for one area at most (a denser area: refused, said why)
+# the picks kept on the app until Spiderweb closes (app.melody_<key>) that a "use as default" holds (user 2026-11-23:
+# the default fills them at the first open after a start; the BPM boxes and "Only selected notes" never: they follow
+# the song / the selection)
+TEXTS = ("step", "step_to", "shortest", "rest", "every", "pitch_low", "hold")  # (boxes, as typed)
+TICKS = ("step_on", "strength_on", "pitch_on")
+CHOICES = {"at": ("melody", "snap", "clicks"), "follow": ("track", "top"), "shape": SHAPES, "how": HOWS,
+           "catch": CATCH_SHAPES, "step_scale": SCALES}
+GRAPHS = ("shape_pts", "strength_pts", "step_pts")
+PICKS = TEXTS + TICKS + tuple(CHOICES) + GRAPHS
 
 
-class MelodyWindow(tk.Toplevel):
+def clean_picks(v):
+    """A saved default: only picks of the right kind (None: nothing usable)."""
+    if not isinstance(v, dict):
+        return None
+    out = {k: v[k] for k in TEXTS if isinstance(v.get(k), str) and len(v[k]) <= 40}
+    out.update({k: v[k] for k in TICKS if isinstance(v.get(k), bool)})
+    out.update({k: v[k] for k, ok in CHOICES.items() if v.get(k) in ok})
+    for k in GRAPHS:
+        pts = v.get(k)
+        try:
+            pts = [[min(1.0, max(0.0, float(c))) for c in p] for p in pts]
+        except (TypeError, ValueError):
+            continue
+        if len(pts) >= 2 and all(len(p) == 3 and all(map(math.isfinite, p)) for p in pts):
+            out[k] = pts
+    return out or None
+
+
+class MelodyWindow(DefaultPin, tk.Toplevel):
+    KEY = "melody"  # (its section in shape-defaults.ini)
+    ATTR = "melody_window"
+
+    # ---- the user's own default ("use as default" pin, window/default_pin.py)
+
+    @classmethod
+    def clean_saved(cls, v):
+        return clean_picks(v)
+
+    @classmethod
+    def default_title(cls):
+        return tr("melody.title")
+
+    @classmethod
+    def editor_class(cls):
+        return melody_editor(cls)
+
+    def can_save_default(self):
+        return True
+
+    def default_now(self):
+        self.sync()  # (the picks onto the app, as every change does)
+        app = self.app
+        out = {k: copy.deepcopy(getattr(app, "melody_" + k)) for k in PICKS if hasattr(app, "melody_" + k)}
+        for kind in ("shape", "strength", "step"):
+            out[kind + "_pts"] = graph_pts(app, kind)
+        out.setdefault("step_scale", self.step_scale())
+        return clean_picks(out)
+
+    @classmethod
+    def describe_default(cls, v, ppq):
+        at = {"melody": "melody.at_melody", "snap": "melody.at_every", "clicks": "melody.at_clicks"}
+        words = [tr(at[v.get("at", "melody")]).rstrip(":"), tr("melody.shape_" + v.get("shape", "burst")),
+                 tr("melody.how_" + v.get("how", "audio"))]
+        return ", ".join(words)
+
+    def put_mine(self):
+        """The first open after a start: picks not made yet this session come from the user's default."""
+        for k, v in (self.saved_default() or {}).items():
+            if not hasattr(self.app, "melody_" + k):
+                setattr(self.app, "melody_" + k, copy.deepcopy(v))
+
     def __init__(self, app):
         super().__init__(app)
         self.withdraw()
         self.app = app
+        self.put_mine()
         self.seen = None  # what the anchors were worked out for
         self.runs = []  # melody_runs / snap_runs' answer for the area
         self.lit = None  # (starts, ends, keys) in beats of the notes followed, for the piano roll; None = none
         self.reading = None  # a loaded track's notes being read: {"key", "got", "error", "finished"}
         self.loaded_got = None  # (key, starts, ends, keys) of the last read
-        app.melody_window = self
+        setattr(app, self.ATTR, self)
         self.title(tr("melody.title"))
         self.transient(app)
         self.resizable(False, False)
@@ -192,9 +263,13 @@ class MelodyWindow(tk.Toplevel):
         self.hint.pack(anchor="w", fill="x", pady=(10, 0))
         row = ttk.Frame(box)
         row.pack(fill="x", pady=(10, 0))
-        ttk.Button(row, text=tr("merge_window.close"), command=self.close).pack(side="right")
-        self.go = ttk.Button(row, text=tr("melody.fill"), command=self.fill)
-        self.go.pack(side="right", padx=(0, 6))
+        right = ttk.Frame(row)
+        right.pack(side="right")
+        self.pin_row(right)
+        self.go = ttk.Button(right, text=tr("melody.fill"), command=self.fill)
+        self.go.pack(side="left", padx=(0, 6))
+        self.close_button = ttk.Button(right, text=tr("merge_window.close"), command=self.close)
+        self.close_button.pack(side="left")
         self.bind("<Escape>", lambda e: self.close())
         self.bind("<F1>", lambda e: (app.open_help("fill_tempo"), "break")[1])
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -942,11 +1017,55 @@ class MelodyWindow(tk.Toplevel):
             self.watch = None
         if self.reading is not None:
             self.reading["cancel"] = True
-        self.app.melody_window = None
+        setattr(self.app, self.ATTR, None)
         self.lit = None
         self.destroy()
         self.app.roll.request_redraw()
         self.app.roll.focus_set()
+
+
+def melody_editor(cls):
+    """Fill with tempo jumps changing the user's DEFAULT only (Settings → User set defaults; like
+    default_pin.default_editor): it shows the saved default (else the program's own), its picks this session are put
+    back when it closes, Fill becomes OK (saves), Close changes nothing."""
+    class Editor(cls):
+        ATTR = cls.ATTR + "_defaults"
+        editing_default = True
+
+        def __init__(self, app, done=None):
+            self.done = done
+            self.kept = {k: copy.deepcopy(getattr(app, "melody_" + k)) for k in PICKS if hasattr(app, "melody_" + k)}
+            for k in PICKS:  # (the window shows the default, not this session's picks)
+                if hasattr(app, "melody_" + k):
+                    delattr(app, "melody_" + k)
+            super().__init__(app)
+            self.title(tr("defaults.edit_title", name=cls.default_title()))
+            self.go.config(text=tr("range_window.ok"), command=self.ok)
+
+        def pin_row(self, row):
+            """(no pin here: OK is what saves)"""
+
+        def sync(self):
+            super().sync()
+            if hasattr(self, "go"):
+                self.go.state(["!disabled"])  # (OK: usable with no area picked too)
+
+        def fill(self):
+            """(nothing filled here)"""
+
+        def ok(self):
+            self.save_default()
+            self.close()
+
+        def close(self):
+            super().close()
+            for k in PICKS:  # (this session's picks back as they were)
+                if hasattr(self.app, "melody_" + k):
+                    delattr(self.app, "melody_" + k)
+            for k, v in self.kept.items():
+                setattr(self.app, "melody_" + k, v)
+    Editor.__name__ = cls.__name__ + "Default"
+    return Editor
 
 
 def open_melody(app):

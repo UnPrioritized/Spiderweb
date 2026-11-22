@@ -38,6 +38,7 @@ WINDOWS = {
     "strum": "window.strum_window:StrumWindow",
     "chop": "window.chop_window:ChopWindow",
     "trim": "window.trim_window:TrimWindow",
+    "melody": "window.melody_window:MelodyWindow",
 }
 
 
