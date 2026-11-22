@@ -260,7 +260,8 @@ def _options(block=BLOCK, ahead=AHEAD, voices=MAX_VOICES, lower=True, limiter=2,
              dc_blocker_hz=0.0, interpolation=1, steal=2, release_floor=-100, min_velocity=0, admit=0, max_steal=25,
              max_layers=16, filter=True, lfo=True, mod_env=True, card="", clock_seed=0.0):
     """The connector's options from Kestrel's keywords (App.kestrel_opts; card = Loaded's, not a synth's).
-    clock_seed = a piece's tempo clock starts with this carried (ahead_pieces.Song.clock_at)."""
+    clock_seed = a piece's tempo clock starts with this carried (0: pieces have one tempo since 2026-11-22,
+    ahead_pieces.Retime)."""
     return _Options(ctypes.sizeof(_Options), RATE, block, ahead, voices, int(lower), int(limiter), float(ceiling_db),
                     int(dc_blocker), dc_blocker_hz, interpolation, steal, release_floor, min_velocity, admit, max_steal,
                     max_layers, int(filter), int(lfo), int(mod_env), float(clock_seed))

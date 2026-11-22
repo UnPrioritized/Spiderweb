@@ -19,7 +19,6 @@ Thread rules: Maker.step() runs on the window's thread (quick: it only looks at 
 making runs in threads of its own; Maker.take() is called from the sound's thread."""
 
 import bisect
-import math
 import os
 import tempfile
 import threading
@@ -33,11 +32,89 @@ from files.playback import TimeMap
 from files.synth import RATE
 
 class PieceMidi(bytearray):
-    """A piece's MIDI file bytes + clock_seed: what Kestrel's clock starts with carried (Song.clock_at)."""
+    """A piece's MIDI file bytes (clock_seed: the connector's field, always 0 since pieces have one tempo, Retime)."""
 
     def __init__(self, data=b"", clock_seed=0.0):
         super().__init__(data)
         self.clock_seed = clock_seed
+
+
+# PIECES RUN ON THE REAL TEMPO (user 2026-11-22, picked A): a piece's file has ONE tempo and one tick = one frame.
+# BASSMIDI's file player and Kestrel / Merlin (its "bassmidi" clock) snap to a whole frame at every tempo change and
+# carry the part left over in TICKS into the next tempo: fast <-> very slow jumps (15 us <-> 10884 us a beat,
+# polyriddim vip.mid) lose ~11 ms each, 10.8 s over that song, so pieces placed by the real tempo lost their last
+# notes (silent stretches). With no tempo change in a piece nothing is carried: every event on its real frame.
+FRAME_PPQ = 960
+FRAME_US = FRAME_PPQ * 1_000_000 // RATE  # (20000 at 48 kHz: 960 ticks a beat of 1/50 s = 48000 ticks a second)
+assert FRAME_US * RATE == FRAME_PPQ * 1_000_000
+
+
+class Retime:
+    """A piece's tracks (waits in the song's ticks from tick origin) written again in FRAMES from the song frame
+    origin is on (zero): anchors on their real frames (Song.frame), straight between them (midi_scan.rewrite, the
+    rule Keep timing uses); the file's own tempo events left out (tempo_track writes the one tempo). Anchors = every
+    tempo change + every ANCHOR_GRID ticks, the same ones whatever the piece: a tick lands on the same frame in
+    every piece and in one piece of the whole song (joins exact; the grid keeps the in-between sums small)."""
+
+    ANCHOR_GRID = 1 << 20
+
+    def __init__(self, song, origin, t_end):
+        self.zero = song.frame(origin)
+        ticks = [t for t, _ in song.tempo]
+        t_end = max(t_end, origin)
+        g = self.ANCHOR_GRID
+        lo = max(0, bisect.bisect_right(ticks, origin) - 1)
+        hi = bisect.bisect_right(ticks, t_end)
+        first = max(ticks[lo] if ticks and ticks[lo] <= origin else 0, origin // g * g)
+        # (the last one past t_end: the next tempo change or grid point, never beyond a change: a straight line
+        # over a change is the wrong slope)
+        far = (t_end // g + 1) * g
+        if hi < len(ticks):
+            far = min(far, ticks[hi])
+        inside = {t for t in ticks[lo:hi] if first < t <= t_end}
+        inside.update(range((first // g + 1) * g, t_end + 1, g))
+        anchors = [first] + sorted(inside) + [far]
+        self.bp_n = np.array(anchors, np.int64)
+        self.bp_f = np.array([song.frame(t) for t in anchors], np.int64) - self.zero
+        self.origin, self.end = origin, song.frame(t_end) - self.zero
+
+    def tempo_track(self):
+        """The one tempo, running to the piece's end (t_end): a file ends at its last event, and notes held there
+        with their offs later were never played by BASSMIDI, let go at once by Merlin (user 2026-11-18; test
+        ahead_last_chord)."""
+        body = b"\x00\xff\x51\x03" + FRAME_US.to_bytes(3, "big") + _vlq(max(0, self.end)) + b"\xff\x2f\x00"
+        return b"MTrk" + len(body).to_bytes(4, "big") + body
+
+    def body(self, *parts):
+        """Track body parts (each whole events, in order; waits from origin) written again in frames, as one."""
+        from files import midi_scan, speed
+        fast = speed.loops()
+        rw = fast.midi_rewrite if fast is not None else midi_scan.rewrite
+        st = np.zeros(midi_scan.RW_SIZE, np.int64)
+        st[midi_scan.RW_TICK], st[midi_scan.RW_DONE], st[midi_scan.RW_WRUN] = self.origin, 0, -1
+        drop, none = np.zeros(128, np.uint8), np.zeros(0, np.int64)
+        drop[0x51] = 1
+        out_parts = []
+        for part in parts:
+            if not part:
+                continue
+            src = np.frombuffer(part, np.uint8) if fast is not None else memoryview(bytes(part))
+            p = 0
+            while p < len(src):
+                end = min(len(src), p + (16 << 20))
+                out = np.empty(4 * (end - p) + 64, np.uint8) if fast is not None else bytearray(4 * (end - p) + 64)
+                used, o = rw(src[p:end], 0, end - p, True, self.bp_n, self.bp_f, True, drop, none,
+                             np.zeros(1, np.int64), np.zeros(0, np.uint8), out, 0, st, 0, none)
+                out_parts.append(bytes(out[:o]))
+                if used <= 0:  # (a broken event: what is written stays)
+                    break
+                p += used
+        return b"".join(out_parts)
+
+    def track(self, chunk):
+        """A whole MTrk chunk written again in frames."""
+        body = self.body(memoryview(chunk)[8:])
+        return b"MTrk" + len(body).to_bytes(4, "big") + body
 
 
 BLOCK_S = 2.0  # seconds a block (the grey / remake / play unit)
@@ -85,11 +162,11 @@ def _vlq_many(d):
     """Many delta times at once: (bytes each, the bytes in a row)."""
     d = d.astype(np.int64)
     n = np.ones(len(d), np.int64)
-    for k in (7, 14, 21):
-        n += d >= (1 << k)
+    for k in (7, 14, 21, 28):  # (a 5th byte: a wait in song ticks over 2^28 at a very fast tempo; Retime
+        n += d >= (1 << k)    # reads it, the piece's file has frames)
     out = np.zeros(int(n.sum()), np.uint8)
     end = np.cumsum(n)
-    for k in range(4):
+    for k in range(5):
         sel = n > k
         out[end[sel] - 1 - k] = ((d[sel] >> (7 * k)) & 127) | (0x80 if k else 0)
     return n, out
@@ -387,17 +464,21 @@ class Song:
     def frame(self, tick):
         return int(round(self.map.sec(tick) * RATE))
 
+    def frames(self, ticks):
+        """frame() of many ticks at once (the same sums: equal answers)."""
+        m = self.map
+        tk = np.asarray(m.ticks, np.int64)
+        ticks = np.asarray(ticks, np.int64)
+        i = np.maximum(np.searchsorted(tk, ticks, "right") - 1, 0)
+        secs, spt = np.asarray(m.secs, np.float64), np.asarray(m.spt, np.float64)
+        return np.rint((secs[i] + (ticks - tk[i]) * spt[i]) * RATE).astype(np.int64)
+
     def tick_at(self, frame):
         """The first tick at / after frame."""
         t = int(self.map.tick(frame / RATE))
         while self.frame(t) < frame:
             t += 1
         return t
-
-    def _at(self, tick):
-        """(tempo us in force at tick, the changes after it)."""
-        before = [u for t, u in self.tempo if t <= tick]
-        return before[-1], [(t, u) for t, u in self.tempo if t > tick]
 
     def piece_start(self, f0, last=None, pre=PRE):
         """(the tick a piece from frame f0 starts at, the tick notes count from: ones ending after it sound in it).
@@ -423,74 +504,13 @@ class Song:
         in it)."""
         t_end = self.tick_at(f1 + int(POST_S * RATE))  # (a little past it: see POST_S)
         t0, t_pre = self.piece_start(f0)
-        # (a PPQ over 32767 reads as SMPTE timing in a MIDI file: written as half the PPQ with half the tempo
-        # value, so every tick keeps its time; hunt 2026-11-03, PPQ goes up to 65535)
-        half = 2 if self.ppq > 32767 else 1
         tracks = self.tracks(t0, t_pre, t_end)
         if not tracks:
             return None, 0
-        zero, seed = self.clock_at(t0) if half == 1 else (self.frame(t0), 0.0)
-        tracks.insert(0, self.tempo_track(t0, t_end, (self.ppq // half) / self.ppq))
+        rt = Retime(self, t0, t_end)  # (one tempo, a tick a frame: any PPQ fits, no half-PPQ trick needed)
+        tracks = [rt.tempo_track()] + [rt.track(c) for c in tracks]
         head = b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + len(tracks).to_bytes(2, "big")
-        return PieceMidi(head + (self.ppq // half).to_bytes(2, "big") + b"".join(tracks), seed), f0 - zero
-
-    def tempo_track(self, t0, t_end, scale=1.0):
-        """The heard tempo from tick t0 (the piece's tick 0) to t_end as a track; scale = the tempo values' factor
-        (an odd PPQ halved: the exact ratio, not 1/2). It ENDS AT t_end, so the piece's file runs to there: a file
-        ended at its last event, and notes held there with their offs past t_end (a song's last chord, its offs 8
-        beats on: every track ended on the chord's own tick) were never played by BASSMIDI and let go at once by
-        Merlin (user 2026-11-18; test ahead_last_chord); the sound kept stops at the piece's end anyway.
-        (Was only with a pedal down, PLAN E4.)"""
-        us, changes = self._at(t0)
-        tempo_of = lambda u: b"\xff\x51\x03" + max(1, int(round(u * scale))).to_bytes(3, "big")  # noqa: E731
-        events = [(0, tempo_of(us))] + [(t - t0, tempo_of(u)) for t, u in changes if t < t_end]
-        body, last = bytearray(), 0
-        for t, data in events:
-            body += _vlq(t - last) + data
-            last = t
-        body += _vlq(max(0, t_end - t0 - last)) + b"\xff\x2f\x00"
-        return b"MTrk" + len(body).to_bytes(4, "big") + bytes(body)
-
-    def clock_at(self, t0):
-        """(the song frame a piece starting at tick t0 has its time 0 on, the clock seed it needs). Kestrel times
-        notes as BASSMIDI's file player does (TempoTiming::Bassmidi): every note on a whole frame, and at every tempo
-        change the clock snaps to a whole frame and carries the part over ("overshoot", in ticks) from the song's
-        start on. A piece starting mid-song began with nothing carried: notes one frame off a whole render (single
-        attacks -22..-33 dB, Shining Needle, 2026-11-06). Here Kestrel's clock is replayed (same sums in the same
-        order, f64) up to t0; the seed (connector 0.9.0 clock_seed: the piece's clock starts with it carried) puts
-        every note of the piece on the frame the whole render has it on. Tempo values as the piece writes them."""
-        if t0 <= 0:
-            return 0, 0.0
-        states = self._clock_states()
-        i = max(0, bisect.bisect_right([s[0] for s in states], t0) - 1)
-        bt, bf, over, num, den = states[i]
-        whole, rem = divmod((t0 - bt) * num, den)
-        fr = rem / den - over * num / den
-        zero = int(max(0.0, float(whole) + math.ceil(fr)))
-        part = math.ceil(fr) - fr  # (frames from the piece's time 0 back to where the clock's ticks run from)
-        return bf + zero, part * den / num
-
-    def _clock_states(self):
-        """[(tick of a tempo change, its whole frame, overshoot in ticks, num, den)] after each change: Kestrel's
-        TempoClock (midi.rs set_tempo / frames_to, Bassmidi timing) run over the tempo list once."""
-        got = getattr(self, "_clock", None)
-        if got is not None:
-            return got
-        bt, bf, over = 0, 0, 0.0
-        num, den = 500_000 * RATE, 1_000_000 * self.ppq  # (120 BPM until told otherwise)
-        out = [(0, 0, 0.0, num, den)]
-        for t, u in self.tempo:
-            t = max(0, int(t))
-            whole, rem = divmod((t - bt) * num, den)
-            n = int(max(0.0, float(whole) + math.ceil(rem / den - over * num / den)))
-            past = n * den - (t - bt) * num
-            over = max(0.0, over + float(past) / float(num))
-            bf += n
-            bt = t
-            num = max(1, int(round(u))) * RATE
-            out.append((t, bf, over, num, den))
-        self._clock = out
-        return out
+        return PieceMidi(head + FRAME_PPQ.to_bytes(2, "big") + b"".join(tracks)), f0 - rt.zero
 
     def tracks(self, t0, t_pre, t_end, file_ports=()):
         """The notes + CC lines of a piece from tick t0 (its tick 0; notes ending after t_pre sound in it) to t_end
@@ -541,18 +561,24 @@ class Song:
 
     def bass_events(self):
         """The whole song as BASSMIDI's event list (synth.events' order; each port's channels as the stream's
-        channels port x 16 + channel; channel 10s melodic)."""
+        channels port x 16 + channel; channel 10s melodic), IN FRAMES at one tempo (FRAME_PPQ: render it with that
+        PPQ): BASSMIDI's clock drifts over tempo changes as its file player does (Retime)."""
         with self._bass_lock:
             return self._bass_now()
 
     def _bass_now(self):
         if self._bass is None:
             from files import synth
-            rows = np.stack([self.start, self.end, self.key, self.vel], axis=1) if len(self) else \
-                np.zeros((0, 4), np.int64)
+            if len(self):
+                s = self.frames(self.start)
+                e = np.maximum(self.frames(self.end), s + 1)  # (a note under a frame long keeps one: its end
+                rows = np.stack([s, e, self.key, self.vel], axis=1)  # never comes before its start)
+            else:
+                rows = np.zeros((0, 4), np.int64)
             chans = self.port.astype(np.int64) * 16 + self.chan
-            cc = [(t, m & 0xF0, (m >> 8) & 0x7F, (m >> 16) & 0x7F, (m >> 24) * 16 + (m & 15))
-                  for t, m in self.ccs]
+            cf = self.frames(self.cc_ticks) if len(self.ccs) else ()
+            cc = [(int(f), m & 0xF0, (m >> 8) & 0x7F, (m >> 16) & 0x7F, (m >> 24) * 16 + (m & 15))
+                  for f, (_, m) in zip(cf, self.ccs)]
             extra = synth.cc_events(cc)
             tunes = getattr(self, "tunes", ())
             if tunes:  # (31-EDO's channels retuned at the start: Live.tune's events)
@@ -564,8 +590,7 @@ class Song:
             drums = np.array([(synth._EV_DRUMS, 1 if c == kit else 0, c, 0, 0) for c in used if c % 16 == 9],
                              synth.EVENT)
             extra = np.concatenate([drums, extra]) if len(drums) else extra
-            tempo = self.tempo if len(self.tempo) > 1 else None
-            self._bass = synth.events(rows, self.ppq, 60e6 / self.tempo[0][1], chans, extra, True, tempo)
+            self._bass = synth.events(rows, FRAME_PPQ, 60e6 / FRAME_US, chans, extra, True)
         return self._bass
 
 
@@ -1079,7 +1104,7 @@ class Maker:
             job.end = end
             return out
         stats = {}
-        out = self.synth.render(song.bass_events(), song.ppq, f0, f1 - f0, self.opts["bass_voices"], False,
+        out = self.synth.render(song.bass_events(), FRAME_PPQ, f0, f1 - f0, self.opts["bass_voices"], False,
                                 job.cancel, lambda n: setattr(job, "progress", n / max(1, f1 - f0)), stats,
                                 pre=song.pre_frames(f0))  # (held notes sound on: from their start, as on the card)
         if out is not None and stats.get("end") is not None:

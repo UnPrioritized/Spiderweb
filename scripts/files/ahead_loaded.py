@@ -18,7 +18,7 @@ import numpy as np
 
 from files import midi_piece, play_map
 from files.midi_bytes import vlq as _vlq
-from files.ahead_pieces import HELD_PRE, PIECE_MOST, POST_S, PRE, PieceMidi, Song
+from files.ahead_pieces import FRAME_PPQ, HELD_PRE, PIECE_MOST, POST_S, PRE, PieceMidi, Retime, Song
 from files.synth import RATE, SynthError
 
 
@@ -925,12 +925,18 @@ class LoadedSong:
         if not got and not own and not counted_tracks:
             return None, 0
         ports = sorted(set(rows) | set(sysex) | set(replay))
-        # (the file runs to t_copy: the tempo track ends there, Song.tempo_track; was PLAN E4's own track, only with a
-        # pedal down. Merlin lets every note go at the file's end, BASSMIDI never plays notes on its last tick)
+        # (the file runs to t_copy: the tempo track ends there, Retime.tempo_track; was PLAN E4's own track, only with
+        # a pedal down. Merlin lets every note go at the file's end, BASSMIDI never plays notes on its last tick)
         count = 1 + len(ports) + len(got) + len(own) + len(counted_tracks)
+        # (every track written again in frames at one tempo, so no player's clock drifts: ahead_pieces.Retime)
+        rt = Retime(self.own, origin, t_copy)
+
+        def chunk(*parts):
+            body = rt.body(*parts)
+            return b"MTrk" + len(body).to_bytes(4, "big") + body
         buf = PieceMidi(b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + min(65535, count).to_bytes(2, "big")
-                        + self.ppq.to_bytes(2, "big"))
-        buf += self.own.tempo_track(origin, t_copy)
+                        + FRAME_PPQ.to_bytes(2, "big"))
+        buf += rt.tempo_track()
         for port in ports:  # (each port's set-up first: SysEx in order, then every channel's state; hunt 11-03)
             head = bytearray(b"\x00\xff\x21\x01" + bytes([port]))
             for _, _, ev in sorted(sysex.get(port, ()), key=lambda e: e[:2]):
@@ -942,7 +948,7 @@ class LoadedSong:
                 head += _vlq(tk - last) + bytes([s, d1]) + (b"" if (s & 0xF0) in (0xC0, 0xD0) else bytes([d2]))
                 last = tk
             head += b"\x00\xff\x2f\x00"
-            buf += b"MTrk" + len(head).to_bytes(4, "big") + head
+            buf += chunk(head)
         got.reverse()  # (popped from the end: each track's body let go once it's in buf)
         while got:
             j, body, start, held, vel, cnt = got.pop()
@@ -968,19 +974,13 @@ class LoadedSong:
             head += _vlq(t_pre - last) + b"\xff\x01\x00"
             if self.sysex:  # (31-EDO: a GM / GS reset in the file wipes our tuning too: sent again right after it)
                 body = _retuned(body, int(self.tport[j]), self.sysex)
-            buf += b"MTrk" + (len(head) + len(body) + 4).to_bytes(4, "big")
-            buf += head
-            buf += body
-            buf += b"\x00\xff\x2f\x00"
+            buf += chunk(bytes(head), body, b"\x00\xff\x2f\x00")
             del body
-        for chunk in counted_tracks:
-            buf += chunk
-        for chunk in own:
-            buf += chunk
-        # (the frame its time 0 is on as Kestrel's clock has it, + what that clock carries there: Song.clock_at)
-        zero, seed = self.own.clock_at(origin)
-        buf.clock_seed = seed
-        return buf, f0 - zero
+        for c in counted_tracks:
+            buf += rt.track(c)
+        for c in own:
+            buf += rt.track(c)
+        return buf, f0 - rt.zero
 
     def bass_events(self):
         raise NotImplementedError("BASSMIDI pieces of a loaded MIDI: PLAN.md L4")
