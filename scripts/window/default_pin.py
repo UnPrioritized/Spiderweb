@@ -30,6 +30,10 @@ from window.widgets import Tooltip
 WINDOWS = {
     "extend": "window.extend_window:ExtendWindow",
     "subtract": "window.subtract_window:SubtractWindow",
+    "sustain": "window.sustain_window:SustainWindow",
+    "range": "window.range_window:RangeGraph",
+    "funnel_range": "window.range_window:FunnelRangeGraph",
+    "tumour": "window.tumour_window:TumourWindow",
 }
 
 
@@ -80,9 +84,96 @@ def pins_shown(app):
             g.place_pin()
 
 
+def editors(app):
+    """Every open "<name>: your default" window (Settings → User set defaults)."""
+    for sec in WINDOWS:
+        cls = window_class(sec)
+        w = getattr(app, cls.ATTR + "_defaults", None) if cls else None
+        if w is not None and not getattr(w, "closed", False) and w.winfo_exists():
+            yield w
+
+
+def default_editor(cls):
+    """cls changing the user's DEFAULT only (Settings → User set defaults, double-click a row; user 2026-11-23): the
+    same window on a stand-in shape no one sees; no shape, selection or undo step touched; OK saves it as the
+    default, Cancel changes nothing; its on / off tick greyed (a default goes only with Reset). The window needs:
+    targets() (the shapes' numbers it works on; here [0]), tgts (here the stand-in), and store() skipping the main
+    window's work while editing_default. Its own extras: stand_in(), put_default(sh, v), editor_greyed()."""
+    class Editor(cls):
+        ATTR = cls.ATTR + "_defaults"
+        editing_default = True
+
+        def __init__(self, app, done=None):
+            self.fake = cls.stand_in()
+            saved = self.saved_default()
+            if saved is not None:
+                cls.put_default(self.fake, saved)
+            self.done = done
+            super().__init__(app)
+            self.title(tr("defaults.edit_title", name=cls.default_title()))
+
+        @property
+        def tgts(self):
+            return [self.fake]
+
+        def targets(self):
+            return [0]
+
+        def pin_row(self, row):
+            """(no pin here: OK is what saves)"""
+
+        def retarget(self, start=False):
+            super().retarget(start=True)
+
+        def sync(self):
+            """(the main window's selection doesn't matter here)"""
+
+        def settle(self, also=()):
+            """(nothing tried on shapes to keep)"""
+
+        def show(self):
+            super().show()
+            for w in self.editor_greyed():
+                if isinstance(w, ttk.Widget):
+                    w.state(["disabled"])  # (state(): config(state=) drops a half-tick)
+                else:
+                    w.config(state="disabled")
+
+        def ok(self):
+            self.take_typing()
+            self.save_default()
+            self.close()
+
+        def cancel(self):
+            self.close()
+
+        def close(self):
+            self.closed = True
+            setattr(self.app, self.ATTR, None)
+            self.destroy()
+    Editor.__name__ = cls.__name__ + "Default"
+    return Editor
+
+
 class DefaultPin:
     """The pin's part of a window (see the module's text)."""
     KEY = ATTR = None
+    editing_default = False  # (True: the "your default" window, default_editor)
+
+    @classmethod
+    def stand_in(cls):
+        """The shape the "your default" window works on (a whole one: some windows work out numbers from its notes)."""
+        from notes.engine import clean_shape
+        return clean_shape({"kind": "line", "pts": [[0, 60], [1, 61]], "vel0": 100, "vel1": 100})
+
+    @classmethod
+    def put_default(cls, sh, v):
+        sh[cls.KEY] = v
+
+    def editor_greyed(self):
+        """What the "your default" window greys (its on / off tick)."""
+        tick = getattr(self, "on_tick", None)
+        return [tick] if tick is not None else []
 
     @classmethod
     def clean_saved(cls, v):
@@ -94,7 +185,7 @@ class DefaultPin:
 
     @classmethod
     def editor_class(cls):
-        return None
+        return default_editor(cls)
 
     @classmethod
     def default_title(cls):

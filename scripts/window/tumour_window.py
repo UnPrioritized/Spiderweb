@@ -10,8 +10,9 @@ from tkinter import ttk
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.joined import shown_tumour, unify_tumours
-from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph
+from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph, clean_tumour
 from window import look
+from window.default_pin import DefaultPin
 from window.graph_window import GraphSource, GraphWindow
 from window.panel_custom import GAP_COLOR
 from window.widgets import (LocalUndo, Scrub, Tooltip, bad, fit_screen, good, grid_shown, placed, traced, unchanged,
@@ -51,10 +52,10 @@ class TumourGraphs(GraphSource):
     """The graph window on the selected lines' tumours: tm["graphs"][setting] (tumour.py)."""
 
     def tm(self):
-        return dict(TUMOUR_DEFAULTS, **(self.app.shown_tumours() or {}))
+        return dict(self.owner.base(), **(self.owner.shown_tumours() or {}))
 
     def targets(self):
-        return self.app.tumour_targets()
+        return self.owner.tumour_targets()
 
     def graph(self, key):
         return (self.tm().get("graphs") or {}).get(key)
@@ -80,7 +81,7 @@ class TumourGraphs(GraphSource):
 
     def restore(self, tgts, saved, key):
         # (still part of the tumour window's change: its Accept / X decides whether it's kept)
-        shapes = self.app.shapes
+        shapes = self.owner.shape_list()
         if not any(t is s for t in tgts for s in shapes):
             return
         for t, g in zip(tgts, saved):
@@ -101,10 +102,84 @@ class TumourGraphs(GraphSource):
         self.owner.graph_window = None
 
 
-class TumourWindow(tk.Toplevel):
+MINE_LEFT_OUT = ("on", "k", "seed")  # (never in a default: on / off, the zoom it was set at, random sides' pick)
+
+
+class TumourWindow(DefaultPin, tk.Toplevel):
+    KEY = "tumour"  # (the shape's key, its section in shape-defaults.ini)
+    ATTR = "tumour_window"
+
+    # ---- what it works on (the "your default" window: a stand-in line, tumour_editor)
+
+    def picked(self):
+        return sorted(self.app.sels)
+
+    def tumour_targets(self):
+        return self.app.tumour_targets()
+
+    def shown_tumours(self):
+        return self.app.shown_tumours()
+
+    def shape_list(self):
+        return self.app.shapes
+
+    def refresh(self):
+        """The shapes changed: notes made again, the panel's summary + this window shown again."""
+        self.app.shapes_changed()
+        self.app.sync_tumour()
+
+    def resync(self):
+        self.app.sync_tumour()
+
+    # ---- the user's own default ("use as default" pin, window/default_pin.py): what new tumours start with (and
+    # Reset goes back to); on / off, the zoom and the random pick never in it
+
+    def base(self):
+        """What a line without tumours starts with: the user's default, else the program's."""
+        return dict(TUMOUR_DEFAULTS, **(self.saved_default() or {}))
+
+    @classmethod
+    def clean_saved(cls, v):
+        tm = clean_tumour(v)
+        return None if tm is None else {k: x for k, x in tm.items() if k not in MINE_LEFT_OUT}
+
+    @classmethod
+    def default_title(cls):
+        return tr("tumour_window.tumours")
+
+    @classmethod
+    def editor_class(cls):
+        return tumour_editor(cls)
+
+    def can_save_default(self):
+        return bool((self.shown_tumours() or {}).get("on"))
+
+    def default_now(self):
+        tm = self.shown_tumours()
+        if not (tm or {}).get("on"):
+            return None
+        return json.loads(json.dumps({k: v for k, v in tm.items() if k not in MINE_LEFT_OUT}))
+
+    @classmethod
+    def describe_default(cls, v, ppq):
+        v = dict(TUMOUR_DEFAULTS, **v)
+
+        def ticks(beats):
+            n = round(beats * ppq, 3)
+            return f"{fmt(n)} {unit_text(fmt(n), 'unit.ticks')}"
+        words = [dict(SHAPE_CHOICES)[v["shape"]],
+                 f"{tr('tumour_window.size')} {fmt(round(v['size'], 3))} {unit_text(fmt(v['size']), 'unit.keys')}",
+                 f"{tr('tumour_window.length')} {ticks(v['length'])}",
+                 f"{tr('tumour_window.distance')} {ticks(v['dist'])}",
+                 dict(SIDE_CHOICES)[v["side"]], dict(WRAP_CHOICES)[v["wrap"]]]
+        if v.get("graphs"):
+            words.append(tr("defaults.own_graph"))
+        return ", ".join(words)
+
     def __init__(self, app):
         super().__init__(app)
         self.app = app
+        setattr(app, self.ATTR, self)
         self.title(tr("tumour_window.tumours"))
         self.transient(app)
         self.resizable(False, False)
@@ -195,9 +270,12 @@ class TumourWindow(tk.Toplevel):
         reset = ttk.Button(row, text=tr("tumour_window.reset"), command=self.reset)
         reset.pack(side="left")
         Tooltip(reset, tr("tumour_window.tip_reset"))
-        ttk.Button(row, text=tr("tumour_window.accept"), command=self.accept).pack(side="right")
+        right = ttk.Frame(row)
+        right.pack(side="right")
+        self.pin_row(right)
+        ttk.Button(right, text=tr("tumour_window.accept"), command=self.accept).pack(side="left")
 
-        self.targets = sorted(app.sels)
+        self.targets = self.picked()
         self.undo = LocalUndo(self, self.state, self.put_state)
         self.bind("<Escape>", lambda e: self.cancel())
         self.bind("<Return>", lambda e: self.accept())
@@ -226,12 +304,13 @@ class TumourWindow(tk.Toplevel):
     def state(self):
         """The selected shapes' tumour settings as they are now (only these: a shape moved on the piano roll stays
         where it is when they're put back)."""
-        return json.dumps([{k: self.app.shapes[i][k] for k in TUMOUR_KEYS if k in self.app.shapes[i]}
-                           for i in self.targets if i < len(self.app.shapes)])
+        shapes = self.shape_list()
+        return json.dumps([{k: shapes[i][k] for k in TUMOUR_KEYS if k in shapes[i]}
+                           for i in self.targets if i < len(shapes)])
 
     def begin(self):
         """Start from the selected shapes as they are now."""
-        self.targets = sorted(self.app.sels)
+        self.targets = self.picked()
         self.saved_sel = self.app.sel_state()  # (for the undo step)
         self.before = self.now = self.state()  # (now: as this window last left them)
         self.undo.reset()
@@ -245,18 +324,15 @@ class TumourWindow(tk.Toplevel):
 
     def put_state(self, state):
         """The selected shapes' tumours as they were (Ctrl+Z / Ctrl+Y in the window, or X / Esc)."""
-        app = self.app
-        self.put_tumours(app.shapes, state)
+        self.put_tumours(self.shape_list(), state)
         self.now = self.state()
-        app.shapes_changed()
-        app.sync_tumour()
+        self.refresh()
 
     def changed(self, mark=None):
         """The window changed the selected shapes (mark: changes with the same key in a row are one Ctrl+Z step)."""
         self.now = self.state()
         self.undo.mark(mark)
-        self.app.shapes_changed()
-        self.app.sync_tumour()
+        self.refresh()
 
     def pending(self):
         """Are there tumours tried here that settle would keep?"""
@@ -283,16 +359,17 @@ class TumourWindow(tk.Toplevel):
             self.undo.reset()  # (Ctrl+Z in the window goes back as far as X / Esc does: no further)
 
     def reset(self):
-        """Every setting back to its default and no graphs; tumours stay on or off."""
+        """Every setting back to its default (the user's own if saved) and no graphs; tumours stay on or off."""
         app = self.app
         k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
-        tgts = [t for t in app.tumour_targets() if shown_tumour(t)]
+        tgts = [t for t in self.tumour_targets() if shown_tumour(t)]
         if not tgts:
             return
+        start = json.dumps(self.base())
         for t in tgts:
             on = bool(shown_tumour(t).get("on"))
             unify_tumours(t)
-            t["tumour"] = dict(TUMOUR_DEFAULTS, on=on, k=k)
+            t["tumour"] = dict(json.loads(start), on=on, k=k)
         self.changed()
 
     def accept(self):
@@ -318,20 +395,22 @@ class TumourWindow(tk.Toplevel):
 
     def close(self):
         self.drop_graph()
-        self.app.tumour_window = None
+        setattr(self.app, self.ATTR, None)
         self.destroy()
         self.app.roll.focus_set()
 
     def sync(self):
         """Show the first selected line's settings (everything greyed out when nothing fitting is selected)."""
         app = self.app
-        if sorted(app.sels) != self.targets:  # other shapes: the change tried on the last ones is kept
+        if self.picked() != self.targets:  # other shapes: the change tried on the last ones is kept
             self.settle()
             self.begin()
         elif self.state() != self.now:  # changed from outside (the main window's undo)
             self.begin()
-        tgts = app.tumour_targets()
-        if not tgts:
+        tgts = self.tumour_targets()
+        if self.editing_default:
+            self.what.grid_remove()  # (no shape to name)
+        elif not tgts:
             self.what.config(text=NOTHING)
         elif len(tgts) == 1:
             i = next(i for i in sorted(app.sels) if app.shapes[i] is tgts[0])
@@ -341,7 +420,7 @@ class TumourWindow(tk.Toplevel):
             self.what.config(text=tr("tumour_window.shapes_they_all_change_together", n=len(tgts))
                              if on in (0, len(tgts)) else
                              tr("tumour_window.shapes_with_tumours_the_settings_change", n=len(tgts), on=on))
-        tm = dict(TUMOUR_DEFAULTS, **(app.shown_tumours() or {"on": False}))
+        tm = dict(self.base(), **(self.shown_tumours() or {"on": False}))
         self.loading = True
         self.on.set(tm["on"])
         self.fit.set(tm["fit"])
@@ -393,11 +472,11 @@ class TumourWindow(tk.Toplevel):
         app = self.app
         if self.loading:
             return
-        tgts = app.tumour_targets()
+        tgts = self.tumour_targets()
         if not tgts:
             return
         k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
-        shown = app.shown_tumours()
+        shown = self.shown_tumours()
         if self.mixed and key == "on" and value:  # (half ticked: the others get the settings shown)
             for t in tgts:
                 if not (shown_tumour(t) or {}).get("on"):
@@ -406,13 +485,14 @@ class TumourWindow(tk.Toplevel):
                     t["tumour"] = dict(json.loads(json.dumps(shown)), k=k)
         elif self.mixed or not (key == "on" and value):  # (the settings only change shapes with tumours on)
             tgts = [t for t in tgts if (shown_tumour(t) or {}).get("on" if self.mixed else "shape")]
+        start = json.dumps(shown or self.base())  # (once: the defaults file read once, not per line)
         for t in tgts:
             unify_tumours(t)  # (a joined curve's shapes with their own tumours: these become the whole curve's)
-            tm = t.setdefault("tumour", json.loads(json.dumps(shown or TUMOUR_DEFAULTS)))
+            tm = t.setdefault("tumour", json.loads(start))
             tm[key] = value
             tm["k"] = k  # sizes as the roll looks now
         self.changed(key if group else None)
-        if key == "on" and value:
+        if key == "on" and value and not self.editing_default:
             app.tips.show("tumours")
 
     def on_entry(self, key, left=False):
@@ -432,12 +512,13 @@ class TumourWindow(tk.Toplevel):
             bad(e)
             return
         good(e)
-        tgts = self.app.tumour_targets()
-        if tgts and all(abs((shown_tumour(t) or TUMOUR_DEFAULTS).get(key, 0.0) - value) < 1e-12 and
+        tgts = self.tumour_targets()
+        base = self.base()
+        if tgts and all(abs((shown_tumour(t) or base).get(key, 0.0) - value) < 1e-12 and
                         "tumours" not in t for t in tgts):
             return
         self.set(key, value, group=True)
-        self.app.sync_tumour()
+        self.resync()
 
     def show_unit(self, key):
         """The unit after a box ("1 key" / "2 keys"), blue + "× graph" while it follows a graph."""
@@ -464,14 +545,15 @@ class TumourWindow(tk.Toplevel):
     def set_graph(self, key, pts):
         """The graph window changed a graph (its undo step is already taken)."""
         app = self.app
-        tgts = app.tumour_targets()
+        tgts = self.tumour_targets()
         if not tgts:
             return
         g = clean_graph(pts)
         k = app.roll.sy / app.roll.sx if app.roll.sx else 0.25
+        start = json.dumps(self.base())
         for t in [t for t in tgts if (shown_tumour(t) or {}).get("on" if self.mixed else "shape")]:
             unify_tumours(t)
-            tm = t.setdefault("tumour", dict(TUMOUR_DEFAULTS))
+            tm = t.setdefault("tumour", json.loads(start))
             graphs = dict(tm.get("graphs") or {})
             if g:
                 graphs[key] = [list(p) for p in g]
@@ -483,3 +565,63 @@ class TumourWindow(tk.Toplevel):
                 tm.pop("graphs", None)
             tm["k"] = k  # sizes as the roll looks now
         self.changed(("graph", key))
+
+
+def tumour_editor(cls):
+    """The Tumours window changing the user's DEFAULT only (Settings → User set defaults; like
+    default_pin.default_editor): a stand-in line no one sees, no shape / selection / undo step touched, the Tumours
+    tick greyed; Accept saves, X / Esc changes nothing."""
+    class Editor(cls):
+        ATTR = cls.ATTR + "_defaults"
+        editing_default = True
+
+        def __init__(self, app, done=None):
+            self.fake = cls.stand_in()
+            self.fake["tumour"] = dict(json.loads(json.dumps(self.base())), on=True)
+            self.done = done
+            super().__init__(app)
+            self.title(tr("defaults.edit_title", name=cls.default_title()))
+
+        def picked(self):
+            return [0]
+
+        def tumour_targets(self):
+            return [self.fake]
+
+        def shown_tumours(self):
+            return shown_tumour(self.fake)
+
+        def shape_list(self):
+            return [self.fake]
+
+        def refresh(self):
+            self.sync()
+
+        def resync(self):
+            self.sync()
+
+        def pin_row(self, row):
+            """(no pin here: Accept is what saves)"""
+
+        def settle(self, also=()):
+            """(nothing tried on shapes to keep)"""
+
+        def sync(self):
+            super().sync()
+            self.on_box.state(["disabled"])
+
+        def accept(self):
+            if self.graph_window:
+                self.graph_window.ok()
+            self.save_default()
+            self.close()
+
+        def cancel(self):
+            self.close()
+
+        def close(self):
+            self.drop_graph()
+            setattr(self.app, self.ATTR, None)
+            self.destroy()
+    Editor.__name__ = cls.__name__ + "Default"
+    return Editor

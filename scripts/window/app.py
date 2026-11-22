@@ -1737,10 +1737,11 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.sync_tumour()
         self.sync_text()
         self.sync_gliss()  # (Step "Auto (1/32)" / grids under a tick and the key count follow the PPQ / Keys)
+        from window.default_pin import editors
         for w in (self.claw_window, self.strum_window, self.chop_window, self.trim_window, self.path_window,
                   self.sustain_window, self.subtract_window, self.extend_window, self.merge_window, self.fill_window, self.melody_window,
-                  getattr(self, "subtract_window_defaults", None), getattr(self, "extend_window_defaults", None)):
-            if w:
+                  *editors(self)):
+            if w and hasattr(w, "ppq_changed"):
                 w.ppq_changed()  # (numbers shown in ticks; Settings' "your default" windows too, hunt)
         if (self.ppq, self.keys) != before:  # (Settings → User set defaults: its tick numbers follow the PPQ)
             from window.default_pin import defaults_changed

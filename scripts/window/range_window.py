@@ -23,6 +23,7 @@ from notes.funnel import funnel_gates, funnel_range
 from notes.gaterange import (DIRS, ENDS, STRAIGHT, clean_range, ends_of, exact_ok, few_steps, gate_steps, halved,
                              steps_to, with_ends, y_gate)
 from window import big_ask, look
+from window.default_pin import DefaultPin
 from window.panel_funnel import GATE_STEPS
 from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, unit_word
 
@@ -39,11 +40,58 @@ BAR, BAR_HOT, NONE = look.RANGE_BAR, look.RANGE_BAR_HOT, look.RANGE_NONE  # note
 BAR_PX = 3  # bars at least this wide: more gates than fit share a bar
 
 
-class RangeGraph(PointGraph, tk.Toplevel):
+class RangeGraph(DefaultPin, PointGraph, tk.Toplevel):
     notes_pass = True  # (its clicks / drags don't wait for notes made in the background: notes_wait.pass_window)
+    KEY = "range"  # (its section in shape-defaults.ini; funnels: FunnelRangeGraph)
+    ATTR = "range_graph"
+
+    # ---- the user's own default ("use as default" pin, window/default_pin.py): the Range a shape without one starts
+    # with (To in ticks as shown, across, ends, changes, rows, graph; From = the shape's own gate, never in it)
+
+    @classmethod
+    def clean_saved(cls, v):
+        return clean_range(v)
+
+    @classmethod
+    def default_title(cls):
+        return tr("range_window.title")
+
+    @classmethod
+    def editor_class(cls):
+        return range_editor(cls)
+
+    @classmethod
+    def stand_in(cls):
+        return {"kind": "custom", "fill": "spam", "gate": 0.0625}
+
+    def can_save_default(self):
+        return bool(self.on_var.get())
+
+    def default_now(self):
+        self.take_typing()
+        return json.loads(json.dumps(self.memo[0])) if self.on_var.get() else None
+
+    @classmethod
+    def describe_default(cls, v, ppq):
+        n = int(round(v["to"] * ppq))
+        words = [f"{tr('range_window.to')} {trn('n.ticks', n, n=fmt(n))}"]
+        if v.get("dir", "time") != "time" or cls.KEY == "range":
+            words.append(tr(f"range_window.{v.get('dir', 'time')}"))
+        if cls.KEY == "range":
+            words.append(tr(f"range_window.ends_{ends_of(v)}"))
+            if v.get("dir") == "time" and v.get("rows"):
+                words.append(tr("range_window.rows") + (" + " + tr("range_window.join") if v.get("join") else ""))
+        words.append(tr("range_window.steps" if v.get("halves") else "range_window.smooth"))
+        if v.get("follow") == "curve":
+            words.append(tr("range_window.with_curve"))
+        if v.get("graph") and [list(map(float, p)) for p in v["graph"]] != STRAIGHT:
+            words.append(tr("defaults.own_graph"))
+        return ", ".join(words)
+
     def __init__(self, app, tgts=None):
         super().__init__(app)
         self.app = app
+        setattr(app, self.ATTR, self)
         self.title(tr("range_window.title"))
         self.transient(app)
         self.resizable(False, False)
@@ -62,7 +110,8 @@ class RangeGraph(PointGraph, tk.Toplevel):
         # each shape's range, kept while it's switched off so switching on brings it back (sh["range_kept"] while
         # it's off; new: 4 times the gate; a funnel's in steps, as its gate first changed)
         clean = funnel_range if self.funnel else clean_range
-        self.memo = [clean(json.loads(json.dumps(t.get("range") or t.get("range_kept") or
+        mine = self.saved_default()  # (shapes without one start from the user's own default, the pin)
+        self.memo = [clean(json.loads(json.dumps(t.get("range") or t.get("range_kept") or mine or
                                                  {"to": t["gate"] * 4, "graph": STRAIGHT, "dir": "time",
                                                   "halves": self.funnel, "exact": not self.funnel})))
                      for t in self.tgts]
@@ -81,8 +130,9 @@ class RangeGraph(PointGraph, tk.Toplevel):
         box = ttk.Frame(self, padding=8)
         box.pack(fill="both", expand=True)
         self.on_var = tk.BooleanVar(value=True)
-        ttk.Checkbutton(box, text=tr("range_window.on"), variable=self.on_var,
-                        command=lambda: self.change(None)).pack(anchor="w")
+        self.on_tick = ttk.Checkbutton(box, text=tr("range_window.on"), variable=self.on_var,
+                                       command=lambda: self.change(None))
+        self.on_tick.pack(anchor="w")
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(6, 0))
         self.gate_vars, self.gate_boxes = {}, {}
@@ -174,6 +224,7 @@ class RangeGraph(PointGraph, tk.Toplevel):
                   wraplength=self.w + self.cw).pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(box)
         row.pack(anchor="e", pady=(6, 0))
+        self.pin_row(row)
         ttk.Button(row, text=tr("range_window.ok"), command=self.ok).pack(side="left")
         ttk.Button(row, text=tr("range_window.cancel"), command=self.cancel).pack(side="left", padx=(4, 0))
         cv.bind("<ButtonPress-1>", self.press)
@@ -233,8 +284,9 @@ class RangeGraph(PointGraph, tk.Toplevel):
                 t["pts"], t["strokes"], free = range_restored(before, t, self.app.ppq)  # the new Range)
                 if free:
                     t["even_free"] = free
-        self.app.shapes_changed()
-        self.app.sync_panel()  # (the panel's Range-on rows while the window is open, hunt 2026-11-17)
+        if not self.editing_default:  # (a stand-in shape: nothing in the main window changes)
+            self.app.shapes_changed()
+            self.app.sync_panel()  # (the panel's Range-on rows while the window is open, hunt 2026-11-17)
         self.count = sum(self.app.note_count(t) or 0 for t in self.tgts if self.placed(t))
 
         def counted():  # (the chart from notes made in the background when not remembered: App.notes_soon)
@@ -421,9 +473,12 @@ class RangeGraph(PointGraph, tk.Toplevel):
             self.change("to", beats, mark=False)
             self.hist.mark("to")
 
-    def ok(self):
+    def take_typing(self):
         for key in self.gate_boxes:  # (a number typed without Enter counts too)
             self.on_gate(key)
+
+    def ok(self):
+        self.take_typing()
         self.closed = True
         if json.dumps(self.app.shapes) != self.before:
             self.app.add_undo_step(self.before, tr("range_window.step"))
@@ -438,8 +493,11 @@ class RangeGraph(PointGraph, tk.Toplevel):
         self.close()
 
     def close(self):
+        setattr(self.app, self.ATTR, None)
         self.grab_release()
         self.destroy()
+        if self.editing_default:
+            return
         if self.funnel:
             self.app.sync_funnel()
         else:
@@ -628,6 +686,65 @@ class RangeGraph(PointGraph, tk.Toplevel):
         self.draw()
 
 
+class FunnelRangeGraph(RangeGraph):
+    """The same window on funnels: their own default (from the line start to the wall: no keys / rows / ends)."""
+    KEY = "funnel_range"
+    ATTR = "funnel_range_graph"
+
+    @classmethod
+    def clean_saved(cls, v):
+        return funnel_range(v)
+
+    @classmethod
+    def default_title(cls):
+        return tr("defaults.funnel_range")
+
+    @classmethod
+    def stand_in(cls):
+        return {"kind": "funnel", "fill": "spam", "gate": 0.0625}
+
+
+def range_editor(cls):
+    """The Range window changing the user's DEFAULT only (Settings → User set defaults; like
+    default_pin.default_editor): a stand-in shape, no note counts, From (the shape's own gate) and the on / off tick
+    greyed; OK saves, Cancel changes nothing."""
+    class Editor(cls):
+        ATTR = cls.ATTR + "_defaults"
+        editing_default = True
+
+        def __init__(self, app, done=None):
+            fake = cls.stand_in()
+            saved = self.saved_default()
+            if saved is not None:
+                fake["range"] = saved
+            self.done = done
+            super().__init__(app, [fake])
+            self.title(tr("defaults.edit_title", name=cls.default_title()))
+
+        def placed(self, t):
+            return False  # (no notes counted or asked about)
+
+        def pin_row(self, row):
+            """(no pin here: OK is what saves)"""
+
+        def show_boxes(self):
+            super().show_boxes()
+            self.gate_boxes["from"].config(state="disabled")
+            self.on_tick.state(["disabled"])
+
+        def ok(self):
+            self.take_typing()
+            self.save_default()
+            self.closed = True
+            self.close()
+
+        def cancel(self):
+            self.closed = True
+            self.close()
+    Editor.__name__ = cls.__name__ + "Default"
+    return Editor
+
+
 def open_range_graph(app):
     app.settle_windows()  # (a claw / sustain... being tried = its own step before this window's)
     tgts = app.skip_hz(app.custom_targets())  # (a Hz bass picked too: left out, after a warning)
@@ -640,4 +757,4 @@ def open_funnel_range(app):
     app.settle_windows()
     tgts = app.skip_hz(app.funnel_targets())  # (a Hz bass funnel picked too: left out, after a warning)
     if tgts and not app.funnel_draft():
-        RangeGraph(app, tgts)
+        FunnelRangeGraph(app, tgts)

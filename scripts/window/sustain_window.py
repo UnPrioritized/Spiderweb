@@ -18,11 +18,12 @@ from tkinter import ttk
 import numpy as np
 
 from files import settings
-from files.lang import tr
+from files.lang import tr, trn
 from files.mathexpr import calc, fmt
-from notes.sustain import (MOST_GAP, MOST_PAST, MOST_PIECES, MOST_POINTS, auto_gap, is_sustained, stop_share, stop_tick,
-                           carry_shares, stop_ticks, sustained, too_many_pieces)
+from notes.sustain import (MOST_GAP, MOST_PAST, MOST_PIECES, MOST_POINTS, auto_gap, clean_sustain, is_sustained,
+                           stop_share, stop_tick, carry_shares, stop_ticks, sustained, too_many_pieces)
 from window import look
+from window.default_pin import DefaultPin
 from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, traced, unit_text
 
 
@@ -80,12 +81,24 @@ def put_own(sh, part):
 LENGTHS = ("gap", "most", "every")  # (sh["sustain"] lengths in beats; "from" goes with "every")
 
 
-class SustainWindow(tk.Toplevel):
+def without_points(sus):
+    """A Sustain as a default holds it: the stops put by hand left out (user 2026-11-23: things placed on the piano
+    roll depend on where the shape is), the "Stop at my points" / "Allow past the shape's end" ticks kept."""
+    sus = dict(sus)
+    if isinstance(sus.get("stops"), dict):
+        sus["stops"] = dict(sus["stops"], at=[])
+    return sus
+
+
+class SustainWindow(DefaultPin, tk.Toplevel):
     notes_pass = True  # (its clicks / drags don't wait for notes made in the background: notes_wait.pass_window)
+    KEY = "sustain"  # (the shape's key, its section in shape-defaults.ini)
+    ATTR = "sustain_window"
+
     def __init__(self, app):
         super().__init__(app)
         self.app = app
-        app.sustain_window = self
+        setattr(app, self.ATTR, self)
         self.title(tr("sustain.title"))
         self.transient(app)
         self.resizable(False, False)
@@ -160,6 +173,7 @@ class SustainWindow(tk.Toplevel):
         self.edit_line = EditLine(box, app, "sustain", row, order=False)
         row = ttk.Frame(box)
         row.pack(anchor="e", pady=(10, 0))
+        self.pin_row(row)
         ttk.Button(row, text=tr("range_window.ok"), command=self.ok).pack(side="left")
         ttk.Button(row, text=tr("range_window.cancel"), command=self.cancel).pack(side="left", padx=(4, 0))
         self.bind("<Escape>", lambda ev: self.cancel())
@@ -177,6 +191,49 @@ class SustainWindow(tk.Toplevel):
     @property
     def tgts(self):
         return [self.app.shapes[i] for i in self.idx if i < len(self.app.shapes)]
+
+    def targets(self):
+        return target_indices(self.app)
+
+    # ---- the user's own default ("use as default" pin, window/default_pin.py)
+
+    @classmethod
+    def clean_saved(cls, v):
+        v = clean_sustain(v)
+        return None if v is None else without_points(v)
+
+    def can_save_default(self):
+        return bool(self.idx) and any(self.on)
+
+    def default_now(self):
+        """The first shape's Sustain shown here (its stops put by hand left out)."""
+        if not self.idx:
+            return None
+        self.take_typing()
+        i = next((i for i, on in enumerate(self.on) if on), 0)
+        sus = self.tgts[i].get("sustain") if i < len(self.tgts) else None
+        return without_points(sus) if isinstance(sus, dict) else None
+
+    @classmethod
+    def describe_default(cls, v, ppq):
+        def ticks(beats):
+            n = int(round(beats * ppq))
+            return trn("n.ticks", n, n=fmt(n))
+        words = [f"{tr('sustain.hold')} {tr('defaults.auto') if 'gap' not in v else ticks(v['gap'])}"]
+        if "most" in v:
+            words.append(f"{tr('sustain.most')} {ticks(v['most'])}")
+        if "every" in v:
+            words.append(f"{tr('sustain.every')} {ticks(v['every'])}"
+                         + (f" {tr('sustain.from')} {ticks(v['from'])}" if v.get("from") else ""))
+        stops = v.get("stops") or {}
+        if stops and not stops.get("off"):
+            words.append(tr("sustain.stops"))
+        if stops.get("past"):
+            words.append(tr("sustain.past"))
+        return ", ".join(words)
+
+    def editor_greyed(self):
+        return [self.on_tick, self.add_btn, self.clear_btn]  # (points aren't kept in a default)
 
     def new_row(self, box):
         row = ttk.Frame(box)
@@ -246,7 +303,7 @@ class SustainWindow(tk.Toplevel):
 
     def retarget(self, start=False):
         """Work on the selected shapes (start: opened, which puts Sustain on)."""
-        self.idx = target_indices(self.app)
+        self.idx = self.targets()
         self.saved_sel = self.app.sel_state()  # (for the undo step)
         self.before = self.sus_now()
         self.kept = self.own_now()  # (put back by Cancel)
@@ -260,9 +317,13 @@ class SustainWindow(tk.Toplevel):
         self.hist.reset()
 
     def load(self, start):
-        """Each shape's settings from the shapes (start: all sustained), then the boxes and ticks."""
+        """Each shape's settings from the shapes (start: all sustained), then the boxes and ticks. Shapes without
+        Sustain yet start from the user's own default (the pin)."""
         sus = [t.get("sustain") if is_sustained(t) else None for t in self.tgts]
         self.on = [start or s is not None for s in sus]
+        mine = self.saved_default()
+        if mine is not None:
+            sus = [mine if s is None else s for s in sus]
         # (each shape's own values, None = none; several shapes keep theirs until that row is changed, hunt)
         self.vals = {k: [(s or {}).get(k) for s in sus] for k in LENGTHS}
         self.vals["from"] = [(s or {}).get("from", 0) if "every" in (s or {}) else None for s in sus]
@@ -270,7 +331,8 @@ class SustainWindow(tk.Toplevel):
         self.show_controls()
 
     def load_stops(self, show=True):
-        stops = [(t.get("sustain") or {}).get("stops") if is_sustained(t) else None for t in self.tgts]
+        mine = (self.saved_default() or {}).get("stops")  # (shapes without Sustain: the default's ticks, no points)
+        stops = [(t.get("sustain") or {}).get("stops") if is_sustained(t) else mine for t in self.tgts]
         self.points = [list(s["at"]) if s else [] for s in stops]
         self.offs = [None if not s else bool(s.get("off")) for s in stops]  # (None: no stops of its own)
         self.pasts = [bool(s and s.get("past")) for s in stops]
@@ -662,6 +724,8 @@ class SustainWindow(tk.Toplevel):
             t["sustain"] = sus
         self.now = self.sus_now()
         self.show()
+        if self.editing_default:  # (a stand-in shape: nothing in the main window changes)
+            return
         # (its settings changed on shapes that keep it: the steps after it skipped until the user leaves it, stage C;
         # put on / taken off: whole; nothing changed (the window opening): as it was)
         if self.now != was:
@@ -710,7 +774,7 @@ class SustainWindow(tk.Toplevel):
 
     def close(self):
         self.closed = True
-        self.app.sustain_window = None
+        setattr(self.app, self.ATTR, None)
         self.app.colour_edit_leave("sustain")  # (the steps after it worked out again)
         roll = self.app.roll
         if roll.drag and roll.drag[0] == "sustop":  # (a stop held: let go, its moves kept)
