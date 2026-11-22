@@ -56,6 +56,97 @@ def calc(text):
     return value
 
 
+def amount(text):
+    """A typed gate amount -> (% part, ticks part): 50 = (0, 50), 50% = (50, 0), 50% + 10 = (50, 10), with the math
+    calc reads ((50% + 10) * 2 = (100, 20)). A "%" right after a number or ")" means percent here, never remainder.
+    Anything that isn't "a % plus ticks" (50% * 50%, 2 ^ 10%) = ValueError with a message (Gate extend / subtract,
+    user 2026-11-22)."""
+    t = text.replace("x", "*").replace("×", "*").replace("^", "**").replace("％", "%")
+    if "P" in t:
+        raise ValueError(tr("mathexpr.can_t_read", text=text))
+    t = _pct_marks(t)
+    if t is None:
+        raise ValueError(tr("mathexpr.can_t_read", text=text))
+
+    def ev(node):  # -> (a, b) = a % + b ticks
+        if isinstance(node, ast.Expression):
+            return ev(node.body)
+        if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) \
+                and not isinstance(node.value, bool):
+            return 0, node.value
+        if isinstance(node, ast.Name) and node.id == "P":
+            return 1, 0
+        if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+            a, b = ev(node.operand)
+            return (-a, -b) if isinstance(node.op, ast.USub) else (a, b)
+        if isinstance(node, ast.BinOp) and type(node.op) in _OPS:
+            (a1, b1), (a2, b2) = ev(node.left), ev(node.right)
+            if isinstance(node.op, ast.Add):
+                return a1 + a2, b1 + b2
+            if isinstance(node.op, ast.Sub):
+                return a1 - a2, b1 - b2
+            if isinstance(node.op, ast.Mult):
+                if a1 and a2:
+                    raise _PctError
+                return (a1 * b2, b1 * b2) if a1 else (a2 * b1, b1 * b2)
+            if isinstance(node.op, ast.Div) and not a2:
+                return a1 / b2, b1 / b2
+            if a1 or a2:  # (// % ** with a percent in it)
+                raise _PctError
+            if isinstance(node.op, ast.Pow):
+                return 0, _power(b1, b2)
+            return 0, _OPS[type(node.op)](b1, b2)
+        raise ValueError("unsupported")
+
+    try:
+        a, b = ev(ast.parse(t, mode="eval"))
+        finite = math.isfinite(a) and math.isfinite(b)
+    except _PctError:
+        raise ValueError(tr("mathexpr.pct_only_add"))
+    except ZeroDivisionError:
+        raise ValueError(tr("mathexpr.division_by_zero"))
+    except (SyntaxError, ValueError, TypeError, OverflowError, RecursionError, MemoryError):
+        raise ValueError(tr("mathexpr.can_t_read", text=text))
+    if not finite:
+        raise ValueError(tr("mathexpr.out_of_range"))
+    return a, b
+
+
+def _pct_marks(t):
+    """Each "%" turned into "*P" around ONLY the number or bracket right before it, so % holds tightest:
+    10 / 5% = 10 / (5*P) (refused), 2 ^ 10% = 2 ** (10*P) (refused), (10 + 20)% = ((10 + 20)*P). None = a % with
+    nothing before it."""
+    out = ""
+    for ch in t:
+        if ch != "%":
+            out += ch
+            continue
+        body = out.rstrip()
+        if body.endswith(")"):
+            depth, i = 0, len(body) - 1
+            while i >= 0:
+                depth += {")": 1, "(": -1}.get(body[i], 0)
+                if depth == 0:
+                    break
+                i -= 1
+            if i < 0:
+                return None
+        else:
+            i = len(body)
+            while i > 0 and (body[i - 1].isdigit() or body[i - 1] in "._"):
+                i -= 1
+            if i > 0 and body[i - 1] in "eE" and i > 1 and body[i - 2].isdigit():
+                return None  # (1e5%: written-out powers of ten with a % = can't read, rare)
+            if i == len(body):
+                return None
+        out = body[:i] + "(" + body[i:] + "*P)"
+    return out
+
+
+class _PctError(Exception):
+    """A percent multiplied by a percent (or raised, divided by): not "a % plus ticks"."""
+
+
 FORMULA_NAMES = {"pi": math.pi, "e": math.e}
 FORMULA_FUNCS = {
     "sin": math.sin, "cos": math.cos, "tan": math.tan, "asin": math.asin, "acos": math.acos, "atan": math.atan,

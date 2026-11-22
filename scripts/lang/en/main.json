@@ -2468,6 +2468,7 @@
  "mathexpr.not_a_real_number": "not a real number",
  "mathexpr.whole_number_needed": "whole number needed",
  "mathexpr.out_of_range": "out of range",
+ "mathexpr.pct_only_add": "% can only be added to ticks or multiplied / divided by a number",
  "pianoroll.drag_a_point": "Drag a point",
  "pianoroll.turn": "Turn",
  "pianoroll.skew": "Skew",
