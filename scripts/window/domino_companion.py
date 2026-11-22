@@ -421,7 +421,10 @@ class Companion(DominoBar, DominoSettings):
         d = self.overlay.domino
         if d is None:
             return
-        if self.linked and dl.in_front(d) and time.monotonic() - self._own > 0.6:  # (the user works in Domino:
+        if self.busy:  # (OUR send / Take going on: its ruler click gave Domino the keyboard, that's not the user;
+            # 2026-11-22 report: a slow paste unlinked, a line stayed on the overlay that Ctrl+Z couldn't take off)
+            self._own = time.monotonic()
+        elif self.linked and dl.in_front(d) and time.monotonic() - self._own > 0.6:  # (the user works in Domino:
             # its own Ctrl+Z from now on)
             self.unlink()
         self.close_list_elsewhere()
