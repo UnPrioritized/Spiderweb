@@ -161,10 +161,12 @@ class LiquifyWindow(DefaultPin, tk.Toplevel):
         ttk.Label(form, text=tr("liquify.tool")).grid(row=1, column=0, sticky="nw", pady=(0, 6))
         tools = ttk.Frame(form)
         tools.grid(row=1, column=1, columnspan=3, sticky="w", pady=(0, 6))
+        self.tool_buttons = []
         for r, names in enumerate(TOOL_ROWS):
             for c, t in enumerate(names):
                 b = ttk.Radiobutton(tools, text=tr("liquify." + t), value=t, variable=self.tool, command=self.on_tool)
                 b.grid(row=r, column=c, sticky="w", padx=(0, 8))
+                self.tool_buttons.append(b)
                 Tooltip(b, tr(f"liquify.{t}_tip"))
         # (Twirl's way round: easy to find here; Alt held turns it back, like the editors; user 11-07)
         self.twirl_word = ttk.Label(form, text=tr("liquify.twirl_way"))
@@ -237,7 +239,8 @@ class LiquifyWindow(DefaultPin, tk.Toplevel):
         self.mask_buttons = []
         mask = ttk.Frame(box)
         mask.pack(anchor="w", fill="x", pady=(10, 0))
-        t = ttk.Checkbutton(mask, text=tr("liquify.show_mask"), variable=self.show_mask, command=self.on_show_mask)
+        t = self.show_mask_tick = ttk.Checkbutton(mask, text=tr("liquify.show_mask"), variable=self.show_mask,
+                                                  command=self.on_show_mask)
         t.pack(anchor="w")
         Tooltip(t, tr("liquify.show_mask_tip"))
         row2 = ttk.Frame(mask)
@@ -586,7 +589,11 @@ def liquify_editor(cls):
             super().sync()
             self.what.config(text="")
             self.moves_box.config(state="readonly")  # (greyed with nothing selected in the real window)
-            for b in [self.restore_button] + self.mask_buttons:
+            # (the brush, tool, Twirl way and mask tick are drawing aids in settings.ini, never in a default: greyed,
+            # hunt: changing them here changed the real ones)
+            brush = [e for e, var, word in self.boxes.values()]
+            for b in ([self.restore_button, self.show_mask_tick] + self.mask_buttons + self.tool_buttons
+                      + self.twirl_buttons + brush):
                 b.state(["disabled"])
 
         def ok(self):
@@ -594,6 +601,7 @@ def liquify_editor(cls):
             self.cancel()
 
         def cancel(self):
+            self.closed = True
             setattr(self.app, self.ATTR, None)
             self.destroy()
     Editor.__name__ = cls.__name__ + "Default"

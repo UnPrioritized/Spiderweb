@@ -215,6 +215,10 @@ class SustainWindow(DefaultPin, tk.Toplevel):
         return without_points(sus) if isinstance(sus, dict) else None
 
     @classmethod
+    def program_default(cls):
+        return {}  # (Sustain as opened with no default: Auto hold, nothing else set)
+
+    @classmethod
     def describe_default(cls, v, ppq):
         def ticks(beats):
             n = int(round(beats * ppq))

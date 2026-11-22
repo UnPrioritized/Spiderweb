@@ -907,6 +907,7 @@ def warp_editor(cls):
             self.moves_box.config(state="readonly")  # (greyed with nothing selected in the real window)
             for b in list(self.split_buttons.values()) + [self.reset_button]:
                 b.state(["disabled"])
+            self.boxes["mirror"].state(["disabled"])  # (a drawing aid, never in a default: hunt)
 
         def sync_preset(self, ws):
             """The preset a shape without a Warp gets: picked, its Bend % and way changeable."""
@@ -941,6 +942,7 @@ def warp_editor(cls):
             self.cancel()
 
         def cancel(self):
+            self.closed = True
             setattr(self.app, self.ATTR, None)
             self.destroy()
     Editor.__name__ = cls.__name__ + "Default"

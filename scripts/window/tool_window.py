@@ -259,7 +259,35 @@ class ToolWindow(DefaultPin, tk.Toplevel):
             return None
         out = {k: v[k] for k, d in cls.DEFAULTS.items()
                if k in v and k not in cls.LEFT_OUT and _same_kind(d, v[k])}
-        return out or None
+        return cls.checked(out) or None
+
+    TEST_PAGES = ({},)  # (settings that make a page do something, so its clean-up shows every setting it checks)
+
+    @classmethod
+    def checked(cls, out):
+        """Each saved setting through the tool's own clean-up (as pages read from a file; hunt: a hand-edited
+        unknown mode stopped the window opening, Chop's 100000 steps froze it): a value it changes = its changed
+        one; a value it never shows back = kept only when the program's own (or a window-only setting)."""
+        def cleaned(cfg):
+            try:
+                return cls.clean(cls, cfg)  # (clean() never reads self)
+            except Exception:  # (a value it can't read at all: as none)
+                return None
+        seen = set()
+        for base in cls.TEST_PAGES:
+            got = cleaned(dict(cls.DEFAULTS, **base))
+            seen |= set(got or ())
+        good = {}
+        for k, v in out.items():
+            for base in ({},) + tuple(cls.TEST_PAGES):
+                got = cleaned(dict(cls.DEFAULTS, **dict(base, **{k: v})))
+                if got and k in got:
+                    good[k] = got[k]
+                    break
+            else:
+                if k not in seen or v == cls.DEFAULTS[k]:
+                    good[k] = v
+        return good
 
     @classmethod
     def default_title(cls):
@@ -271,7 +299,7 @@ class ToolWindow(DefaultPin, tk.Toplevel):
 
     @classmethod
     def program_default(cls):
-        return copied(dict(cls.DEFAULTS))
+        return {k: v for k, v in copied(dict(cls.DEFAULTS)).items() if k not in cls.LEFT_OUT}  # (as default_now)
 
     def start_cfg(self):
         """What a new page starts with: the user's default, else the program's."""

@@ -41,6 +41,7 @@ class Hold:
 
 class TrimWindow(ToolWindow):
     KEY, ATTR, POS, DEFAULTS = "trim", "trim_window", "trim_pos", TRIM_DEFAULTS
+    TEST_PAGES = ({"keep": 50.0}, {"keep": 50.0, "by": "ticks"})  # (pages that trim: tool_window.checked)
 
     def clean(self, cfg):
         return clean_trim(cfg)

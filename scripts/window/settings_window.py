@@ -379,8 +379,8 @@ class SettingsWindow(tk.Toplevel):
         if take is not None:
             take()
         w = getattr(self, "default_window", None)  # (a "your default" window goes with Settings, like Cancel: hunt)
-        if w is not None and w.winfo_exists() and not w.closed:
-            w.cancel()
+        if w is not None and w.winfo_exists() and not getattr(w, "closed", False):
+            (getattr(w, "cancel", None) or w.close)()  # (Fill with tempo jumps / Image: Close)
         self.destroy()
 
     def tick(self, page, key, var, command, tip=None, **kw):
@@ -728,7 +728,7 @@ class SettingsWindow(tk.Toplevel):
     def open_default(self, sec):
         """One row's window, changing its default (never more than one open: the open one comes to the front)."""
         w = self.default_window
-        if w is not None and w.winfo_exists() and not w.closed:
+        if w is not None and w.winfo_exists() and not getattr(w, "closed", False):
             w.lift()
             w.focus_set()
             return
@@ -761,8 +761,8 @@ class SettingsWindow(tk.Toplevel):
                 shape_defaults.forget(sec)
             except OSError:
                 self.app.status.config(text=tr("defaults.cant_save"))
-            if w is not None and w.winfo_exists() and not w.closed and w.KEY == sec:
-                w.cancel()  # (its window would save the old one back on OK)
+            if w is not None and w.winfo_exists() and not getattr(w, "closed", False) and w.KEY == sec:
+                (getattr(w, "cancel", None) or w.close)()  # (its window would save the old one back on OK)
         from window.default_pin import defaults_changed
         defaults_changed(self.app)  # (the list + every open window's pin, hunt)
 

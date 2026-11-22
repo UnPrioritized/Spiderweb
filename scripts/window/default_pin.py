@@ -88,6 +88,7 @@ def defaults_changed(app):
     for g in open_windows(app):
         if getattr(g, "pin", None) is not None:
             g.show_pin()
+        g.default_moved()
 
 
 def pins_shown(app):
@@ -184,6 +185,10 @@ class DefaultPin:
     def put_default(cls, sh, v):
         sh[cls.KEY] = v
 
+    def default_moved(self):
+        """The default was saved / forgotten / reset somewhere: a window SHOWING it on shapes without the tool shows
+        the new one (Tumours: opening never puts it on; the others put theirs on when opened, so nothing to do)."""
+
     def tidy_editor(self):
         """A "your default" window: its Properties… / hidden-steps line (about real shapes) never shown."""
         el = getattr(self, "edit_line", None)
@@ -220,6 +225,12 @@ class DefaultPin:
         """The program's own default, when a window has one to compare with (saving the same = forgetting: Settings
         lists only defaults that differ, user 2026-11-23)."""
         return None
+
+    def program_own(self, mine):
+        """mine = what the program starts with anyway (every setting it has the same as program_default's; one it
+        leaves out = the program's own too)."""
+        p = self.program_default()
+        return p is not None and dict(p, **mine) == p
 
     def can_save_default(self):
         """"Save current as default" usable (asked when the menu opens: no typing taken yet)."""
@@ -280,7 +291,7 @@ class DefaultPin:
         mine = self.default_now()
         if mine is None:
             return
-        if mine == self.program_default():
+        if self.program_own(mine):
             return self.forget_default()
         try:
             shape_defaults.put(self.KEY, {"settings": mine})

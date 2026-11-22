@@ -39,6 +39,7 @@ def number_text(v):
 
 class ClawWindow(ToolWindow):
     KEY, ATTR, POS, DEFAULTS = "claw", "claw_window", "claw_pos", CLAW_DEFAULTS
+    TEST_PAGES = ({"dist": 10.0},) + tuple({"mode": m} for m in ("notes", "keys", "chords", "random"))  # (checked)
 
     @property
     def claw(self):

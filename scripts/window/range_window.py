@@ -71,6 +71,9 @@ class RangeGraph(DefaultPin, PointGraph, tk.Toplevel):
         self.take_typing()
         return json.loads(json.dumps(self.memo[0])) if self.on_var.get() else None
 
+    # (no program_own: the program's own To is 4 times EACH shape's gate, a saved To is a fixed amount for every
+    # shape, so even an untouched save is a real default; hunt)
+
     @classmethod
     def describe_default(cls, v, ppq):
         n = int(round(v["to"] * ppq))

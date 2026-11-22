@@ -644,6 +644,10 @@ class ImageWindow(DefaultPin, tk.Toplevel):
     def remember(self):
         """The window opens with these settings next time (Format / Colour by: kept at once, hunt)."""
         path = self.pic.path if self.pic else (self.app.image_last or ("",))[0]  # ("" = no picture to open)
+        self.set_last(path)
+
+    def set_last(self, path):
+        """The session's last picture + settings (the "your default" window keeps none: hunt)."""
         self.app.image_last = (path, dict(self.s))
 
     def show_gives(self):
@@ -869,7 +873,7 @@ class ImageWindow(DefaultPin, tk.Toplevel):
         self.made = (job.pic, job.s, job.editing)
         if job.size[0] * job.size[1] > THREAD_CELLS:  # (how long a cell takes on this PC, for the question)
             self.app.image_rate = job.seconds / (job.size[0] * job.size[1])
-        self.app.image_last = (job.pic.path, dict(self.s))
+        self.set_last(job.pic.path)
         self.show_swatches()
         self.show_gives()
         self.redraw()
@@ -1251,7 +1255,6 @@ def image_editor(cls):
 
         def __init__(self, app, done=None):
             self.done = done
-            self.kept_last = app.image_last
             super().__init__(app)
             self.title(tr("defaults.edit_title", name=cls.default_title()))
             for w in (self.handle, self.place_btn):
@@ -1265,6 +1268,9 @@ def image_editor(cls):
         def load(self, path, quiet=False, then=None):
             return False  # (no picture here)
 
+        def set_last(self, path):
+            """(the session's last picture + settings never touched)"""
+
         def ok(self):
             self.save_default()
             self.close()
@@ -1273,7 +1279,7 @@ def image_editor(cls):
             if self.late:
                 self.after_cancel(self.late)
             self.stop_making()
-            self.app.image_last = self.kept_last  # (the session's last picture + settings as they were)
+            self.closed = True
             setattr(self.app, self.ATTR, None)
             self.destroy()
     Editor.__name__ = cls.__name__ + "Default"

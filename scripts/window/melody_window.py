@@ -8,6 +8,7 @@ import copy
 import math
 import random
 import threading
+import types
 import tkinter as tk
 from tkinter import ttk
 
@@ -89,16 +90,27 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
 
     def default_now(self):
         self.sync()  # (the picks onto the app, as every change does)
-        app = self.app
-        out = {k: copy.deepcopy(getattr(app, "melody_" + k)) for k in PICKS if hasattr(app, "melody_" + k)}
+        p = self.picks
+        out = {k: copy.deepcopy(getattr(p, "melody_" + k)) for k in PICKS if hasattr(p, "melody_" + k)}
         for kind in ("shape", "strength", "step"):
-            out[kind + "_pts"] = graph_pts(app, kind)
+            out[kind + "_pts"] = graph_pts(self.picks, kind)
         out.setdefault("step_scale", self.step_scale())
         return clean_picks(out)
 
+    def program_own(self, mine):
+        """mine = the picks a first open with no default shows (Every step = the toolbar's Snap, as there; hunt)."""
+        snap = self.app.snap.get()
+        own = {"at": "melody", "follow": "track", "step": snap if snap_name(snap) else fmt(self.app.snap_ticks()),
+               "step_on": False, "step_to": "1/64", "shortest": "1/32", "rest": "1/4", "every": "1",
+               "shape": "burst", "strength_on": False, "pitch_on": False, "pitch_low": "30", "how": "audio",
+               "hold": fmt(HOLD), "catch": "flat", "step_scale": "exp"}
+        own.update({k + "_pts": [list(p) for p in START[k]] for k in ("shape", "strength", "step")})
+        own = clean_picks(own)
+        return dict(own, **mine) == own
+
     @classmethod
     def describe_default(cls, v, ppq):
-        at = {"melody": "melody.at_melody", "snap": "melody.at_every", "clicks": "melody.at_clicks"}
+        at ={"melody": "melody.at_melody", "snap": "melody.at_every", "clicks": "melody.at_clicks"}
         words = [tr(at[v.get("at", "melody")]).rstrip(":"), tr("melody.shape_" + v.get("shape", "burst")),
                  tr("melody.how_" + v.get("how", "audio"))]
         return ", ".join(words)
@@ -106,13 +118,15 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
     def put_mine(self):
         """The first open after a start: picks not made yet this session come from the user's default."""
         for k, v in (self.saved_default() or {}).items():
-            if not hasattr(self.app, "melody_" + k):
-                setattr(self.app, "melody_" + k, copy.deepcopy(v))
+            if not hasattr(self.picks, "melody_" + k):
+                setattr(self.picks, "melody_" + k, copy.deepcopy(v))
 
     def __init__(self, app):
         super().__init__(app)
         self.withdraw()
         self.app = app
+        if getattr(self, "picks", None) is None:  # (where the picks live: the app for the session; the "your
+            self.picks = app  # default" window keeps its own, never touching the session's: hunt)
         self.put_mine()
         self.seen = None  # what the anchors were worked out for
         self.runs = []  # melody_runs / snap_runs' answer for the area
@@ -128,7 +142,7 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         self.area = ttk.Label(box, text="")
         self.area.pack(anchor="w")
         ttk.Label(box, text=tr("melody.jump_at")).pack(anchor="w", pady=(10, 2))
-        self.at = tk.StringVar(value=getattr(app, "melody_at", "melody"))
+        self.at = tk.StringVar(value=getattr(self.picks, "melody_at", "melody"))
         self.at_melody = ttk.Radiobutton(box, text=tr("melody.at_melody"), value="melody", variable=self.at,
                                          command=self.sync)
         self.at_melody.pack(anchor="w", padx=(10, 0))
@@ -136,7 +150,7 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         row = ttk.Frame(box)
         row.pack(anchor="w", padx=(30, 0))
         ttk.Label(row, text=tr("melody.follows_word")).pack(side="left")
-        self.follow_mode = getattr(app, "melody_follow", "track")
+        self.follow_mode = getattr(self.picks, "melody_follow", "track")
         self.follow = ttk.Combobox(row, state="readonly", width=24)
         self.follow.pack(side="left", padx=(4, 0))
 
@@ -157,14 +171,14 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         self.at_snap.pack(side="left")
         snap = app.snap.get()
         start = snap if snap_name(snap) else fmt(app.snap_ticks())
-        self.step = self.length_box(row, getattr(app, "melody_step", start))
+        self.step = self.length_box(row, getattr(self.picks, "melody_step", start))
         # the step changing over the area (user 2026-10-29): a tick, the step it changes to, its graph
         row = ttk.Frame(box)
         row.pack(anchor="w", padx=(30, 0), pady=(2, 0))
-        self.step_on = tk.BooleanVar(value=getattr(app, "melody_step_on", False))
+        self.step_on = tk.BooleanVar(value=getattr(self.picks, "melody_step_on", False))
         self.step_tick = ttk.Checkbutton(row, text=tr("melody.step_to"), variable=self.step_on, command=self.sync)
         self.step_tick.pack(side="left")
-        self.step_to = self.length_box(row, getattr(app, "melody_step_to", "1/64"))
+        self.step_to = self.length_box(row, getattr(self.picks, "melody_step_to", "1/64"))
         self.step_button = ttk.Button(row, text=tr("path.graph"), command=lambda: self.open_graph("step"))
         self.step_button.pack(side="left", padx=(6, 0))
         # Jump areas (group C): each click in the pane an edge, two neighbouring edges an area (window/jump_areas.py)
@@ -176,14 +190,14 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         self.hide_next, self.hidden_for = False, None  # (no preview right after Fill: sync)
         self.snap_starts = np.zeros(0)  # the melody's note starts in beats (sorted): edges go onto them
         self.rules = []  # (label, box) of the melody's rules: greyed with Every snap step
-        self.shortest = self.length_row(box, "melody.shortest", getattr(app, "melody_shortest", "1/32"))
-        self.rest = self.length_row(box, "melody.rest", getattr(app, "melody_rest", "1/4"))
+        self.shortest = self.length_row(box, "melody.shortest", getattr(self.picks, "melody_shortest", "1/32"))
+        self.rest = self.length_row(box, "melody.rest", getattr(self.picks, "melody_rest", "1/4"))
         # only every n-th note jumps (user 2026-10-29), counted again after each rest
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(6, 0))
         lb = ttk.Label(row, text=tr("melody.every_n"))
         lb.pack(side="left")
-        self.every = tk.StringVar(value=getattr(app, "melody_every", "1"))
+        self.every = tk.StringVar(value=getattr(self.picks, "melody_every", "1"))
         e = ttk.Entry(row, textvariable=self.every, width=5)
         e.pack(side="left", padx=(6, 0))
         unit = ttk.Label(row, text=tr("melody.every_n_unit"))
@@ -196,7 +210,7 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         ttk.Label(box, text=tr("melody.between")).pack(anchor="w", pady=(10, 2))
         row = ttk.Frame(box)
         row.pack(anchor="w", padx=(10, 0))
-        self.shape = self.dropdown(row, SHAPES, "melody.shape_", getattr(app, "melody_shape", "burst"))
+        self.shape = self.dropdown(row, SHAPES, "melody.shape_", getattr(self.picks, "melody_shape", "burst"))
         self.shape.pack(side="left")
         normal = self.normal()
         self.lo = tk.StringVar(value=fmt(round(normal * 2, 2)))  # (the first box: Burst's "from", the jump's BPM)
@@ -214,7 +228,7 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         row = ttk.Frame(box)
         row.pack(anchor="w", padx=(10, 0), pady=(6, 0))
         # (a tick switches it on, user 2026-10-29; off = every jump whole, its graph kept for later)
-        self.strength_on = tk.BooleanVar(value=getattr(app, "melody_strength_on", False))
+        self.strength_on = tk.BooleanVar(value=getattr(self.picks, "melody_strength_on", False))
         ttk.Checkbutton(row, text=tr("melody.strength"), variable=self.strength_on,
                         command=self.sync).pack(side="left")
         self.strength_button = ttk.Button(row, text=tr("path.graph"), command=lambda: self.open_graph("strength"))
@@ -224,10 +238,10 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         # the melody's pitch sets each jump's size (user 2026-10-29): highest note 100 %, lowest the box's %
         row = ttk.Frame(box)
         row.pack(anchor="w", padx=(10, 0), pady=(4, 0))
-        self.pitch_on = tk.BooleanVar(value=getattr(app, "melody_pitch_on", False))
+        self.pitch_on = tk.BooleanVar(value=getattr(self.picks, "melody_pitch_on", False))
         self.pitch_tick = ttk.Checkbutton(row, text=tr("melody.pitch"), variable=self.pitch_on, command=self.sync)
         self.pitch_tick.pack(side="left")
-        self.pitch_low = tk.StringVar(value=getattr(app, "melody_pitch_low", "30"))
+        self.pitch_low = tk.StringVar(value=getattr(self.picks, "melody_pitch_low", "30"))
         self.pitch_box = ttk.Entry(row, textvariable=self.pitch_low, width=5)
         self.pitch_box.pack(side="left", padx=(6, 0))
         ttk.Label(row, text="%").pack(side="left", padx=(4, 0))
@@ -240,14 +254,14 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         Scrub(app, [(e, var, None) for e, var in zip(self.bpm_boxes, (self.lo, self.hi))], (1, 10, 0.1),
               round(MIN_BPM, 3), MAX_BPM, drag_box=True, no_undo=True)
         ttk.Label(box, text=tr("melody.keep_with")).pack(anchor="w", pady=(10, 2))
-        self.how = tk.StringVar(value=getattr(app, "melody_how", "audio"))
+        self.how = tk.StringVar(value=getattr(self.picks, "melody_how", "audio"))
         for how in HOWS:
             ttk.Radiobutton(box, text=tr("melody.how_" + how), value=how, variable=self.how,
                             command=self.sync).pack(anchor="w", padx=(10, 0))
         row = ttk.Frame(box)
         row.pack(anchor="w", padx=(30, 0), pady=(2, 0))
         self.catch_parts = [ttk.Label(row, text=tr("melody.hold"))]
-        self.hold = tk.StringVar(value=getattr(app, "melody_hold", fmt(HOLD)))
+        self.hold = tk.StringVar(value=getattr(self.picks, "melody_hold", fmt(HOLD)))
         self.catch_parts += [ttk.Entry(row, textvariable=self.hold, width=5), ttk.Label(row, text=tr("melody.hold_unit"))]
         traced(self, self.hold, lambda *_: self.sync())
         for w in self.catch_parts:
@@ -256,7 +270,7 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         row.pack(anchor="w", padx=(30, 0), pady=(2, 0))
         self.catch_parts.append(ttk.Label(row, text=tr("melody.catch_shape")))
         self.catch_parts[-1].pack(side="left")
-        self.catch_shape = self.dropdown(row, CATCH_SHAPES, "tempo.shape_", getattr(app, "melody_catch", "flat"))
+        self.catch_shape = self.dropdown(row, CATCH_SHAPES, "tempo.shape_", getattr(self.picks, "melody_catch", "flat"))
         self.catch_shape.pack(side="left", padx=(4, 0))
         self.catch_parts.append(self.catch_shape)
         self.hint =ttk.Label(box, text="", wraplength=int(340 * app.scale), justify="left")
@@ -374,12 +388,12 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         hold, catch-up shape, the graphs, Strength's tick, the pane's BPM snap (Random's picks: hunt 2026-10-29)."""
         app = self.app
         return (self.shape.get(), self.lo.get(), self.hi.get(), self.how.get(), self.hold.get(),
-                self.catch_shape.get(), str(graph_pts(app, "shape")), str(graph_pts(app, "strength")),
+                self.catch_shape.get(), str(graph_pts(self.picks, "shape")), str(graph_pts(self.picks, "strength")),
                 self.strength_on.get(), app.tempo_pane.box.bpm_snap())
 
     def step_scale(self):
         """The step graph's Linear / Exponential ("lin" / "exp"), picked in its window."""
-        return getattr(self.app, "melody_step_scale", "exp")
+        return getattr(self.picks, "melody_step_scale", "exp")
 
     def step_range(self):
         """(Every's ticks, "to" ticks) while the step changes over the area and both can be read, else None."""
@@ -582,10 +596,11 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
             return
         app, pane = self.app, self.app.tempo_pane
         at = self.at.get()
-        app.melody_at = at
-        app.melody_shortest, app.melody_rest, app.melody_step = self.shortest.get(), self.rest.get(), self.step.get()
-        app.melody_step_on, app.melody_step_to = self.step_on.get(), self.step_to.get()
-        stepping = (self.step_on.get(), self.step_to.get(), str(graph_pts(app, "step")), self.step_scale())
+        p = self.picks
+        p.melody_at = at
+        p.melody_shortest, p.melody_rest, p.melody_step = self.shortest.get(), self.rest.get(), self.step.get()
+        p.melody_step_on, p.melody_step_to = self.step_on.get(), self.step_to.get()
+        stepping = (self.step_on.get(), self.step_to.get(), str(graph_pts(self.picks, "step")), self.step_scale())
         clicks = at == "clicks"
         chain = self.live_chain()
         if clicks:  # (the area = the clicked edges' first .. last)
@@ -604,18 +619,18 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         only = self.only_sel.get()
         has_sel = any(i < len(app.shapes) for i in app.sels) or bool(app.roll.kept_box())
         top = self.follow_mode == "top"
-        app.melody_follow, app.melody_every = self.follow_mode, self.every.get()
-        app.melody_pitch_on, app.melody_pitch_low = self.pitch_on.get(), self.pitch_low.get()
+        p.melody_follow, p.melody_every = self.follow_mode, self.every.get()
+        p.melody_pitch_on, p.melody_pitch_low = self.pitch_on.get(), self.pitch_low.get()
         melody_ok = track is not None or top  # (Top note: every track's notes, also with All tracks)
         if clicks and melody_ok:  # (edges go onto the melody's starts: read round the view, near_view)
             lkey = self.loaded_key(*self.near_view(), only, top)
         else:
             lkey = self.loaded_key(area[0], area[1], only, top) if area and melody_ok and at == "melody" else None
         how = self.how.get()
-        app.melody_shape, app.melody_how, app.melody_hold = self.shape.value(), how, self.hold.get()
-        app.melody_catch = self.catch_shape.value()
+        p.melody_shape, p.melody_how, p.melody_hold = self.shape.value(), how, self.hold.get()
+        p.melody_catch = self.catch_shape.value()
         made = self.made_key()
-        app.melody_strength_on = self.strength_on.get()
+        p.melody_strength_on = self.strength_on.get()
         seen = (box, area, track, ch, at, only, has_sel, step, stepping, self.shortest.get(), self.rest.get(),
                 tuple(sorted(app.sels)), id(app.drawn), app.ppq, lkey, self.reading and self.reading["finished"],
                 None if clicks else getattr(app, "tempo_count", 0), self.preview_seed, made,
@@ -655,7 +670,7 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
                 w.pack_forget()
             for w in want:
                 w.pack(side="left", padx=(4, 0))
-        strength = graph_pts(app, "strength")
+        strength = graph_pts(self.picks, "strength")
         hs = [p[1] for p in strength]
         on = self.strength_on.get()
         self.strength_button.state(["!disabled"] if on else ["disabled"])
@@ -700,10 +715,10 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
             if not step or self.step_on.get() and self.step_range() is None:
                 problem = tr("melody.bad_step")
             elif self.step_on.get():  # (the step changing over the area: its graph, user 2026-10-29)
-                key = (self.step_range(), str(graph_pts(app, "step")), self.step_scale(), area, app.ppq)
+                key = (self.step_range(), str(graph_pts(self.picks, "step")), self.step_scale(), area, app.ppq)
                 got = getattr(self, "_step_runs", None)  # (made again only when these change: BPM keys didn't
                 if got is None or got[0] != key:         # need it, hunt 2026-10-29)
-                    got = self._step_runs = (key, step_runs(*key[0], graph_pts(app, "step"), key[2], area[0],
+                    got = self._step_runs = (key, step_runs(*key[0], graph_pts(self.picks, "step"), key[2], area[0],
                                                             area[1], app.ppq))
                 self.runs = got[1]
             else:
@@ -874,8 +889,8 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
             return fill_clip(runs, a, b, self.shape.value(), lo, hi, normal, how,
                              self.number(self.hold) or HOLD, self.catch_shape.value(), random.Random(seed),
                              bpm_snap, plain, heard if how == "audio" else None,
-                             graph_pts(app, "shape"), strength, sizes)
-        strength = graph_pts(app, "strength")
+                             graph_pts(self.picks, "shape"), strength, sizes)
+        strength = graph_pts(self.picks, "strength")
         strength = None if not self.strength_on.get() or all(p[1] == 1.0 for p in strength) else strength  # (off /
         # 100 % all along: every jump whole)
         plain = set()
@@ -1026,18 +1041,15 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
 
 def melody_editor(cls):
     """Fill with tempo jumps changing the user's DEFAULT only (Settings → User set defaults; like
-    default_pin.default_editor): it shows the saved default (else the program's own), its picks this session are put
-    back when it closes, Fill becomes OK (saves), Close changes nothing."""
+    default_pin.default_editor): it shows the saved default (else the program's own) in picks of its own (the
+    session's are never touched), Fill becomes OK (saves), Close changes nothing."""
     class Editor(cls):
         ATTR = cls.ATTR + "_defaults"
         editing_default = True
 
         def __init__(self, app, done=None):
             self.done = done
-            self.kept = {k: copy.deepcopy(getattr(app, "melody_" + k)) for k in PICKS if hasattr(app, "melody_" + k)}
-            for k in PICKS:  # (the window shows the default, not this session's picks)
-                if hasattr(app, "melody_" + k):
-                    delattr(app, "melody_" + k)
+            self.picks = types.SimpleNamespace()  # (its own picks: the default, never this session's; hunt)
             super().__init__(app)
             self.title(tr("defaults.edit_title", name=cls.default_title()))
             self.go.config(text=tr("range_window.ok"), command=self.ok)
@@ -1058,12 +1070,8 @@ def melody_editor(cls):
             self.close()
 
         def close(self):
+            self.closed = True
             super().close()
-            for k in PICKS:  # (this session's picks back as they were)
-                if hasattr(self.app, "melody_" + k):
-                    delattr(self.app, "melody_" + k)
-            for k, v in self.kept.items():
-                setattr(self.app, "melody_" + k, v)
     Editor.__name__ = cls.__name__ + "Default"
     return Editor
 

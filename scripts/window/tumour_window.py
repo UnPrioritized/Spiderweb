@@ -139,6 +139,14 @@ class TumourWindow(DefaultPin, tk.Toplevel):
         return dict(TUMOUR_DEFAULTS, **(self.saved_default() or {}))
 
     @classmethod
+    def program_default(cls):
+        return {k: v for k, v in TUMOUR_DEFAULTS.items() if k not in MINE_LEFT_OUT}
+
+    def default_moved(self):
+        """(the boxes of lines without tumours show the new default at once: hunt)"""
+        self.sync()
+
+    @classmethod
     def clean_saved(cls, v):
         tm = clean_tumour(v)
         return None if tm is None else {k: x for k, x in tm.items() if k not in MINE_LEFT_OUT}

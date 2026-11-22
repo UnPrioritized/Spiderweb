@@ -47,6 +47,7 @@ class PathWindow(ToolWindow):
     # ("use as default": never the points placed on the piano roll, the zoom they were placed at or the group box;
     # user 2026-11-23)
     LEFT_OUT = ("pts", "mids", "k", "grp")
+    TEST_PAGES = ({"pts": [[1.0, 1.0]]},)  # (a page with a path: tool_window.checked)
 
     @classmethod
     def describe_default(cls, v, ppq):

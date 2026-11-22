@@ -44,6 +44,7 @@ class JumpGraph(tk.Toplevel):
         app = win.app
         super().__init__(win)
         self.win, self.app, self.kind = win, app, kind
+        self.picks = getattr(win, "picks", app)  # (where the window keeps its picks)
         self.title(tr("jump_graph.title_" + kind))
         self.transient(win)
         self.resizable(False, False)
@@ -52,7 +53,7 @@ class JumpGraph(tk.Toplevel):
         self.ml, self.mb = chart_edges(s, ("60,000,000",), 46, 22)
         self.mr, self.mt = int(12 * s), int(10 * s)
         self.point_labels = (tr("jump_graph.across_" + kind), tr("jump_graph.height"))  # (PointDialog's two boxes)
-        self.pts = graph_pts(app, kind)
+        self.pts = graph_pts(self.picks, kind)
         self.session = [list(p) for p in self.pts]  # (Cancel: back to these)
         self.drag = None  # ("pt" / "bend", i)
         self.hover = None
@@ -115,12 +116,12 @@ class JumpGraph(tk.Toplevel):
 
     def store(self):
         """The points to the Fill window (a chain being made is laid again with them)."""
-        setattr(self.app, "melody_%s_pts" % self.kind, [list(p) for p in self.pts])
+        setattr(self.picks, "melody_%s_pts" % self.kind, [list(p) for p in self.pts])
         self.win.seen = None
         self.win.sync()
 
     def pick_scale(self):
-        self.app.melody_step_scale = SCALES[self.scale_box.current()]
+        self.picks.melody_step_scale = SCALES[self.scale_box.current()]
         self.win.seen = None
         self.win.sync()
         self.draw()

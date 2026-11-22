@@ -25,6 +25,7 @@ TENSION_STEPS = (1, 10, 0.1)
 
 class StrumWindow(ToolWindow):
     KEY, ATTR, POS, DEFAULTS = "strum", "strum_window", "strum_pos", STRUM_DEFAULTS
+    TEST_PAGES = ({"time": 1.0, "end_time": 1.0},)  # (pages that strum: tool_window.checked)
 
     def clean(self, cfg):
         return clean_strum(cfg)
