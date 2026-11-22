@@ -6,6 +6,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from notes.fonts import font_families
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.widgets import ListTip, remember_place, traced
 
@@ -58,7 +59,7 @@ class FontDialog(tk.Toplevel):
         self.bind("<Return>", lambda e: self.pick())
         self.bind("<Escape>", lambda e: self.destroy())
         self.listbox.bind("<<ListboxSelect>>", lambda e: self.show_preview())
-        self.listbox.bind("<Double-Button-1>", lambda e: self.pick())
+        bind_double(self.listbox, lambda e: self.pick())
         self.filter(select=current)
         self.entry.focus_set()
         self.entry.select_range(0, "end")

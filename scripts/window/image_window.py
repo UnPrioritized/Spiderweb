@@ -17,6 +17,7 @@ from files import speed
 from files.lang import tr, trn
 from files.speed import Photo
 from notes import picture as P
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.default_pin import DefaultPin
 from window.widgets import Tooltip, fit_screen, name_list, placed, set_least, set_names, unit_word, wrap_to_room
@@ -530,7 +531,7 @@ class ImageWindow(DefaultPin, tk.Toplevel):
         scale.pack(side="left", padx=3)
         scale.bind("<ButtonPress-1>", press)
         scale.bind("<ButtonRelease-1>", release, add="+")
-        scale.bind("<Double-Button-1>", reset)
+        bind_double(scale, reset, press)
         self.scales[key] = scale
         if ends:
             ttk.Label(r, text=ends[1], foreground=look.HINT).pack(side="left")

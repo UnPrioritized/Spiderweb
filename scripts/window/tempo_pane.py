@@ -46,6 +46,7 @@ from roll.zoombar import add_zoom_bars
 from roll.roll_shared import (ALT, BOX_STILL, CTRL, PENCIL_CURSOR, SELECT_CURSOR, SHIFT, bind_double_right, draw_boxes,
                               grab_while_panning,
                               recheck_pointer, set_cursor)
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.notes_wait import stale_ok
 from window.canvas_keep import KeepsItems
@@ -791,7 +792,7 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
         self.bind("<ButtonPress-1>", self.on_press)
         self.bind("<B1-Motion>", self.on_drag)
         self.bind("<ButtonRelease-1>", self.on_release)
-        self.bind("<Double-Button-1>", self.on_double)
+        bind_double(self, self.on_double, self.on_press)
         self.bind("<Motion>", self.on_motion)
         self.bind("<Leave>", lambda e: (self.rebar_hover(None), self.drag or self.placing or self.box.pick_tool_hint()))
         bind_double_right(self, self.on_right, self.on_double_right)

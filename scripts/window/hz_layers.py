@@ -14,6 +14,7 @@ from files.system import double_click_ms
 from notes.hzbass import (LAYER_NAME, LAYERS, NOT_SOUND, SOUND, all_tones, clean_tones, fit_length, layers_of, left_edge,
                           next_id, with_layers)
 from roll.roll_shared import SLOT_COLORS
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.canvas_keep import KeptItems
 from window.hz_gates import hz_keys, hz_made
@@ -71,7 +72,7 @@ class LayerStrip:
         c.bind("<ButtonPress-1>", self.on_press)
         c.bind("<B1-Motion>", self.on_drag)
         c.bind("<ButtonRelease-1>", self.on_release)
-        c.bind("<Double-Button-1>", self.on_double)
+        bind_double(c, self.on_double, self.on_press)
         c.bind("<ButtonPress-3>", self.on_menu)
         c.bind("<Delete>", lambda e: (self.drop_held(), self.remove(self.picked())))  # (a row held: let go first)
         c.bind("<Escape>", lambda e: self.drop_held())

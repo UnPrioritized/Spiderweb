@@ -16,6 +16,7 @@ import numpy as np
 from files.lang import tr
 from files.mathexpr import fmt
 from notes.melody import GRAPH_POINTS, graph_at
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.speed_graph import BEND_SNAP, FLAT, SNAP, PointDialog
 from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, menu_click, popup_menu, Tooltip, chart_edges, remember_place
@@ -94,7 +95,7 @@ class JumpGraph(tk.Toplevel):
         cv.bind("<ButtonPress-1>", self.press)
         cv.bind("<B1-Motion>", self.motion)
         cv.bind("<ButtonRelease-1>", self.release)
-        cv.bind("<Double-Button-1>", self.double)
+        bind_double(cv, self.double, self.press)
         cv.bind("<ButtonPress-3>", self.menu)
         cv.bind("<Motion>", self.on_hover)
         cv.bind("<Leave>", lambda e: self.on_hover(None))

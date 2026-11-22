@@ -26,6 +26,7 @@ from files.clipboard import get_text, put_text
 from files.share import LONG_LINE, ShareError, drawing_line, made_by, read_drawing, unpack
 from files.system import double_click_ms
 from roll.roll_shared import bind_double_right, grab_while_panning
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.help import open_help
 from window.canvas_keep import KeptItems
@@ -191,8 +192,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
         sb.pack(side="left", fill="y")
         lb = self.listbox
         ListTip(lb)
-        lb.bind("<Double-Button-1>", lambda e: (self.stop_slow_click(), self.open_selected()))
         lb.bind("<ButtonPress-1>", self.list_press)
+        bind_double(lb, lambda e: (self.stop_slow_click(), self.open_selected()), self.list_press)
         # Keys while the list has the keyboard work on the list (the drawing's own keys: click the board). Blue =
         # the list has the keyboard, grey = the board has it (user, like Windows' file lists).
         lb.bind("<Delete>", lambda e: (self.delete_selected(), "break")[1])
@@ -264,7 +265,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
         c.bind("<ButtonPress-1>", self.on_press)
         c.bind("<B1-Motion>", self.on_drag)
         c.bind("<ButtonRelease-1>", self.on_release)
-        c.bind("<Double-Button-1>", self.on_double)
+        bind_double(c, self.on_double, self.on_press)
         c.bind("<Motion>", self.on_motion)
         c.bind("<Leave>", self.on_leave)
         bind_double_right(c, self.right_click, self.double_right)

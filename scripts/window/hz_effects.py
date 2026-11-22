@@ -45,6 +45,7 @@ from notes.hzbass import (BEND, BOOST_FX, CC_FX, ENVELOPES, FROM_MODES, FX, FX_S
                           group_count, height_times, legato_links, line_at, loop_off, loop_on, loop_shape, sound_span,
                           sustained, tones_span)
 from roll.roll_shared import BOX_STILL, CTRL, MAX_SX, MIN_SX, SELECT_CURSOR, SHIFT
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.canvas_keep import KeptItems
 from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, remember_place, traced
@@ -116,7 +117,7 @@ class FxPane:
                                     height=win.app.hz_fx_h or start_h)
         c.bind("<Configure>", lambda e: self.redraw())
         c.bind("<ButtonPress-1>", self.on_press)
-        c.bind("<Double-Button-1>", self.on_double)
+        bind_double(c, self.on_double, self.on_press)
         c.bind("<B1-Motion>", self.on_drag)
         c.bind("<ButtonRelease-1>", self.on_release)
         c.bind("<ButtonPress-3>", self.on_menu)

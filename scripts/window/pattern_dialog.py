@@ -33,6 +33,7 @@ from notes.pattern import (AROUND, LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG,
                            shape_slices, span_numbers, t_span)
 from files.clipboard import put_text
 from roll.roll_shared import ALT, grab_while_panning
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.formula_host import put_sym, sym_choices, sym_label
 from window.formula_paste import FormulaPaste
@@ -370,7 +371,7 @@ class FormulaDialog(tk.Toplevel):
         c.bind("<ButtonRelease-2>", self.middle_release)
         grab_while_panning(c)
         c.bind("<MouseWheel>", self.wheel)
-        c.bind("<Double-Button-1>", self.add_point)
+        bind_double(c, self.add_point, self.press)
         info = ttk.Frame(right)
         info.grid(row=r + 3, column=0, columnspan=2, sticky="ew", pady=(4, 0))
         self.info = ttk.Label(info, text="", font=look.font(9), wraplength=int(300 * s), justify="left")

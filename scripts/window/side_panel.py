@@ -7,6 +7,7 @@ from tkinter import font as tkfont, ttk
 
 from files import settings
 from files.lang import tr
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.widgets import Tooltip
 
@@ -77,7 +78,7 @@ class ScrollingSide:
         g.bind("<ButtonPress-1>", self.grip_press)
         g.bind("<B1-Motion>", self.grip_drag)
         g.bind("<ButtonRelease-1>", self.grip_release)
-        g.bind("<Double-Button-1>", self.grip_double)
+        bind_double(g, self.grip_double, self.grip_press)
         c = self.side_canvas = tk.Canvas(box, highlightthickness=0, bd=0, bg=bg)
         c.notes_pass = True  # (its clicks / keys don't wait for notes made in the background: notes_wait.pass_window)
         self.side_bar = ttk.Scrollbar(box, orient="vertical", command=c.yview)

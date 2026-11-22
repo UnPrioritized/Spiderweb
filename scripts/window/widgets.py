@@ -1022,6 +1022,28 @@ class Scrub:
             self.app.scrub_let_go(gesture)
 
 
+def bind_double(widget, double, single=None):
+    """Left double-clicks on widget: double(e). CLICKS PAIR UP (THE CONTROL SCHEME, user 2026-11-23): Tk counts every
+    quick click after the first as another double-click, so a double-click then one more click "double-clicked"
+    again (Sketch points vanished; bind_double_right fixed the same for right-clicks). Here only the 2nd, 4th...
+    click of a quick row is a double; the 3rd, 5th... goes to single(e) (the widget's own press handler) as a plain
+    click. Call AFTER the widget's own <ButtonPress-1> binding (a plain press is added to it, never replacing it).
+    EVERY left double-click in the program goes through here."""
+    widget._left_paired = False
+
+    def reset(e):
+        widget._left_paired = False
+
+    def twice(e):
+        widget._left_paired = not widget._left_paired
+        if widget._left_paired:
+            return double(e)
+        return single(e) if single else None
+    widget.left_twice = twice  # (tests: a quick click Tk would call a double-click)
+    widget.bind("<Double-Button-1>", twice)
+    widget.bind("<ButtonPress-1>", reset, add="+")
+
+
 MENU_CLICK_S = 0.25  # a press this soon after a right-click menu closed = the click that closed it (Windows hands it on)
 
 

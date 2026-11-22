@@ -11,6 +11,7 @@ from files import lang, settings
 from files.lang import tr, trn
 from files.playback import AHEAD, BUILTIN, KESTREL, MAESTRO, devices
 from files.system import WINDOWS, open_path, work_area
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import button_look, look, palettes
 from window.builtin_settings import BuiltinPanel
 from window.drawer import clean_name
@@ -689,7 +690,7 @@ class SettingsWindow(tk.Toplevel):
                 b.state(["!disabled"] if got else ["disabled"])
             box.after_idle(fit_list)  # (the "none yet" line came / went: the room changed)
         self.fill_defaults = fill
-        tree.bind("<Double-1>", lambda e: (self.open_default(tree.identify_row(e.y)), "break")[1])
+        bind_double(tree, lambda e: (self.open_default(tree.identify_row(e.y)), "break")[1])
         tree.bind("<Return>", lambda e: (self.open_default(tree.focus()), "break")[1])
         tree.bind("<Delete>", lambda e: self.reset_defaults())
         # (more ways to pick several, user 2026-11-23: Ctrl+A, dragging over rows; Ctrl / Shift click and Shift+Up /

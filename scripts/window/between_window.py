@@ -25,6 +25,7 @@ from notes.strips import has_strips
 from notes.subtract import subtracts
 from notes.extend import is_extended
 from notes.sustain import is_sustained
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.default_pin import DefaultPin
 from window.widgets import LocalUndo, PointGraph, Scrub, menu_click, Tooltip, chart_edges, remember_place
@@ -543,7 +544,7 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
         pad.bind("<ButtonPress-1>", self.pad_press)
         pad.bind("<B1-Motion>", self.pad_motion)
         pad.bind("<ButtonRelease-1>", self.pad_release)
-        pad.bind("<Double-Button-1>", self.pad_reset)
+        bind_double(pad, self.pad_reset, self.pad_press)
         self.pad_info = ttk.Label(parent, text="", foreground=look.HINT, font=look.font(8))
         self.pad_info.grid(row=2, column=1, sticky="nw", padx=(8, 0), pady=(2, 0))
         for w in (self.pad_title, self.pad_info):  # (not on the pad itself: it covered the stick, user)

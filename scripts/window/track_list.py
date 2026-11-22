@@ -39,6 +39,7 @@ from roll.roll_draw import TRACK_FADE
 from roll.roll_shared import (BOX_STILL, COLOURS_16, MAX_SX, MIN_SX, SELECT_CURSOR, SLOT_COLORS, PlayFollow,
                               draw_boxes as outline_boxes, grab_while_panning, recheck_pointer, slot_colours)
 from roll.tiles import see_through
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.notes_wait import stale_ok
 from window.track_windows import AddTracksBox, PropertiesBox
@@ -198,7 +199,7 @@ class TrackList(tk.Canvas):
         self.bind("<B1-Motion>", self.on_drag)
         self.bind("<ButtonRelease-1>", self.on_release)
         self.bind("<ButtonPress-3>", self.on_right)
-        self.bind("<Double-Button-1>", self.on_double)
+        bind_double(self, self.on_double, self.on_press)
         self.bind("<Escape>", self.on_escape)
         self.bind("<Motion>", self.on_motion)
         self.bind("<MouseWheel>", self.on_wheel)

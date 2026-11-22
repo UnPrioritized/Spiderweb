@@ -33,6 +33,7 @@ from notes.hz_cc import sharers
 from notes.hzbass import AUTO, FX, HZ_KINDS, all_tones, clean_line, clean_tones, has_cc, left_edge, own_channels
 from roll.roll_shared import CTRL, bind_double_right, grab_while_panning
 from roll.zoombar import add_zoom_bars
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.hz_effects import FxPane
 from window.hz_layers import LayerStrip
@@ -244,7 +245,7 @@ class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzLfo, 
         c.config(cursor="")
         c.bind("<Configure>", self.on_resize)
         c.bind("<ButtonPress-1>", self.on_press)
-        c.bind("<Double-Button-1>", self.on_double)
+        bind_double(c, self.on_double, self.on_press)
         c.bind("<B1-Motion>", self.on_drag)
         c.bind("<ButtonRelease-1>", self.on_release)
         c.bind("<ButtonPress-2>", self.pan_start)

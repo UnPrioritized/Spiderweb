@@ -33,6 +33,7 @@ from roll.roll_draw import RollDrawing
 from roll.roll_funnel import FLAT, FunnelEditing
 from roll.roll_gliss import GlissEditing
 from roll.roll_hz import HzStart
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.big_ask import BIG
 from window.hz_window import open_hz
@@ -192,7 +193,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.bind("<ButtonPress-1>", self.on_left_down)
         self.bind("<B1-Motion>", self.on_drag)
         self.bind("<ButtonRelease-1>", self.on_left_up)
-        self.bind("<Double-Button-1>", self.on_double)
+        bind_double(self, self.on_double, self.on_left_down)
         self.bind("<Motion>", self.on_motion)
         self.bind("<Leave>", self.liquify_leave, add="+")  # (Liquify's brush circle goes with the mouse)
         self.bind("<Leave>", self.warp_leave, add="+")  # (the Warp's lit twins go dark)

@@ -33,6 +33,7 @@ from notes.hz_settings import clean_trace
 from notes.hzbass import (FULL_LENGTH, HZ_DEFAULTS, START_TRACE, TRACE_POINTS, clean_extra, hz_gate,
                           key_range, length_ticks, trace_hits, trace_line)
 from roll.roll_shared import SLOT_COLORS
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.hz_gates import LENGTH_UNITS
 from window.hz_layers import layer_colour
@@ -294,7 +295,7 @@ class TraceWindow(tk.Toplevel):
         c.bind("<ButtonPress-1>", self.on_press)
         c.bind("<B1-Motion>", self.on_drag)
         c.bind("<ButtonRelease-1>", self.on_release)
-        c.bind("<Double-Button-1>", self.on_double)
+        bind_double(c, self.on_double, self.on_press)
         c.bind("<ButtonPress-3>", self.on_right)
         c.bind("<Motion>", self.on_motion)
         c.bind("<Escape>", lambda e: self.cancel_drag())

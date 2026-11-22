@@ -24,6 +24,7 @@ from notes.areas import ALL_COLOURS, most_colours
 from notes.even_steps import snapped_shape
 from notes.custom import (ROUND, CENTRE_KEYS, CUSTOM_DEFAULTS, even_on, capped_colours, custom_note_count, has_pattern, set_key_top,
                           tracks_apart)
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import big_ask, look, notes_wait
 from window.help import Tips, open_help
 from window.updates import Updates
@@ -1302,7 +1303,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         ListTip(self.listbox)
         # hand the keys back to the roll, so Space plays instead of picking a list row
         self.listbox.bind("<ButtonRelease-1>", lambda e: self.roll.focus_set(), add="+")
-        self.listbox.bind("<Double-Button-1>", self.on_list_double)
+        bind_double(self.listbox, self.on_list_double)
         btns = ttk.Frame(box)
         btns.pack(fill="x", pady=(4, 0))
         ttk.Button(btns, text=tr("app.duplicate"), command=self.duplicate).pack(side="left")

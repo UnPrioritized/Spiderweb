@@ -11,6 +11,7 @@ from tkinter import ttk
 
 from files.lang import tr
 from files.system import ALT
+from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 
 SHIFT, CTRL = 0x1, 0x4
@@ -243,7 +244,7 @@ class DrawerLayers:
         t.bind("<ButtonPress-1>", self.layer_press)
         t.bind("<B1-Motion>", self.layer_drag)
         t.bind("<ButtonRelease-1>", self.layer_release)
-        t.bind("<Double-Button-1>", self.layer_double)
+        bind_double(t, self.layer_double, self.layer_press)
         t.bind("<ButtonPress-3>", self.layer_right_click)
         t.bind("<<TreeviewSelect>>", lambda e: self.layer_picked())
         t.bind("<F2>", lambda e: (self.rename_layer(), "break")[1])
