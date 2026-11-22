@@ -32,7 +32,7 @@ CURVE_PX = 40  # px: Alt+dragging a piece this far up / down = a full curve
 PAD = 10  # px round an editor's drawing area
 WAVE_SNAP = (1 / 16, 1 / 8)  # a wave point snaps to these steps (x, y); Shift = free, like the whole Hz window
 LINE_SNAP = (1 / 16, 0.05)  # ... a depth / speed line's point (user 2026-11-13: not the plugin's Shift = snap)
-PHASE_STEPS = {"plain": 1 / 8, "shift": 1 / 64, "ctrl": 1 / 4}  # the phase ◀ ▶ buttons (the plugin's)
+PHASE_STEPS = {"plain": 1 / 8, "shift": 1 / 4, "ctrl": 1 / 64}  # the phase ◀ ▶ buttons (THE CONTROL SCHEME, user 2026-11-23: Shift big, Ctrl small; was the plugin's other way)
 LOCKS = ("none", "start", "end", "both")  # the speed lock's choices (hz_settings.SPEED_LOCKS + none)
 DEPTH_MOST = 48.0  # keys: the Depth box's top (the plugin's); a deeper wobble made on the piano roll is shown as it is
 NEW_DEPTH = 1.0  # keys: a new wobble's depth

@@ -83,7 +83,7 @@
  "hz.lfo_lock_both": "Both ends",
  "hz.lfo_lock_tip": "Which end keeps its speed when the speed changes (the rest of the line tilts)",
  "hz.lfo_phase": "Phase:",
- "hz.lfo_phase_tip": "Move the wave along by 1/8 of a wave (Shift: 1/64, Ctrl: 1/4)",
+ "hz.lfo_phase_tip": "Move the wave along by 1/8 of a wave (Shift: 1/4, Ctrl: 1/64)",
  "hz.lfo_phase_now": "moved on {pct} % of a wave",
  "hz.lfo_phase_none": "starts at its usual place",
  "hz.lfo_apply": "Apply",

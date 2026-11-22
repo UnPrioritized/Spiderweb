@@ -51,7 +51,7 @@ Fast wobbles can only be heard as fast as the Hz bass repeats: low notes can't f
 
 Right-click a note → LFO… (or the orange line's menu, or Ctrl+L) opens a window to design a wobble with everything in one place. It works on the piece or wobble you picked in Sketch, otherwise on the whole note, and on the other selected notes too (with Same cycles / Same speed). Every change shows on the notes at once.
 
-In it: the shape buttons and Upside down; a wave editor showing one wave, where you can draw your own (click to add a point, drag it, right-click it to delete it from its menu, Alt+drag to curve; points snap, Shift = free); Depth (keys each way) and Cycles (waves over the stretch); the depth line with the five presets; the speed line with Lock and Even speed; and Phase ◀ ▶ (an eighth; Shift = 1/64, Ctrl = a quarter).
+In it: the shape buttons and Upside down; a wave editor showing one wave, where you can draw your own (click to add a point, drag it, right-click it to delete it from its menu, Alt+drag to curve; points snap, Shift = free); Depth (keys each way) and Cycles (waves over the stretch); the depth line with the five presets; the speed line with Lock and Even speed; and Phase ◀ ▶ (an eighth; Shift = a quarter, Ctrl = 1/64).
 [clip:hz_sketch-lfo]
 
 Save… keeps a drawn wave in your shape bank under a name; pick it again from the box next to it, or from the orange line's right-click menu, and Delete removes it from the bank. A note keeps its own copy of the wave, so projects open fine without the bank.
