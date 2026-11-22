@@ -336,7 +336,7 @@ class Companion(DominoBar, DominoSettings):
         if ctrl and ks.lower() in ("z", "y"):
             redo = ks.lower() == "y" or bool(e.state & 0x1)
             stack = app.redo_stack if redo else app.undo_stack
-            return not r.idle() or bool(stack) and id(stack[-1]) not in self.before
+            return not r.idle() or bool(stack) and id(stack[-1]) not in self.before or redo and self.nothing_to_redo()
         return not ctrl and not alt and ks.lower() in {t[2] for t in bar_tools()}
 
     def key(self, e):
@@ -1997,11 +1997,21 @@ class Companion(DominoBar, DominoSettings):
         self.linked.append(step)
         self.domino_steps[id(step)] = steps
 
+    def nothing_to_redo(self):
+        """Redo with every step made here redone already: nothing to redo ANYWHERE (Domino's redo list = ours while
+        linked; Domino changed by the user = unlinked, our steps gone): Ctrl+Y / Redo does nothing (user's log
+        2026-11-22: a held Ctrl+Y went past the end into Domino, which kept the keyboard; the next Ctrl+Z were
+        Domino's own, the waiting line stayed)."""
+        app = self.app
+        return not app.redo_stack and any(id(s) not in self.before for s in app.undo_stack)
+
     def undo_step(self, redo):
         """history.undo_roll: the next step changed Domino too (sent / taken) = undone / redone in Domino as well.
         True when done here."""
         app, d = self.app, self.overlay.domino
         stack = app.redo_stack if redo else app.undo_stack
+        if redo and self.nothing_to_redo():
+            return True
         if not stack or id(stack[-1]) in self.before:  # (nothing of ours: the project's hidden shapes never change
             # out of sight, user 2026-11-06; Domino's own Undo / Redo instead, the bar's buttons work like its keys)
             if d is not None and not self.busy and dl.alive(d) and not dl.busy(d):
