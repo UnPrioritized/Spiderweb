@@ -26,6 +26,10 @@ What's new:
 
 • Every [page:numbers|number box] can now be dragged sideways by the box itself, and its name still drags it too. Start / end pairs move together without losing their gap: drag Velocity's name or its →, Melody's BPM words, or the new ↔ between From and To in the Range and graph windows.
 
+• One way of using the mouse and keys everywhere (new Help page: [page:controls|Mouse and keys]). Right-clicking a point in a graph, the Hz bass window or Copy along a path opens a menu with Delete point instead of deleting it at once, and the first and last points of a graph stay. Double-click never deletes a point (Sketch points included). Middle-click puts the Image sliders, the Trim slider and Add between's push pad back to their default. The note tool windows' Accept button is now OK, Enter presses the main button in Paste, Paste formula, Deform and Image, and F1 opens each tool window's own Help page.
+
+• Fixed: a double-click followed by one more quick click counted as a second double-click (a Sketch point vanished); and the click that closed a graph's right-click menu added a point.
+
 • Before you update: Gate extend's box now reads a plain number as ticks. Type 50% for percent (it used to follow the Ticks / % choice). Projects open with the same notes as before.
 
 ## Version 1.7.7

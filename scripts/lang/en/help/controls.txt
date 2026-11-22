@@ -1,0 +1,31 @@
+Spiderweb answers the mouse and the keys the same way in every window, so what works in one place works in the others too. Every key one by one: [page:shortcuts|Keyboard and mouse shortcuts].
+
+## Things you grab
+
+Points, handles, knobs and sliders, in a graph, on the piano roll or in the Hz bass window:
+
+• Drag = change it.
+• Right-click = a menu. It never deletes anything by itself: Delete point is in the menu (greyed for the first and last point of a graph: they stay).
+• Double-click = straighten (a bent piece goes straight). It never deletes.
+• Middle-click = back to its default (a knob to 0, a slider to its usual value).
+• Shift while dragging = off the grid.
+
+Clicks pair up: a double-click and then one more quick click is a double-click and a click, never two double-clicks.
+
+The drawing tools' curves work like a pen tool and keep their own way: right-click an anchor of a curve, a lasso or a formula's curve to take its handles off or remove it.
+
+## Number boxes
+
+Drag a box, or the name beside it, sideways; Up / Down in the box; the mouse wheel after a click in it. Shift = big steps, Ctrl = small steps. Two boxes that are a start and an end move together from the name over both or the ↔ between them. More in [page:numbers|Number boxes].
+
+## Mouse wheel
+
+Wheel = scroll, Shift+wheel = sideways, Ctrl+Shift+wheel = zoom time, Alt+wheel = zoom keys, Ctrl+Alt+wheel = zoom both. Ctrl+wheel = the next / previous track where there are tracks (piano roll, velocity and Conductor panes), a zoom where there are none (Hz bass window). A box, dropdown or knob changes on the wheel only after you click it.
+
+## Tool windows
+
+• OK keeps what you tried and closes the window. Cancel, Esc or the window's X put everything back.
+• Windows where every change is already its own undo step (Stir, Warp, Liquify, Shares, Properties) have just Close.
+• Enter = the window's main button (OK, Use it, Apply…), except while you type in a box: there Enter takes the box's number.
+• F1 = this window's own Help page.
+• Every control shows a short help when the mouse rests on it.

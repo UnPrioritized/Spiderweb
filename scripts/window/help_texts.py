@@ -144,6 +144,7 @@ TOPIC_LIST = [
     ("drawer_slice", "Custom shape drawer"),
     ("drawer_lasso", "Custom shape drawer"),
     ("drawer_deform", "Custom shape drawer"),
+    ("controls", "Reference"),
     ("shortcuts", "Reference"),
 ]
 TOPICS = []
@@ -255,7 +256,8 @@ SEE = {
     "sharing": ["selecting", "drawer", "text"],
     "undo": ["history", "shortcuts"],
     "history": ["undo", "selecting", "shortcuts"],
-    "numbers": ["shortcuts"],
+    "numbers": ["controls", "shortcuts"],
+    "controls": ["shortcuts", "numbers"],
     "view": ["side_panel", "offrange", "playback", "shortcuts"],
     "side_panel": ["view", "drawer", "settings"],
     "offrange": ["view", "settings", "merge", "files", "domino", "playback"],
@@ -287,7 +289,7 @@ SEE = {
     "drawer_areas": ["drawer", "drawer_select", "fill", "channels"],
     "drawer_slice": ["drawer", "drawer_erase", "slice", "drawer_lasso"],
     "drawer_deform": ["drawer", "drawer_select", "stir", "drawer_areas"],
-    "shortcuts": ["selecting", "view", "numbers", "curves_pen"],
+    "shortcuts": ["controls", "selecting", "view", "numbers", "curves_pen"],
 }
 # the tip for each tool (Circle / Polygon share one)
 TOOL_TOPICS = {"select": "select", "line": "line", "poly": "poly", "free": "free", "curve": "curve", "arc": "arc",
