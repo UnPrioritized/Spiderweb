@@ -16,6 +16,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import KEEP, MOST_PUSH, MOST_TIGHT, PATTERNS, SPLIT, TIGHT, clean_recolour, palettes, wanted, \
     weights
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.default_pin import DefaultPin
 from window.edit_line import EditLine
@@ -455,6 +456,7 @@ class SharesWindow(DefaultPin, HeldKnobs, tk.Toplevel):
         self.even.pack(side="left")
         Tooltip(self.even, tr("shares.even_tip"))
         self.bind("<Escape>", lambda e: self.close())
+        help_page(self, self.app, "recolour")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.protocol("WM_DELETE_WINDOW", self.close)
         if not self.editing_default:
             self.put_mine()  # (a default saved: on at once, user 2026-11-23)

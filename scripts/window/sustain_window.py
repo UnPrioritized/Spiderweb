@@ -22,6 +22,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.sustain import (MOST_GAP, MOST_PAST, MOST_PIECES, MOST_POINTS, auto_gap, clean_sustain, is_sustained,
                            stop_share, stop_tick, carry_shares, stop_ticks, sustained, too_many_pieces)
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.default_pin import DefaultPin
 from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, traced, unit_text
@@ -177,6 +178,7 @@ class SustainWindow(DefaultPin, tk.Toplevel):
         ttk.Button(row, text=tr("range_window.ok"), command=self.ok).pack(side="left")
         ttk.Button(row, text=tr("range_window.cancel"), command=self.cancel).pack(side="left", padx=(4, 0))
         self.bind("<Escape>", lambda ev: self.cancel())
+        help_page(self, self.app, "sustain")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.bind("<Return>", lambda ev: self.ok())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.on, self.vals, self.offs, self.pasts = [], {k: [] for k in LENGTHS + ("from",)}, [], []

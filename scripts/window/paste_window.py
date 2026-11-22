@@ -9,6 +9,7 @@ from tkinter import ttk
 from files import clipboard
 from files import colour_list as CL
 from files.lang import tr, trn
+from window.widgets import enter_presses  # (THE CONTROL SCHEME)
 from window import look
 from window.widgets import remember_place
 
@@ -55,6 +56,7 @@ class PasteWindow(tk.Toplevel):
         self.use_btn = ttk.Button(r, text=tr("paste.use"), command=self.use)
         self.use_btn.pack(side="right", padx=6)
         self.bind("<Escape>", lambda e: self.destroy())
+        enter_presses(self, self.use_btn)  # (THE CONTROL SCHEME: Enter = the main button)
         remember_place(self, "paste_colours")
         self.from_clipboard()
 

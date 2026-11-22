@@ -25,6 +25,7 @@ from notes.strips import has_strips
 from notes.subtract import subtracts
 from notes.extend import is_extended
 from notes.sustain import is_sustained
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.default_pin import DefaultPin
@@ -210,6 +211,7 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
         cv.bind("<Motion>", self.on_hover)
         cv.bind("<Leave>", lambda e: self.on_hover(None))
         self.bind("<Escape>", lambda e: self.cancel())
+        help_page(self, self.app, "between")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.bind("<Return>", lambda e: self.ok())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.show()

@@ -17,6 +17,7 @@ from files import speed
 from files.lang import tr, trn
 from files.speed import Photo
 from notes import picture as P
+from window.widgets import enter_presses  # (THE CONTROL SCHEME)
 from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.default_pin import DefaultPin
@@ -225,6 +226,7 @@ class ImageWindow(DefaultPin, tk.Toplevel):
         self.bind("<KeyRelease-space>", lambda e: (self.hold(False), "break")[1])
         self.bind("<F1>", lambda e: (app.open_help("picture"), "break")[1])
         self.bind("<Escape>", lambda e: self.cancel_making() if self.making else self.close())
+        enter_presses(self, lambda: self.apply_btn if self.apply_btn.winfo_ismapped() else self.place_btn)  # (THE CONTROL SCHEME: Enter = the main button shown)
         self.show_settings()
         if last and os.path.isfile(last[0]):
             self.load(last[0], quiet=True)

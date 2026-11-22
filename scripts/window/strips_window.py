@@ -18,6 +18,7 @@ from tkinter import ttk
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.strips import MOST_GAP, can_strip, clean_strips, has_strips, strip_sizes
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.default_pin import DefaultPin
 from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, traced, unit_text
@@ -133,6 +134,7 @@ class StripsWindow(DefaultPin, tk.Toplevel):
         ttk.Button(row, text=tr("range_window.ok"), command=self.ok).pack(side="left")
         ttk.Button(row, text=tr("range_window.cancel"), command=self.cancel).pack(side="left", padx=(4, 0))
         self.bind("<Escape>", lambda ev: self.cancel())
+        help_page(self, self.app, "strips")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.bind("<Return>", lambda ev: self.ok())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.hist = LocalUndo(self, self.state, self.put_state, main=app.last_step)

@@ -27,6 +27,7 @@ from files.mathexpr import amount, fmt
 from notes.gaterange import DIRS, STRAIGHT, few_steps, gate_steps, y_gate
 from notes.subtract import (MOST, MOST_PCT, box_of, clean_subtract, cut_marks, empty_side, end_side, is_subtracted, marked, part_subtract,
                             side_used, subtracts, ticks_of, touched, touching, with_sides)
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.default_pin import DefaultPin, defaults_changed
 from window.range_window import PRESETS
@@ -443,6 +444,7 @@ class SubtractWindow(DefaultPin, PointGraph, tk.Toplevel):
         ttk.Button(row, text=tr("range_window.ok"), command=self.ok).pack(side="left")
         ttk.Button(row, text=tr("range_window.cancel"), command=self.cancel).pack(side="left", padx=(4, 0))
         self.bind("<Escape>", lambda ev: self.cancel())
+        help_page(self, self.app, self.KEY)  # (THE CONTROL SCHEME: F1 = this window's page)
         self.bind("<Return>", lambda ev: self.ok())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.ons, self.sides = [], {side: self.side_data() for side in self.SIDES}  # (ons: "Subtract from gates" per shape)

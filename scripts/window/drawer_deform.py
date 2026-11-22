@@ -17,6 +17,7 @@ from files.mathexpr import fmt
 from notes import deform
 from notes import recolour as rc
 from notes.custom import stroke_points
+from window.widgets import enter_presses  # (THE CONTROL SCHEME)
 from window import look
 from window.drawer_mirror import mirror_fns
 from window.widgets import (LocalUndo, Scrub, Tooltip, bad, good, name_index, name_list, read_number,
@@ -205,6 +206,7 @@ class DeformWindow(tk.Toplevel):
         btns.pack(fill="x", pady=(int(8 * s), 0))
         ttk.Button(btns, text=tr("deform.cancel"), command=self.cancel).pack(side="right")
         ttk.Button(btns, text=tr("deform.apply"), command=self.apply).pack(side="right", padx=(0, int(6 * s)))
+        enter_presses(self, lambda: next((b for b in btns.winfo_children() if b.cget("text") == tr("deform.apply")), None))  # (Enter = Apply)
 
     def slider_row(self, parent, row, key):
         """Label, slider, number box. The slider covers the usual range, the box takes the whole range."""

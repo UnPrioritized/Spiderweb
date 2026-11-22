@@ -21,6 +21,7 @@ from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_ST
                             size_scale, stir_removed, stir_stack, stirs_of, without_recolour)
 from notes.shape_bend import colour_part, shape_tabs
 from roll.roll_live import STROKE_TOOLS
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window import stir_presets as sp
 from window.default_pin import DefaultPin
@@ -218,6 +219,7 @@ class StirWindow(DefaultPin, HeldKnobs, tk.Toplevel):
         self._build_flips(form)
         self._build_bottom(box)
         self.bind("<Escape>", lambda e: self.close())
+        help_page(self, self.app, "stir")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.fix_columns()
         if not self.editing_default and not any(stirs_of(clean_recolour(t.get("recolour"))) for t in self.targets()):

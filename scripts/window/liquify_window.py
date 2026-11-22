@@ -15,6 +15,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes import liquify as lq
 from notes.recolour import KEEP, STIR_EDGES, clean_recolour
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.default_pin import DefaultPin
 from window.edit_line import EditLine
@@ -258,6 +259,7 @@ class LiquifyWindow(DefaultPin, tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.close)
         # (Esc: a straight stroke's start placed goes first, like on the piano roll; then the window closes)
         self.bind("<Escape>", lambda e: self.on_escape())
+        help_page(self, self.app, "liquify")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.sync()
         remember_place(self, "liquify")
         self.deiconify()

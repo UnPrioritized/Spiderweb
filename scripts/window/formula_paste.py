@@ -16,6 +16,7 @@ from files.mathexpr import as_written, fmt, formula
 from files.mathpaste import from_latex, normalise, split_pair
 from notes.pattern import (formula_loop, formula_shape, pattern_names, polar_xy, shape_names, span_numbers,
                            clean_pattern_graphs)
+from window.widgets import enter_presses  # (THE CONTROL SCHEME)
 from window import look
 from window.widgets import long_line, remember_place
 
@@ -407,6 +408,7 @@ class FormulaPaste(tk.Toplevel):
         self.use_btn = ttk.Button(btns, text=tr("formula_paste.use"), command=self.use, state="disabled")
         self.use_btn.pack(side="right", padx=4)
         self.bind("<Escape>", lambda e: self.close())
+        enter_presses(self, self.use_btn)  # (THE CONTROL SCHEME: Enter = the main button; a new line in the paste box)
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.read()
         remember_place(self, "formula_paste")

@@ -28,6 +28,7 @@ from notes.custom import ROUND, SPAM_FILLS, gate_ticks, pack_notes, unpack_notes
 from notes.fx import is_page, pages
 from notes.recolour import (KEEP, MODES, PAGE, clean_recolour, edited_step, new_seed, ordered, order_of as rc_order,
                             page_removed, shape_order, shape_step_removed, stirs_of, tags_of as rc_tags, turned_map)
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.edit_line import is_shape_tag, names_line, tag_name
 from window.props_text import (LIKE_KEYS, MADE_BY, channel_text, clumps_hidden, colour_removed, colours_text, fill_text,
@@ -153,6 +154,7 @@ class PropertiesWindow(tk.Toplevel):
         self.edit_line = self  # (App.sync_edit_lines calls .sync() on it)
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Escape>", lambda e: self.close())
+        help_page(self, self.app, "properties")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.bind("<MouseWheel>", self.scroll.wheel)
         self.sync()
         remember_place(self, "properties")

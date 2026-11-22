@@ -1057,6 +1057,29 @@ def popup_menu(menu, owner, e):
         owner._menu_shut = time.perf_counter()
 
 
+TYPING = {"Entry", "TEntry", "Text", "Spinbox", "TSpinbox", "TCombobox"}  # (Enter there = that box's own)
+
+
+def help_page(win, app, page):
+    """F1 in this window = its own Help page (THE CONTROL SCHEME), not the general one."""
+    app = getattr(app, "_app", app)
+    win.bind("<F1>", lambda e: (app.open_help(page), "break")[1])
+
+
+def enter_presses(win, button):
+    """Enter in this window = its main button (THE CONTROL SCHEME; button: a ttk button, or () -> the one shown now).
+    A greyed button does nothing; typing in a box keeps that box's own Enter (a new line in a text box)."""
+    def go(e):
+        w = win.focus_get()
+        if w is not None and w.winfo_class() in TYPING:
+            return None
+        b = button() if callable(button) and not isinstance(button, tk.Widget) else button
+        if b is not None and b.winfo_exists():
+            b.invoke()  # (a disabled ttk button ignores it)
+        return "break"
+    win.bind("<Return>", go)
+
+
 def delete_menu(owner, e, do, can=True):
     """Right-click a point (THE CONTROL SCHEME): a menu with Delete point (greyed when it can't go, e.g. an end), never
     deleting at once. do() runs on the pick. Returns True (the right-click is taken)."""

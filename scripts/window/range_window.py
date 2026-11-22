@@ -22,6 +22,7 @@ from notes.even_steps import range_restored, stores_snap
 from notes.funnel import funnel_gates, funnel_range
 from notes.gaterange import (DIRS, ENDS, STRAIGHT, clean_range, ends_of, exact_ok, few_steps, gate_steps, halved,
                              steps_to, with_ends, y_gate)
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import big_ask, look
 from window.default_pin import DefaultPin
 from window.panel_funnel import GATE_STEPS
@@ -240,6 +241,7 @@ class RangeGraph(DefaultPin, PointGraph, tk.Toplevel):
         cv.bind("<Motion>", self.on_hover)
         cv.bind("<Leave>", lambda e: self.on_hover(None))
         self.bind("<Escape>", lambda e: self.cancel())
+        help_page(self, self.app, "funnel" if self.KEY == "funnel_range" else "fill")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.bind("<Return>", lambda e: self.ok())
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         if not self.fits():  # (on at once, unless that's too many notes for the user)

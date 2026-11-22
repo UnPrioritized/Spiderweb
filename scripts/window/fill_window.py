@@ -6,6 +6,7 @@ import tkinter as tk
 from tkinter import ttk
 
 from files.lang import tr
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.widgets import centre_over, open_or_lift, remember_place
 
@@ -43,6 +44,7 @@ class FillWindow(tk.Toplevel):
         self.go.pack(side="right", padx=(0, 6))
         self.bind("<Return>", self.enter)
         self.bind("<Escape>", lambda e: self.close())
+        help_page(self, self.app, "fill_gaps")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.sync()
         centre_over(self, app)

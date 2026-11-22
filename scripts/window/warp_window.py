@@ -21,6 +21,7 @@ from files.mathexpr import calc, fmt
 from notes import warp as wp_
 from notes import warp_presets as pr
 from notes.recolour import KEEP, STIR_EDGES, clean_recolour, new_seed
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.default_pin import DefaultPin
 from window.edit_line import EditLine
@@ -308,6 +309,7 @@ class WarpWindow(DefaultPin, tk.Toplevel):
         self.edit_line = EditLine(box, app, "warp", self.hint, 200)  # (later colour steps hidden: PLAN.md stage C)
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.bind("<Escape>", lambda e: self.set_split("") if self.split_mode else self.close())
+        help_page(self, self.app, "warp")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.sync()
         remember_place(self, "warp")
         self.deiconify()

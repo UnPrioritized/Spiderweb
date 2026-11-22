@@ -11,6 +11,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.joined import shown_tumour, unify_tumours
 from notes.tumour import GRAPH_KEYS, TUMOUR_DEFAULTS, clean_graph, clean_tumour
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.default_pin import DefaultPin
 from window.graph_window import GraphSource, GraphWindow
@@ -286,6 +287,7 @@ class TumourWindow(DefaultPin, tk.Toplevel):
         self.targets = self.picked()
         self.undo = LocalUndo(self, self.state, self.put_state)
         self.bind("<Escape>", lambda e: self.cancel())
+        help_page(self, self.app, "tumours")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.bind("<Return>", lambda e: self.accept())
         self.bind("<Configure>", self.remember, add="+")
         self.protocol("WM_DELETE_WINDOW", self.cancel)

@@ -9,6 +9,7 @@ from tkinter import messagebox, ttk
 
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.widgets import Scrub, Tooltip, centre_over, remember_place, traced, unit_text
 
@@ -57,6 +58,7 @@ class LinesWindow(tk.Toplevel):
         self.go.pack(side="left")
         ttk.Button(row, text=tr("range_window.cancel"), command=self.close).pack(side="left", padx=(4, 0))
         self.bind("<Escape>", lambda e: self.close())
+        help_page(self, self.app, "lines")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.bind("<Return>", lambda e: self.ok())
         self.bind("<Control-Key>", lambda e: "break")  # (the piano roll's shortcuts wait until it's closed)
         self.protocol("WM_DELETE_WINDOW", self.close)

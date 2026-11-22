@@ -16,6 +16,7 @@ from files.mathexpr import calc, fmt
 from notes.fold import block, chunks, colour_count, fold_map, folded, free_rounds
 from notes.loaded import clean_extract, extract_groups, held_extract
 from notes.mask import is_mask
+from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.history import load_state, undo_state
 from window.join_split import by_owner, without10
@@ -169,6 +170,7 @@ class FoldWindow(tk.Toplevel):
         self.fold_button.pack(side="left")
         ttk.Button(buttons, text=tr("range_window.cancel"), command=self.cancel).pack(side="left", padx=(4, 0))
         self.bind("<Escape>", lambda e: self.cancel())
+        help_page(self, self.app, "fold")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.bind("<Return>", lambda e: self.fold())
         self.bind("<Control-Key>", lambda e: "break")  # (the piano roll's shortcuts wait until it's closed)
         self.protocol("WM_DELETE_WINDOW", self.cancel)
