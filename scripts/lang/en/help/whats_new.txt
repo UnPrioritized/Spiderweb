@@ -8,6 +8,14 @@ What's new:
 
 • Fixed: Draw on Domino flashed black and stuttered while you resized Domino's panes (dragging the event list wider, for example).
 
+• Draw on Domino: while you pick Glissando keys, the row of the key you hold gets a faint shade.
+
+• Fixed in Draw on Domino: Spiderweb's own Select box no longer shows over Domino; the drawing layer is no longer tiny before Domino's grid is found; undo no longer loses track of lines after pasting, panning or pressing keys; Ctrl+Y after the last redo no longer goes on into Domino.
+
+• Fixed: Rendered ahead went silent on songs with many tempo jumps, could fail on Merlin with long notes at very fast tempos, and on Built-in BASSMIDI cut a note short after a tiny note on the same key. Its pieces also take less memory while they're made.
+
+• Fixed: the Hz preview on Built-in BASSMIDI now follows the real tempo, and the Hz window's first held note shows the right tempo's lines.
+
 • Gate extend and Gate subtract: type the amount the way you mean it. 120 = ticks, 50% = half of each note's length, 50% + 10 = both, and math like 960*2 works. Gate subtract can use % now too. Amount in follows what you type. See [page:extend#The amount|Gate extend].
 
 • Your own defaults: the pin next to OK / Accept / Close in the tool windows (Gate extend and subtract, Sustain, Spam gate range, Tumours, Claw machine, Strum, Chop, Gate trim, Copy along a path, Shares, Stir, Warp, Liquify, Fill with tempo jumps, Channel per strip, Add between, Image to notes) saves the window's settings as what shapes start with. Settings → [page:settings#User set defaults|User set defaults] lists them, changes them and resets them, and can hide the pins.
