@@ -68,6 +68,15 @@ class OverlayRoll(PianoRoll):
     def box_scroll(self):
         self.box_timer = None  # (a Select box past the edge doesn't scroll: the view is Domino's)
 
+    # --- no Select box of Spiderweb's here: the one selection is Domino's (user 2026-11-22: one showed up on
+    # Domino now and then, cause not found; it stayed until the bar's tool was switched there and back): a Select
+    # press on empty space does nothing (pianoroll.on_press), a kept one (undo puts them back) is dropped ---
+    select_boxes = False
+
+    def kept_box(self):
+        self.box_kept = None
+        return None
+
     def on_wheel(self, e):
         if self.wheel_out:
             self.wheel_out(e)

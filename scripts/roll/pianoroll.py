@@ -1523,6 +1523,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             if part and e.state & CTRL:  # Ctrl+click: highlight just this one too (or not any more)
                 app.set_parts(app.parts ^ {part})
                 return
+            if i is None and not self.select_boxes:  # (Draw on Domino: no box of ours, nothing changes; overlay_roll)
+                return
             if i is None:  # a box that selects the shapes it touches (Ctrl: adds them to the ones selected, and
                 self.box_more = list(kept or []) if e.state & CTRL else []  # the box to the boxes kept);
                 if not e.state & CTRL:  # a click without dragging moves the play line here
@@ -2258,6 +2260,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         return False
 
     as_select = False  # (select_hit's answer for the press / hover now: tool_now() is "select" then)
+    select_boxes = True  # (False on Draw on Domino's piano roll: a Select press on empty space starts no box there)
 
     def tool_now(self):
         """The tool a press here works as: Select over the waiting shape on Domino (select_hit), else the tool picked.
