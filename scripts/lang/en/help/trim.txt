@@ -1,4 +1,4 @@
-Select one or more shapes, then right-click one: Gate trim… (also in the Tools menu). Each row of touching notes on a key is cut down to a share of its whole length. Type how much stays in the Keep box (or drag the slider), then pick which end stays. The notes change on the piano roll while you try settings. Accept keeps the change (one Ctrl+Z takes it back); X or Esc puts the notes back as they were. Reset goes back to 100 %, where it changes nothing.
+Select one or more shapes, then right-click one: Gate trim… (also in the Tools menu). Each row of touching notes on a key is cut down to a share of its whole length. Type how much stays in the Keep box (or drag the slider), then pick which end stays. The notes change on the piano roll while you try settings. OK keeps the change (one Ctrl+Z takes it back); X or Esc puts the notes back as they were. Reset goes back to 100 %, where it changes nothing.
 [clip:trim-keep]
 
 Every row is trimmed by the same share of ITS OWN length, so a long row loses more ticks than a short one. A filled circle at 25 % from the left becomes a crescent: the left edge stays, and the new right edge follows the same curve, closer in.
@@ -19,4 +19,4 @@ On a shape with [page:recolour|Recolour] ([page:stir|Stir], Shuffle, Per chord, 
 
 ## Your own default
 
-The pin left of Accept saves the page shown as what a new page starts with. Click it: Save current as default, or Forget my default. Black and leaning = none of yours saved, green and pointing down = saved. With a default saved, opening the window on a shape without this tool adds the page at once. Pages already made never change, and Reset still means "does nothing". Every saved default is listed in [page:settings#User set defaults|Settings → User set defaults], where you can change or reset it.
+The pin left of OK saves the page shown as what a new page starts with. Click it: Save current as default, or Forget my default. Black and leaning = none of yours saved, green and pointing down = saved. With a default saved, opening the window on a shape without this tool adds the page at once. Pages already made never change, and Reset still means "does nothing". Every saved default is listed in [page:settings#User set defaults|Settings → User set defaults], where you can change or reset it.
