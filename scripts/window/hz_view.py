@@ -122,14 +122,15 @@ class HzView:
         self.t0 = max(-0.25, self.t0)
 
     def on_wheel(self, e):
-        """The same as on the main piano roll (PianoRoll.on_wheel): wheel = up / down 3 keys, Shift = sideways,
-        Ctrl = zoom both ways around the mouse, Ctrl+Shift = time only, Alt = keys only. While a Quick detune is
-        pulled: one voice more / fewer (hz_note_tools.py)."""
+        """Like the main piano roll (PianoRoll.on_wheel; THE CONTROL SCHEME): wheel = up / down 3 keys, Shift =
+        sideways, Ctrl+Shift = time only, Alt = keys only, Ctrl+Alt = both; plain Ctrl (the roll's next track: no
+        tracks here) = zoom both ways around the mouse. While a Quick detune is pulled: one voice more / fewer
+        (hz_note_tools.py)."""
         up = e.delta > 0
         if self.detune_count(1 if up else -1):
             return
         f = 1.25 if up else 0.8
-        zoom_time = e.state & CTRL and not e.state & ALT
+        zoom_time = bool(e.state & CTRL)
         zoom_keys = (e.state & CTRL and not e.state & SHIFT) or e.state & ALT
         if zoom_time:
             self.zoom_x(f, e.x)
