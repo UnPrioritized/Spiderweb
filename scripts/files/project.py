@@ -707,7 +707,7 @@ class ProjectFiles:
                               "domino_256": self.domino256.get(), "copy_domino": self.copy_domino.get(),
                               "domino_remember": self.domino_remember.get(),
                               "domino_onion": self.domino_onion.get(),
-                              "copy_notes": self.copy_notes.get(),
+                              "copy_notes": self.copy_notes.get(), "default_pins": self.default_pins.get(),
                               "keep_colours": self.keep_colours.get(), "stacked_notes": self.stack_order.get(),
                               "loud_on_top": self.stack_order.get() == "loud",
                               "hidden_shade": self.hidden_shade.get(),
@@ -962,6 +962,7 @@ class ProjectFiles:
             self.domino_onion.set(win.get("domino_onion") is True)
             self.copy_domino.set(win.get("copy_domino") is True)
             self.copy_notes.set(win.get("copy_notes") is True)
+            self.default_pins.set(win.get("default_pins") is not False)
             self.keep_colours.set(win.get("keep_colours") is True)
             stack = win.get("stacked_notes")  # (none yet: the old "Louder notes on top" tick's)
             self.stack_order.set(stack if stack in STACK_MODES else "loud" if win.get("loud_on_top") is True

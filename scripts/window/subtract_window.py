@@ -28,6 +28,7 @@ from notes.gaterange import DIRS, STRAIGHT, few_steps, gate_steps, y_gate
 from notes.subtract import (MOST, MOST_PCT, box_of, clean_subtract, cut_marks, empty_side, end_side, is_subtracted, marked, part_subtract,
                             side_used, subtracts, ticks_of, touched, touching, with_sides)
 from window import look
+from window.default_pin import DefaultPin, defaults_changed
 from window.range_window import PRESETS
 from window.widgets import (LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, show_mixed, traced,
                             unit_text)
@@ -188,7 +189,7 @@ def put_own(sh, part):
             b["sub"] = mark
 
 
-class SubtractWindow(PointGraph, tk.Toplevel):
+class SubtractWindow(DefaultPin, PointGraph, tk.Toplevel):
     notes_pass = True  # (its clicks / drags don't wait for notes made in the background: notes_wait.pass_window)
     use, bys, touches, varies, owns, g, g_all = (_side_list(k) for k in SIDE_LISTS)
 
@@ -260,77 +261,35 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         """What a shape gets where it has no amount yet: 1 tick."""
         return [None, 1 / self.app.ppq]
 
-    # ---- the user's own default ("use as default" pin, user 2026-11-22/23, PLAN.md stage D: one per window by OK /
-    # Cancel; black pointing right = none saved, green pointing down = saved; saves EVERYTHING the window sets on a
-    # shape, from the first shape worked on; "Forget my default" never changes the window open)
+    # ---- the user's own default ("use as default" pin, window/default_pin.py; user 2026-11-22/23: saves EVERYTHING the
+    # window sets on a shape, from the first shape worked on)
 
-    def clean_saved(self, v):
+    @classmethod
+    def clean_saved(cls, v):
         return clean_subtract(v)
 
-    def saved_default(self):
-        """The default saved for this window, as a shape would store it (None: the program's own)."""
-        v = shape_defaults.get(self.KEY).get("settings")
-        return None if v is None else self.clean_saved(v)
+    @classmethod
+    def describe_default(cls, v, ppq):
+        return describe(cls.KEY, v, ppq)
 
-    def pin_row(self, row):
-        """The pin, left of OK."""
-        self.pin = ttk.Label(row, cursor="hand2")
-        self.pin.pack(side="left", padx=(0, 8))
-        self.pin.bind("<ButtonRelease-1>", lambda e: self.pin_menu())
-        self.pin.bind("<Destroy>", lambda e: self.drop_pin_image(), add="+")
-        self.pin_tip = Tooltip(self.pin, "")
-        self.show_pin()
+    @classmethod
+    def editor_class(cls):
+        return default_editor(cls)
 
-    def drop_pin_image(self):
-        """The pin's picture freed now (a closed window's picture stayed in Tk: window_traces_freed)."""
-        old, self.pin_image = getattr(self, "pin_image", None), None
-        if old is not None:
-            try:
-                self.tk.call("image", "delete", str(old))
-            except tk.TclError:
-                pass
+    def can_save_default(self):
+        return bool(self.idx) and any(self.ons)
 
-    def show_pin(self):
-        from window.tool_picker import pin_picture
-        saved = self.saved_default() is not None
-        new = pin_picture(self.s, look.rgb(look.PIN_ON if saved else look.PIN_OFF), 90 if saved else 135)
-        self.pin.config(image=new)
-        self.drop_pin_image()
-        self.pin_image = new
-        self.pin_tip.set_text(tr("defaults.pin_saved_tip" if saved else "defaults.pin_tip", name=self.tx("title")))
-
-    def pin_menu(self):
-        m = tk.Menu(self, tearoff=0)
-        m.add_command(label=tr("defaults.save"), command=self.save_default,
-                      state="normal" if self.idx and any(self.ons) else "disabled")
-        m.add_command(label=tr("defaults.forget"), command=self.forget_default,
-                      state="normal" if self.saved_default() is not None else "disabled")
-        m.tk_popup(self.pin.winfo_rootx(), self.pin.winfo_rooty() + self.pin.winfo_height())
-
-    def save_default(self):
+    def default_now(self):
         """The first shape's settings shown here = what shapes get from now on."""
         if not self.idx:
-            return
+            return None
         self.take_typing()
         i = next((i for i, on in enumerate(self.ons) if on), 0)
         mine = self.made_of(i)
         mine.pop("cuts", None)  # (a piece's own marks: never a default)
         if isinstance(mine.get("start"), dict):
             mine["start"] = {k: v for k, v in mine["start"].items() if k != "cuts"}
-        try:
-            shape_defaults.put(self.KEY, {"settings": mine})
-        except OSError:
-            self.app.status.config(text=tr("defaults.cant_save"))
-        self.show_pin()
-        defaults_changed(self.app)
-
-    def forget_default(self):
-        try:
-            shape_defaults.forget(self.KEY)
-        except OSError:
-            self.app.status.config(text=tr("defaults.cant_save"))
-        self.show_pin()
-        defaults_changed(self.app)
+        return mine
 
     def made_of(self, i):
         """Shape i's stored settings from the window's."""
@@ -1110,20 +1069,6 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.app.colour_edit_leave(self.KEY)  # (the steps after it worked out again)
         self.destroy()
         self.app.roll.focus_set()
-
-
-def defaults_changed(app):
-    """A default saved / forgotten: an open Settings window's User set defaults list shows it at once (user
-    2026-11-23: it waited for a page change)."""
-    w = getattr(app, "settings_window", None)
-    fill = getattr(w, "fill_defaults", None)
-    if fill is not None and w.winfo_exists():
-        fill()
-    for attr in ("extend_window", "subtract_window"):  # (their pins green / black at once, hunt: a Reset in
-        # Settings left a green pin)
-        g = getattr(app, attr, None)
-        if g is not None and not g.closed and g.winfo_exists() and hasattr(g, "pin"):
-            g.show_pin()
 
 
 def default_editor(cls):

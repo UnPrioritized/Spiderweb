@@ -602,8 +602,10 @@ class SettingsWindow(tk.Toplevel):
         # (an index saved while Settings is open: listed when the page is shown again, hunt 2026-11-07)
         self.tabs.on_show[str(self.pages["loaded"])] = fill
 
-    # windows with a "use as default" pin: the defaults file's section -> the window (files/shape_defaults.py)
-    DEFAULT_WINDOWS = ("extend", "subtract")
+    # windows with a "use as default" pin: the defaults file's sections (window/default_pin.WINDOWS)
+    from window.default_pin import WINDOWS as _PINNED
+    DEFAULT_WINDOWS = tuple(_PINNED)
+    del _PINNED
 
     def build_defaults(self, f):
         """User set defaults (user 2026-11-23, PLAN.md stage D2): every tool window whose saved default differs from
@@ -612,9 +614,12 @@ class SettingsWindow(tk.Toplevel):
         default; only the row under the mouse / the focused row, and only ONE such window at a time (user: Ctrl+A +
         Enter could open many): another one while it's open brings it to the front."""
         from files import shape_defaults
-        from window.subtract_window import describe
+        from window import default_pin
         Tooltip(f.head(tr("defaults.page")), tr("defaults.page_tip"))
         f.note(tr("defaults.page_note"), tip=tr("defaults.page_tip"))
+        f.row(None, self.tick(f.page, "defaults.show_pins", self.app.default_pins,
+                              lambda: (default_pin.pins_shown(self.app), self.app.schedule_autosave())),
+              tip=tr("defaults.show_pins_tip"))
         empty = self.defaults_empty = f.note(tr("defaults.none"), colour=look.HINT)
         box = ttk.Frame(f.page)
         box.grid(row=f.r, column=0, columnspan=2, sticky="ew", pady=3)
@@ -668,10 +673,12 @@ class SettingsWindow(tk.Toplevel):
             for sec in shape_defaults.sections():
                 if sec not in self.DEFAULT_WINDOWS:
                     continue
-                saved = self.clean_default(sec)
+                saved = default_pin.saved(sec)
                 if saved is None:
                     continue
-                tree.insert("", "end", iid=sec, values=(tr(f"{sec}.title"), describe(sec, saved, self.app.ppq)))
+                cls = default_pin.window_class(sec)
+                tree.insert("", "end", iid=sec, values=(cls.default_title(),
+                                                        cls.describe_default(saved, self.app.ppq)))
             tree.selection_set([i for i in picked if tree.exists(i)])
             got = bool(tree.get_children())
             if got:
@@ -714,22 +721,9 @@ class SettingsWindow(tk.Toplevel):
         fill()
         self.tabs.on_show[str(self.pages["defaults"])] = fill  # (a default saved with a pin meanwhile: listed)
 
-    def clean_default(self, sec):
-        """The section's saved default made valid, or None."""
-        from files import shape_defaults
-        v = shape_defaults.get(sec).get("settings")
-        if v is None:
-            return None
-        if sec == "extend":
-            from notes.extend import clean_extend
-            return clean_extend(v)
-        from notes.subtract import clean_subtract
-        return clean_subtract(v)
-
     def default_window_class(self, sec):
-        from window.extend_window import ExtendWindow
-        from window.subtract_window import SubtractWindow, default_editor
-        return default_editor({"extend": ExtendWindow, "subtract": SubtractWindow}[sec])
+        from window.default_pin import window_class
+        return window_class(sec).editor_class()
 
     def open_default(self, sec):
         """One row's window, changing its default (never more than one open: the open one comes to the front)."""
@@ -749,7 +743,12 @@ class SettingsWindow(tk.Toplevel):
         picked = [i for i in self.defaults_tree.selection() if i in self.DEFAULT_WINDOWS]
         if not picked:
             return
-        shown = [tr(f"{sec}.title") for sec in picked[:RESET_NAMED]]  # (8 names at most + "and N more": the
+        from window.default_pin import window_class
+
+        def name(sec):
+            cls = window_class(sec)
+            return cls.default_title() if cls else tr(f"{sec}.title")
+        shown = [name(sec) for sec in picked[:RESET_NAMED]]  # (8 names at most + "and N more": the
         # question stays short however many windows get a pin, hunt)
         if len(picked) > RESET_NAMED:
             shown.append(trn("defaults.and_more", len(picked) - RESET_NAMED, n=len(picked) - RESET_NAMED))
@@ -764,8 +763,8 @@ class SettingsWindow(tk.Toplevel):
                 self.app.status.config(text=tr("defaults.cant_save"))
             if w is not None and w.winfo_exists() and not w.closed and w.KEY == sec:
                 w.cancel()  # (its window would save the old one back on OK)
-        from window.subtract_window import defaults_changed
-        defaults_changed(self.app)  # (the list + an open Gate window's pin, hunt)
+        from window.default_pin import defaults_changed
+        defaults_changed(self.app)  # (the list + every open window's pin, hunt)
 
     def build_copying(self, f):
         """Copying: what Ctrl+C puts on the clipboard besides Spiderweb's own copy (App.put_clipboard)."""

@@ -329,6 +329,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.domino_onion = tk.BooleanVar(self, value=False)
         self.copy_domino = tk.BooleanVar(self, value=False)  # Settings → General: Ctrl+C also copies for Domino
         self.copy_notes = tk.BooleanVar(self, value=False)  # ... and as Spiderweb Notes (files/notes_clip.py)
+        self.default_pins = tk.BooleanVar(self, value=True)  # Settings → User set defaults: show the pins (default_pin)
         self.keep_colours = tk.BooleanVar(self, value=False)  # Settings → General: overlapping shapes move whole to
         # the next row of channels (render keep)
         # Settings → Look "Stacked notes": which of the notes on top of each other shows (roll_draw.stack_rule; a
@@ -1742,7 +1743,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if w:
                 w.ppq_changed()  # (numbers shown in ticks; Settings' "your default" windows too, hunt)
         if (self.ppq, self.keys) != before:  # (Settings → User set defaults: its tick numbers follow the PPQ)
-            from window.subtract_window import defaults_changed
+            from window.default_pin import defaults_changed
             defaults_changed(self)
         if self.image_window and (self.ppq, self.keys) != before:
             self.image_window.show_settings()  # (its Keys inside the new key range; One step in the new ticks)

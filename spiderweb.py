@@ -99,6 +99,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     range_window.py  the spam gate Range's graph window
     sustain_window.py  the Sustain window (on / off, the gap held over: Auto or typed)
     subtract_window.py the Gate subtract window (on / off, ticks, only notes that touch)
+    default_pin.py   the "use as default" pin every tool window shares + the list of those windows
     strips_window.py the Channel per strip window (on / off, notes between, the count, strip colours)
     merge_window.py  the Gate sensitive merge window (which way, keep two shapes)
     fill_window.py   the Fill gaps window (stretch left / right / meet in the middle, same-start notes)

@@ -109,7 +109,8 @@ class ExtendWindow(SubtractWindow):
             side["same"] = True
         return side
 
-    def clean_saved(self, v):
+    @classmethod
+    def clean_saved(cls, v):
         return clean_extend(v)
 
     def load(self, start):
