@@ -85,3 +85,7 @@ Slicing a drawn shape keeps each piece's colours, and the pieces keep Recolour, 
 Turn into plain notes, [page:merge|Gate sensitive merge], [page:domino|Copy to Domino] and [page:files|Export MIDI] all keep the colours you see.
 
 Some colours depend on the other notes in the shape: Stir, Warp and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes ([page:glue|Glue], Chop, Claw machine, Strum, Gate trim, Gate subtract, [page:extend|Gate extend], Sustain, [page:fill_gaps|Fill gaps]...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
+
+## Your own default
+
+In the Shares… window, the pin left of Close saves Colours, the shares and locks, and Clumps' pattern, angle and tightness. Recoloured shapes still at the program's own get them when the window opens. Click it: Save current as default, or Forget my default. Black and leaning = none of yours saved, green and pointing down = saved. The Clumps Centre point and Push are never saved. Every saved default is listed in [page:settings#User set defaults|Settings → User set defaults], where you can change or reset it.

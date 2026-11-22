@@ -10,7 +10,9 @@ What's new:
 
 • Gate extend and Gate subtract: type the amount the way you mean it. 120 = ticks, 50% = half of each note's length, 50% + 10 = both, and math like 960*2 works. Gate subtract can use % now too. Amount in follows what you type. See [page:extend#The amount|Gate extend].
 
-• Your own defaults: the pin left of OK in Gate extend and Gate subtract saves the window's settings as what shapes start with. Settings → [page:settings#User set defaults|User set defaults] lists them, changes them and resets them.
+• Your own defaults: the pin next to OK / Accept / Close in the tool windows (Gate extend and subtract, Sustain, Spam gate range, Tumours, Claw machine, Strum, Chop, Gate trim, Copy along a path, Shares, Stir, Warp, Liquify, Fill with tempo jumps, Channel per strip, Add between, Image to notes) saves the window's settings as what shapes start with. Settings → [page:settings#User set defaults|User set defaults] lists them, changes them and resets them, and can hide the pins.
+
+• Warp and Liquify no longer carry the last picks over to the next shape: every opening starts from the program's own, or from your pinned default.
 
 • The pins in the drawing tools list now point down when pinned and lean when not.
 

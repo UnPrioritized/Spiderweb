@@ -191,3 +191,7 @@ A sliced piece of a stirred shape shows the colours it had in the whole, also af
 Some colours depend on the other notes in the shape: Stir, [page:warp|Warp] and [page:liquify|Liquify] take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes ([page:glue|Glue], [page:chop|Chop], [page:claw|Claw machine], [page:strum|Strum], [page:trim|Gate trim], [page:subtract|Gate subtract], [page:extend|Gate extend], [page:sustain|Sustain], [page:fill_gaps|Fill gaps]...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
 
 Bends can never be perfectly smooth: MIDI notes sit on whole keys and whole ticks. See [page:deform#How exact a bend can be|Deform: Colours or Shape].
+
+## Your own default
+
+The pin left of Close saves the tab shown as your own default. Click it: Save current as default, or Forget my default. Black and leaning = none of yours saved, green and pointing down = saved. With a default saved, opening the window on shapes without a Stir gives them a first tab from it, and + adds a new tab from it at once. The Centre point, the area spot and a drawn area are never saved. Reset still means no stir. Every saved default is listed in [page:settings#User set defaults|Settings → User set defaults], where you can change or reset it.

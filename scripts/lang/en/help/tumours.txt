@@ -45,3 +45,7 @@ Lead in: the bumps grow from nothing over that many ticks from each end, so the 
 Range: only part of the line gets bumps. Fit: a whole number of bumps fits exactly (seamless on a full circle).
 
 The zoom matters: bumps are shaped as they look on screen when you change a tumour setting (a circle comes out round at that zoom). Zooming afterwards stretches them like the rest of the piano roll; changing any tumour setting again reshapes them for the zoom you're at now. So zoom to how you want to see them first, then set them up.
+
+## Your own default
+
+The pin left of Accept saves the window's settings as what lines start with when they get tumours, and what Reset goes back to. Click it: Save current as default, or Forget my default. Black and leaning = none of yours saved, green and pointing down = saved. Tumours on / off and the sides Random picked are never saved. Every saved default is listed in [page:settings#User set defaults|Settings → User set defaults], where you can change or reset it.

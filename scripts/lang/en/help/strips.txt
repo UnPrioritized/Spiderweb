@@ -17,3 +17,7 @@ One colour on its own is never split, since nothing comes between its strips.
 With [page:lines|Split into pieces]: turn Channel per strip on first, then use Split into pieces. The other way round, Channel per strip takes the pieces off their new tracks and puts them back on Spiderweb's tracks; the window says so in orange.
 
 OK keeps the change (one Ctrl+Z takes it back); Cancel, Esc or X puts it back as it was. The menu item has a tick while it's on, and the [page:shapes|Shapes list] says (Ch. per strip). Sliced pieces keep it, and a strip cut in two stays on one channel.
+
+## Your own default
+
+The pin left of OK saves Other notes between and Show each strip in its own colour as what shapes start with. Click it: Save current as default, or Forget my default. Black and leaning = none of yours saved, green and pointing down = saved. Every saved default is listed in [page:settings#User set defaults|Settings → User set defaults], where you can change or reset it.

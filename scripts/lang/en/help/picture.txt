@@ -40,3 +40,7 @@ Several images in one project share one set of colours (a player has only one). 
 To change a placed image, double-click it (or right-click → Change its look…), change the settings, then press "Apply to the placed image". The same menu has Use another image…, Undo turn / skew and Back to the image's own shape.
 
 Resizing a placed image makes its notes again from the image file, so it stays sharp. If the file is gone, the image still plays as it is (stretched), and the image window offers to find the file. If the file changed since it was placed, you're asked whether to use the new version. Keep images in your project's folder: they're saved relative to it, so both can move together.
+
+## Your own default
+
+The pin left of Place at the play line saves every slider and choice as what the window starts with when no image was opened yet since Spiderweb started (after that it keeps the last image's settings, as before). Click it: Save current as default, or Forget my default. Black and leaning = none of yours saved, green and pointing down = saved. Colours picked for an image are never saved. Back to suggested still goes to the program's suggestion. Every saved default is listed in [page:settings#User set defaults|Settings → User set defaults], where you can change or reset it.

@@ -26,3 +26,7 @@ Velocities, [page:tumours|tumours] and [page:formulas|formulas] change step by s
 The [page:shapes|Shapes list] shows the group as one row; clicking it selects the whole group. Right-click a shape of the group: Edit add between… (or double-click it), Select the whole group, Unlink (make them plain shapes).
 
 Deleting the first or last shape makes the rest plain shapes. [page:join|Join], [page:turn_live|Turn into live shape], Split and [page:slice|Slice] unlink the group first. Copying the whole group makes a new group; copying a single step gives a plain shape.
+
+## Your own default
+
+The pin left of OK saves Steps, the graph, Smooth through keys and the colours' turns: a new Add between group starts from them. Click it: Save current as default, or Forget my default. Black and leaning = none of yours saved, green and pointing down = saved. Reverse (set by the two ends) and pushes are never saved. Every saved default is listed in [page:settings#User set defaults|Settings → User set defaults], where you can change or reset it.

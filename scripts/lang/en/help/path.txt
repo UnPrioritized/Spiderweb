@@ -50,3 +50,7 @@ Turn into plain shapes: every copy becomes a shape of its own notes, in the colo
 Anything done to the shape after its path (a flip, a turn, Claw machine, [page:strum|Strum], [page:sustain|Sustain]…) is already in the copies' notes. The shape itself stays as drawn, without this path. The window closes; one Ctrl+Z takes it back.
 
 Notes past the lowest or highest key, or before the song's start, are cut off.
+
+## Your own default
+
+The pin left of Accept saves the page shown as what a new path starts with. Click it: Save current as default, or Forget my default. Black and leaning = none of yours saved, green and pointing down = saved. The points you put on the piano roll are never saved. Pages already made never change. Every saved default is listed in [page:settings#User set defaults|Settings → User set defaults], where you can change or reset it.

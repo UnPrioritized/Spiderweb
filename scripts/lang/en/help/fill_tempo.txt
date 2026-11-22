@@ -94,3 +94,7 @@ Above: four clicks, three areas, each with a Burst from 240 to 120. The shape, t
 • The window keeps its settings while Spiderweb runs. Changing a box re-draws the faint line at once; drag the BPM and length boxes sideways to try values quickly.
 • When the tempo goes higher or lower than the pane shows, a small arrow at its top or bottom edge points to it; click the arrow to scroll there.
 • Judge the result by playing it in Spiderweb, not in other programs: some MIDI programs skip very short tempo changes.
+
+## Your own default
+
+The pin left of Fill saves the window's picks as what it opens with the first time after Spiderweb starts; after that it keeps your last picks until Spiderweb closes, as before. Click it: Save current as default, or Forget my default. Black and leaning = none of yours saved, green and pointing down = saved. The BPM boxes and Only the selected notes are never saved. Every saved default is listed in [page:settings#User set defaults|Settings → User set defaults], where you can change or reset it.
