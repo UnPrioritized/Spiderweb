@@ -36,7 +36,7 @@ from roll.roll_shared import SLOT_COLORS
 from window import look
 from window.hz_gates import LENGTH_UNITS
 from window.hz_layers import layer_colour
-from window.widgets import Scrub, Tooltip, long_line, name_list, no_spaces, remember_place, set_names
+from window.widgets import Scrub, Tooltip, long_line, menu_click, popup_menu, name_list, no_spaces, remember_place, set_names
 
 GRID = 16  # grid lines each way (snapped to)
 PAD = 14  # px round the drawing area (x scale)
@@ -665,8 +665,8 @@ class TraceWindow(tk.Toplevel):
 
     def on_press(self, e):
         self.canvas.focus_set()
-        if self.drag is not None or self.bar is not None:
-            return
+        if self.drag is not None or self.bar is not None or menu_click(self.canvas):  # (the click that closed the
+            return                                                                    # right-click menu: nothing)
         was = [list(p) for p in self.pts]
         i = self.grabbed(e)
         bend = i is None and self.bend_at(e)
@@ -759,33 +759,55 @@ class TraceWindow(tk.Toplevel):
         self.draw()
 
     def on_double(self, e):
-        if not self.placed:
-            self.remove(e)
+        """THE CONTROL SCHEME: double-click straightens a bent piece, never deletes (a point: nothing, user
+        2026-11-23)."""
+        if not self.placed and self.grabbed(e) is None:
+            j = self.bent_at(e)
+            if j is not None:
+                self.straighten(j)
 
     def on_right(self, e):
-        if self.drag is None and self.bar is None:
-            self.remove(e)
-
-    def remove(self, e):
-        """The point under the mouse taken away (the line keeps at least 2; the piece left there is straight), or
-        the round dot's piece made straight again."""
+        """Right-click = a menu (never deletes at once): a point -> Delete point (the ends stay), a bent piece ->
+        Straight."""
+        if self.drag is not None or self.bar is not None:
+            return
         i = self.grabbed(e)
-        if i is None:
-            j = self.bend_at(e)
-            if j is None:  # (or the bent piece itself: its dot may sit on a point, where it can't be grabbed)
-                got = self.on_line(e)
-                j = got and got[0]
-            if not j or len(self.pts[j]) < 4:
-                return
-            was, before = [list(p) for p in self.pts], self.hz.fx.state()
-            self.pts[j] = self.pts[j][:2]
+        m = tk.Menu(self.canvas, tearoff=0)
+        if i is not None:
+            m.add_command(label=tr("graph_window.delete_point"), command=lambda: self.delete_point(i),
+                          state="disabled" if i in (0, len(self.pts) - 1) else "normal")
         else:
-            if len(self.pts) <= 2:
-                return self.bell()
-            was, before = [list(p) for p in self.pts], self.hz.fx.state()
-            del self.pts[i]
-            if i < len(self.pts):  # (the point after it: its piece now comes from further back, straight)
-                self.pts[i] = self.pts[i][:2]
+            j = self.bent_at(e)
+            if j is None:
+                return
+            m.add_command(label=tr("speed_graph.straight"), command=lambda: self.straighten(j))
+        popup_menu(m, self.canvas, e)
+
+    def bent_at(self, e):
+        """The bent piece under the mouse (its round dot, or the piece itself: its dot may sit on a point, where it
+        can't be grabbed), or None."""
+        j = self.bend_at(e)
+        if j is None:
+            got = self.on_line(e)
+            j = got and got[0]
+        return j if j and len(self.pts[j]) >= 4 else None
+
+    def straighten(self, j):
+        """The piece ending at point j made straight again (one undo step)."""
+        if not 0 < j < len(self.pts) or len(self.pts[j]) < 4:
+            return
+        was, before = [list(p) for p in self.pts], self.hz.fx.state()
+        self.pts[j] = self.pts[j][:2]
+        self.save(before, was)
+        self.draw()
+
+    def delete_point(self, i):
+        """Point i taken away (the first and last stay; the piece left there is straight; one undo step)."""
+        if not 0 < i < len(self.pts) - 1:
+            return self.bell()
+        was, before = [list(p) for p in self.pts], self.hz.fx.state()
+        del self.pts[i]
+        self.pts[i] = self.pts[i][:2]  # (the point after it: its piece now comes from further back, straight)
         self.save(before, was)
         self.draw()
 

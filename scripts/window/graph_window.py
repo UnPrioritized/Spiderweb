@@ -17,7 +17,7 @@ from files.system import work_area
 from notes.tumour import GRAPH_LIMIT
 from window import look
 from window.panel_custom import GAP_COLOR
-from window.widgets import (REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, pair_grip, chart_edges, fit_screen, placed, read_number,
+from window.widgets import (REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, pair_grip, menu_click, popup_menu, chart_edges, fit_screen, placed, read_number,
                             remember_place, traced, unit_text, unit_word)
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
@@ -502,7 +502,7 @@ class GraphWindow(tk.Toplevel):
         return None if best is None else best[1]
 
     def press(self, e):
-        if not self.src.targets():
+        if not self.src.targets() or menu_click(e):  # (the click that closed the right-click menu: nothing)
             return
         i = self.point_at(e.x, e.y)
         if i is None:  # a new point here
@@ -556,15 +556,14 @@ class GraphWindow(tk.Toplevel):
         m = tk.Menu(self, tearoff=0)
         m.add_command(label=tr("graph_window.value"), command=lambda: self.open_point(i))
         m.add_command(label=tr("graph_window.delete_point"), command=lambda: self.delete_point(i),
-                      state="normal" if len(self.pts) > 2 else "disabled")
-        m.tk_popup(e.x_root, e.y_root)
+                      state="disabled" if i in (0, len(self.pts) - 1) else "normal")  # (ends stay: THE CONTROL SCHEME)
+        popup_menu(m, e.widget, e)
 
     def delete_point(self, i):
-        """An end's neighbour becomes the new end (it moves to the line's start / end)."""
-        if len(self.pts) <= 2 or not self.src.targets():
+        """A point between the ends taken away (the first and last stay)."""
+        if not 0 < i < len(self.pts) - 1 or not self.src.targets():
             return
         del self.pts[i]
-        self.pts[0][0], self.pts[-1][0] = 0.0, 1.0
         self.draw()
         self.store()
         self.mark()

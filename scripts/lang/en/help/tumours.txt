@@ -24,7 +24,7 @@ Slant (square bumps only): 0 = a square, 100 = the top narrows to a point, minus
 
 Graphs: the … button next to Size, Length, Distance, Rotation or Slant opens a graph of that number along the whole line (from its start on the left to its end on the right). 100 % = the number in the box, so the box still scales the whole graph. Drag the points (Shift = free), click to add one, or pick a preset or type a formula.
 
-Right-click a point: Value… types its exact place along the line and its value (in %, or as the number it makes), Delete point removes it (not when only two are left; deleting an end makes the next point the new end).
+Right-click a point: Value… types its exact place along the line and its value (in %, or as the number it makes), Delete point removes it (the first and last points stay).
 
 Show picks how high the graph is shown, or type your own From / to. Ctrl+Z / Ctrl+Y undo and redo the graph's changes while the window is open.
 

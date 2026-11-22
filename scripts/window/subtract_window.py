@@ -30,7 +30,7 @@ from notes.subtract import (MOST, MOST_PCT, box_of, clean_subtract, cut_marks, e
 from window import look
 from window.default_pin import DefaultPin, defaults_changed
 from window.range_window import PRESETS
-from window.widgets import (LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, show_mixed, traced,
+from window.widgets import (LocalUndo, PointGraph, Scrub, menu_click, Tooltip, chart_edges, remember_place, show_mixed, traced,
                             unit_text)
 
 GRAPH_KEYS = ("to", "graph", "dir", "rows", "join", "count")  # (a side's graph settings, shared by all)
@@ -505,7 +505,7 @@ class SubtractWindow(DefaultPin, PointGraph, tk.Toplevel):
         cv.bind("<ButtonPress-1>", self.press)
         cv.bind("<B1-Motion>", self.motion)
         cv.bind("<ButtonRelease-1>", self.release)
-        cv.bind("<ButtonPress-3>", self.delete_at)
+        cv.bind("<ButtonPress-3>", self.point_menu)
         cv.bind("<Motion>", self.on_hover)
         cv.bind("<Leave>", lambda e: self.on_hover(None))
         row = ttk.Frame(part)
@@ -927,7 +927,7 @@ class SubtractWindow(DefaultPin, PointGraph, tk.Toplevel):
     # ---- the graph's mouse (like Gate Range's)
 
     def press(self, e):
-        if not self.g:
+        if not self.g or menu_click(e):  # (the click that closed the right-click menu: nothing)
             return
         self.take_typing()
         i = self.point_at(e.x, e.y)
@@ -964,13 +964,15 @@ class SubtractWindow(DefaultPin, PointGraph, tk.Toplevel):
         self.draw()
         self.hist.mark()
 
-    def delete_at(self, e):
-        i = self.point_at(e.x, e.y)
-        if not self.g or i is None or len(self.pts) <= 2 or self.drag is not None:
+    def points_editable(self):
+        return bool(self.g)
+
+    def delete_point(self, i):
+        """Right-click menu > Delete point (the ends stay: THE CONTROL SCHEME)."""
+        if not self.g or not 0 < i < len(self.pts) - 1 or self.drag is not None:
             return
         pts = [list(p) for p in self.pts]
         del pts[i]
-        pts[0][0], pts[-1][0] = 0.0, 1.0
         self.put_graph("graph", pts)
 
     def on_hover(self, e):

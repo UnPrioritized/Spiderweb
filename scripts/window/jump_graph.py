@@ -18,7 +18,7 @@ from files.mathexpr import fmt
 from notes.melody import GRAPH_POINTS, graph_at
 from window import look
 from window.speed_graph import BEND_SNAP, FLAT, SNAP, PointDialog
-from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, chart_edges, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, menu_click, popup_menu, Tooltip, chart_edges, remember_place
 
 PRESETS = {"shape": [("up", [[0.0, 0.0, 0.5], [1.0, 1.0, 0.5]]), ("down", [[0.0, 1.0, 0.5], [1.0, 0.0, 0.5]]),
                      ("arch", [[0.0, 0.0, 0.5], [0.5, 1.0, 0.5], [1.0, 0.0, 0.5]]),
@@ -263,6 +263,8 @@ class JumpGraph(tk.Toplevel):
         return min(found)[3] if found else None
 
     def press(self, e):
+        if menu_click(e):  # (the click that closed the right-click menu: nothing)
+            return
         self.press_pts = json.dumps(self.pts)
         got = self.hit(e.x, e.y)
         if got is None:  # (a new point here, on the stretch it splits; both halves keep its bend)
@@ -343,7 +345,7 @@ class JumpGraph(tk.Toplevel):
             m.add_command(label=tr("graph_window.value"), command=lambda: PointDialog(self, i))
             m.add_command(label=tr("graph_window.delete_point"), command=lambda: self.delete_point(i),
                           state="disabled" if end else "normal")
-        m.tk_popup(e.x_root, e.y_root)
+        popup_menu(m, e.widget, e)
 
     def delete_point(self, i):
         if 0 < i < len(self.pts) - 1:

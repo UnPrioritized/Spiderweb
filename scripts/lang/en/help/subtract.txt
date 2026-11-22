@@ -29,7 +29,7 @@ Across: Left to right (time) goes from the shape's first note to its last (on No
 
 Each key row by itself (Left to right only): every key row runs the whole graph, from its first note to its last. Where a row has a hole, each piece runs the graph again, unless Across gaps in a row is ticked. Along a row: By time (halfway along the row's time = halfway along the graph) or By note count (the middle note = halfway, however long the notes are).
 
-The graph works like a Range's: drag a point to move it (Shift = free), click the line or empty space to add one, right-click a point to delete it. The buttons under it are ready-made graphs. The pale steps are the whole ticks the notes really get.
+The graph works like a Range's: drag a point to move it (Shift = free), click the line or empty space to add one, right-click a point and pick Delete point (the first and last stay). The buttons under it are ready-made graphs. The pale steps are the whole ticks the notes really get.
 
 ## Using the window
 

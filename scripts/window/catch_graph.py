@@ -17,7 +17,7 @@ from notes.tempo import DRAWN, DRAWN_BENDS, DRAWN_POINTS, catch_get, catch_set, 
 from window import look
 from window.speed_graph import BEND_SNAP, FLAT, SNAP, PointDialog
 from window.tempo_pane import ids
-from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, chart_edges, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, menu_click, popup_menu, chart_edges, remember_place
 
 PRESETS = [(tr("tempo.shape_" + k), k) for k in ("flat", "ease", "rise", "ramp")]
 
@@ -339,7 +339,7 @@ class CatchGraph(tk.Toplevel):
         return min(found)[3] if found else None
 
     def press(self, e):
-        if not self.live():
+        if not self.live() or menu_click(e):  # (the click that closed the right-click menu: nothing)
             return
         self.press_pts = json.dumps(self.pts)
         self.press_c = catch_get(self.c, 6)  # (as the catch-up held them: Ctrl+Z mid-drag puts exactly this back)
@@ -426,7 +426,7 @@ class CatchGraph(tk.Toplevel):
             m.add_command(label=tr("graph_window.value"), command=lambda: PointDialog(self, i))
             m.add_command(label=tr("graph_window.delete_point"), command=lambda: self.delete_point(i),
                           state="disabled" if end else "normal")
-        m.tk_popup(e.x_root, e.y_root)
+        popup_menu(m, e.widget, e)
 
     def delete_point(self, i):
         if 0 < i < len(self.pts) - 1 and self.live():

@@ -5,7 +5,7 @@ The drawing is one wave of the tone (left to right) over the Hz bass's keys (bot
 
 Save… keeps the line drawn under a name. Delete takes the saved shape picked in the box out again (you're asked first); it's greyed out for the ready-made shapes and for a line that isn't saved.
 
-Drag a point to move it. Click the line to add a point there, or click empty space to add one at the end. Right-click or double-click a point to remove it (two always stay). Drag the round dot in the middle of a piece to bend it into a curve; right-click or double-click the dot to make it straight again. Points snap to the grid; hold Shift to move them freely. Each change is one undo step.
+Drag a point to move it. Click the line to add a point there, or click empty space to add one at the end. Right-click a point and pick Delete point to remove it (the first and last stay). Drag the round dot in the middle of a piece to bend it into a curve; double-click the dot, or right-click it and pick Straight, to make it straight again. Points snap to the grid; hold Shift to move them freely. Each change is one undo step.
 
 Note length (under the drawing) sets how long each note lasts: 100 % = until the next one on its key starts, less = a gap after each one. % of a wave = that much of one wave of the note's tone, so short notes trace the drawn line on every pitch (a fraction works too: 1/8 = 12.5 %). % of the note = that much of how long each note is. Ticks = that many ticks each. Shorter notes change the look, hardly the sound. Here a Sine at 100 % (top: a block) and at 1/8 of a wave (bottom: the sine shows):
 [clip:hz_shape-length]

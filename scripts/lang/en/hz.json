@@ -492,7 +492,7 @@
  "hz.trace_title_layer": "Hz shape: {layer}",
  "hz.trace_reset": "Reset",
  "hz.trace_reset_tip": "This layer back to the main line and Note length.\nWith one layer: line straight, Note length back to 100 % and the last note no longer sticking out.",
- "hz.trace_hint": "Drag points to change the shape, or the end of a bar to change the note length. Click the line to add a point, right-click one to remove it. Shift = off the grid. More in Help (F1).",
+ "hz.trace_hint": "Drag points to change the shape, or the end of a bar to change the note length. Click the line to add a point, right-click one to delete it from the menu. Shift = off the grid. More in Help (F1).",
  "hz.trace_strips_tip": "How the notes look in the piano roll at a few pitches, from low (left) to high (right): the lowest, middle and highest notes of the Hz bass (a few octaves when it has none). Each shows the same stretch of time, so a higher pitch shows more waves. Effects aren't shown.",
  "hz.trace_shapes_tip": "Start from a ready-made shape or one you saved (newest first; type a letter while the list is open to jump to it). Straight and Saw hit each key once a wave; the other ready-made ones hit each key twice (twice the notes). Empty while the line is one of your own that isn't saved.",
  "hz.trace_straight": "Straight",

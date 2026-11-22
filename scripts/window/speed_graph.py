@@ -15,7 +15,7 @@ from files.lang import tr
 from files.mathexpr import fmt
 from notes.copypath import BEND_LIMITS, CURVE_POINTS, SPEED_CURVES, curve_at
 from window import look
-from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, chart_edges, read_number, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, menu_click, popup_menu, Scrub, chart_edges, read_number, remember_place
 
 PRESETS = [(tr("path.even"), SPEED_CURVES["even"]), (tr("path.up"), SPEED_CURVES["up"]),
            (tr("path.down"), SPEED_CURVES["down"]),
@@ -281,7 +281,7 @@ class SpeedGraph(tk.Toplevel):
         return min(found)[3] if found else None
 
     def press(self, e):
-        if not self.live():
+        if not self.live() or menu_click(e):  # (the click that closed the right-click menu: nothing)
             return
         pw = self.pw
         self.press_state = (json.dumps(self.pts), list(pw.undo.states), pw.undo.at)
@@ -369,7 +369,7 @@ class SpeedGraph(tk.Toplevel):
                           state="disabled" if end else "normal")
             m.add_command(label=tr("graph_window.delete_point"), command=lambda: self.delete_point(i),
                           state="disabled" if end else "normal")
-        m.tk_popup(e.x_root, e.y_root)
+        popup_menu(m, e.widget, e)
 
     def delete_point(self, i):
         if 0 < i < len(self.pts) - 1 and self.live():

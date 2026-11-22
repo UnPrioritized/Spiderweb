@@ -50,7 +50,7 @@ Range… (next to the gate, Spam and Outline spam) opens a window where the gate
 
 From is the shape's gate, to is the second gate, and the graph sets how it gets there: the straight line gives every whole-tick gate between the two an equal share, like a gate distribution, so most notes get the short gates. Beside the graph, "Notes per gate" shows how many notes get each gate (red: a gate no note gets; point at a bar for its numbers).
 
-The buttons under the graph give it a ready shape: Straight, More short gates, More long gates, Hill or Valley. To change it by hand, drag a point, click to add one, or right-click a point to delete it.
+The buttons under the graph give it a ready shape: Straight, More short gates, More long gates, Hill or Valley. To change it by hand, drag a point, click to add one, or right-click a point and pick Delete point (the first and last stay).
 
 Smooth uses every whole-tick gate between the two. Steps lets the gate only halve or double from the first one (the first, half of it, a quarter…), so the shape is made of sections of equal notes; the graph still says where each step comes.
 

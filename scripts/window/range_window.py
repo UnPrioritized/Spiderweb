@@ -25,7 +25,7 @@ from notes.gaterange import (DIRS, ENDS, STRAIGHT, clean_range, ends_of, exact_o
 from window import big_ask, look
 from window.default_pin import DefaultPin
 from window.panel_funnel import GATE_STEPS
-from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, pair_grip, chart_edges, remember_place, unit_word
+from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, pair_grip, menu_click, chart_edges, remember_place, unit_word
 
 
 def _power(k):
@@ -236,7 +236,7 @@ class RangeGraph(DefaultPin, PointGraph, tk.Toplevel):
         cv.bind("<ButtonPress-1>", self.press)
         cv.bind("<B1-Motion>", self.motion)
         cv.bind("<ButtonRelease-1>", self.release)
-        cv.bind("<ButtonPress-3>", self.delete_at)
+        cv.bind("<ButtonPress-3>", self.point_menu)
         cv.bind("<Motion>", self.on_hover)
         cv.bind("<Leave>", lambda e: self.on_hover(None))
         self.bind("<Escape>", lambda e: self.cancel())
@@ -633,7 +633,7 @@ class RangeGraph(DefaultPin, PointGraph, tk.Toplevel):
     # ---- mouse
 
     def press(self, e):
-        if not self.on_var.get():
+        if not self.on_var.get() or menu_click(e):  # (the click that closed the right-click menu: nothing)
             return
         i = self.point_at(e.x, e.y)
         self.drag_from = json.loads(json.dumps(self.memo))  # (put back if the notes it makes are too many)
@@ -675,13 +675,15 @@ class RangeGraph(DefaultPin, PointGraph, tk.Toplevel):
         self.draw()
         self.hist.mark()
 
-    def delete_at(self, e):
-        i = self.point_at(e.x, e.y)
-        if not self.on_var.get() or i is None or len(self.pts) <= 2 or self.drag is not None:  # (not mid-drag)
+    def points_editable(self):
+        return self.on_var.get()
+
+    def delete_point(self, i):
+        """Right-click menu > Delete point (the ends stay: THE CONTROL SCHEME)."""
+        if not self.on_var.get() or not 0 < i < len(self.pts) - 1 or self.drag is not None:  # (not mid-drag)
             return
         pts = [list(p) for p in self.pts]
         del pts[i]
-        pts[0][0], pts[-1][0] = 0.0, 1.0
         self.change("graph", pts)
 
     def on_hover(self, e):

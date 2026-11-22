@@ -27,7 +27,7 @@ from notes.extend import is_extended
 from notes.sustain import is_sustained
 from window import look
 from window.default_pin import DefaultPin
-from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place
+from window.widgets import LocalUndo, PointGraph, Scrub, menu_click, Tooltip, chart_edges, remember_place
 
 
 def _power(k):
@@ -205,7 +205,7 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
         cv.bind("<ButtonPress-1>", self.press)
         cv.bind("<B1-Motion>", self.motion)
         cv.bind("<ButtonRelease-1>", self.release)
-        cv.bind("<ButtonPress-3>", self.delete_at)
+        cv.bind("<ButtonPress-3>", self.point_menu)
         cv.bind("<Motion>", self.on_hover)
         cv.bind("<Leave>", lambda e: self.on_hover(None))
         self.bind("<Escape>", lambda e: self.cancel())
@@ -679,6 +679,8 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
                            text=tr("between.at", n=round(at[0] * (n + 1), 1), y=round(at[1] * 100)))
 
     def press(self, e):
+        if menu_click(e):  # (the click that closed the right-click menu: nothing)
+            return
         i = self.point_at(e.x, e.y)
         if i in (0, len(self.pts) - 1):  # (the ends are the first and last shapes: they stay)
             return
@@ -711,9 +713,9 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
         self.draw()
         self.hist.mark()
 
-    def delete_at(self, e):
-        i = self.point_at(e.x, e.y)
-        if i is None or i in (0, len(self.pts) - 1) or self.drag is not None:
+    def delete_point(self, i):
+        """Right-click menu > Delete point (the ends are the first and last shapes: they stay)."""
+        if not 0 < i < len(self.pts) - 1 or self.drag is not None:
             return
         pts = [list(p) for p in self.pts]
         del pts[i]

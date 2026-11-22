@@ -2,6 +2,7 @@
 
 import re
 import sys
+import time
 import tkinter as tk
 from tkinter import font as tkfont, ttk
 
@@ -627,6 +628,21 @@ class PointGraph:
             u, y = round(u / self.U_SNAP) * self.U_SNAP, round(y / self.Y_SNAP) * self.Y_SNAP
         return u, y
 
+    def points_editable(self):
+        """The graph's points can be changed now (Range: its tick on; Gate subtract: a graph in use)."""
+        return True
+
+    def point_menu(self, e):
+        """Right-click a point (THE CONTROL SCHEME): a menu with Delete point, never deleting at once; the first and
+        last points stay (greyed). The window's delete_point(i) does it (one undo step)."""
+        i = self.point_at(e.x, e.y)
+        if i is None or self.drag is not None or not self.points_editable():
+            return
+        m = tk.Menu(e.widget, tearoff=0)
+        m.add_command(label=tr("graph_window.delete_point"), command=lambda: self.delete_point(i),
+                      state="disabled" if i in (0, len(self.pts) - 1) else "normal")
+        popup_menu(m, e.widget, e)
+
 
 def shortened(label, text, reserve=0):
     """text as a one-line ttk label shows it: whole when it fits in the label's width (less its padding and
@@ -1004,6 +1020,26 @@ class Scrub:
         self.app.catch_up_notes()
         if gesture is not None and hasattr(self.app, "scrub_let_go"):  # (questions put off while held: now)
             self.app.scrub_let_go(gesture)
+
+
+MENU_CLICK_S = 0.25  # a press this soon after a right-click menu closed = the click that closed it (Windows hands it on)
+
+
+def popup_menu(menu, owner, e):
+    """A right-click menu at the mouse (THE CONTROL SCHEME: right-click = a menu). The press that closes it must do
+    nothing on owner: its press handler starts with `if menu_click(e): return`."""
+    try:
+        menu.tk_popup(e.x_root, e.y_root)
+    finally:
+        menu.grab_release()
+        owner._menu_shut = time.perf_counter()
+
+
+def menu_click(e):
+    """This press (its event, or the widget pressed) is the click that closed that widget's right-click menu
+    (popup_menu)."""
+    owner = getattr(e, "widget", e)
+    return time.perf_counter() - getattr(owner, "_menu_shut", 0.0) < MENU_CLICK_S
 
 
 def pair_grip(app, parent, boxes, steps, lo=None, hi=None, no_undo=False):
