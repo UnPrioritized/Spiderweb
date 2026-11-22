@@ -831,10 +831,19 @@ class Scrub:
         d = n * self.step_size(state)
         read = getattr(self, "read", None) or calc
         step_for = getattr(self, "step_for", None)
+        step_text = getattr(self, "step_text", None)  # (optional: (text, change) -> new text or None, for boxes
+        # holding more than a number, Gate extend's "50% + 10": its last number steps)
 
         def run():
             for entry, var, apply in boxes:
                 if str(entry.cget("state")) == "disabled":
+                    continue
+                if step_text:
+                    new = step_text(var.get() or getattr(entry, "blank_from", None) or "", d)
+                    if new is not None:
+                        var.set(new)
+                        if apply:
+                            apply()
                     continue
                 try:  # (an empty box for shapes with different numbers: from the first one's, same_or_blank)
                     value = float(read(var.get() or getattr(entry, "blank_from", None) or ""))

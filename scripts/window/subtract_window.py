@@ -158,6 +158,14 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     def put_own(self, sh, part):
         put_own(sh, part)
 
+    def as_shown(self, s):
+        """A stored side with its amounts as the window keeps them (here: beats as they are)."""
+        return s
+
+    def widest_label(self):
+        """The widest amount the graph's left edge shows (its margin)."""
+        return self.amount_text(99999)
+
     def first_amount(self):
         """What a shape gets where it has no amount yet: 1 tick."""
         return 1 / self.app.ppq
@@ -226,8 +234,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.by_unit.pack(side="left", padx=(4, 0))
         for var in (self.by_var, self.to_var):
             traced(self, var, lambda *_: self.put_unit())
-        Scrub(app, [(self.by_box, self.by_var, lambda: self.on_box("by"))], lambda: (1, 10, 1), 0, None,
-              label=self.by_unit, drag_box=True, no_undo=True)
+        self.hook_scrub(Scrub(app, [(self.by_box, self.by_var, lambda: self.on_box("by"))], lambda: (1, 10, 1), 0,
+                              None, label=self.by_unit, drag_box=True, no_undo=True))
         self.by_tips = [Tooltip(w, "") for w in (self.by_label, self.by_box, self.by_unit)]
         Tooltip(self.to_label, self.tx("to_tip"))
         self.touch_var = tk.BooleanVar(value=False)
@@ -259,22 +267,27 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         remember_place(self, self.T)
         self.focus_set()
 
+    BOX_WIDTH = 7  # (letters the amount boxes show)
+
     def number_box(self, row, var, key, label):
         label.pack(side="left", padx=(0 if key == "by" else 6, 0))
-        e = ttk.Entry(row, textvariable=var, width=7)
+        e = ttk.Entry(row, textvariable=var, width=self.BOX_WIDTH)
         e.pack(side="left", padx=(4, 0))
         e.bind("<Return>", lambda ev: (self.on_box(key), "break")[1])  # (not OK: the window stays)
         e.bind("<FocusOut>", lambda ev: self.on_box(key))
         if key == "to":
-            Scrub(self.app, [(e, var, lambda: self.on_box("to"))], lambda: (1, 10, 1), 0, None, label=label,
-                  drag_box=True, no_undo=True)
-            Tooltip(e, self.tx("to_tip"))
+            self.hook_scrub(Scrub(self.app, [(e, var, lambda: self.on_box("to"))], lambda: (1, 10, 1), 0, None,
+                                  label=label, drag_box=True, no_undo=True))
+            self.to_tip = Tooltip(e, self.tx("to_tip"))
         return e
+
+    def hook_scrub(self, scrub):
+        """A box's Scrub, for a window whose boxes hold more than one number (Gate extend: "50% + 10")."""
 
     def make_graph(self, part, s):
         """The part shown while "Change across the shape" is ticked: Across, the row ticks, the graph, presets."""
         self.w, self.h = int(460 * s), int(170 * s)
-        self.ml, self.mb = chart_edges(s, (self.amount_text(99999),), 56, 22)
+        self.ml, self.mb = chart_edges(s, (self.widest_label(),), 56, 22)
         self.mr, self.mt = int(12 * s), int(10 * s)
         pad = int(20 * s)
         row = ttk.Frame(part)
@@ -362,7 +375,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         for side in self.SIDES:
             # (an empty side = none: one a flip left with 0 ticks gets 1 tick when used, hunt 2026-10-20)
             ss = [s and (end_side(s) if side == "end" else s.get("start")) for s in subs]
-            ss = [None if empty_side(s) else s for s in ss]
+            ss = [None if empty_side(s) else self.as_shown(s) for s in ss]
             d = self.sides[side]
             d["use"] = [side_used(s) for s in ss]
             d["bys"] = [s["by"] if s else None for s in ss]
@@ -405,7 +418,11 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     def new_graph(self):
         """The graph settings a shape gets the first time it changes across: To = 4 times its amount (0: 4 ticks)."""
         b = next((b for b in self.bys if b is not None), None) or self.first_amount()
-        return {"to": min(b * 4, self.most()), "graph": [list(p) for p in STRAIGHT], "dir": "time"}
+        return {"to": self.scaled(b, 4), "graph": [list(p) for p in STRAIGHT], "dir": "time"}
+
+    def scaled(self, value, k):
+        """An amount k times as big (at most the most it may be)."""
+        return min(value * k, self.most())
 
     def show_controls(self):
         """The ticks, boxes and graph as the shapes' settings are: ticked when every shape has it, half-ticked when
@@ -424,8 +441,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
             t.set_text(self.tx("by_start_tip" if start else "by_tip"))
         tick(self.touch_var, self.touch_tick, self.touches)
         tick(self.vary_var, self.vary_tick, self.varies)
-        got = {b for b in self.bys if b is not None}
-        self.by_var.set(self.text_of(got.pop()) if len(got) == 1 and None not in self.bys else "")
+        got = {self.text_of(b) for b in self.bys if b is not None}
+        self.by_var.set(got.pop() if len(got) == 1 and None not in self.bys else "")
         g = self.g or self.new_graph()
         self.to_var.set(self.text_of(g["to"]))
         self.dir_box.current(DIRS.index(g["dir"]))
@@ -553,7 +570,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
             return
         beats = self.read(var.get())
         if beats is None:  # (a wrong number: back to the last good one, or empty)
-            return self.show_controls()
+            return self.refused(box, var)
+        self.accepted(box)
         if key == "by":
             self.bys = [beats] * len(self.idx)
         elif self.g:
@@ -562,6 +580,13 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.show_controls()
         self.store()
         self.hist.mark(key)
+
+    def refused(self, box, var):
+        """A typed amount that can't be used: back to the last good one."""
+        self.show_controls()
+
+    def accepted(self, box):
+        """A typed amount taken (a window showing why one was refused takes that back)."""
 
     # ---- showing
 
@@ -606,12 +631,22 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.put_unit()
         self.draw()
 
-    def gates(self):
-        """The first and second amount in ticks."""
+    def ends(self):
+        """The first and second amount shown (the first shape's, the graph's)."""
         got = [b for b in self.bys if b is not None]
         g = self.g or self.new_graph()
+        return got[0] if got else self.first_amount(), g["to"]
+
+    def gates(self):
+        """The first and second amount in whole steps, for the pale steps (None: none drawn)."""
+        a, b = self.ends()
         u = self.uppq()
-        return ticks_of(got[0] if got else self.first_amount(), u), ticks_of(g["to"], u)
+        return ticks_of(a, u), ticks_of(b, u)
+
+    def label_at(self, y):
+        """The amount the notes get at height y (0..1) of the graph, as text."""
+        a, b = self.gates()
+        return self.amount_text(y_gate(a, b, y))
 
     def draw(self):
         """The graph: amounts at 0, 25 ... 100 % up, the whole-tick amounts the notes get (pale steps), the line."""
@@ -619,15 +654,13 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         cv.delete("all")
         if not self.g:
             return
-        a, b = self.gates()
         x0, x1, top, bot = self.u2x(0), self.u2x(1), self.y2c(1), self.y2c(0)
         for j in range(1, 4):
             cv.create_line(self.u2x(j / 4), top, self.u2x(j / 4), bot, fill=look.CHART_GRID)
         for k in range(5):
             y = k / 4
-            g = y_gate(a, b, y)
             cv.create_line(x0, self.y2c(y), x1, self.y2c(y), fill=look.CHART_GRID)
-            cv.create_text(x0 - 4 * s, self.y2c(y), text=self.amount_text(g), anchor="e", fill=look.LABEL,
+            cv.create_text(x0 - 4 * s, self.y2c(y), text=self.label_at(y), anchor="e", fill=look.LABEL,
                            font=look.font(7))
         cv.create_rectangle(x0, top, x1, bot, outline=look.CHART_FRAME)
         d = self.g["dir"]
@@ -637,8 +670,10 @@ class SubtractWindow(PointGraph, tk.Toplevel):
             ends = ("row_first", "row_last") if self.g.get("rows") else ("first", "last")
         cv.create_text(x0, bot + 4 * s, text=self.tx(ends[0]), anchor="nw", fill=look.LABEL, font=look.font(7))
         cv.create_text(x1, bot + 4 * s, text=self.tx(ends[1]), anchor="ne", fill=look.LABEL, font=look.font(7))
+        ab = self.gates()
+        a, b = ab or (0, 0)
         span = (b - a) or 1
-        if few_steps(self.pts, a, b):
+        if ab is not None and few_steps(self.pts, a, b):
             line = []
             for u0, u1, g in gate_steps(self.pts, a, b):
                 y = self.y2c((g - a) / span if b != a else 0)
@@ -654,8 +689,8 @@ class SubtractWindow(PointGraph, tk.Toplevel):
             shape(x - r, yy - r, x + r, yy + r, fill=look.CHART_POINT, outline=look.CHART_LINE, width=lw)
         at = self.pts[self.drag] if self.drag is not None else self.hover
         if at is not None:
-            g = y_gate(a, b, float(at[1]))
-            cv.create_text(x1 - 4 * s, top + 4 * s, text=self.tx("at", at=fmt(round(at[0] * 100, 1)), ticks=self.amount_text(g)),
+            cv.create_text(x1 - 4 * s, top + 4 * s, text=self.tx("at", at=fmt(round(at[0] * 100, 1)),
+                                                                 ticks=self.label_at(float(at[1]))),
                            anchor="ne", fill=look.VALUE, font=look.font(8))
 
     # ---- the graph's mouse (like Gate Range's)
