@@ -840,7 +840,7 @@ class Scrub:
         step_text = getattr(self, "step_text", None)  # (optional: (text, change) -> new text or None, for boxes
         # holding more than a number, Gate extend's "50% + 10": its last number steps)
 
-        live = [b for b in boxes if str(b[0].cget("state")) != "disabled"]
+        live = [b for b in boxes if can_change(b[0])]  # (greyed either way: state or ttk's own; hunt 2026-11-23)
         if len(live) > 1:  # (a label over several: a box taken off the window, e.g. Melody's second BPM with a
             live = [b for b in live if b[0].winfo_manager()] or live  # one-BPM shape, stays as it is)
         if len(live) > 1 and not (step_text or step_for):
@@ -912,13 +912,16 @@ class Scrub:
         return "break"
 
     def box_press(self, e, box):
-        self.held = {"x": e.x_root, "box": box}  # (the box's own click still puts the text cursor there)
+        # (the box's own click still puts the text cursor there; a greyed box never drags)
+        self.held = {"x": e.x_root, "box": box, "cursor": box[0].cget("cursor")} if can_change(box[0]) else None
 
     def box_motion(self, e):
         """In the box: once the mouse has gone DRAG_PX sideways it's a scrub of that box, not a text selection."""
         h = self.held
         if not h:
             return None
+        if h.get("dead"):  # (Ctrl+Z took the drag back: the mouse does nothing more until let go, no text selecting)
+            return "break"
         if not self.drag:
             if abs(e.x_root - h["x"]) < DRAG_PX * self.app.scale:
                 return None
@@ -931,11 +934,12 @@ class Scrub:
         return "break"
 
     def box_release(self, e):
+        """The let go is never swallowed (hunt 2026-11-23): the program's own let-go handling (page turning while
+        playing, waiting questions, Tk's own text box clean-up) runs after a box drag too."""
         h, self.held = self.held, None
-        if h and self.drag:
-            h["box"][0].config(cursor="")
+        if h and (self.drag or h.get("dead")):
+            h["box"][0].config(cursor=h["cursor"])  # (the box's own text pointer back, not the plain arrow)
             self.release(e)
-            return "break"
         return None
 
     def press(self, e, boxes=None):
@@ -953,9 +957,10 @@ class Scrub:
             return
         if d["job"]:
             self.app.after_cancel(d["job"])
-        if self.held:
-            self.held["box"][0].config(cursor="")
-        self.drag = self.held = None
+        if self.held:  # (kept till the let go: further moves of this press do nothing)
+            self.held["box"][0].config(cursor=self.held["cursor"])
+            self.held["dead"] = True
+        self.drag = None
         self.app.held_scrub = None
         self.app.take_back_scrub(d["gesture"])
         if self.no_undo:
