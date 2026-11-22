@@ -8,7 +8,7 @@ import tkinter as tk
 from tkinter import colorchooser, font as tkfont, messagebox, ttk
 
 from files import lang, settings
-from files.lang import tr
+from files.lang import tr, trn
 from files.playback import AHEAD, BUILTIN, KESTREL, MAESTRO, devices
 from files.system import WINDOWS, open_path, work_area
 from window import button_look, look, palettes
@@ -137,6 +137,7 @@ def open_settings(app, tab=None):
 
 PAGE_MOST = 560  # the tallest a Settings page shows at 100 % size, in pixels (taller ones scroll)
 NOTE_WRAP = 380  # a status line's width under its control, at 100 % size
+RESET_NAMED = 8  # User set defaults' Reset question names this many windows at most, then "and N more"
 
 
 class Form:
@@ -377,6 +378,9 @@ class SettingsWindow(tk.Toplevel):
         take = getattr(self, "take_new_typed", None)  # (New projects' PPQ / output boxes)
         if take is not None:
             take()
+        w = getattr(self, "default_window", None)  # (a "your default" window goes with Settings, like Cancel: hunt)
+        if w is not None and w.winfo_exists() and not w.closed:
+            w.cancel()
         self.destroy()
 
     def tick(self, page, key, var, command, tip=None, **kw):
@@ -745,7 +749,11 @@ class SettingsWindow(tk.Toplevel):
         picked = [i for i in self.defaults_tree.selection() if i in self.DEFAULT_WINDOWS]
         if not picked:
             return
-        names = "\n".join(tr(f"{sec}.title") for sec in picked)
+        shown = [tr(f"{sec}.title") for sec in picked[:RESET_NAMED]]  # (8 names at most + "and N more": the
+        # question stays short however many windows get a pin, hunt)
+        if len(picked) > RESET_NAMED:
+            shown.append(trn("defaults.and_more", len(picked) - RESET_NAMED, n=len(picked) - RESET_NAMED))
+        names = "\n".join(shown)
         if not messagebox.askyesno(tr("defaults.reset_title"), tr("defaults.reset_ask", names=names), parent=self):
             return
         w = self.default_window
@@ -756,7 +764,8 @@ class SettingsWindow(tk.Toplevel):
                 self.app.status.config(text=tr("defaults.cant_save"))
             if w is not None and w.winfo_exists() and not w.closed and w.KEY == sec:
                 w.cancel()  # (its window would save the old one back on OK)
-        self.fill_defaults()
+        from window.subtract_window import defaults_changed
+        defaults_changed(self.app)  # (the list + an open Gate window's pin, hunt)
 
     def build_copying(self, f):
         """Copying: what Ctrl+C puts on the clipboard besides Spiderweb's own copy (App.put_clipboard)."""

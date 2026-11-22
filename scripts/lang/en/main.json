@@ -403,6 +403,8 @@
  "defaults.reset": "Reset…",
  "defaults.reset_tip": "The picked rows go back to the program's own defaults (asks first).",
  "defaults.reset_title": "Reset defaults",
+ "defaults.and_more": "and {n} more",
+ "defaults.and_more_one": "and 1 more",
  "defaults.reset_ask": "Go back to the program's own defaults for these?\n\n{names}",
  "defaults.none": "None saved yet: use the pin next to OK in Gate extend or Gate subtract.",
  "defaults.edit_title": "{name}: your default",

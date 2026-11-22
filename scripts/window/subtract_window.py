@@ -649,6 +649,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     def show_controls(self):
         """The ticks, boxes and graph as the shapes' settings are: ticked when every shape has it, half-ticked when
         only some do; a box shows the number they share, else stays empty."""
+        self.accepted()  # (the boxes show the shapes' amounts again: no red / reason left from before)
         def tick(var, w, flags):
             var.set(bool(flags) and all(flags))
             w.state(["alternate"] if any(flags) and not all(flags) else ["!alternate"])
@@ -744,11 +745,14 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         except ValueError as e:
             self.why = str(e)
             return None
-        if p < 0 or t < 0:
+        if p < -1e-9 or t < -1e-9:  # (a hair under 0 from decimals, 0.3% - 0.1% - 0.2%, counts as 0: hunt)
             self.why = self.tx("below_zero")
             return None
-        p = None if "%" not in text and "％" not in text or p == 0 and t > 0 else min(math.floor(p + 0.5), MOST_PCT)
-        return [None if p is None else float(p), min(math.floor(t + 0.5) / ppq, MOST)]
+        ticks = math.floor(max(t, 0) + 0.5)
+        p = min(math.floor(max(p, 0) + 0.5), MOST_PCT)  # (rounded FIRST: 0.4% + 10 = plain 10 ticks, hunt)
+        if "%" not in text and "％" not in text or p == 0 and ticks > 0:
+            p = None
+        return [None if p is None else float(p), min(ticks / ppq, MOST)]
 
     def put_all(self, what):
         """A tick changed ("on", "use", "touch", "vary"): every shape takes it (a half-ticked one: a click = all
@@ -823,9 +827,12 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         if not self.why_label.winfo_manager():
             self.why_label.pack(anchor="w", after=self.by_box.master, pady=(2, 0))
 
-    def accepted(self, box):
-        """A typed amount taken: the red + why gone."""
-        box.config(style="TEntry")
+    def accepted(self, box=None):
+        """A typed amount taken, or the boxes refilled from the shapes (a tab, Ctrl+Z, another selection, back to the
+        last good number: hunt, the red + why stayed): the red + why gone."""
+        for b in (self.by_box, self.to_box):
+            if str(b.cget("style")) == "Bad.TEntry":
+                b.config(style="TEntry")
         if hasattr(self, "why_label") and self.why_label.winfo_manager():
             self.why_label.pack_forget()
 
@@ -1112,6 +1119,11 @@ def defaults_changed(app):
     fill = getattr(w, "fill_defaults", None)
     if fill is not None and w.winfo_exists():
         fill()
+    for attr in ("extend_window", "subtract_window"):  # (their pins green / black at once, hunt: a Reset in
+        # Settings left a green pin)
+        g = getattr(app, attr, None)
+        if g is not None and not g.closed and g.winfo_exists() and hasattr(g, "pin"):
+            g.show_pin()
 
 
 def default_editor(cls):
@@ -1169,10 +1181,7 @@ def default_editor(cls):
         def ok(self):
             self.take_typing()
             self.save_default()
-            done = self.done
             self.close()
-            if done:
-                done()
 
         def save_default(self):
             mine = dict(self.fake.get(self.KEY) or {})
@@ -1181,12 +1190,14 @@ def default_editor(cls):
                 shape_defaults.put(self.KEY, {"settings": mine})
             except OSError:
                 self.app.status.config(text=tr("defaults.cant_save"))
+            defaults_changed(self.app)  # (the Settings list if it's still open + the open windows' pins: hunt)
 
         def forget_default(self):
             try:
                 shape_defaults.forget(self.KEY)
             except OSError:
                 self.app.status.config(text=tr("defaults.cant_save"))
+            defaults_changed(self.app)
 
         def cancel(self):
             self.close()
