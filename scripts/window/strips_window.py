@@ -19,6 +19,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes.strips import MOST_GAP, can_strip, clean_strips, has_strips, strip_sizes
 from window import look
+from window.default_pin import DefaultPin
 from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, traced, unit_text
 
 
@@ -31,12 +32,57 @@ def strips_targets(app):
     return [app.shapes[i] for i in target_indices(app)]
 
 
-class StripsWindow(tk.Toplevel):
+class StripsWindow(DefaultPin, tk.Toplevel):
     notes_pass = True  # (its clicks / drags don't wait for notes made in the background: notes_wait.pass_window)
+    KEY = "strips"  # (the shape's key, its section in shape-defaults.ini)
+    ATTR = "strips_window"
+
+    # ---- the user's own default ("use as default" pin, window/default_pin.py): Other notes between (a shape without
+    # Channel per strip starts from it) + Show each strip in its own colour (the window opens with it)
+
+    @classmethod
+    def clean_saved(cls, v):
+        if not isinstance(v, dict):
+            return None
+        out = {}
+        g = v.get("gap")
+        if isinstance(g, int) and not isinstance(g, bool) and 1 <= g <= MOST_GAP:
+            out["gap"] = g
+        if isinstance(v.get("view"), bool):
+            out["view"] = v["view"]
+        return out or None
+
+    @classmethod
+    def default_title(cls):
+        return tr("strips.title")
+
+    @classmethod
+    def program_default(cls):
+        return {"gap": 1, "view": True}
+
+    @classmethod
+    def describe_default(cls, v, ppq):
+        g = v.get("gap", 1)
+        return ", ".join([f"{tr('strips.gap')} {g} {unit_text(fmt(g), 'strips.notes', 'strips.note')}"] +
+                         ([] if v.get("view", True) else [tr("defaults.no_view")]))
+
+    def can_save_default(self):
+        return bool(self.idx) and any(self.ons)
+
+    def default_now(self):
+        if not self.idx:
+            return None
+        self.take_typing()
+        i = next((i for i, on in enumerate(self.ons) if on), 0)
+        return {"gap": int(self.gaps[i]), "view": bool(self.view_var.get())}
+
+    def targets(self):
+        return target_indices(self.app)
+
     def __init__(self, app):
         super().__init__(app)
         self.app = app
-        app.strips_window = self
+        setattr(app, self.ATTR, self)
         self.title(tr("strips.title"))
         self.transient(app)
         self.resizable(False, False)
@@ -74,7 +120,7 @@ class StripsWindow(tk.Toplevel):
                               justify="left")
         self.off_tracks = ttk.Label(box, text=tr("strips.off_tracks"), foreground=look.WARN,
                                     wraplength=int(320 * app.scale), justify="left")
-        self.view_var = tk.BooleanVar(value=True)
+        self.view_var = tk.BooleanVar(value=(self.saved_default() or {}).get("view", True))
         self.view_tick = ttk.Checkbutton(box, text=tr("strips.view"), variable=self.view_var,
                                          command=self.app.shapes_changed)
         self.view_tick.pack(anchor="w", pady=(8, 0))
@@ -83,6 +129,7 @@ class StripsWindow(tk.Toplevel):
                   wraplength=int(320 * app.scale)).pack(anchor="w", pady=(8, 0))
         self.buttons = row = ttk.Frame(box)
         row.pack(anchor="e", pady=(10, 0))
+        self.pin_row(row)
         ttk.Button(row, text=tr("range_window.ok"), command=self.ok).pack(side="left")
         ttk.Button(row, text=tr("range_window.cancel"), command=self.cancel).pack(side="left", padx=(4, 0))
         self.bind("<Escape>", lambda ev: self.cancel())
@@ -113,18 +160,19 @@ class StripsWindow(tk.Toplevel):
 
     def retarget(self, start=False):
         """Work on the selected shapes (start: opened, which puts Channel per strip on)."""
-        self.idx = target_indices(self.app)
+        self.idx = self.targets()
         self.saved_sel = self.app.sel_state()  # (for the undo step)
         self.before = self.kept = self.now_text()  # (kept: put back by Cancel)
         self.ons = [start or has_strips(t) for t in self.tgts]
-        self.gaps = [(clean_strips(t.get("strips")) or {"gap": 1})["gap"] for t in self.tgts]
+        mine = {"gap": (self.saved_default() or {}).get("gap", 1)}  # (shapes without it: the user's default)
+        self.gaps = [(clean_strips(t.get("strips")) or mine)["gap"] for t in self.tgts]
         self.show_controls()
         if start and self.idx:
             self.store()
         else:
             self.now = self.before
-            if list(self.shown_owners()) != self.painted:  # (the strips' colours shown for these shapes now)
-                self.app.shapes_changed()
+            if list(self.shown_owners()) != self.painted and not self.editing_default:  # (the strips' colours
+                self.app.shapes_changed()  # shown for these shapes now)
             self.show()
         self.painted = list(self.shown_owners())
         self.hist.reset()
@@ -227,7 +275,7 @@ class StripsWindow(tk.Toplevel):
 
     def counted(self):
         """The line saying how many strips the shapes are cut into now (Multi channel), or ""."""
-        if self.app.channel_mode.get() != "auto":
+        if self.app.channel_mode.get() != "auto" or self.editing_default:
             return ""
         app = self.app
         app.stale_ok += 1  # (notes still being made: the count from the ones on screen, shown again once they're in)
@@ -262,7 +310,7 @@ class StripsWindow(tk.Toplevel):
         for w in (self.gap_label, self.gap_unit):
             w.config(foreground="" if on else look.LABEL_OFF)
         self.view_tick.state(["!disabled"] if on else ["disabled"])
-        multi = self.app.channel_mode.get() == "auto"
+        multi = self.app.channel_mode.get() == "auto" or self.editing_default  # (no warning about real shapes)
         if on and not multi and not self.warn.winfo_manager():
             self.warn.pack(anchor="w", pady=(8, 0), after=self.count)
         elif (multi or not on) and self.warn.winfo_manager():
@@ -293,7 +341,8 @@ class StripsWindow(tk.Toplevel):
             else:
                 t.pop("strips", None)
         self.now = self.now_text()
-        self.app.shapes_changed()
+        if not self.editing_default:  # (a stand-in shape: nothing in the main window changes)
+            self.app.shapes_changed()
         self.show()
 
     # ---- closing
@@ -311,7 +360,7 @@ class StripsWindow(tk.Toplevel):
 
     def close(self):
         self.closed = True
-        self.app.strips_window = None
+        setattr(self.app, self.ATTR, None)
         self.destroy()
         self.app.shapes_changed()  # (the strips' own colours go)
         self.app.roll.focus_set()

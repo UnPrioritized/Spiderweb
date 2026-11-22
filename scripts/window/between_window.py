@@ -26,6 +26,7 @@ from notes.subtract import subtracts
 from notes.extend import is_extended
 from notes.sustain import is_sustained
 from window import look
+from window.default_pin import DefaultPin
 from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place
 
 
@@ -42,9 +43,58 @@ PRESETS = [("between.even", between.STRAIGHT), ("between.near_first", _power(2))
            ("between.near_middle", _s_curve(2))]
 PREVIEW_POINTS = 100000  # the preview's steps drawn with at most about this many points in all
 PAD_STICK = 8  # the push pad's middle pulls the stick in within this many px (Shift = not)
+MINE_KEYS = ("steps", "graph", "colours", "smooth")  # (a "use as default"'s: never Reverse (set by the ends) or pushes)
 
 
-class BetweenWindow(PointGraph, tk.Toplevel):
+def clean_mine(v):
+    """A saved Add between default (None: nothing usable)."""
+    if not isinstance(v, dict):
+        return None
+    s = between.clean_settings(v)
+    return {k: s[k] for k in MINE_KEYS if k in v} or None
+
+
+class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
+    KEY = "between"  # (its section in shape-defaults.ini)
+    ATTR = "between_window"
+
+    # ---- the user's own default ("use as default" pin, window/default_pin.py): Steps, the graph, Smooth, the
+    # colours' turns; a new group (Add between…) starts from it
+
+    @classmethod
+    def clean_saved(cls, v):
+        return clean_mine(v)
+
+    @classmethod
+    def default_title(cls):
+        return tr("between.title")
+
+    @classmethod
+    def editor_class(cls):
+        return between_editor(cls)
+
+    @classmethod
+    def program_default(cls):
+        s = between.clean_settings({})
+        return {"steps": s["steps"], "graph": s["graph"], "colours": 15, "smooth": True}
+
+    def can_save_default(self):
+        return True
+
+    def default_now(self):
+        self.on_steps()
+        self.on_turns()
+        return {k: json.loads(json.dumps(self.set[k])) for k in MINE_KEYS if k in self.set}
+
+    @classmethod
+    def describe_default(cls, v, ppq):
+        words = [f"{tr('between.steps').rstrip(':')} {v.get('steps', between.STEPS_DEFAULT)}"]
+        if v.get("colours", 15):
+            words.append(f"{tr('between.turns').rstrip(':')} {v.get('colours', 15)}")
+        if v.get("graph") and [list(map(float, p)) for p in v["graph"]] != between.STRAIGHT:
+            words.append(tr("defaults.own_graph"))
+        return ", ".join(words)
+
     def __init__(self, app, gid, before, name, opened_on=None, sel_before=None):
         """gid: the group (made already); before: the shapes as JSON before the window (Cancel puts them back, OK
         makes one undo step from them, called name); opened_on: the shape it was opened from (the pad starts on it
@@ -52,6 +102,7 @@ class BetweenWindow(PointGraph, tk.Toplevel):
         (Cancel and the OK step's undo put it back)."""
         super().__init__(app)
         self.app, self.gid, self.before, self.name = app, gid, before, name
+        setattr(getattr(app, "_app", app), self.ATTR, self)
         self.title(tr("between.title"))
         self.transient(app)
         self.resizable(False, False)
@@ -111,7 +162,7 @@ class BetweenWindow(PointGraph, tk.Toplevel):
         self.info = ttk.Label(side, text="", foreground=look.HINT)
         self.info.pack(anchor="w", pady=(2, 0))
         self.rev_var = tk.BooleanVar()
-        rev = ttk.Checkbutton(side, text=tr("between.reverse"), variable=self.rev_var,
+        rev = self.rev_tick = ttk.Checkbutton(side, text=tr("between.reverse"), variable=self.rev_var,
                               command=lambda: self.change("rev", self.rev_var.get()))
         rev.pack(anchor="w", pady=(6, 0))
         Tooltip(rev, tr("between.reverse_tip"))
@@ -148,6 +199,7 @@ class BetweenWindow(PointGraph, tk.Toplevel):
                   wraplength=self.w).pack(anchor="w", pady=(6, 0))
         row = ttk.Frame(box)
         row.pack(anchor="e", pady=(6, 0))
+        self.pin_row(row)
         ttk.Button(row, text=tr("between.ok"), command=self.ok).pack(side="left")
         ttk.Button(row, text=tr("between.cancel"), command=self.cancel).pack(side="left", padx=(4, 0))
         cv.bind("<ButtonPress-1>", self.press)
@@ -318,6 +370,7 @@ class BetweenWindow(PointGraph, tk.Toplevel):
                 cv.unbind(seq)
         self.update()  # (after a long wait Windows shows a "not responding" copy of the window: destroyed before
         self.grab_release()  # that's gone, Tk crashed)
+        setattr(getattr(self.app, "_app", self.app), self.ATTR, None)
         self.destroy()
 
     # ---- the preview: the whole group, the first and last shapes' points can be dragged (user)
@@ -674,6 +727,85 @@ class BetweenWindow(PointGraph, tk.Toplevel):
         self.draw()
 
 
+class _Sandbox:
+    """The main window as Add between's "your default" window sees it: its own shape list (two stand-in lines), its
+    own selection; selecting, notes made again and the piano roll's draft do nothing; everything else is the main
+    window's (Tk, scale, colours...)."""
+
+    class _Roll:
+        def __init__(self, roll):
+            self._roll = roll
+
+        def cancel_draft(self):
+            """(no draft of the sandbox's)"""
+
+        def __getattr__(self, name):
+            return getattr(self._roll, name)
+
+    def __init__(self, app, shapes):
+        self.__dict__.update(_app=app, shapes=shapes, sels=set(), roll=_Sandbox._Roll(app.roll), scrubbing=False)
+
+    def __getattr__(self, name):
+        return getattr(self._app, name)
+
+    def __str__(self):
+        return str(self._app)
+
+    def select_many(self, got, first=None):
+        self.sels = set(got)
+
+    def sel_state(self):
+        return (set(self.sels), None)
+
+    def shapes_changed(self, *a, **k):
+        """(the sandbox's lines are no shape of the project)"""
+
+    def catch_up_notes(self):
+        """(nothing waiting)"""
+
+
+def between_editor(cls):
+    """Add between changing the user's DEFAULT only (Settings → User set defaults; like default_pin.default_editor):
+    the window on a group of two stand-in lines in a sandbox (_Sandbox) no one sees; no shape, selection or undo
+    step touched; OK saves, Cancel changes nothing."""
+    class Editor(cls):
+        ATTR = cls.ATTR + "_defaults"
+        editing_default = True
+
+        def __init__(self, app, done=None):
+            from notes.engine import clean_shape
+            self.done = done
+            line = {"kind": "line", "vel0": 100, "vel1": 100}
+            shapes = [clean_shape(dict(line, pts=[[0, 60], [4, 72]])), clean_shape(dict(line, pts=[[0, 48], [4, 54]]))]
+            shapes, gid = between.start_group(shapes, 0, 1, most_colours(app.all16()))
+            mine = cls.saved_default(cls)
+            if mine:
+                shapes = between.rebuild(shapes, gid, dict(between.settings_of(shapes, gid), **mine), remake=True)[0]
+            super().__init__(_Sandbox(app, shapes), gid, json.dumps(shapes), "")
+            self.title(tr("defaults.edit_title", name=cls.default_title()))
+            self.rev_tick.state(["disabled"])  # (Reverse comes from the ends, pushes from the shapes: never saved)
+            for seq in self.pad.bind():
+                self.pad.unbind(seq)
+
+        def pin_row(self, row):
+            """(no pin here: OK is what saves)"""
+
+        def ok(self):
+            if self.closed:
+                return
+            self.save_default()
+            self.closed = True
+            self.close()
+
+        def cancel(self):
+            if self.closed:
+                return
+            self.closed = True
+            self.close()
+    Editor.__name__ = cls.__name__ + "Default"
+    return Editor
+
+
 class BetweenGroups:
     """Mixed into App: Add between groups in the main window."""
 
@@ -693,6 +825,12 @@ class BetweenGroups:
         self.settle_windows()  # (another window's try = its own step first, while the shape numbers still fit it)
         before, sel = json.dumps(self.shapes), self.sel_state()
         self.shapes[:], gid = between.start_group(self.shapes, *pair, most_colours(self.all16()))
+        mine = BetweenWindow.saved_default(BetweenWindow)  # (the user's own default: the new group starts from it)
+        if mine:
+            s = dict(between.settings_of(self.shapes, gid), **mine)
+            if s["colours"]:
+                s["colours"] = min(s["colours"], most_colours(self.all16()))
+            self.shapes[:] = between.rebuild(self.shapes, gid, s, remake=True)[0]
         got = between.ordered(self.shapes, gid)
         self.select_many(got, got[0])
         self.shapes_changed()

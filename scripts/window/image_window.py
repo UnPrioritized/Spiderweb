@@ -18,6 +18,7 @@ from files.lang import tr, trn
 from files.speed import Photo
 from notes import picture as P
 from window import look
+from window.default_pin import DefaultPin
 from window.widgets import Tooltip, fit_screen, name_list, placed, set_least, set_names, unit_word, wrap_to_room
 
 PREVIEW_W, PREVIEW_H = 900, 520  # the preview's size to start with (it grows with the window)
@@ -136,8 +137,52 @@ class Making:
             self.done = True
 
 
-class ImageWindow(tk.Toplevel):
+def mine_of(v):
+    """Image settings as a "use as default" holds them: every slider / choice, never the colours picked for a picture
+    (pal / locked) or its share (None: nothing usable)."""
+    if not isinstance(v, dict):
+        return None
+    s = P.clean_settings(v)
+    out = {k: s[k] for k in P.SUGGESTED if k in v and k in s}
+    return out or None
+
+
+class ImageWindow(DefaultPin, tk.Toplevel):
     """One per Spiderweb (app.image_window)."""
+    KEY = "picture"  # (its section in shape-defaults.ini)
+    ATTR = "image_window"
+
+    # ---- the user's own default ("use as default" pin, window/default_pin.py): what the window starts with when
+    # nothing was opened in it yet this session (after that: the last picture's settings, as before); "Back to
+    # suggested" = the program's suggestion, as before
+
+    @classmethod
+    def clean_saved(cls, v):
+        return mine_of(v)
+
+    @classmethod
+    def default_title(cls):
+        return tr("image.window_title")
+
+    @classmethod
+    def editor_class(cls):
+        return image_editor(cls)
+
+    @classmethod
+    def program_default(cls):
+        return dict(P.SUGGESTED)
+
+    def can_save_default(self):
+        return True
+
+    def default_now(self):
+        return mine_of(dict(self.s))
+
+    @classmethod
+    def describe_default(cls, v, ppq):
+        v = dict(P.SUGGESTED, **v)
+        return ", ".join([tr("image.falling" if v.get("view") == "fall" else "image.roll_view"),
+                          f"{v.get('keys')} {tr('unit.keys')}"])
 
     @classmethod
     def open(cls, app):
@@ -157,8 +202,8 @@ class ImageWindow(tk.Toplevel):
         self.transient(app)
         self.geometry(placed(self, app.image_pos) or "1500x760")
         fit_screen(self)
-        self.pic, self.s = None, dict(P.SUGGESTED, share=1.0)
-        last = app.image_last
+        self.pic, self.s = None, dict(P.SUGGESTED, share=1.0, **(self.saved_default() or {}))
+        last = None if self.editing_default else app.image_last
         if last:
             self.s = P.clean_settings(last[1])
         self.locked = {}  # slot -> linear colour picked by the user
@@ -225,7 +270,11 @@ class ImageWindow(tk.Toplevel):
         self.handle.bind("<ButtonPress-1>", self.drag_start)
         self.handle.bind("<B1-Motion>", self.drag_move)
         self.handle.bind("<ButtonRelease-1>", self.drag_end)
-        ttk.Button(info, text=tr("image.place"), command=self.place_at_play_line).pack(side="right", padx=8)
+        self.place_btn = ttk.Button(info, text=tr("image.place"), command=self.place_at_play_line)
+        self.place_btn.pack(side="right", padx=8)
+        right = self.pin_place = ttk.Frame(info)
+        right.pack(side="right")
+        self.pin_row(right)
         self.info.pack(side="left", fill="x", expand=True)
         self.apply_btn = ttk.Button(info, text=tr("image.apply"), command=self.apply)  # (packed while editing)
         for ev in ("<Map>", "<Unmap>"):  # (the window's least width counts it: fit_side)
@@ -1186,7 +1235,46 @@ class ImageWindow(tk.Toplevel):
         if self.late:
             self.after_cancel(self.late)
         self.stop_making()
-        self.app.image_window = None
+        setattr(self.app, self.ATTR, None)
         self.app.roll.delete("picdrag")  # (closed while the handle was dragged)
         self.destroy()
         self.app.roll.focus_set()
+
+
+def image_editor(cls):
+    """Image to notes changing the user's DEFAULT only (Settings → User set defaults; like
+    default_pin.default_editor): the window with no picture (none opened, the last one not reopened); dragging /
+    placing hidden; the session's last picture + settings left as they were; OK saves, X / Esc change nothing."""
+    class Editor(cls):
+        ATTR = cls.ATTR + "_defaults"
+        editing_default = True
+
+        def __init__(self, app, done=None):
+            self.done = done
+            self.kept_last = app.image_last
+            super().__init__(app)
+            self.title(tr("defaults.edit_title", name=cls.default_title()))
+            for w in (self.handle, self.place_btn):
+                w.pack_forget()
+            ttk.Button(self.info_row, text=tr("range_window.ok"), command=self.ok).pack(side="right", padx=8,
+                                                                                       before=self.pin_place)
+
+        def pin_row(self, row):
+            """(no pin here: OK is what saves)"""
+
+        def load(self, path, quiet=False, then=None):
+            return False  # (no picture here)
+
+        def ok(self):
+            self.save_default()
+            self.close()
+
+        def close(self):
+            if self.late:
+                self.after_cancel(self.late)
+            self.stop_making()
+            self.app.image_last = self.kept_last  # (the session's last picture + settings as they were)
+            setattr(self.app, self.ATTR, None)
+            self.destroy()
+    Editor.__name__ = cls.__name__ + "Default"
+    return Editor
