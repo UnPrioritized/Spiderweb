@@ -44,6 +44,17 @@ GROUP_ONLY =("grp", "most")  # (page settings that may differ between the shapes
 
 class PathWindow(ToolWindow):
     KEY, ATTR, POS, DEFAULTS = "path", "path_window", "path_pos", PATH_DEFAULTS
+    # ("use as default": never the points placed on the piano roll, the zoom they were placed at or the group box;
+    # user 2026-11-23)
+    LEFT_OUT = ("pts", "mids", "k", "grp")
+
+    @classmethod
+    def describe_default(cls, v, ppq):
+        """Settings → User set defaults: how the copies are spaced and their speed."""
+        v = dict(PATH_DEFAULTS, **v)
+        every = (f"{tr('path.every')} {fmt(round(v['every'] * ppq))} {tr('unit.ticks')}" if v["mode"] == "every"
+                 else f"{tr('path.count')} {v['count']}")
+        return ", ".join([every, f"{tr('path.speed')} {tr('path.' + v['speed'])}"])
     loose = False  # the last point follows the mouse on the piano roll until a click places it
     adding = False  # Add point pressed: the new point comes with the mouse's first move on the piano roll
     idle = False  # another shape selected meanwhile: no new path until the menu / + asks for one (user)
@@ -172,7 +183,7 @@ class PathWindow(ToolWindow):
         reset = ttk.Button(row, text=tr("path.reset"), command=self.reset)
         reset.pack(side="left")
         Tooltip(reset, tr("path.tip_reset"))
-        ttk.Button(row, text=tr("path.accept"), command=self.accept).pack(side="right")
+        self.accept_row(row, tr("path.accept"))
         self.plain_button = ttk.Button(row, text=tr("path.plain"), command=self.plain_shapes)
         self.plain_button.pack(side="right", padx=(0, 8))
         Tooltip(self.plain_button, tr("path.tip_plain"))
