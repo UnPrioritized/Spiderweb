@@ -318,6 +318,7 @@ class SettingsWindow(tk.Toplevel):
         self.build_tips(f)
         self.build_file_link(f)
         self.build_new_projects(page("new", tr("settings.cat_new")))  # (user 2026-11-18: its own page)
+        self.build_defaults(page("defaults", tr("defaults.page")))  # (user 2026-11-23: PLAN.md stage D2)
         f = page("look", tr("settings.look_tab"))
         f.head(tr("settings.look_tab"))
         self.look = f.row(tr("look.look"), look_box(f.page), tip=tr("settings.look_hint"))
@@ -596,6 +597,126 @@ class SettingsWindow(tk.Toplevel):
         fill()
         # (an index saved while Settings is open: listed when the page is shown again, hunt 2026-11-07)
         self.tabs.on_show[str(self.pages["loaded"])] = fill
+
+    # windows with a "use as default" pin: the defaults file's section -> the window (files/shape_defaults.py)
+    DEFAULT_WINDOWS = ("extend", "subtract")
+
+    def build_defaults(self, f):
+        """User set defaults (user 2026-11-23, PLAN.md stage D2): every tool window whose saved default differs from
+        the program's own, one row each (where it's from + a short summary), scrolling both ways. Ctrl / Shift click
+        picks several; Reset… asks ONCE for all picked. Double-click / Enter = that window opens to change the
+        default; only the row under the mouse / the focused row, and only ONE such window at a time (user: Ctrl+A +
+        Enter could open many): another one while it's open brings it to the front."""
+        from files import shape_defaults
+        from window.subtract_window import describe
+        Tooltip(f.head(tr("defaults.page")), tr("defaults.page_tip"))
+        f.note(tr("defaults.page_note"), tip=tr("defaults.page_tip"))
+        box = ttk.Frame(f.page)
+        box.grid(row=f.r, column=0, columnspan=2, sticky="ew", pady=3)
+        f.r += 1
+        s = self.app.scale
+        tree = self.defaults_tree = ttk.Treeview(box, columns=("where", "what"), show="headings", height=6,
+                                                 selectmode="extended")
+        tree.heading("where", text=tr("defaults.col_where"), anchor="w")
+        tree.heading("what", text=tr("defaults.col_what"), anchor="w")
+        # (the list keeps a fixed size; a long summary scrolls sideways instead of widening Settings)
+        tree.column("where", width=round(120 * s), minwidth=round(90 * s), stretch=False)
+        tree.column("what", width=round(900 * s), minwidth=round(300 * s), stretch=False)
+        ys = ttk.Scrollbar(box, orient="vertical", command=tree.yview)
+        xs = ttk.Scrollbar(box, orient="horizontal", command=tree.xview)
+        tree.configure(yscrollcommand=ys.set, xscrollcommand=xs.set)
+        tree.grid(row=0, column=0, sticky="nsew")
+        ys.grid(row=0, column=1, sticky="ns")
+        xs.grid(row=1, column=0, sticky="ew")
+        box.columnconfigure(0, weight=1)
+        box.rowconfigure(0, weight=1)
+        box.configure(width=round((NOTE_WRAP + 80) * s), height=round(190 * s))
+        box.grid_propagate(False)
+        row = ttk.Frame(f.page)
+        row.grid(row=f.r, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        f.r += 1
+        change = ttk.Button(row, text=tr("defaults.change"), takefocus=False,
+                            command=lambda: self.open_default(tree.focus()))
+        change.pack(side="left")
+        Tooltip(change, tr("defaults.change_tip"))
+        reset = ttk.Button(row, text=tr("defaults.reset"), takefocus=False, command=self.reset_defaults)
+        reset.pack(side="left", padx=(6, 0))
+        Tooltip(reset, tr("defaults.reset_tip"))
+        empty = self.defaults_empty = f.note(tr("defaults.none"), colour=look.HINT)
+        self.default_window = None
+
+        def fill():
+            picked = set(tree.selection())
+            tree.delete(*tree.get_children())
+            for sec in shape_defaults.sections():
+                if sec not in self.DEFAULT_WINDOWS:
+                    continue
+                saved = self.clean_default(sec)
+                if saved is None:
+                    continue
+                tree.insert("", "end", iid=sec, values=(tr(f"{sec}.title"), describe(sec, saved, self.app.ppq)))
+            tree.selection_set([i for i in picked if tree.exists(i)])
+            got = bool(tree.get_children())
+            if got:
+                empty.grid_remove()
+            else:
+                empty.grid()
+            for b in (change, reset):
+                b.state(["!disabled"] if got else ["disabled"])
+        self.fill_defaults = fill
+        tree.bind("<Double-1>", lambda e: (self.open_default(tree.identify_row(e.y)), "break")[1])
+        tree.bind("<Return>", lambda e: (self.open_default(tree.focus()), "break")[1])
+        tree.bind("<Delete>", lambda e: self.reset_defaults())
+        fill()
+        self.tabs.on_show[str(self.pages["defaults"])] = fill  # (a default saved with a pin meanwhile: listed)
+
+    def clean_default(self, sec):
+        """The section's saved default made valid, or None."""
+        from files import shape_defaults
+        v = shape_defaults.get(sec).get("settings")
+        if v is None:
+            return None
+        if sec == "extend":
+            from notes.extend import clean_extend
+            return clean_extend(v)
+        from notes.subtract import clean_subtract
+        return clean_subtract(v)
+
+    def default_window_class(self, sec):
+        from window.extend_window import ExtendWindow
+        from window.subtract_window import SubtractWindow, default_editor
+        return default_editor({"extend": ExtendWindow, "subtract": SubtractWindow}[sec])
+
+    def open_default(self, sec):
+        """One row's window, changing its default (never more than one open: the open one comes to the front)."""
+        w = self.default_window
+        if w is not None and w.winfo_exists() and not w.closed:
+            w.lift()
+            w.focus_set()
+            return
+        if not sec or sec not in self.DEFAULT_WINDOWS:
+            return
+        self.default_window = self.default_window_class(sec)(self.app, done=self.fill_defaults)
+        self.default_window.transient(self)
+
+    def reset_defaults(self):
+        """The picked rows back to the program's own, after ONE question naming them all."""
+        from files import shape_defaults
+        picked = [i for i in self.defaults_tree.selection() if i in self.DEFAULT_WINDOWS]
+        if not picked:
+            return
+        names = "\n".join(tr(f"{sec}.title") for sec in picked)
+        if not messagebox.askyesno(tr("defaults.reset_title"), tr("defaults.reset_ask", names=names), parent=self):
+            return
+        w = self.default_window
+        for sec in picked:
+            try:
+                shape_defaults.forget(sec)
+            except OSError:
+                self.app.status.config(text=tr("defaults.cant_save"))
+            if w is not None and w.winfo_exists() and not w.closed and w.KEY == sec:
+                w.cancel()  # (its window would save the old one back on OK)
+        self.fill_defaults()
 
     def build_copying(self, f):
         """Copying: what Ctrl+C puts on the clipboard besides Spiderweb's own copy (App.put_clipboard)."""

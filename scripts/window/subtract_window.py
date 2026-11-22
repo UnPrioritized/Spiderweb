@@ -54,6 +54,42 @@ def kind(v):
     return "ticks" if v[0] is None else "pct" if not v[1] else "both"
 
 
+def amount_text(v, ppq):
+    """[% or None, beats] as typed: 50% + 10 / 50% / 10."""
+    p, b = v
+    ticks = ticks_of(b, ppq)
+    parts = [] if p is None else [fmt(p) + "%"]
+    if ticks or p is None:
+        parts.append(fmt(ticks))
+    return " + ".join(parts)
+
+
+def describe(key, saved, ppq):
+    """A saved default in a few words (Settings → User set defaults): each side used, its amount (and the second one
+    with a graph), "only touching", "same amount"."""
+    def side_words(s):
+        a = amount_text(value_of(s, "by"), ppq)
+        if s.get("vary") and "to" in s:
+            a = tr("defaults.from_to", a=a, b=amount_text(value_of(s, "to"), ppq))
+        ends = [value_of(s, "by")] + ([value_of(s, "to")] if s.get("vary") and "to" in s else [])
+        kinds = {kind(v) for v in ends}
+        unit = tr("subtract.pct_word") if kinds == {"pct"} else tr("subtract.ticks") if "pct" not in kinds \
+            else tr("subtract.both_word")  # (50% + 10 ticks / 10% of each note / 2 ticks to 50%: both words)
+        words = [f"{a} {unit}"]
+        if s.get("touch"):
+            words.append(tr("defaults.touching"))
+        if s.get("same"):
+            words.append(tr("defaults.same"))
+        return ", ".join(words)
+    if key == "extend":
+        return side_words(saved)
+    parts = []
+    for name, s in (("subtract.side_end", end_side(saved)), ("subtract.side_start", saved.get("start"))):
+        if side_used(s):
+            parts.append(f"{tr(name)}: {side_words(s)}")
+    return " · ".join(parts) or tr("defaults.nothing_used")
+
+
 def step_text(text, delta):
     """A box's text with its LAST number stepped by delta (never under 0): 50% + 10 -> 50% + 11; None when the text
     doesn't end in a number."""
@@ -445,8 +481,6 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         remember_place(self, self.T)
         self.focus_set()
 
-    BOX_WIDTH = 7  # (letters the amount boxes show)
-
     def number_box(self, row, var, key, label):
         label.pack(side="left", padx=(0 if key == "by" else 6, 0))
         e = ttk.Entry(row, textvariable=var, width=self.BOX_WIDTH)
@@ -682,12 +716,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     # ---- the amounts: [% or None, beats], ticks shown whole
 
     def text_of(self, v):
-        p, b = v
-        ticks = ticks_of(b, self.app.ppq)
-        parts = [] if p is None else [fmt(p) + "%"]
-        if ticks or p is None:
-            parts.append(fmt(ticks))
-        return " + ".join(parts)
+        return amount_text(v, self.app.ppq)
 
     def read(self, text, ppq=None):
         """Typed text -> [% or None, beats] (whole % and whole ticks, each at most its most), or None (self.why = the
@@ -1060,6 +1089,90 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.app.colour_edit_leave(self.KEY)  # (the steps after it worked out again)
         self.destroy()
         self.app.roll.focus_set()
+
+
+def default_editor(cls):
+    """cls (SubtractWindow / ExtendWindow) changing the user's DEFAULT only (Settings → User set defaults, double-click
+    a row; user 2026-11-23): the same window on a stand-in shape no one sees; no shape, selection or undo step
+    touched; OK saves it as the default, Cancel changes nothing. done(): called after OK (the list refreshed)."""
+    class Editor(cls):
+        ATTR = cls.ATTR + "_defaults"
+        editing_default = True
+
+        def __init__(self, app, done=None):
+            self.fake = {"kind": "line", "pts": [[0, 60], [1, 61]]}
+            saved = self.saved_default()
+            if saved is not None:
+                self.fake[cls.KEY] = saved
+            self.done = done
+            super().__init__(app)
+            self.title(tr("defaults.edit_title", name=self.tx("title")))
+
+        @property
+        def tgts(self):
+            return [self.fake]
+
+        def pin_row(self, row):
+            """(no pin here: OK is what saves)"""
+
+        def retarget(self, start=False):
+            self.idx = [0]
+            self.saved_sel = None
+            self.before = self.now = self.sub_now()
+            self.kept = self.own_now()
+            self.load(True)
+            self.store()
+            self.hist.reset()
+
+        def store(self):
+            for i, t in enumerate(self.tgts):
+                if not self.ons[i]:
+                    t.pop(self.KEY, None)
+                else:
+                    t[self.KEY] = self.made_of(i)
+            self.now = self.sub_now()
+            self.show()
+
+        def sync(self):
+            """(the main window's selection doesn't matter here)"""
+
+        def settle(self, also=()):
+            """(nothing tried on shapes to keep)"""
+
+        def ok(self):
+            self.take_typing()
+            if self.ons[0]:
+                self.save_default()
+            else:
+                self.forget_default()
+            done = self.done
+            self.close()
+            if done:
+                done()
+
+        def save_default(self):
+            mine = dict(self.fake.get(self.KEY) or {})
+            mine.pop("cuts", None)
+            try:
+                shape_defaults.put(self.KEY, {"settings": mine})
+            except OSError:
+                self.app.status.config(text=tr("defaults.cant_save"))
+
+        def forget_default(self):
+            try:
+                shape_defaults.forget(self.KEY)
+            except OSError:
+                self.app.status.config(text=tr("defaults.cant_save"))
+
+        def cancel(self):
+            self.close()
+
+        def close(self):
+            self.closed = True
+            setattr(self.app, self.ATTR, None)
+            self.destroy()
+    Editor.__name__ = cls.__name__ + "Default"
+    return Editor
 
 
 def open_subtract(app):
