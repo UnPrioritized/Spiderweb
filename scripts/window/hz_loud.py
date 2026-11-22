@@ -26,7 +26,7 @@ from window import look
 from window.canvas_keep import KeptItems
 from window.hz_layers import layer_colour
 from window.velocity import curve_env, curve_mid, limit_bend, segment
-from window.widgets import Tooltip
+from window.widgets import Tooltip, menu_click, popup_menu
 
 TOP = 127.0  # the pane counts both lines in velocity steps: the layer's 100 % = 127
 NOTE_LEVELS = (127, 96, 64, 32)
@@ -288,6 +288,8 @@ class LoudPane:
         return None
 
     def on_press(self, e):
+        if menu_click(e):  # (the click that closed the pane's right-click menu: nothing)
+            return
         win = self.win
         win.canvas.focus_set()  # (the window's keys: Space, Ctrl+Z...)
         win.fx.pressed = False
@@ -446,7 +448,7 @@ class LoudPane:
             if any(len(n.get("vel") or ()) > 2 for i, n in enumerate(win.tones) if not win.sel or i in win.sel):
                 menu.add_command(label=tr("hz.simplify"), command=win.simplify_loud)
         if menu.index("end") is not None:
-            menu.tk_popup(e.x_root, e.y_root)
+            popup_menu(menu, self.canvas, e)  # (its closing click does nothing: on_press)
 
     def clear_notes(self):
         """The notes' own lines taken away (the selected ones when some are): the Hz bass's velocity again."""

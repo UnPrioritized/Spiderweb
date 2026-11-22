@@ -10,6 +10,8 @@ from notes.sustain import MOST_PAST, MOST_POINTS, is_sustained
 from roll.roll_shared import CTRL, SHIFT
 from window import look
 from window.sustain_window import bare_notes, target_indices
+from window.widgets import popup_menu
+import tkinter as tk
 
 GRAB = 5  # px either side of a line that grab it
 
@@ -147,13 +149,25 @@ class SustainStops:
             win.stops_changed()
 
     def stop_right(self, e):
-        """A right-click on a stop line: the stop goes. True if taken."""
+        """A right-click on a stop line: a menu with Remove sustain stop (THE CONTROL SCHEME: never at once; hunt
+        2026-11-23, user took it). True if taken."""
         hit = self.stop_hit(e.x, e.y, e.state)
         if hit is None:
             return False
         i, k = hit
-        self.stop_edit(i, tr("sustain.remove_stop"), lambda st: st["at"].pop(k))
+        m = tk.Menu(self, tearoff=0)
+        m.add_command(label=tr("sustain.remove_stop"), command=lambda: self.stop_drop(i, k))
+        popup_menu(m, self, e)
         return True
+
+    def stop_drop(self, i, k):
+        """Stop k of shape i taken away (one undo step), if it's still there."""
+        if self.holding() or not 0 <= i < len(self.app.shapes):
+            return
+        st = ((self.app.shapes[i].get("sustain") or {}).get("stops")) or {}
+        if not 0 <= k < len(st.get("at") or ()):
+            return
+        self.stop_edit(i, tr("sustain.remove_stop"), lambda st: st["at"].pop(k))
 
     def stop_here(self, i, at):
         """The share for a new stop on shape i at at.x (on the grid; at.state Shift = free), or None: not sustained,

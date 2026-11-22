@@ -1049,12 +1049,36 @@ MENU_CLICK_S = 0.25  # a press this soon after a right-click menu closed = the c
 
 def popup_menu(menu, owner, e):
     """A right-click menu at the mouse (THE CONTROL SCHEME: right-click = a menu). The press that closes it must do
-    nothing on owner: its press handler starts with `if menu_click(e): return`."""
+    nothing on owner: its press handler starts with `if menu_click(e): return`. ONLY a menu closed by clicking away
+    arms that: an item picked (its command runs before or after the menu closes) clears it, so a quick click right
+    after Delete point still works (hunt 2026-11-23)."""
+    picked = [False]
+
+    def wrapped(cmd):
+        def run():
+            picked[0] = True
+            owner._menu_shut = 0.0
+            return menu.tk.eval(cmd)
+        return run
+    def wrap_all(m, depth=0):
+        end = m.index("end")
+        for i in range(0 if end is None else end + 1):
+            kind = m.type(i)
+            if kind in ("command", "checkbutton", "radiobutton"):
+                cmd = str(m.entrycget(i, "command"))
+                if cmd:
+                    m.entryconfigure(i, command=wrapped(cmd))
+            elif kind == "cascade" and depth < 4:  # (a pick inside a submenu counts too)
+                sub = str(m.entrycget(i, "menu"))
+                if sub:
+                    wrap_all(m.nametowidget(sub), depth + 1)
+    wrap_all(menu)
     try:
-        menu.tk_popup(e.x_root, e.y_root)
+        menu.tk_popup(getattr(e, "x_root", 0), getattr(e, "y_root", 0))
     finally:
         menu.grab_release()
-        owner._menu_shut = time.perf_counter()
+        if not picked[0]:
+            owner._menu_shut = time.perf_counter()
 
 
 TYPING = {"Entry", "TEntry", "Text", "Spinbox", "TSpinbox", "TCombobox"}  # (Enter there = that box's own)

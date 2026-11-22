@@ -10,9 +10,9 @@ Points, handles, knobs and sliders, in a graph, on the piano roll or in the Hz b
 • Middle-click = back to its default (a knob to 0, a slider to its usual value).
 • Shift while dragging = off the grid.
 
-Clicks pair up: a double-click and then one more quick click is a double-click and a click, never two double-clicks.
+Clicks pair up: a double-click and then one more quick click is a double-click and a click, never two double-clicks. After you pick something from a right-click menu you can click again at once; only the click that closes a menu without picking anything does nothing.
 
-The drawing tools' curves work like a pen tool and keep their own way: right-click an anchor of a curve, a lasso or a formula's curve to take its handles off or remove it.
+Two places keep their own way on purpose: a Hz bass note double-clicked with the Pencil is deleted (like many MIDI programs' pencil), and right-clicking the first or last point of a note's bend opens the note's menu. The drawing tools' curves work like a pen tool and keep their own way too: right-click an anchor of a curve, a lasso or a formula's curve to take its handles off or remove it.
 
 ## Number boxes
 

@@ -792,7 +792,7 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
         self.bind("<ButtonPress-1>", self.on_press)
         self.bind("<B1-Motion>", self.on_drag)
         self.bind("<ButtonRelease-1>", self.on_release)
-        bind_double(self, self.on_double, self.on_press)
+        bind_double(self, self.on_double, self.on_quick_click)
         self.bind("<Motion>", self.on_motion)
         self.bind("<Leave>", lambda e: (self.rebar_hover(None), self.drag or self.placing or self.box.pick_tool_hint()))
         bind_double_right(self, self.on_right, self.on_double_right)
@@ -2053,6 +2053,13 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
         if d:
             self.request_redraw()
         return only
+
+    def on_quick_click(self, e):
+        """A 3rd, 5th... quick click (double-clicks pair up: widgets.bind_double): a plain press, but never one that
+        shuts the BPM box the double-click just opened (hunt 2026-11-23: it flashed open and shut)."""
+        if self._typing:
+            return "break"
+        return self.on_press(e)
 
     def on_double(self, e):
         """Double-click on a point: type its BPM. Elsewhere: a press like any other."""

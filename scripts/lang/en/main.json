@@ -2127,6 +2127,7 @@
  "panel_custom.hz_update_tip": "The tempo changed since this Hz bass was made: its tone is off until it's updated to the new tempo.",
  "colours.channels_tip": "How many channels the notes take turns over (each a colour of its own).",
  "menu.key_f2": "F2",
+ "roll.centre_back": "Back to the middle",
  "panel_text.low_keys": "Low keys",
  "panel_text.high_keys": "High keys",
  "panel_text.direction": "Direction",

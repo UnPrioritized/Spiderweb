@@ -889,11 +889,30 @@ class HelpWindow(tk.Toplevel):
 
 
 def open_help(app, topic_id=None):
-    """The Help window (one of it), at that topic."""
+    """The Help window (one of it), at that topic. A window holding the mouse (Range, Add between, graphs: grab_set)
+    lets it go while Help shows and takes it back once Help is closed (hunt 2026-11-23: F1 there opened a Help page
+    that took no clicks)."""
+    held = app.grab_current()
     win = getattr(app, "help_window", None)
     if win is None or not win.winfo_exists():
         win = app.help_window = HelpWindow(app)
+    if held is not None and held is not win:
+        held.grab_release()
+        give_back_grab(app, win, held)
     win.deiconify()
     win.lift()
     win.focus_force()
     win.open_topic(topic_id or "welcome")
+
+
+def give_back_grab(app, help_win, held, every_ms=300):
+    """held gets the mouse back once the Help window is closed / hidden (if held is still open by then)."""
+    def check():
+        try:
+            if help_win.winfo_exists() and help_win.winfo_viewable():
+                app.after(every_ms, check)
+            elif held.winfo_exists() and held.winfo_viewable() and app.grab_current() is None:
+                held.grab_set()
+        except tk.TclError:
+            pass
+    app.after(every_ms, check)

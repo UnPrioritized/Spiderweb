@@ -245,7 +245,7 @@ class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzLfo, 
         c.config(cursor="")
         c.bind("<Configure>", self.on_resize)
         c.bind("<ButtonPress-1>", self.on_press)
-        bind_double(c, self.on_double, self.on_press)
+        bind_double(c, self.on_double, self.on_quick_click)
         c.bind("<B1-Motion>", self.on_drag)
         c.bind("<ButtonRelease-1>", self.on_release)
         c.bind("<ButtonPress-2>", self.pan_start)

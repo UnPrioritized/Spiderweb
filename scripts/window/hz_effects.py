@@ -48,7 +48,7 @@ from roll.roll_shared import BOX_STILL, CTRL, MAX_SX, MIN_SX, SELECT_CURSOR, SHI
 from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.canvas_keep import KeptItems
-from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, remember_place, traced
+from window.widgets import REDO_KEYS, UNDO_KEYS, Scrub, menu_click, popup_menu, remember_place, traced
 
 # (not orange, red, green or blue: selected notes, the red line, the exact tone, notes)
 REPEAT_MOST = 999  # Repeat every… [n] / [n]: the biggest number in either box
@@ -786,6 +786,8 @@ class FxPane:
         return tr("hz.fx_value", name=tr("hz.fx_" + name), value=f"{value * 100:.4g}")
 
     def on_press(self, e):
+        if menu_click(e):  # (the click that closed the pane's right-click menu: nothing)
+            return
         self._spans = None
         win = self.win
         win.canvas.focus_set()
@@ -1013,10 +1015,11 @@ class FxPane:
         self.win.commit_fx(before)
 
     def on_double(self, e):
-        """A double click on a point deletes it; the last point takes the effect off."""
+        """A double click on a bend: straight again. On a point: nothing (THE CONTROL SCHEME, user 2026-11-23:
+        double-click never deletes; Delete point is in its right-click menu, or the Delete key)."""
         hit = self.hit(e.x, e.y)
         if hit and hit[0] == "point":
-            self.delete_point(hit[1], hit[2])
+            return
         elif hit and hit[0] == "bend":
             self.set_bend(hit[1], hit[2], 0.0)
         else:
@@ -1515,7 +1518,7 @@ class FxPane:
         for fx in on:
             menu.add_command(label=tr("hz.fx_remove", name=tr("hz.fx_" + fx)), command=lambda fx=fx: self.remove(fx))
         if menu.index("end") is not None:  # (nothing on and nothing under the mouse: no menu)
-            menu.tk_popup(e.x_root, e.y_root)
+            popup_menu(menu, self.canvas, e)  # (its closing click does nothing on the pane: on_press)
 
     def on_wheel(self, e):
         """The time of the notes above: wheel = sideways, Ctrl = zoom around the mouse. Over the effects' names when

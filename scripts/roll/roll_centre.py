@@ -20,6 +20,8 @@ from notes.recolour import (DRAWN, KEEP, PAGE, pages_before, LEAST_REACH, SPOT_L
 from roll.roll_shared import CTRL
 from roll.roll_gliss import clip_polyline
 from roll.roll_shared import SHIFT
+import tkinter as tk
+from window.widgets import popup_menu
 from window import look
 
 GRAB = 8  # px: how near the dot (or a Stir's circle line) the mouse must be to grab it
@@ -438,11 +440,27 @@ class CentreDots:
         return True
 
     def centre_right(self, e):
-        """A right-click on a Centre point dot: every selected shape's Centre point of that kind back to the
-        middle (like Nested's; one undo step, none when nothing moves). True if taken."""
+        """A right-click on a Centre point dot: a menu with Back to the middle (THE CONTROL SCHEME: right-click = a
+        menu; middle-click the dot does it at once: centre_reset). True if taken."""
         made = self.centre_hit(e)
         if made is None:
             return False
+        m = tk.Menu(self, tearoff=0)
+        m.add_command(label=tr("roll.centre_back"), command=lambda: self.centre_back(made))
+        popup_menu(m, self, e)
+        return True
+
+    def centre_reset(self, e):
+        """A middle-click on a Centre point dot: back to the middle at once. True if taken."""
+        made = self.centre_hit(e)
+        if made is None:
+            return False
+        self.centre_back(made)
+        return True
+
+    def centre_back(self, made):
+        """Every selected shape's Centre point of that kind back to the middle (like Nested's; one undo step, none
+        when nothing moves)."""
         if made[3] in ("stir", "spot"):  # (the area's own spot: back to the middle too)
             self.set_centre(made[3], [50.0, 50.0], tr("stir.undo_" + ("centre" if made[3] == "stir" else "spot")))
         else:

@@ -2560,6 +2560,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if (self._pan and not self._panned and abs(e.x - self._pan[0]) <= 3 and abs(e.y - self._pan[1]) <= 3
                 and not self.drag and self.lasso_middle(e)):  # (a waiting lasso loop: a point added there)
             return
+        if (self._pan and not self._panned and abs(e.x - self._pan[0]) <= 3 and abs(e.y - self._pan[1]) <= 3
+                and not self.drag and not self.draft and self.centre_reset(e)):  # (THE CONTROL SCHEME:
+            return  # middle-click a Centre point dot = back to the middle)
         sh = self.point_shape()
         if (not self._pan or self._panned or abs(e.x - self._pan[0]) > 3 or abs(e.y - self._pan[1]) > 3 or self.draft
                 or self.drag or not sh or sh["kind"] not in ("poly", "funnel", "curve", "custom", "gliss")

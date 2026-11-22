@@ -226,7 +226,9 @@ class ImageWindow(DefaultPin, tk.Toplevel):
         self.bind("<KeyRelease-space>", lambda e: (self.hold(False), "break")[1])
         self.bind("<F1>", lambda e: (app.open_help("picture"), "break")[1])
         self.bind("<Escape>", lambda e: self.cancel_making() if self.making else self.close())
-        enter_presses(self, lambda: self.apply_btn if self.apply_btn.winfo_ismapped() else self.place_btn)  # (THE CONTROL SCHEME: Enter = the main button shown)
+        enter_presses(self, lambda: next((b for b in (self.apply_btn, self.place_btn, getattr(self, "ok_btn", None))
+                                          if b is not None and b.winfo_ismapped()), None))  # (THE CONTROL SCHEME:
+        # Enter = the main button SHOWN: Apply, Place, or OK in the default editor; hunt 2026-11-23)
         self.show_settings()
         if last and os.path.isfile(last[0]):
             self.load(last[0], quiet=True)
@@ -1265,7 +1267,8 @@ def image_editor(cls):
             self.title(tr("defaults.edit_title", name=cls.default_title()))
             for w in (self.handle, self.place_btn):
                 w.pack_forget()
-            ttk.Button(self.info_row, text=tr("range_window.ok"), command=self.ok).pack(side="right", padx=8,
+            self.ok_btn = ttk.Button(self.info_row, text=tr("range_window.ok"), command=self.ok)
+            self.ok_btn.pack(side="right", padx=8,
                                                                                        before=self.pin_place)
 
         def pin_row(self, row):

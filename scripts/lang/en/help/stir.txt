@@ -15,7 +15,7 @@ Centre point: where Turn and Twist go around, in % of the shape's box. It may go
 
 With "Moving the Centre point squeezes the colours" ticked (the start), moving it also moves the middle of the colours there, so they get squeezed on one side and stretched on the other. Untick it to keep the colours where they are: the Centre point then only says where they turn and twist around. Middle puts the Centre point back in the middle (50 / 50).
 
-While the window is open the piano roll shows the Centre point as a dot with a dot inside: drag it (whole %, hold Shift for in between), right-click it to put it back in the middle.
+While the window is open the piano roll shows the Centre point as a dot with a dot inside: drag it (whole %, hold Shift for in between), middle-click it to put it back in the middle (or right-click it → Back to the middle).
 [clip:stir-centre]
 
 Twist 1 with the Centre point at 25 % across: on the left the colours squeeze towards it, on the right (unticked) they only twist around it.

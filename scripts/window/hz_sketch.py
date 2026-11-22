@@ -24,7 +24,7 @@ from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOB
                           split_bez, with_handles, WAVE_DRAWN)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
-from window.widgets import delete_menu, long_line
+from window.widgets import delete_menu, long_line, popup_menu
 from window.hz_bend import BEND, LINE_NEAR, NEAR, drop_point, follow_wobble, set_curve, tidy_bend
 
 SKETCH_WIDE = 0.6  # the line's thickness: this part of a key's row (between SKETCH_THIN and SKETCH_THICK px)
@@ -999,7 +999,7 @@ class HzSketch:
         menu.add_command(label=tr("hz.wobble_bake"), command=lambda: self.wobble_edit(i, u0, u1, "bake", None))
         menu.add_command(label=tr("hz.wobble_remove"), command=lambda: self.wobble_edit(i, u0, u1, "remove", None))
         menu.vars = (shape, flip, same)  # (kept while the menu shows)
-        menu.tk_popup(e.x_root, e.y_root)
+        popup_menu(menu, self.canvas, e)  # (its closing click does nothing: on_press)
         return True
 
     def wobble_edit(self, i, u0, u1, what, value):
@@ -1115,7 +1115,7 @@ class HzSketch:
                              command=lambda: self.sketch_curve_kind(i, j, True))
         menu.add_command(label=tr("hz.sketch_straight"), command=lambda: self.sketch_curve_kind(i, j, None))
         menu.kind = kind  # (kept while the menu shows)
-        menu.tk_popup(e.x_root, e.y_root)
+        popup_menu(menu, self.canvas, e)  # (its closing click does nothing: on_press)
 
     def sketch_curve_kind(self, i, j, s):
         """Piece j of note i: an S (s True), one curve (False), straight (None). One undo step."""

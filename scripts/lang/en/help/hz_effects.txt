@@ -3,7 +3,7 @@ Effects change how the tone sounds (only Pitch and Vibrato move its pitch). Pres
 
 Each effect is one line over all the notes, in step with them: 0 % at the bottom, 100 % at the top, flat before its first point and after its last.
 
-Drag a point to move it, press on the line to add a point, double-click a point to delete it (deleting the last one takes the effect off; Delete with no points selected takes the highlighted effect off).
+Drag a point to move it, press on the line to add a point, right-click a point and pick Delete point to delete it (deleting the last one takes the effect off; Delete with no points selected takes the highlighted effect off).
 
 Drag the small round handle in the middle of a line up or down to bend it (double-click it: straight again); right-click a line → Hold makes it a step. Right-click for more.
 

@@ -19,7 +19,7 @@ from notes.hzbass import LAYERS, TUNE, bend_for, can_slide, handle_u, left_edge,
 from roll.roll_shared import (BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, RULER_TOP, SELECT_CURSOR, SHIFT,
                               boxes_side, boxes_upright, grid_span, ruler_boxes)
 from window.hz_bend import BEND_TOOLS
-from window.widgets import menu_click
+from window.widgets import menu_click, popup_menu
 
 
 TUNE_STICK = 3.0  # cents: a dragged tune this near the exact tone sticks to it (at any zoom; was 5 px, user)
@@ -421,6 +421,20 @@ class HzMouse:
         return any(min(self.x_of(a[0]), self.x_of(a[2])) <= e.x <= max(self.x_of(a[0]), self.x_of(a[2]))
                    for a in ruler_boxes(kept))
 
+    def on_placed(self, e, hit):
+        """The Pencil pressed (no Ctrl) on the note the click before just placed: one more note (every click places
+        one, user)."""
+        return (hit and hit[0] in ("note", "tune", "left", "right") and self.placed is not None
+                and self.tones[hit[1]]["id"] == self.placed and not e.state & CTRL and self.tool.get() == "pencil")
+
+    def on_quick_click(self, e):
+        """A 3rd, 5th... quick click (double-clicks pair up: widgets.bind_double): a plain press, except on the note
+        the click before just placed with the Pencil: one more note there too (hunt 2026-11-23: quick clicks deleted
+        the notes they placed)."""
+        if self.on_placed(e, self.hit(e.x, e.y)):
+            return self.on_press(e, place=True)
+        return self.on_press(e)
+
     def on_double(self, e):
         """A double click on a note deletes it, when the button is let go with nothing changed (so a click and then
         a quick drag still moves it). With Select on empty space it pastes the copied notes there (user, like the
@@ -432,8 +446,7 @@ class HzMouse:
             # the 8-handle box: a press like any; the Bend tool: a curve
             return  # square straight again, else a press; no note deleted)
         hit = self.hit(e.x, e.y)
-        if (hit and hit[0] in ("note", "tune", "left", "right") and self.tones[hit[1]]["id"] == self.placed
-                and not e.state & CTRL and self.tool.get() == "pencil"):
+        if self.on_placed(e, hit):
             return self.on_press(e, place=True)
         if hit and hit[0] == "tune" and not e.state & CTRL:  # the red line (tall rows): its tune back to 0 (user)
             return self.reset_tune(hit[1])
@@ -902,7 +915,7 @@ class HzMouse:
                              state="normal" if pairs else "disabled")
         menu.add_separator()
         menu.add_command(label=tr("hz.box_delete", n=len(self.sel)), accelerator=tr("roll_menu.del"), command=self.delete_selected)
-        menu.tk_popup(e.x_root, e.y_root)
+        popup_menu(menu, self.canvas, e)  # (its closing click does nothing: on_press)
 
     def show_menu(self, e, hit):
         self.menu_wait = None
@@ -952,7 +965,7 @@ class HzMouse:
         if menu.index("end") is not None and menu.type("end") == "separator":  # (the gates' group ends with one)
             menu.delete("end")
         if menu.index("end") is not None:
-            menu.tk_popup(e.x_root, e.y_root)
+            popup_menu(menu, self.canvas, e)  # (its closing click does nothing: on_press)
 
     def delete_slide(self, s):
         """Slide s goes (the dots on both its notes)."""

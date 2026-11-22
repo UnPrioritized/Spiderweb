@@ -11,7 +11,7 @@ Stop every: the sustain stops every this many ticks, counted from the shape's fi
 
 Stop at my points: stops you put yourself. Add stop puts one on the next snap line after the last stop, Clear points takes them all away. These stops stretch with the shape when it's resized. With Allow past the shape's end ticked, a stop can sit past the end: the last notes on each key are then held on until it, so the shape gets longer.
 
-While the shape is selected, the piano roll shows these stops as lines. With the Select tool, drag a line to move its stop (it sticks to the snap lines; hold Shift to place it freely), or right-click a line to remove it. Ctrl+click and Ctrl+drag leave the lines alone.
+While the shape is selected, the piano roll shows these stops as lines. With the Select tool, drag a line to move its stop (it sticks to the snap lines; hold Shift to place it freely), or right-click a line and pick Remove sustain stop. Ctrl+click and Ctrl+drag leave the lines alone.
 
 To add a stop, right-click the shape → Add sustain stop here, or double-click the shape while the Sustain window is open. With a lot of notes and many stops there can be too many pieces: then the stops aren't put on, and the window says so.
 

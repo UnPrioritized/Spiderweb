@@ -193,7 +193,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
         lb = self.listbox
         ListTip(lb)
         lb.bind("<ButtonPress-1>", self.list_press)
-        bind_double(lb, lambda e: (self.stop_slow_click(), self.open_selected()), self.list_press)
+        # (a 3rd quick click after the double-click that opened it: nothing, never a slow-click rename; hunt 2026-11-23)
+        bind_double(lb, lambda e: (self.stop_slow_click(), self.open_selected()), lambda e: self.stop_slow_click())
         # Keys while the list has the keyboard work on the list (the drawing's own keys: click the board). Blue =
         # the list has the keyboard, grey = the board has it (user, like Windows' file lists).
         lb.bind("<Delete>", lambda e: (self.delete_selected(), "break")[1])
