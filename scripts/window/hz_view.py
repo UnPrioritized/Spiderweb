@@ -12,6 +12,8 @@ from notes.hzbass import (HZ_DEFAULTS, NOTE_BEND_MOST, all_tones, auto_state, be
                           bends, funnel_box, left_edge, links, pitch, slide_knob, slide_part, tone_keys)
 from roll.roll_shared import (ALT, CTRL, MAX_SX, MIN_SX, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name,
                               recheck_pointer, ruler_boxes)
+from notes.custom import box_frame
+from notes.hzbass import sound_span
 from notes.meter import bar_lines, beat_lines, sigs_of
 from window import look
 from window.canvas_keep import KeptItems
@@ -429,7 +431,9 @@ class HzView:
         width = max(2, round(2 * self.s))
         hz = self.line_hz()
         sh = self.target()  # (what's heard: at the tempo under it NOW, so a Hz bass made for another shows off)
-        now = app.hz_tempo_now(sh, hz) if sh is not None and sh.get("hz") else None
+        if sh is None or not sh.get("hz"):
+            sh = self.waiting_shape(hz) if sh is None else None  # (the first note held: where it will start)
+        now = app.hz_tempo_now(sh, hz) if sh is not None else None
         bpm = (now[1] or now[0]) if now else float(app.current_bpm() or 120)
         knobs = dict(hz, _memo={})  # (each slide's Glide curve: what the MOD tab needs worked out once)
         red = self.slide_red()
@@ -519,9 +523,25 @@ class HzView:
         return out
 
     def line_hz(self):
-        """The Hz bass the red line is worked out from: the shown one's settings with the window's notes."""
+        """The Hz bass the red line is worked out from: the shown one's settings with the window's notes. No Hz bass
+        yet (the first note held): made for the tempo heard where it will start, as the first note's let go makes it
+        (was: the BPM box's, so the line jumped on let go under another tempo)."""
         sh = self.target()
-        return dict((sh or {}).get("hz") or self.new_hz(float(self.app.current_bpm() or 120)), tones=self.tones)
+        if sh is not None and sh.get("hz"):
+            return dict(sh["hz"], tones=self.tones)
+        hz = dict(self.new_hz(float(self.app.current_bpm() or 120)), tones=self.tones)
+        stand = self.waiting_shape(hz) if sh is None else None
+        return self.app.hz_retimed(stand, hz) if stand is not None else hz
+
+    def waiting_shape(self, hz):
+        """No Hz bass yet, a start spot picked and notes placed: a stand-in for the shape the first note's let go
+        makes (hz_gates commit: same box), so the tempo heard there can be read. None otherwise."""
+        app = self.app
+        if app.hz_start is None or not self.tones:
+            return None
+        keys = app.hz_defaults or {}
+        lo, hi = keys.get("lo", 60), keys.get("hi", 60)
+        return {"kind": "custom", "pts": box_frame(app.hz_start, lo, app.hz_start + sound_span(hz), hi)}
 
     def slides_off(self):
         """True while the Arpeggio box is on: it plays new notes, leaving the slides made by hand out (like a
