@@ -11,6 +11,7 @@ from notes.copypath import LETTERS, all_points, clean_path, mid_of, track
 from roll.roll_draw import screen_lines
 from roll.roll_shared import SHIFT
 from window import look
+from window.widgets import delete_menu
 
 GRAB = 8  # px: how near a point the mouse must be to grab it
 MOST_DRAWN = 6000  # the most points of the dashed path line drawn
@@ -100,7 +101,7 @@ class PathEditing:
 
     def path_right(self, e):
         """A right-click while the window is open: the added point following the mouse dropped, or the point under
-        the mouse removed. True if taken."""
+        the mouse: a menu with Delete point (THE CONTROL SCHEME; greyed when it's the only one). True if taken."""
         w = self.path_win()
         if w is None:
             return False
@@ -109,8 +110,8 @@ class PathEditing:
         which = self.path_hit(e.x, e.y)
         if which is None or which[0] != "pt":
             return False
-        w.remove_point(which[1])
-        return True
+        return delete_menu(self, e, lambda i=which[1]: w.winfo_exists() and w.remove_point(i),
+                           len(w.lists()[0]) >= 2)
 
     def draw_copy_path(self):
         """The path, A, its points and middle points (while the window is open)."""

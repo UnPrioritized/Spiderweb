@@ -1057,6 +1057,15 @@ def popup_menu(menu, owner, e):
         owner._menu_shut = time.perf_counter()
 
 
+def delete_menu(owner, e, do, can=True):
+    """Right-click a point (THE CONTROL SCHEME): a menu with Delete point (greyed when it can't go, e.g. an end), never
+    deleting at once. do() runs on the pick. Returns True (the right-click is taken)."""
+    m = tk.Menu(owner, tearoff=0)
+    m.add_command(label=tr("graph_window.delete_point"), command=do, state="normal" if can else "disabled")
+    popup_menu(m, owner, e)
+    return True
+
+
 def menu_click(e):
     """This press (its event, or the widget pressed) is the click that closed that widget's right-click menu
     (popup_menu)."""

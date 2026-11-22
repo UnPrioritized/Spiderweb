@@ -19,6 +19,7 @@ from notes.hzbass import LAYERS, TUNE, bend_for, can_slide, handle_u, left_edge,
 from roll.roll_shared import (BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, RULER_TOP, SELECT_CURSOR, SHIFT,
                               boxes_side, boxes_upright, grid_span, ruler_boxes)
 from window.hz_bend import BEND_TOOLS
+from window.widgets import menu_click
 
 
 TUNE_STICK = 3.0  # cents: a dragged tune this near the exact tone sticks to it (at any zoom; was 5 px, user)
@@ -280,6 +281,9 @@ class HzMouse:
     def on_press(self, e, place=False):
         """place: a new note even if there's one under the mouse (see on_double)."""
         self.canvas.focus_set()
+        self._menu_closer = menu_click(self.canvas)  # (the click that closed a Delete point menu: nothing, its let
+        if self._menu_closer:                        # go too; widgets.popup_menu)
+            return
         if self.draw_press(e):  # (a drawing tool: hz_draw.py)
             return
         self.placed = None
@@ -716,6 +720,9 @@ class HzMouse:
                     s["in"] = min(max(0.0, s0["in"] - (n["t"] - was["t"])), n["len"])
 
     def on_release(self, e):
+        if getattr(self, "_menu_closer", False):
+            self._menu_closer = False
+            return
         if (self.draw_release(e) or self.bend_release(e) or self.detune_release(e) or self.rail_release(e)
                 or self.box8_release(e)):
             return

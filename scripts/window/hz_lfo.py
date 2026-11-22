@@ -24,7 +24,7 @@ from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, WOBBLE_RATE, WOBBLE_RATE_MOS
                           clean_speed, depth_most, depth_pts, fit_wobbles, set_depth, speed_mean, wobble_points)
 from roll.roll_shared import ALT, CTRL, SHIFT
 from window import look
-from window.widgets import REDO_KEYS, UNDO_KEYS, Tooltip, name_list, remember_place, set_names
+from window.widgets import REDO_KEYS, UNDO_KEYS, Tooltip, delete_menu, menu_click, name_list, remember_place, set_names
 
 BANK_FILE = os.path.join(USER, "hz_wobbles.json")  # the shape bank: drawn waves saved by name ({"shapes": [...]})
 GRAB = 7  # px: how near a point a press takes it
@@ -151,6 +151,8 @@ class LineEdit:
 
     def press(self, e):
         self.c.focus_set()
+        if menu_click(e):  # (the click that closed the right-click menu: nothing)
+            return
         if self.before:
             self.before()
         pts = [list(p) for p in self.get()]
@@ -208,12 +210,18 @@ class LineEdit:
             return     # under the held one made the next point follow the mouse)
         pts = [list(p) for p in self.get()]
         j = self.hit(e.x, e.y)
-        if j is not None and 0 < j < len(pts) - 1:
-            if self.before:
-                self.before()
-            pts = [list(p) for p in self.get()]
-            del pts[j]
-            self.put(pts)
+        if j is not None:  # (THE CONTROL SCHEME: a menu with Delete point, greyed on the ends)
+            delete_menu(self.c, e, lambda: self.drop(j), 0 < j < len(pts) - 1)
+
+    def drop(self, j):
+        """Point j taken away (Delete point in its right-click menu), if it's still a middle point."""
+        if self.drag or not 0 < j < len(self.get()) - 1:
+            return
+        if self.before:
+            self.before()
+        pts = [list(p) for p in self.get()]
+        del pts[j]
+        self.put(pts)
 
     def draw(self):
         c = self.c

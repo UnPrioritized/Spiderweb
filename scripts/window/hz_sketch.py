@@ -24,7 +24,7 @@ from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, WOBBLE_RATE, WOB
                           split_bez, with_handles, WAVE_DRAWN)
 from roll.roll_shared import ALT, CTRL, SHIFT, note_name
 from window import look
-from window.widgets import long_line
+from window.widgets import delete_menu, long_line
 from window.hz_bend import BEND, LINE_NEAR, NEAR, drop_point, follow_wobble, set_curve, tidy_bend
 
 SKETCH_WIDE = 0.6  # the line's thickness: this part of a key's row (between SKETCH_THIN and SKETCH_THICK px)
@@ -639,17 +639,24 @@ class HzSketch:
         self.redraw()
         return True
 
+    def sketch_depth_can_drop(self, i, which):
+        """which (a depth_hit) is a depth / speed point between its line's ends (right-click: its Delete point menu)."""
+        if which[0] not in ("pt", "spt") or self.picked_piece() is None or not 0 <= i < len(self.tones):
+            return False
+        _, _, u0, u1 = self.picked_piece()
+        run = self.wobble_run(self.tones[i], u0, u1)
+        pts = (run.get("speed") or EVEN_SPEED if which[0] == "spt" else depth_pts(run)) if run else ()
+        return 0 < which[1] < len(pts) - 1
+
     def sketch_depth_drop(self, i, which):
-        """A right-click on a depth point between the ends: it goes (one undo step). False for anything else (the
-        wobble's menu). A speed point between its ends: the same."""
-        if which[0] not in ("pt", "spt"):
+        """Delete point on a depth point between the ends (its right-click menu): it goes (one undo step). A speed
+        point between its ends: the same. False when it isn't one (any more)."""
+        if self.drag or not self.sketch_depth_can_drop(i, which):
             return False
         _, _, u0, u1 = self.picked_piece()
         run = self.wobble_run(self.tones[i], u0, u1)
         speed = which[0] == "spt"
         pts = (run.get("speed") or EVEN_SPEED if speed else depth_pts(run)) if run else ()
-        if not 0 < which[1] < len(pts) - 1:
-            return False
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
         kept = [p for k, p in enumerate(copy.deepcopy(pts)) if k != which[1]]
@@ -1136,20 +1143,15 @@ class HzSketch:
 
     def sketch_double(self, e, hit):
         """A double-click on a note's line ("note", tone): a point there (on the grid, on the line as it is, so
-        nothing changes yet), held like a pressed one; on a point ("point", tone, point): it goes (never the
-        first / last: the note's start and end). One undo step each."""
+        nothing changes yet), held like a pressed one (one undo step); on a point ("point", tone, point): nothing
+        (THE CONTROL SCHEME, user 2026-11-23: double-click never deletes; Delete point is in its right-click menu)."""
         self.drop_drag()
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
         i, n = hit[1], self.tones[hit[1]]
         self.sel, self.box_kept = {i}, None
         if hit[0] == "point":
-            if 0 < hit[2] < len(n.get("bend") or "..") - 1:
-                drop_point(n, hit[2])  # (its wobbles merged, hunt 2026-10-28)
-                self.bend_done({"i": i, "before": before}, tr("hz.step_note_bend_delete"))
-                self.point_again()
-            else:
-                self.redraw()
+            self.redraw()
             return True
         u = self.bend_spot(n, e)[0]
         pts = [list(p) for p in n.get("bend") or ([0.0, 0.0], [1.0, 0.0])]

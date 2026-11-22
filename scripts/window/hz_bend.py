@@ -27,6 +27,7 @@ from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, SLIDE_BEND, bend_of, bends, 
 from notes.hz_settings import keep_forward
 from roll.roll_shared import SHIFT
 from window import look
+from window.widgets import delete_menu
 
 NEAR = 6  # px: a press this near a bend point grabs it
 WOBBLE_SPOTS = 4000  # bend_line: spots along a wobbling note at most
@@ -452,21 +453,29 @@ class HzBend:
             self.handle_straight(hit[1], hit[2], hit[3])
             self.bend_done({"i": hit[1], "before": before}, tr("hz.step_handles"))
             return True
-        if hit and hit[0] == "wobble":  # (Sketch's depth line: a depth point goes; elsewhere the wobble's shape,
-            return self.sketch_depth_drop(hit[1], hit[2]) or self.sketch_wobble_menu(e, hit[1])  # Bake, Remove...)
+        if hit and hit[0] == "wobble":  # (Sketch's depth / speed line: a middle point's Delete point menu; elsewhere
+            if self.sketch_depth_can_drop(hit[1], hit[2]):  # the wobble's shape, Bake, Remove...)
+                return delete_menu(self.canvas, e, lambda i=hit[1], w=hit[2]: self.sketch_depth_drop(i, w))
+            return self.sketch_wobble_menu(e, hit[1])
         if hit and hit[0] == "curve" and self.sketching():  # (Sketch: Single curve / S-curve / Straight)
             self.sketch_curve_menu(e, hit[1], hit[2])
             return True
         if not hit or hit[0] != "point":
             return False
-        if self.sketching() and hit[2] in (0, len(self.tones[hit[1]].get("bend") or "..") - 1):  # (Sketch: its start
-            return False                                                              # and end stay: its menu)
+        if hit[2] in (0, len(self.tones[hit[1]].get("bend") or "..") - 1):  # (the start and end stay: the note's
+            return False                                                     # menu)
+        # (THE CONTROL SCHEME: right-click = a menu with Delete point, never at once)
+        return delete_menu(self.canvas, e, lambda i=hit[1], j=hit[2]: self.bend_drop(i, j))
+
+    def bend_drop(self, i, j):
+        """Bend point j of note i taken away (one undo step), if it's still a middle point of that note."""
+        if self.drag or not 0 <= i < len(self.tones) or not 0 < j < len(self.tones[i].get("bend") or "..") - 1:
+            return
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
-        drop_point(self.tones[hit[1]], hit[2])
-        self.bend_done({"i": hit[1], "before": before}, tr("hz.step_note_bend_delete"))
+        drop_point(self.tones[i], j)
+        self.bend_done({"i": i, "before": before}, tr("hz.step_note_bend_delete"))
         self.point_again()
-        return True
 
     def bend_motion(self, e):
         """The pointer with the Bend tool: a hand on a point, up / down arrows on a curve square, the pencil on a

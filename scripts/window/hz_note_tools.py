@@ -16,7 +16,7 @@ from files.mathexpr import fmt
 from notes.hzbass import NOTE_BEND_MOST, TUNE, handles, pitch, side_handles
 from roll.roll_shared import CTRL, SHIFT, note_name
 from window import look
-from window.widgets import REDO_KEYS, UNDO_KEYS, read_number, remember_place
+from window.widgets import REDO_KEYS, UNDO_KEYS, delete_menu, read_number, remember_place
 
 LOWEST, HIGHEST = 0, 127  # the keys a Hz bass note can sit on (the Hz window's rows)
 LETTERS = {"c": 0, "d": 2, "e": 4, "f": 5, "g": 7, "a": 9, "b": 11}
@@ -546,18 +546,27 @@ class HzNoteTools:
         return False
 
     def rail_menu(self, e):
-        """Right-click on a middle rail point: it goes (one step). Ends: nothing (they stay)."""
+        """Right-click on a rail point: a menu with Delete point (THE CONTROL SCHEME; greyed for the ends, which stay,
+        or when no spread would be left). Elsewhere on the rail: taken, nothing."""
         hit = self.rail_hit(e.x, e.y)
         if not hit:
             return False
         r = self.rail
-        if hit[0] == "pt" and 0 < hit[1] < len(r["pts"]) - 1 and self.rail_can_drop(r, hit[1], r["pts"]):
-            d = {"before": copy.deepcopy(self.tones), "pts0": copy.deepcopy(r["pts"])}
-            self.sel_before = (d["before"], self.sel_state())
-            del r["pts"][hit[1]]
-            self.rail_remade(r)
-            self.rail_done_step(d, tr("hz.step_detune_rail"))
+        if hit[0] == "pt":
+            j = hit[1]
+            can = 0 < j < len(r["pts"]) - 1 and self.rail_can_drop(r, j, r["pts"])
+            delete_menu(self.canvas, e, lambda: self.rail_drop(r, j), can)
         return True
+
+    def rail_drop(self, r, j):
+        """Rail point j taken away (one step), if the rail is still the one the menu was for."""
+        if self.drag or r is not self.rail or not 0 < j < len(r["pts"]) - 1 or not self.rail_can_drop(r, j, r["pts"]):
+            return
+        d = {"before": copy.deepcopy(self.tones), "pts0": copy.deepcopy(r["pts"])}
+        self.sel_before = (d["before"], self.sel_state())
+        del r["pts"][j]
+        self.rail_remade(r)
+        self.rail_done_step(d, tr("hz.step_detune_rail"))
 
     def rail_enter(self):
         """Enter: the rail is done (the copies stay as they are). False without a rail."""

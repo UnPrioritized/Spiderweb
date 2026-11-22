@@ -33,7 +33,7 @@ from roll.roll_draw import RollDrawing
 from roll.roll_funnel import FLAT, FunnelEditing
 from roll.roll_gliss import GlissEditing
 from roll.roll_hz import HzStart
-from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
+from window.widgets import bind_double, menu_click  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.big_ask import BIG
 from window.hz_window import open_hz
@@ -1352,10 +1352,16 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
 
     def on_left_down(self, e):
         self.left_down = True
+        self._menu_closer = menu_click(e)  # (the click that closed a Delete point menu, e.g. Copy along a path's:
+        if self._menu_closer:              # nothing, its let go too)
+            return None
         return self.on_press(e)
 
     def on_left_up(self, e):
         self.left_down = False
+        if getattr(self, "_menu_closer", False):
+            self._menu_closer = False
+            return None
         return self.on_release(e)
 
     def on_press(self, e):
