@@ -111,7 +111,7 @@ class StripsWindow(DefaultPin, tk.Toplevel):
         traced(self, self.gap_var, lambda *_: self.gap_unit.config(
             text=unit_text(self.gap_var.get(), "strips.notes", "strips.note")))
         Scrub(app, [(self.gap_box, self.gap_var, self.on_box)], lambda: (1, 10, 1), 1, MOST_GAP,
-              label=self.gap_label, drag_box=True, no_undo=True)
+              label=self.gap_label, no_undo=True)
         for w in (self.gap_label, self.gap_box, self.gap_unit):
             Tooltip(w, tr("strips.gap_tip"))
         self.count = ttk.Label(box, text="", foreground=look.VALUE)

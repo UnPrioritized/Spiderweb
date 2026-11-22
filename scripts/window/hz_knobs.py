@@ -678,8 +678,7 @@ class SynthKnobs(SynthKnobPics):
             self.unit_labels[key].pack(side="left", padx=(2, 0))
         e.bind("<Return>", lambda ev: (self.on_box(key), self.keyboard_back(e), "break")[2])
         e.bind("<FocusOut>", lambda ev: self.on_box(key))
-        self.scrubs[key] = Scrub(self.app, [(e, var, lambda: self.on_box(key, stepped=True))], steps, lo, hi,
-                                 drag_box=True)
+        self.scrubs[key] = Scrub(self.app, [(e, var, lambda: self.on_box(key, stepped=True))], steps, lo, hi)
         tip = tr(f"hz.synth_tip_{text_key(key)}")
         if text_key(key) != key:  # (OSC B's Mode knobs)
             tip = tr("hz.synth_tip_osc2_mode") + "\n" + tip

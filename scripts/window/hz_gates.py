@@ -57,7 +57,7 @@ def ask_live(win, app, prompt, value, lo, hi, steps, on_change):
     entry.pack(side="left")
     lb = unit_word(ttk.Label(row, foreground=look.HINT), var, "unit.cents")
     lb.pack(side="left", padx=(4, 0))
-    Scrub(app, [(entry, var, None)], steps, lo, hi, label=lb, drag_box=True)
+    Scrub(app, [(entry, var, None)], steps, lo, hi, label=lb)
     got = {"value": None}
 
     def read():

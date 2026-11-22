@@ -57,8 +57,7 @@ class MaskPanel:
         self.mask_size_var = tk.StringVar()
         e = self.mask_size_entry = ttk.Entry(c, textvariable=self.mask_size_var, width=5)
         e.pack(side="left", padx=4)
-        Scrub(self, [(e, self.mask_size_var, lambda: self.on_mask("size"))], (0.5, 4, 0.1), 0, MOST_SIZE, label=lb,
-              drag_box=True)
+        Scrub(self, [(e, self.mask_size_var, lambda: self.on_mask("size"))], (0.5, 4, 0.1), 0, MOST_SIZE, label=lb)
         unit_word(ttk.Label(c, foreground=look.HINT), self.mask_size_var, "unit.keys").pack(side="left")
         e.bind("<Return>", lambda ev: self.on_mask("size"))
         leave_box(self, e, self.mask_size_var, lambda left, e=e: self.on_mask("size", left and e))
@@ -150,7 +149,7 @@ class MaskPanel:
         lb.pack(side="left", padx=(2, 0))
         e.bind("<Return>", lambda ev: (self.on_mask_fade(), "break")[1])
         e.bind("<FocusOut>", lambda ev: self.on_mask_fade())
-        Scrub(self, [(e, self.mask_fade_var, self.on_mask_fade)], (5, 20, 1), 0, 100, label=lb, drag_box=True,
+        Scrub(self, [(e, self.mask_fade_var, self.on_mask_fade)], (5, 20, 1), 0, 100, label=lb,
               no_undo=True)
         for w in (e, lb):
             Tooltip(w, tr("mask.fade_tip"))

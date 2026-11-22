@@ -1326,14 +1326,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         v.pack(fill="x")
         lb = ttk.Label(v, text=tr("app.velocity"))
         lb.pack(side="left")
+        arrow = None
         for i, key in enumerate(("vel0", "vel1")):
             if i:
-                ttk.Label(v, text="→").pack(side="left", padx=3)
+                arrow = ttk.Label(v, text="→")
+                arrow.pack(side="left", padx=3)
+                Tooltip(arrow, tr("pair.grip_tip"))
             self.fentries[key] = ttk.Entry(v, textvariable=self.fvars[key], width=5)
             self.fentries[key].pack(side="left", padx=(5 if not i else 0, 0))
             watch_bad(self.fentries[key])
-        # dragging "Velocity" moves both ends together
-        Scrub(self, [(self.fentries[k], self.fvars[k], None) for k in ("vel0", "vel1")], (1, 10, 1), 1, 127, label=lb)
+        # dragging "Velocity" or the arrow moves both ends together (gap kept); a box dragged moves itself
+        Scrub(self, [(self.fentries[k], self.fvars[k], None) for k in ("vel0", "vel1")], (1, 10, 1), 1, 127,
+              label=[lb, arrow])
         ttk.Label(v, text=tr("app.start_end"), foreground=look.HINT).pack(side="left", padx=(5, 0))
         self.env_note = ttk.Label(self.settings, text=tr("app.velocity_drawn_in_the_velocity_pane"), foreground=look.HINT,
                                   font=look.font(8),

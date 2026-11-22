@@ -17,7 +17,7 @@ from files.system import work_area
 from notes.tumour import GRAPH_LIMIT
 from window import look
 from window.panel_custom import GAP_COLOR
-from window.widgets import (REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, chart_edges, fit_screen, placed, read_number,
+from window.widgets import (REDO_KEYS, UNDO_KEYS, LocalUndo, Scrub, pair_grip, chart_edges, fit_screen, placed, read_number,
                             remember_place, traced, unit_text, unit_word)
 
 FLAT = [[0.0, 1.0], [1.0, 1.0]]
@@ -166,6 +166,10 @@ class GraphWindow(tk.Toplevel):
             e.bind("<Return>", lambda ev, sd=side: (self.on_range(sd), "break")[1])
             e.bind("<FocusOut>", lambda ev, sd=side: self.on_range(sd))
             Scrub(self.app, [(e, var, lambda sd=side: self.on_range(sd))], (10, 100, 1), -LIMIT, LIMIT, label=lb)
+        # (between From's box and To: drags both, gap kept)
+        pair_grip(self.app, row, [(self.range_boxes[sd], self.range_vars[sd], lambda sd=sd: self.on_range(sd))
+                                  for sd in ("lo", "hi")], (10, 100, 1), -LIMIT, LIMIT).pack(
+            side="left", padx=(4, 0), after=self.range_boxes["lo"])
         ttk.Label(row, text="%").pack(side="left", padx=(3, 0))
         row = ttk.Frame(box)
         row.pack(fill="x", pady=(6, 0))

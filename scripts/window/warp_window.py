@@ -211,8 +211,7 @@ class WarpWindow(DefaultPin, tk.Toplevel):
         e = self.amount_entry = ttk.Entry(arow, textvariable=self.amount_var, width=6)
         e.pack(side="left")
         Tooltip(e, tr("warp.amount_tip"))
-        Scrub(app, [(e, self.amount_var, self.on_amount)], (1, 10, 0.1), -pr.MOST_BEND, pr.MOST_BEND, label=word,
-              drag_box=True)
+        Scrub(app, [(e, self.amount_var, self.on_amount)], (1, 10, 0.1), -pr.MOST_BEND, pr.MOST_BEND, label=word)
         ttk.Label(arow, text="%").pack(side="left", padx=(4, 0))
         e.bind("<Return>", lambda ev: self.on_amount())
         leave_box(app, e, self.amount_var, lambda left: self.on_amount(left and e))
@@ -250,7 +249,7 @@ class WarpWindow(DefaultPin, tk.Toplevel):
             e.pack(side="left")
             Tooltip(e, tr("warp.cells_tip"))
             apply = lambda name=name: self.on_cells(name)  # noqa: E731
-            Scrub(app, [(e, var, apply)], (1, 5, 1), 1, wp_.MOST_CELLS, label=word, drag_box=True)
+            Scrub(app, [(e, var, apply)], (1, 5, 1), 1, wp_.MOST_CELLS, label=word)
             e.bind("<Return>", lambda ev, name=name: self.on_cells(name))
             e.bind("<FocusOut>", lambda ev, name=name: self.on_cells(name), add="+")
             self.cells[name] = (e, var)
@@ -268,7 +267,7 @@ class WarpWindow(DefaultPin, tk.Toplevel):
         e.pack(side="left")
         Tooltip(e, tr("warp.strength_tip"))
         Scrub(app, [(e, self.strength_var, lambda: self.on_shown("strength"))], (1, 10, 0.1), 0, wp_.MOST_STRENGTH,
-              label=word, drag_box=True)
+              label=word)
         ttk.Label(srow, text="%").pack(side="left", padx=(4, 0))
         e.bind("<Return>", lambda ev: self.on_shown("strength"))
         leave_box(app, e, self.strength_var, lambda left: self.on_shown("strength", left and e))

@@ -192,7 +192,7 @@ def build_strip(app, parent, tl):
     pc.pack(side="left", padx=(2, 0))
     e.bind("<Return>", lambda ev: (tl.on_faint(e), "break")[1])
     e.bind("<FocusOut>", lambda ev: tl.on_faint(e))
-    Scrub(app, [(e, tl.faint_var, lambda: tl.on_faint(e))], (5, 20, 1), 0, 100, label=lb, drag_box=True,
+    Scrub(app, [(e, tl.faint_var, lambda: tl.on_faint(e))], (5, 20, 1), 0, 100, label=lb,
           no_undo=True)
     for w in (lb, e, pc):
         Tooltip(w, tr("tracks.faint_tip"))

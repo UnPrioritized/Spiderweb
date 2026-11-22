@@ -775,41 +775,47 @@ class StatusLine(ttk.Label):
 
 
 class Scrub:
-    """Quick number changes for entry boxes: drag the label sideways, Up / Down in the box, or the
+    """Quick number changes for entry boxes: drag the box or its label sideways, Up / Down in the box, or the
     mouse wheel over the box while it has the keyboard. Shift = big steps, Ctrl = fine steps.
 
-    boxes: [(entry, variable, apply)] — apply() is what Enter does in that box (None: the variable applies itself);
-    a label over several boxes steps them all together. steps: (step, Shift step, Ctrl step), or a function giving
-    them. One scrub of a box is one undo step (App.scrub_step)."""
+    boxes: [(entry, variable, apply)] — apply() is what Enter does in that box (None: the variable applies itself).
+    EVERY BOX DRAGS ITSELF, EVERY LABEL DRAGS WHAT IT NAMES (user 2026-11-23): a box dragged = that box only (a click
+    without moving still types); a label over several boxes (a start / end pair) steps them all together, the gap
+    kept (they stop together at a limit). steps: (step, Shift step, Ctrl step), or a function giving them. One scrub
+    of a box is one undo step (App.scrub_step)."""
 
-    def __init__(self, app, boxes, steps, lo=None, hi=None, label=None, drag_box=False, no_undo=False, text=None):
-        """drag_box: each box can be dragged sideways itself too (a click without moving still types). no_undo: the
-        boxes make no undo step (app settings): Ctrl+Z while held puts their numbers back itself. text: number ->
-        what the box shows (default fmt)."""
+    def __init__(self, app, boxes, steps, lo=None, hi=None, label=None, no_undo=False, text=None, own_boxes=True,
+                 label_on=None):
+        """label: a widget or a list of them (e.g. a pair's name + the arrow between its boxes). no_undo: the boxes
+        make no undo step (app settings): Ctrl+Z while held puts their numbers back itself. text: number -> what
+        the box shows (default fmt). own_boxes=False: only the labels drag (a pair's grip over boxes that have their
+        own Scrub each: pair_grip). label_on: () -> whether the labels drag now (None: always)."""
         self.app, self.boxes, self.steps, self.lo, self.hi = app, boxes, steps, lo, hi
         self.text = text or fmt
         self.no_undo = no_undo
         self.drag = None  # label drag: {"x": where the last step was, "n": steps waiting, "job", "gesture", "boxes"}
-        self.held = None  # drag_box: the box pressed, until the mouse has moved far enough to be a drag
-        for entry, var, apply in boxes:
+        self.held = None  # the box pressed, until the mouse has moved far enough to be a drag
+        for entry, var, apply in boxes if own_boxes else ():
             entry._scrub = True  # the side panel's wheel scrolling leaves it alone
             for key in ("<Up>", "<Down>"):
                 entry.bind(key, lambda e, box=(entry, var, apply): self.key(e, box))
             entry.bind("<MouseWheel>", lambda e, box=(entry, var, apply): self.wheel(e, box))
-            if drag_box:
-                entry.bind("<ButtonPress-1>", lambda e, box=(entry, var, apply): self.box_press(e, box))
-                entry.bind("<B1-Motion>", self.box_motion)
-                entry.bind("<ButtonRelease-1>", self.box_release)
+            entry.bind("<ButtonPress-1>", lambda e, box=(entry, var, apply): self.box_press(e, box))
+            entry.bind("<B1-Motion>", self.box_motion)
+            entry.bind("<ButtonRelease-1>", self.box_release)
             # the first time one is clicked into: how else it can be changed
             entry.bind("<FocusIn>", lambda e: app.tips.show("numbers", wait=True), add="+")
-        if label is not None:
-            label.config(cursor="sb_h_double_arrow")
-            label.bind("<ButtonPress-1>", self.press)
-            label.bind("<B1-Motion>", self.motion)
-            label.bind("<ButtonRelease-1>", self.release)
-        for w in [label] + [entry for entry, _, _ in boxes] if drag_box else [label]:
-            if w is not None:  # (its window closed mid-drag, e.g. Esc: the let-go never comes)
-                w.bind("<Destroy>", lambda e: self.gone(), add="+")
+        labels = [w for w in (label if isinstance(label, (list, tuple)) else [label]) if w is not None]
+        for lb in labels:
+            lb.config(cursor="sb_h_double_arrow")
+            lb.bind("<ButtonPress-1>", self.press if label_on is None else
+                    lambda e: self.press(e) if label_on() else None)
+            lb.bind("<B1-Motion>", self.motion)
+            lb.bind("<ButtonRelease-1>", self.release if label_on is None else
+                    lambda e: self.release(e) if self.drag else None)
+        for w in labels + ([entry for entry, _, _ in boxes] if own_boxes else []):
+            # (its window closed mid-drag, e.g. Esc: the let-go never comes)
+            w.bind("<Destroy>", lambda e: self.gone(), add="+")
 
     def gone(self):
         """A box / label being dragged went away: the drag ends there (no more steps)."""
@@ -834,10 +840,14 @@ class Scrub:
         step_text = getattr(self, "step_text", None)  # (optional: (text, change) -> new text or None, for boxes
         # holding more than a number, Gate extend's "50% + 10": its last number steps)
 
+        live = [b for b in boxes if str(b[0].cget("state")) != "disabled"]
+        if len(live) > 1:  # (a label over several: a box taken off the window, e.g. Melody's second BPM with a
+            live = [b for b in live if b[0].winfo_manager()] or live  # one-BPM shape, stays as it is)
+        if len(live) > 1 and not (step_text or step_for):
+            return self.change_pair(live, d, read, gesture)
+
         def run():
-            for entry, var, apply in boxes:
-                if str(entry.cget("state")) == "disabled":
-                    continue
+            for entry, var, apply in live:
                 if step_text:
                     new = step_text(var.get() or getattr(entry, "blank_from", None) or "", d)
                     if new is not None:
@@ -856,6 +866,36 @@ class Scrub:
                 if hi is not None:
                     value = min(hi, value)
                 var.set(self.text(value))
+                if apply:
+                    apply()
+        self.app.scrub_step(gesture, run)
+
+    def change_pair(self, boxes, d, read, gesture):
+        """A label over several boxes (start / end): all move by the same amount, so the gap stays; at a limit they
+        stop together (never squashed). The box leading the move goes first (a window that pushes the other end
+        when they'd cross sees no crossing)."""
+        values = []
+        for entry, var, apply in boxes:
+            try:  # (an empty box for shapes with different numbers: from the first one's, same_or_blank)
+                values.append(float(read(var.get() or getattr(entry, "blank_from", None) or "")))
+            except (ValueError, ZeroDivisionError):
+                values.append(None)
+        nums = [v for v in values if v is not None]
+        if not nums:
+            return
+        lo, hi = (v() if callable(v) else v for v in (self.lo, self.hi))
+        if hi is not None and d > 0:
+            d = max(0, min(d, hi - max(nums)))
+        if lo is not None and d < 0:
+            d = min(0, max(d, lo - min(nums)))
+        if not d:
+            return
+        order = sorted((i for i, v in enumerate(values) if v is not None), key=lambda i: values[i], reverse=d > 0)
+
+        def run():
+            for i in order:
+                entry, var, apply = boxes[i]
+                var.set(self.text(round(values[i] + d, 6)))
                 if apply:
                     apply()
         self.app.scrub_step(gesture, run)
@@ -959,6 +999,15 @@ class Scrub:
         self.app.catch_up_notes()
         if gesture is not None and hasattr(self.app, "scrub_let_go"):  # (questions put off while held: now)
             self.app.scrub_let_go(gesture)
+
+
+def pair_grip(app, parent, boxes, steps, lo=None, hi=None, no_undo=False):
+    """A small "↔" between a start / end pair whose boxes each have their own Scrub and label (From / To): dragging
+    it moves both together, the gap kept (Scrub.change_pair). Returns the label: the caller packs / grids it."""
+    grip = ttk.Label(parent, text="↔", foreground=look.HINT)
+    Scrub(app, boxes, steps, lo, hi, label=grip, no_undo=no_undo, own_boxes=False)
+    Tooltip(grip, tr("pair.grip_tip"))
+    return grip
 
 
 # Undo / redo keys. Upper case = Caps Lock on; Ctrl+Shift+Z is redo too (it wins over <Control-Z>: Shift is named)

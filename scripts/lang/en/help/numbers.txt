@@ -1,3 +1,5 @@
-Every number box (not PPQ) can be changed without typing: drag the name next to it sideways, or press Up / Down in it (the mouse wheel too, after a click in it). Shift = big steps, Ctrl = small steps. A name over two boxes (Velocity) changes both. Boxes also take math: 960*4, 1920/3…
+Every number box (not PPQ) can be changed without typing: drag the box itself or the name next to it sideways, or press Up / Down in it (the mouse wheel too, after a click in it). Shift = big steps, Ctrl = small steps. A click without moving still puts the text cursor in the box. Boxes also take math: 960*4, 1920/3…
+
+Two boxes that make a start and an end (Velocity's start → end, From / To) can move together: drag the name over both (Velocity), the arrow or word between them, or the small ↔ between From and To. Both move by the same amount, so the gap between them stays; they stop together when one reaches its limit. Dragging one box changes only that box.
 
 The mouse wheel changes a number box, dropdown or knob only after you click it. Over anything not clicked, the wheel scrolls the window instead, so nothing changes by accident while you scroll past.

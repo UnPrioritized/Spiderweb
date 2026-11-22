@@ -219,7 +219,7 @@ class SynthMod:
         unit.pack(side="left", padx=(2, 0))
         e.bind("<Return>", lambda ev: (self.on_mod_amount(i), self.keyboard_back(e), "break")[2])
         e.bind("<FocusOut>", lambda ev: self.on_mod_amount(i))
-        Scrub(self.app, [(e, var, lambda: self.on_mod_amount(i))], (1, 10, 0.1), -100.0, 100.0, drag_box=True)
+        Scrub(self.app, [(e, var, lambda: self.on_mod_amount(i))], (1, 10, 0.1), -100.0, 100.0)
         Tooltip(e, tr("hz.synth_tip_mod_col_amount"))
         e.bindtags((f"SynthLetters{id(self)}",) + e.bindtags())  # (a letter that plays a key: as in the other boxes)
         both = tk.BooleanVar()
@@ -350,8 +350,7 @@ class SynthMod:
         unit_label.pack(side="left", padx=(2, 0))
         e.bind("<Return>", lambda ev: (self.on_mod_box(src, key, kind), self.keyboard_back(e), "break")[2])
         e.bind("<FocusOut>", lambda ev: self.on_mod_box(src, key, kind))
-        Scrub(self.app, [(e, var, lambda: self.on_mod_box(src, key, kind, stepped=True))], steps, lo, hi,
-              drag_box=True)
+        Scrub(self.app, [(e, var, lambda: self.on_mod_box(src, key, kind, stepped=True))], steps, lo, hi)
         tip = tr("hz.synth_tip_mod_rate" if key == "rate" else "hz.synth_tip_mod_env")
         for w in (k, e):
             Tooltip(w, tip + "\n" + tr("hz.synth_tip_knob"))

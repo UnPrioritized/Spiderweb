@@ -248,8 +248,7 @@ class RecolourPanel:
         self.recolour_var = tk.StringVar()
         e = self.recolour_entry = ttk.Entry(row, textvariable=self.recolour_var, width=7)
         e.pack(side="left", padx=4)
-        Scrub(self, [(e, self.recolour_var, lambda: self.on_recolour("amount"))], (1, 10, 0.1), 0, 100, label=lb,
-              drag_box=True)
+        Scrub(self, [(e, self.recolour_var, lambda: self.on_recolour("amount"))], (1, 10, 0.1), 0, 100, label=lb)
         ttk.Label(row, text="%").pack(side="left")
         self.recolour_amount_word = lb
         self.recolour_amount_tip = Tooltip(lb, tr("recolour.amount_tip"))

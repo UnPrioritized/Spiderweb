@@ -102,7 +102,7 @@ class StrumWindow(ToolWindow):
             e.bind("<Return>", lambda ev, k=key: (self.on_keys(k), "break")[1])
             e.bind("<FocusOut>", lambda ev, k=key: self.on_keys(k))
             self.scrubs[key] = Scrub(self.app, [(e, var, lambda k=key: self.on_keys(k, False))], (1, 10, 1), 1,
-                                     KEYS_MAX, drag_box=True)
+                                     KEYS_MAX)
             Tooltip(e, tr(f"strum.tip_{key}"))
         Tooltip(self.keys_label, tr("strum.tip_keys"))
         Tooltip(self.keys_mid, tr("strum.tip_keys_to"))
@@ -145,7 +145,7 @@ class StrumWindow(ToolWindow):
         e.bind("<FocusOut>", lambda ev: self.on_entry(key))
         lo, hi = self.limits(key)
         self.scrubs[key] = Scrub(self.app, [(e, var, lambda: self.on_entry(key, False))],
-                                 STEPS.get(key, TENSION_STEPS), lo, hi, drag_box=True)
+                                 STEPS.get(key, TENSION_STEPS), lo, hi)
         for w in (k, e):
             Tooltip(w, tr(f"strum.tip_{key}") + "\n" + tr("strum.tip_knob"))
 

@@ -192,7 +192,7 @@ class LiquifyWindow(DefaultPin, tk.Toplevel):
             e.grid(row=row, column=1, sticky="w", padx=(6, 4), pady=2)
             ttk.Label(form, text=unit).grid(row=row, column=2, sticky="w")
             apply = lambda name=name: self.on_box(name)  # noqa: E731
-            Scrub(app, [(e, var, apply)], steps, lo, hi, label=word, drag_box=True, no_undo=True)
+            Scrub(app, [(e, var, apply)], steps, lo, hi, label=word, no_undo=True)
             e.bind("<Return>", lambda ev, name=name: self.on_box(name))
             e.bind("<FocusOut>", lambda ev, name=name: self.on_box(name), add="+")
             self.boxes[name] = (e, var, word)
@@ -217,7 +217,7 @@ class LiquifyWindow(DefaultPin, tk.Toplevel):
         e.grid(row=row, column=1, sticky="w", padx=(6, 4), pady=2)
         Tooltip(e, tr("liquify.strength_tip"))
         Scrub(app, [(e, self.strength_var, lambda: self.on_shown("strength"))], (1, 10, 0.1), 0, lq.MOST_STRENGTH,
-              label=word, drag_box=True)
+              label=word)
         ttk.Label(form, text="%").grid(row=row, column=2, sticky="w")
         e.bind("<Return>", lambda ev: self.on_shown("strength"))
         leave_box(app, e, self.strength_var, lambda left: self.on_shown("strength", left and e))

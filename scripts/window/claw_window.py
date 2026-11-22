@@ -94,7 +94,7 @@ class ClawWindow(ToolWindow):
         e.pack(side="left", padx=(10, 0))
         e.bind("<Return>", lambda ev: (self.on_entry("dist"), "break")[1])
         e.bind("<FocusOut>", lambda ev: self.on_entry("dist"))
-        Scrub(self.app, [(e, var, lambda: self.on_entry("dist", False))], (1, 10, 0.1), -100, 100, drag_box=True)
+        Scrub(self.app, [(e, var, lambda: self.on_entry("dist", False))], (1, 10, 0.1), -100, 100)
         for w in (self.knob, e):
             Tooltip(w, tr("claw.tip_dist") + "\n" + tr("claw.tip_dist_box"))
         self.ticks = {}
@@ -270,12 +270,11 @@ class ClawWindow(ToolWindow):
         self.period_back = self.back_button(f, "period")
         sc = self.period_scrub = Scrub(self.app, [(e, var, lambda: self.on_entry("period", False))],
                                        lambda: (0.25, 1, 1 / self.app.ppq), None, MAX_PERIOD,
-                                       text=lambda v: f"{v:.9f}".rstrip("0").rstrip("."))
+                                       text=lambda v: f"{v:.9f}".rstrip("0").rstrip("."), label=lb,
+                                       label_on=lambda: self.shown_typed.get("period"))  # (its label drags only
+        # while the box shows, not over the dropdown)
         # (steps from the period in use, not the box's rounded text: 1-tick steps stay whole ticks)
         sc.read = lambda text: self.claw["period"] if text == self.shown_text("period") else calc(text)
-        for ev, fn in (("<ButtonPress-1>", sc.press), ("<B1-Motion>", sc.motion), ("<ButtonRelease-1>", sc.release)):
-            lb.bind(ev, lambda e, fn=fn: fn(e) if self.shown_typed.get("period") else None)
-        lb.bind("<Destroy>", lambda e: sc.gone(), add="+")
         Tooltip(e, tr("claw.tip_period_typed"))
         return f
 
@@ -291,8 +290,7 @@ class ClawWindow(ToolWindow):
             e.pack(side="left")
             e.bind("<Return>", lambda ev, w=which: (self.on_trash(w), "break")[1])
             e.bind("<FocusOut>", lambda ev, w=which: self.on_trash(w))
-            Scrub(self.app, [(e, var, lambda w=which: self.on_trash(w, False))], (1, 10, 1), 1, MAX_SLICES,
-                  drag_box=True)
+            Scrub(self.app, [(e, var, lambda w=which: self.on_trash(w, False))], (1, 10, 1), 1, MAX_SLICES)
             Tooltip(e, tr("claw.tip_trash_typed"))
         self.back_button(f, "trash")
         return f

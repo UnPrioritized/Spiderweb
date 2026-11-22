@@ -95,7 +95,7 @@ class SynthMacros:
             e.grid(row=1, column=1, sticky="sw")
             e.bind("<Return>", lambda ev, i=i, e=e: (self.on_macro_box(i), self.keyboard_back(e), "break")[2])
             e.bind("<FocusOut>", lambda ev, i=i: self.on_macro_box(i))
-            Scrub(self.app, [(e, var, lambda i=i: self.on_macro_box(i))], (1, 10, 0.1), 0.0, 100.0, drag_box=True)
+            Scrub(self.app, [(e, var, lambda i=i: self.on_macro_box(i))], (1, 10, 0.1), 0.0, 100.0)
             count = ttk.Label(cell, text="", style="Synth.Box.Dim.TLabel")
             count.grid(row=2, column=1, sticky="nw")
             for w in (k, e):

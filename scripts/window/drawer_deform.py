@@ -242,7 +242,7 @@ class DeformWindow(tk.Toplevel):
         e.bind("<FocusOut>", lambda ev, k=key: self.typed(k))
         self.boxes[key] = e
         e.value = plain
-        Scrub(self.dr.app, [(e, var, lambda k=key: self.typed(k))], STEPS[key], lo, hi, label=label, drag_box=True,
+        Scrub(self.dr.app, [(e, var, lambda k=key: self.typed(k))], STEPS[key], lo, hi, label=label,
               no_undo=True)
         return e
 

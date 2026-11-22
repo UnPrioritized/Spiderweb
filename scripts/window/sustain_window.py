@@ -262,7 +262,7 @@ class SustainWindow(DefaultPin, tk.Toplevel):
 
     def scrub(self, e, var, apply, lb, lo):
         """The box stepped by dragging it or its unit sideways, Up / Down, the wheel. lo: its lowest, in ticks."""
-        s = Scrub(self.app, [(e, var, apply)], self.steps, lo, MOST_GAP, label=lb, drag_box=True, no_undo=True,
+        s = Scrub(self.app, [(e, var, apply)], self.steps, lo, MOST_GAP, label=lb, no_undo=True,
                   text=lambda v: self.text_of(v if self.shown_beats else v / self.app.ppq))
         self.scrubs.append((s, lo))
         self.put_limits()

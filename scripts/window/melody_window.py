@@ -28,7 +28,7 @@ from window.default_pin import DefaultPin
 from window.jump_areas import JumpChain
 from window.jump_graph import SCALES, START, JumpGraph, graph_pts
 from window.load_extract import boxes_now
-from window.widgets import Scrub, centre_over, open_or_lift, read_number, remember_place, traced, unhighlight
+from window.widgets import Scrub, Tooltip, centre_over, open_or_lift, read_number, remember_place, traced, unhighlight
 
 WATCH_MS = 250
 # the words round the two BPM boxes, by shape (None = one box: the second hidden)
@@ -204,7 +204,7 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         unit.pack(side="left", padx=(4, 0))
         self.rules += [(lb, e), (unit, e)]
         traced(self, self.every, lambda *_: self.sync())
-        Scrub(app, [(e, self.every, None)], (1, 10, 1), 1, None, drag_box=True, no_undo=True)
+        Scrub(app, [(e, self.every, None)], (1, 10, 1), 1, None, no_undo=True)
         # the tempo made (group B): shape between jumps, its BPMs (the words round the boxes by the shape), how the
         # timing is kept
         ttk.Label(box, text=tr("melody.between")).pack(anchor="w", pady=(10, 2))
@@ -246,13 +246,15 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
         self.pitch_box.pack(side="left", padx=(6, 0))
         ttk.Label(row, text="%").pack(side="left", padx=(4, 0))
         traced(self, self.pitch_low, lambda *_: self.sync())
-        Scrub(app, [(self.pitch_box, self.pitch_low, None)], (1, 10, 0.1), 0, 100, drag_box=True, no_undo=True)
+        Scrub(app, [(self.pitch_box, self.pitch_low, None)], (1, 10, 0.1), 0, 100, no_undo=True)
         self.sizes = None  # the jumps' pitch shares (melody.pitch_sizes), None = whole
         for var in (self.lo, self.hi):
             traced(self, var, lambda *_: self.sync())
-        # (the boxes themselves drag sideways, user 2026-10-29: 1 BPM, Shift 10, Ctrl 0.1; no undo step)
+        # (the boxes themselves drag sideways, user 2026-10-29: 1 BPM, Shift 10, Ctrl 0.1; no undo step; the word
+        # before them and the one between move both, gap kept, user 2026-11-23)
         Scrub(app, [(e, var, None) for e, var in zip(self.bpm_boxes, (self.lo, self.hi))], (1, 10, 0.1),
-              round(MIN_BPM, 3), MAX_BPM, drag_box=True, no_undo=True)
+              round(MIN_BPM, 3), MAX_BPM, label=self.bpm_words[:2], no_undo=True)
+        Tooltip(self.bpm_words[1], tr("pair.grip_tip"))
         ttk.Label(box, text=tr("melody.keep_with")).pack(anchor="w", pady=(10, 2))
         self.how = tk.StringVar(value=getattr(self.picks, "melody_how", "audio"))
         for how in HOWS:
@@ -319,7 +321,7 @@ class MelodyWindow(DefaultPin, tk.Toplevel):
             self.sync()
         traced(self, var, put_unit)
         unit.config(text="" if snap_name(start) else tr("melody.ticks"))
-        scrub = Scrub(self.app, [(e, var, None)], (1, 10, 1), 0, None, drag_box=True, no_undo=True)
+        scrub = Scrub(self.app, [(e, var, None)], (1, 10, 1), 0, None, no_undo=True)
         # (dragging / Up / Down from a note length: from its ticks)
         scrub.read = lambda text: snap_name_beats(snap_name(text)) * self.app.ppq if snap_name(text) else calc(text)
         return var

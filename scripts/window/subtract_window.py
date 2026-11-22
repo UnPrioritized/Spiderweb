@@ -421,7 +421,7 @@ class SubtractWindow(DefaultPin, PointGraph, tk.Toplevel):
         for var in (self.by_var, self.to_var):
             traced(self, var, lambda *_: self.put_unit())
         self.hook_scrub(Scrub(app, [(self.by_box, self.by_var, lambda: self.on_box("by"))], lambda: (1, 10, 1), 0,
-                              None, label=self.by_unit, drag_box=True, no_undo=True))
+                              None, label=self.by_unit, no_undo=True))
         self.by_tips = [Tooltip(w, "") for w in (self.by_label, self.by_box, self.by_unit)]
         Tooltip(self.to_label, self.tx("to_tip"))
         self.touch_var = tk.BooleanVar(value=False)
@@ -462,7 +462,7 @@ class SubtractWindow(DefaultPin, PointGraph, tk.Toplevel):
         e.bind("<FocusOut>", lambda ev: self.on_box(key))
         if key == "to":
             self.hook_scrub(Scrub(self.app, [(e, var, lambda: self.on_box("to"))], lambda: (1, 10, 1), 0, None,
-                                  label=label, drag_box=True, no_undo=True))
+                                  label=label, no_undo=True))
             self.to_tip = Tooltip(e, self.tx("to_tip"))
         return e
 

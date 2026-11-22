@@ -37,7 +37,7 @@ class ColoursPanel:
         self.cycle_n_entry = ttk.Entry(c, textvariable=self.cycle_n_var, width=3)
         self.cycle_n_entry.pack(side="left", padx=(4, 0))
         self.cycle_n_scrub = Scrub(self, [(self.cycle_n_entry, self.cycle_n_var, lambda: self.on_cycle("n"))],
-                                   (1, 3, 1), 2, self.cycle_most(), label=lb, drag_box=True)
+                                   (1, 3, 1), 2, self.cycle_most(), label=lb)
         rows = self.cycle_every_row = ttk.Frame(box)  # (channels + these rows: only shown while Colours is on, user)
         rows.pack(anchor="w", pady=(1, 0))  # (under the dropdown: app._build_shape_settings)
         c = ttk.Frame(rows)
@@ -52,7 +52,7 @@ class ColoursPanel:
                 self.cycle_slash.pack(side="left")
             e = ttk.Entry(c, textvariable=var, width=4)
             e.pack(side="left", padx=4)
-            Scrub(self, [(e, var, lambda: self.on_cycle("every"))], (1, 4, 1), 1, EVERY_MAX, drag_box=True)
+            Scrub(self, [(e, var, lambda: self.on_cycle("every"))], (1, 4, 1), 1, EVERY_MAX)
             self.cycle_entries.append(e)
         self.cycle_unit = ttk.Label(c, text="")
         self.cycle_unit.pack(side="left")
@@ -82,7 +82,7 @@ class ColoursPanel:
             e = ttk.Entry(c, textvariable=var, width=4)
             e.pack(side="left", padx=4)
             Scrub(self, [(e, var, lambda: self.on_cycle("shift"))], (1, 4 if i else 3, 1), lo, hi,
-                  label=None if i else lb, drag_box=True)
+                  label=None if i else lb)
             e.mixed_tip = Tooltip(e, tr("colours.shift_tip"))  # (one tip: Mixed's sentence goes on top, sync_colours)
             unit_word(ttk.Label(c), var, unit, unit + "_one").pack(side="left")
             self.shift_entries.append(e)

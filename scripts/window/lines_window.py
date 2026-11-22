@@ -41,7 +41,7 @@ class LinesWindow(tk.Toplevel):
         traced(self, self.gap_var, lambda *_: (unit.config(text=unit_text(self.gap_var.get(), "lines.ticks",
                                                                                "lines.tick")), self.count_later()))
         unit.config(text=unit_text(self.gap_var.get(), "lines.ticks", "lines.tick"))
-        Scrub(app, [(self.gap_box, self.gap_var, None)], lambda: (1, 10, 1), 0, MOST_GAP, label=label, drag_box=True,
+        Scrub(app, [(self.gap_box, self.gap_var, None)], lambda: (1, 10, 1), 0, MOST_GAP, label=label,
               no_undo=True)
         for w in (label, self.gap_box, unit):
             Tooltip(w, tr("lines.gap_tip"))

@@ -213,7 +213,7 @@ class PathWindow(ToolWindow):
         e.grid(row=r, column=c, sticky="w", pady=(4 if r else 0, 0))
         e.bind("<Return>", lambda ev: (self.on_entry(key), "break")[1])
         e.bind("<FocusOut>", lambda ev: self.on_entry(key))
-        Scrub(self.app, [(e, var, lambda: self.on_entry(key, False))], steps, label=label, drag_box=label is None)
+        Scrub(self.app, [(e, var, lambda: self.on_entry(key, False))], steps, label=label)
         Tooltip(e, tip)
 
     # ---- the group: its box, each shape's page

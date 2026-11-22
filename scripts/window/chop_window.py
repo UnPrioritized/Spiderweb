@@ -268,7 +268,7 @@ class ChopWindow(ToolWindow):
         self.ticks_entry.bind("<Return>", lambda e: (self.on_ticks(), "break")[1])
         self.ticks_entry.bind("<FocusOut>", lambda e: self.on_ticks())
         Scrub(self.app, [(self.ticks_entry, self.ticks_var, lambda: self.on_ticks(False))], (1, 10, 1), 1,
-              MAX_TICKS, label=lb, drag_box=True)
+              MAX_TICKS, label=lb)
         Tooltip(self.ticks_entry, tr("chop.tip_ticks"))
         self.ticks_unit = ttk.Label(row, text=tr("chop.ticks"), foreground=look.HINT)
         self.ticks_unit.pack(side="left", padx=(5, 0))

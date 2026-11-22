@@ -900,8 +900,7 @@ class StirWindow(DefaultPin, HeldKnobs, tk.Toplevel):
         self.boxes[name] = {"var": var, "entry": e, "shown": "", "lo": lo, "hi": hi}
         e.bind("<Return>", lambda ev: self.on_box(name))
         e.bind("<FocusOut>", lambda ev: self.on_box(name))
-        scrub = Scrub(self.app, [(e, var, lambda: self.on_box(name))], (1, 10, 0.1), lo, hi, label=word,
-                      drag_box=True)
+        scrub = Scrub(self.app, [(e, var, lambda: self.on_box(name))], (1, 10, 0.1), lo, hi, label=word)
         if name == "kaleido":  # (whole slices, and 1 = off: a drag / wheel / arrow from 0 goes straight to 2 and
             # from 2 down to 0, else every step up landed on 1 = 0 again and the drag stuck there, user 11-07)
             scrub.steps = (1, 4, 1)

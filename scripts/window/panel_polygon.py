@@ -192,8 +192,7 @@ class PolygonPanel:
                 e = ttk.Entry(self.polygon_len_grid, textvariable=var, width=4)
                 e.bind("<Return>", lambda ev, i=i: self.on_polygon_length(i))
                 leave_box(self, e, var, lambda left, i=i: self.on_polygon_length(i, left))
-                Scrub(self, [(e, var, lambda i=i: self.on_polygon_length(i))], (0.5, 1, 0.1), *LENGTH_RANGE,
-                      drag_box=True)
+                Scrub(self, [(e, var, lambda i=i: self.on_polygon_length(i))], (0.5, 1, 0.1), *LENGTH_RANGE)
                 Tooltip(e, tr("panel_polygon.lengths_tip"))
                 e.grid(row=i // LENGTHS_A_LINE, column=i % LENGTHS_A_LINE, padx=(0, 3), pady=(0, 2))
                 boxes.append((e, var))

@@ -129,7 +129,7 @@ class FoldWindow(tk.Toplevel):
         self.each = ttk.Label(row, foreground=look.HINT)
         self.each.pack(side="left", padx=(8, 0))
         Scrub(app, [(self.n_box, self.n_var, self.on_box)], lambda: (1, 10, 1), 1, max(1, self.tracks),
-              label=self.n_label, drag_box=True, no_undo=True)
+              label=self.n_label, no_undo=True)
         for w in (self.n_label, self.n_box):
             Tooltip(w, tr("fold.into_tip"))
         self.n = self.read(self.n_var.get()) or 1

@@ -25,7 +25,7 @@ from notes.gaterange import (DIRS, ENDS, STRAIGHT, clean_range, ends_of, exact_o
 from window import big_ask, look
 from window.default_pin import DefaultPin
 from window.panel_funnel import GATE_STEPS
-from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, unit_word
+from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, pair_grip, chart_edges, remember_place, unit_word
 
 
 def _power(k):
@@ -150,6 +150,9 @@ class RangeGraph(DefaultPin, PointGraph, tk.Toplevel):
             Scrub(app, [(e, var, lambda k=key: self.on_gate(k))], GATE_STEPS, 1, 10 ** 7, label=lb)
             for w in (lb, e):
                 Tooltip(w, tr(f"range_window.{key}_tip"))
+        # (between From's box and To: drags both, gap kept)
+        pair_grip(app, row, [(self.gate_boxes[k], self.gate_vars[k], lambda k=k: self.on_gate(k)) for k in ("from", "to")],
+                  GATE_STEPS, 1, 10 ** 7).pack(side="left", after=self.gate_boxes["from"])
         unit_word(ttk.Label(row, foreground=look.HINT), self.gate_vars["to"], "unit.ticks", "unit.tick").pack(
             side="left")
         row = ttk.Frame(box)

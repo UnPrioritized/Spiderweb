@@ -37,7 +37,7 @@ class StepEditor:
         e.pack(pady=(2, 0))
         e.bind("<Return>", lambda ev: (self.on_count(), self.frame.focus_set(), "break")[2])
         e.bind("<FocusOut>", lambda ev: self.on_count())
-        Scrub(app, [(e, self.count_var, self.on_count)], (1, 4, 1), 1, STEPS, drag_box=True)
+        Scrub(app, [(e, self.count_var, self.on_count)], (1, 4, 1), 1, STEPS)
         Tooltip(e, tr("hz.synth_tip_steps_count"))
         w, h = round((LEFT + CELL * STEPS + 2) * s), round((TOP + GRID_H + 2) * s)
         c = self.canvas = tk.Canvas(self.frame, width=w, height=h, background=PIC, highlightthickness=1,

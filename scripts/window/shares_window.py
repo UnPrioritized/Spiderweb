@@ -410,7 +410,7 @@ class SharesWindow(DefaultPin, HeldKnobs, tk.Toplevel):
         self.n_var = tk.StringVar()
         e = self.n_entry = ttk.Entry(row, textvariable=self.n_var, width=4)
         e.pack(side="left", padx=4)
-        Scrub(app, [(e, self.n_var, self.on_colours)], (1, 1, 1), 1, 16, label=lb, drag_box=True)
+        Scrub(app, [(e, self.n_var, self.on_colours)], (1, 1, 1), 1, 16, label=lb)
         e.bind("<Return>", lambda ev: self.on_colours())
         e.bind("<FocusOut>", lambda ev: self.on_colours())
         self.n_tip = Tooltip(lb, "")
@@ -544,7 +544,7 @@ class SharesWindow(DefaultPin, HeldKnobs, tk.Toplevel):
         self.boxes[name] = {"var": var, "entry": e, "shown": "", "lo": lo, "hi": hi}
         e.bind("<Return>", lambda ev: self.on_box(name))
         e.bind("<FocusOut>", lambda ev: self.on_box(name))
-        Scrub(self.app, [(e, var, lambda: self.on_box(name))], (1, 10, 0.1), lo, hi, label=word, drag_box=True)
+        Scrub(self.app, [(e, var, lambda: self.on_box(name))], (1, 10, 0.1), lo, hi, label=word)
 
     # ---- what the selection holds
 

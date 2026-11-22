@@ -72,7 +72,7 @@ class TrimWindow(ToolWindow):
         self.unit.bind("<<ComboboxSelected>>", lambda e: self.on_unit())
         Tooltip(self.unit, tr("trim.tip_unit"))
         self.scrub = Scrub(self.app, [(self.entry, self.var, lambda: self.on_entry(False))], self.steps, 0, 100,
-                           label=label, drag_box=True)
+                           label=label)
         self.scrub.read = lambda text: self.value() if text == self.shown_text() else calc(text)
         for w in (label, self.entry):
             Tooltip(w, tr("trim.tip_keep"))
