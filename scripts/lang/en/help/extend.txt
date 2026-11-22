@@ -5,11 +5,15 @@ A run as drawn, and with Gate extend at 100 %: every note twice as long, running
 
 ## The amount
 
-Amount in: % of each note's length (the default) or Ticks. With 50 %, a note of 10 ticks ends 5 ticks later and a note of 40 ticks 20 ticks later, so short notes stay short. With Ticks every note ends the same number of ticks later. Switching keeps the numbers shown.
+Add: how much each note gets (0 = none). What you type decides the unit:
+• 120 = 120 ticks: every note ends the same number of ticks later.
+• 50% = half of each note's own length: a note of 10 ticks ends 5 ticks later, a note of 40 ticks 20 ticks later, so short notes stay short.
+• 50% + 10 = both: half of each note's length and 10 ticks more.
+• Math works too: 960*2, (50% + 10) * 2. A % can be added to ticks or multiplied / divided by a number; 50% * 50% can't be used (the box turns red and says why).
 
-Same amount for every note (with % only): every note ends the same number of ticks later, worked out from the shape's average note length. Use it on a slanted line whose notes differ by a tick: the ends then follow the starts as evenly as with Ticks. Leave it off for shapes whose notes really are different lengths.
+Amount in shows what the box holds: Ticks, % of each note's length, or "% + ticks" when it has both. Picking Ticks or % there turns every number into that unit (50% + 10 becomes 60 ticks, or 60%). The mouse wheel, Up / Down and dragging the box or the word beside it change the last number in the box. Ticks follow the PPQ, so changing the PPQ keeps the look.
 
-Add: how much each note gets (0 = none). Drag the box or the word beside it sideways to change the number. In ticks, the number follows the PPQ, so changing the PPQ keeps the look.
+Same amount for every note (when there's a %): every note gets the same number of ticks, worked out from the shape's average note length. Use it on a slanted line whose notes differ by a tick: the ends then follow the starts as evenly as with ticks. Leave it off for shapes whose notes really are different lengths.
 
 A note never runs into the next note on its own key: it stops where that one starts (two notes on one key at once clash in any MIDI player). Notes on other keys overlap freely.
 
@@ -20,11 +24,17 @@ Tick Change across the shape to make the amount change from the first number to 
 
 Left to right from 0 % to 300 %: the run's first notes stay as they were, its last ones run far over.
 
+The two numbers can be different kinds, for example from 10 (ticks) to 50%: each note gets its own mix of both along the graph.
+
 ## Using the window
 
 Changes show on the piano roll at once, and the window follows the selection. OK keeps the changes as one undo step, Cancel or Esc puts back what changed, Ctrl+Z steps back through the changes made in the window.
 
 The menu item has a tick while a selected shape has it, and the [page:shapes|Shapes list] says (Extended). Untick Add to gates in the window to take it off.
+
+## Your own default
+
+The pin left of OK saves the window's settings as what shapes start with when they get Gate extend (instead of 50%). Click it: Save current as default, or Forget my default. Black and leaning = none of yours saved, green and pointing down = saved. Shapes that already have Gate extend keep their own settings. Every saved default is listed in [page:settings#User set defaults|Settings → User set defaults].
 
 ## With other features
 

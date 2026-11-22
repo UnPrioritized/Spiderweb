@@ -9,7 +9,12 @@ Touching notes as drawn, then with 30 ticks off the Note end (each note ends ear
 
 With both sides, a note can be shortened at both ends. If the two together would take more than the note has, both are made smaller by the same share, so the note always keeps at least 1 tick.
 
-Subtract: how many ticks come off each note on that side (0 = none). Drag the box or the word beside it sideways to change the number. The number follows the PPQ, so changing the PPQ keeps the look.
+Subtract: how much comes off each note on that side (0 = none). What you type decides the unit, as in [page:extend#The amount|Gate extend]:
+• 10 = 10 ticks off every note.
+• 20% = a fifth of each note's own length: a note of 10 ticks loses 2 ticks, a note of 40 ticks 8.
+• 20% + 5 = both. Math works too: 960/16 = 60 ticks.
+
+Amount in shows what the box holds (Ticks, %, or "% + ticks"); each tab has its own. Picking Ticks or % turns every number on the tab into that unit. The mouse wheel, Up / Down and dragging the box or the word beside it change the last number in the box. Ticks follow the PPQ, so changing the PPQ keeps the look.
 
 Only notes the one before touches (Note start) / Only notes that touch the next one (Note end): only notes with no gap on that side are shortened. Notes that already have a gap there stay as they are. All colours on a key count together.
 
@@ -33,6 +38,10 @@ Changes show on the piano roll at once, and the piano roll can still be used whi
 With several shapes selected, each keeps its own settings until you change them; a half-ticked box means they differ. A graph is the first shape's until you change something about it, then every shape takes it.
 
 The menu item has a tick while a selected shape has a side in use, and the [page:shapes|Shapes list] says (Subtracted). Untick Subtract from gates in the window to take it off.
+
+## Your own default
+
+The pin left of OK saves the window's settings, both tabs, as what shapes start with when they get Gate subtract (instead of Note end, 1 tick). Click it: Save current as default, or Forget my default. Black and leaning = none of yours saved, green and pointing down = saved. Every saved default is listed in [page:settings#User set defaults|Settings → User set defaults].
 
 ## With other features
 

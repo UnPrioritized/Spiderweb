@@ -22,10 +22,10 @@ from window import look
 def _sources():
     """(name in the backup, path) of every file / folder holding settings or the user's own presets. Read from each
     module's own path, so tests (which point them elsewhere) back up their own. New saved settings: add them here."""
-    from files import colour_list
+    from files import colour_list, shape_defaults
     from window import chop_window, drawer, hz_presets, hz_trace, palettes, pattern_dialog, stir_presets
     paths = (settings.SETTINGS_FILE, look.LOOK_FILE, palettes.FOLDER, drawer.LIBRARY, hz_presets.PRESETS_FILE,
-             stir_presets.PRESETS_FILE,
+             stir_presets.PRESETS_FILE, shape_defaults.DEFAULTS_FILE,
              hz_trace.SHAPES_FILE, pattern_dialog.PATTERNS_FILE, pattern_dialog.OLD_CURVES_FILE,
              chop_window.RHYTHMS_FILE, colour_list.FORMATS_FILE)
     return [(os.path.basename(p), p) for p in paths]

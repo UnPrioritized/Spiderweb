@@ -8,6 +8,14 @@ What's new:
 
 • Fixed: Draw on Domino flashed black and stuttered while you resized Domino's panes (dragging the event list wider, for example).
 
+• Gate extend and Gate subtract: type the amount the way you mean it. 120 = ticks, 50% = half of each note's length, 50% + 10 = both, and math like 960*2 works. Gate subtract can use % now too. Amount in follows what you type. See [page:extend#The amount|Gate extend].
+
+• Your own defaults: the pin left of OK in Gate extend and Gate subtract saves the window's settings as what shapes start with. Settings → [page:settings#User set defaults|User set defaults] lists them, changes them and resets them.
+
+• The pins in the drawing tools list now point down when pinned and lean when not.
+
+• Before you update: Gate extend's box now reads a plain number as ticks. Type 50% for percent (it used to follow the Ticks / % choice). Projects open with the same notes as before.
+
 ## Version 1.7.7
 ^^ 2026/11/21 12:03:01 UTC+07:00 · 8b6d59fe
 
