@@ -571,6 +571,7 @@ def liquify_editor(cls):
             ttk.Button(self.buttons, text=tr("range_window.ok"), command=self.ok).pack(side="right")
             self.protocol("WM_DELETE_WINDOW", self.cancel)
             self.bind("<Escape>", lambda e: self.cancel())
+            self.tidy_editor()
 
         def targets(self):
             return []

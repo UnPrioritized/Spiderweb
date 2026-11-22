@@ -418,6 +418,7 @@
  "defaults.funnel_range": "Spam gate range (funnels)",
  "defaults.own_graph": "own graph",
  "defaults.nothing_strummed": "nothing strummed",
+ "defaults.own_settings": "own settings",
  "app.as_drawn": "As drawn",
  "app.keeps_overlaps_every_note_exactly_as": "Keeps overlaps.\nEvery note exactly as the shapes make it, all on one channel.\nNotes on the same key can overlap or start on the same tick.",
  "app.single_channel": "Single channel",

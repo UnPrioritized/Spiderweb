@@ -1087,6 +1087,7 @@ def default_editor(cls):
             self.done = done
             super().__init__(app)
             self.title(tr("defaults.edit_title", name=self.tx("title")))
+            self.tidy_editor()
 
         @property
         def tgts(self):

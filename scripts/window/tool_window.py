@@ -878,6 +878,7 @@ def page_editor(cls):
             self.done = done
             super().__init__(app)
             self.title(tr("defaults.edit_title", name=cls.default_title()))
+            self.tidy_editor()
 
         def pick_targets(self):
             return []

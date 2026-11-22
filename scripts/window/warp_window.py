@@ -882,6 +882,7 @@ def warp_editor(cls):
             ok.pack(side="right")
             self.protocol("WM_DELETE_WINDOW", self.cancel)
             self.bind("<Escape>", lambda e: self.cancel())
+            self.tidy_editor()
 
         def targets(self):
             return []

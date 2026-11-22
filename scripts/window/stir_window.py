@@ -23,6 +23,7 @@ from notes.shape_bend import colour_part, shape_tabs
 from roll.roll_live import STROKE_TOOLS
 from window import look
 from window import stir_presets as sp
+from window.default_pin import DefaultPin
 from window.drawer import library_lists, shape_path
 from window.edit_line import EditLine
 from window.shares_window import AngleKnob, HeldKnobs
@@ -107,13 +108,84 @@ def reset_stir(old, i):
     return with_stir(old, i, lambda st: full_stir(None))
 
 
-class StirWindow(HeldKnobs, tk.Toplevel):
+LEFT_OUT = ("centre", "spot", "shape", "seen", "size_mix")  # (never in a default: placed on the piano roll / measured)
+
+
+def stir_mine(v):
+    """A stir as a "use as default" holds it: only settings not at the program's own, nothing placed on the piano roll
+    (a drawn area = no area kind: its loops are left out); None = nothing of its own."""
+    s = one_stir(v) if isinstance(v, dict) else None
+    if not s:
+        return None
+    s = {k: x for k, x in s.items() if k not in LEFT_OUT}
+    if s.get("area") == DRAWN:
+        s.pop("area")
+    return s or None
+
+
+class StirWindow(DefaultPin, HeldKnobs, tk.Toplevel):
     notes_pass = True  # (its clicks / keys don't wait for notes made in the background: notes_wait.pass_window)
+    KEY = "stir"  # (its section in shape-defaults.ini)
+    ATTR = "stir_window"
+
+    # ---- the user's own default ("use as default" pin, window/default_pin.py; user 2026-11-23): the TAB SHOWN; a
+    # shape's first tab (put on when the window opens on shapes without a Stir) and every new tab ("+") start from it.
+    # Reset = no stir, as before.
+
+    @classmethod
+    def clean_saved(cls, v):
+        return stir_mine(v)
+
+    @classmethod
+    def default_title(cls):
+        return tr("stir.title")
+
+    @classmethod
+    def editor_class(cls):
+        return stir_editor(cls)
+
+    def can_save_default(self):
+        return bool(self.targets())
+
+    def default_now(self):
+        self.take_typing()
+        shown = self.stirs()
+        return (stir_mine(shown[0]) or {}) if shown else None  # ({} = the program's own: forgotten)
+
+    @classmethod
+    def program_default(cls):
+        return {}
+
+    @classmethod
+    def describe_default(cls, v, ppq):
+        st = full_stir(v)
+        words = []
+        if st["turn"]:
+            words.append(f"{tr('stir.turn')} {fmt(round(st['turn'], 1))}°")
+        if st["twist"]:
+            words.append(f"{tr('stir.twist')} {fmt(round(st['twist'], 2))}")
+        if st["moves"] == "shape":
+            words.append(tr("stir.moves_shape"))
+        return ", ".join(words) or tr("defaults.own_settings")
+
+    def change_rc(self, change, name, push=True, own_order=False):
+        """The selected shapes' Recolour changed (one undo step, App.change_recolour)."""
+        return self.app.change_recolour(change, name, push, own_order)
+
+    def put_mine(self, i):
+        """Tab i of every selected shape without one = the user's default (one undo step); False: none saved."""
+        mine = self.saved_default()
+        if not mine or self.drawing:
+            return False
+        self.change_rc(lambda old, sh: with_stir(old, i, lambda st: dict(st, **mine))
+                       if i >= len(stirs_of(old)) else old, tr("stir.undo"))
+        return True
+
     def __init__(self, app):
         super().__init__(app)
         self.withdraw()
         self.app = app
-        app.stir_window = self
+        setattr(app, self.ATTR, self)
         self.title(tr("stir.title"))
         self.transient(app)
         self.resizable(False, False)
@@ -148,6 +220,8 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
         self.fix_columns()
+        if not self.editing_default and not any(stirs_of(clean_recolour(t.get("recolour"))) for t in self.targets()):
+            self.put_mine(0)  # (a default saved: on at once, user 2026-11-23, like the note tool pages)
         self.sync()
         centre_over(self, app)
         remember_place(self, "stir")
@@ -249,7 +323,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         # (the tabs after it move along; the shown tab's remembered area forgotten: the preset brings its own)
         self.area_mem = {t + (n - count if t >= i + count else 0): m for t, m in self.area_mem.items()
                          if not i <= t < i + count}
-        self.app.change_recolour(lambda old, sh: sp.with_preset(old, i, p["stirs"], stirred_rc, count),
+        self.change_rc(lambda old, sh: sp.with_preset(old, i, p["stirs"], stirred_rc, count),
                                  tr("stir.undo_preset", name=p["name"]), own_order=True)
         self.fresh = False
         self.sync()
@@ -607,7 +681,12 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.edit_line = EditLine(box, app, "stir", self.hint, 320)  # (later colour steps hidden: PLAN.md stage C)
         row = ttk.Frame(box)
         row.pack(fill="x", pady=(10, 0))
-        ttk.Button(row, text=tr("shares.close"), command=self.close).pack(side="right")
+        self.bottom_row = row
+        self.close_button = ttk.Button(row, text=tr("shares.close"), command=self.close)
+        self.close_button.pack(side="right")
+        right = ttk.Frame(row)
+        right.pack(side="right", padx=(0, 6))
+        self.pin_row(right)
         self.reset = ttk.Button(row, text=tr("stir.reset"), command=self.on_reset)
         self.reset.pack(side="left")
         Tooltip(self.reset, tr("stir.reset_tip"))
@@ -1004,11 +1083,13 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.sync()
 
     def on_add(self):
-        """A new stir after the others (saved once one of its settings changes)."""
+        """A new stir after the others (saved once one of its settings changes; with a default saved: at once)."""
         self.take_typing()
         self.tab, self.fresh = self.tab_count, True
         self.wheel = None
         self.app.colour_edit_leave("stir")
+        if self.put_mine(self.tab):
+            self.fresh = False
         self.sync()
 
     def on_drop(self):
@@ -1021,7 +1102,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
             self.fresh = False
         else:
             self.wheel = None
-            self.app.change_recolour(
+            self.change_rc(
                 lambda old, sh: with_stir(old, i, None)
                 if i < len(stirs_of(old)) else old, tr("stir.undo_drop"))
         # (each tab's remembered area moves down with its tab)
@@ -1349,7 +1430,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 "seen": lambda st: st["spin"] or (st["round"] and st["reach"] is not None)}.get(key)
         self.fresh = False
         i = self.tab
-        return self.app.change_recolour(
+        return self.change_rc(
             lambda old, sh: with_stir(old, i, lambda st: change(st, sh)) if only is None or only(stir_at(old, i))
             else old, name or tr("stir.undo"), push)
 
@@ -1494,7 +1575,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
                 b["var"].set(b["shown"])
                 good(b["entry"])
         self.forget_area()  # (else picking an area after Reset brought the old slant / Size back, user 11-06)
-        self.app.change_recolour(
+        self.change_rc(
             lambda old, sh: reset_stir(old, i) if old and i < len(stirs_of(old)) else old,
             tr("stir.undo_reset"))
         self.sync()
@@ -1659,7 +1740,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         for j in sorted(drop, reverse=True):
             del app.shapes[j]
         self.end_draw()
-        app.change_recolour(lambda old, s: with_stir(old, i, lambda st: dict(st, shape=shape, **puts[id(s)]))
+        self.change_rc(lambda old, s: with_stir(old, i, lambda st: dict(st, shape=shape, **puts[id(s)]))
                             if id(s) in puts else old, None, False)
         app.shapes_changed()
         self.sync()
@@ -1710,7 +1791,7 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         if self.hold:
             self.call_off(self.hold)
         self.take_typing()
-        self.app.stir_window = None
+        setattr(self.app, self.ATTR, None)
         self.app.colour_edit_leave("stir")  # (a Stir's later colour steps worked out again, PLAN.md stage C)
         self.app.colour_window_closed()  # (quick Stir changes' kept work: only while a window needs it, hunt 11-07)
         roll = self.app.roll
@@ -1719,6 +1800,87 @@ class StirWindow(HeldKnobs, tk.Toplevel):
         self.destroy()
         self.app.roll.focus_set()
         self.app.roll.request_redraw()
+
+
+def stir_editor(cls):
+    """The Stir window changing the user's DEFAULT only (Settings → User set defaults; like
+    default_pin.default_editor): one tab on a stand-in line no one sees (no shape, selection or undo step touched),
+    "+" / × / drawing or picking an area / Area to a shape / Match the screen do nothing; OK saves, Close changes
+    nothing."""
+    class Editor(cls):
+        ATTR = cls.ATTR + "_defaults"
+        editing_default = True
+
+        def __init__(self, app, done=None):
+            self.done = done
+            self.fake = cls.stand_in()
+            mine = self.saved_default()
+            if mine:
+                self.fake["recolour"] = with_stir(None, 0, lambda st: dict(st, **mine))
+            super().__init__(app)
+            self.title(tr("defaults.edit_title", name=cls.default_title()))
+            ttk.Button(self.bottom_row, text=tr("range_window.ok"), command=self.ok).pack(side="right", padx=(0, 6),
+                                                                                        before=self.close_button)
+            self.close_button.config(command=self.cancel)
+            self.protocol("WM_DELETE_WINDOW", self.cancel)
+            self.bind("<Escape>", lambda e: self.cancel())
+            self.tidy_editor()
+
+        def targets(self):
+            return [self.fake]
+
+        def pin_row(self, row):
+            """(no pin here: OK is what saves)"""
+
+        def change_rc(self, change, name, push=True, own_order=False):
+            old = clean_recolour(self.fake.get("recolour"))
+            new = change(old, self.fake)
+            new = clean_recolour(new) if new else None
+            if new == old:
+                return False
+            if new:
+                self.fake["recolour"] = new
+            else:
+                self.fake.pop("recolour", None)
+            self.sync()
+            return True
+
+        def on_add(self):
+            """(one tab: the default)"""
+
+        def on_drop(self):
+            """(the tab stays)"""
+
+        def on_draw(self, pick=False):
+            """(nothing drawn on the piano roll here)"""
+
+        def on_to_shape(self):
+            """(no shape made here)"""
+
+        def on_match(self):
+            """(no screen look here)"""
+
+        def sync(self):
+            super().sync()
+            self.what.config(text="")
+            for b in (self.tab_add, self.to_shape, self.match, self.middle):
+                b.state(["disabled"])
+            for k in ("centre0", "centre1", "spot0", "spot1"):  # (placed on the piano roll: never in a default)
+                self.boxes[k]["entry"].config(state="disabled")
+            self.warn.pack_forget()  # (Channels / colours: about real shapes)
+
+        def ok(self):
+            self.take_typing()
+            self.save_default()
+            self.cancel()
+
+        def cancel(self):
+            if self.hold:
+                self.call_off(self.hold)
+            setattr(self.app, self.ATTR, None)
+            self.destroy()
+    Editor.__name__ = cls.__name__ + "Default"
+    return Editor
 
 
 def outline_kept(app, tgts, has):

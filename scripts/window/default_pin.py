@@ -39,6 +39,8 @@ WINDOWS = {
     "chop": "window.chop_window:ChopWindow",
     "trim": "window.trim_window:TrimWindow",
     "melody": "window.melody_window:MelodyWindow",
+    "shares": "window.shares_window:SharesWindow",
+    "stir": "window.stir_window:StirWindow",
     "warp": "window.warp_window:WarpWindow",
     "liquify": "window.liquify_window:LiquifyWindow",
 }
@@ -118,6 +120,7 @@ def default_editor(cls):
             self.done = done
             super().__init__(app)
             self.title(tr("defaults.edit_title", name=cls.default_title()))
+            self.tidy_editor()
 
         @property
         def tgts(self):
@@ -176,6 +179,13 @@ class DefaultPin:
     @classmethod
     def put_default(cls, sh, v):
         sh[cls.KEY] = v
+
+    def tidy_editor(self):
+        """A "your default" window: its Properties… / hidden-steps line (about real shapes) never shown."""
+        el = getattr(self, "edit_line", None)
+        if el is not None:
+            el.pack_forget()
+            el.sync = lambda: None
 
     def editor_greyed(self):
         """What the "your default" window greys (its on / off tick)."""

@@ -7,6 +7,7 @@ Stays open and follows the selection like Gate sensitive merge's. Several shapes
 (so the shown % holds for each); a box where they differ is blank, like the side panel's Mixed. Each knob turn /
 wheel run / typed number / Even shares / lock is one undo step; Ctrl+Z while a knob is held = back to the press."""
 
+import json
 import math
 import tkinter as tk
 from tkinter import ttk
@@ -16,6 +17,7 @@ from files.mathexpr import calc, fmt
 from notes.recolour import KEEP, MOST_PUSH, MOST_TIGHT, PATTERNS, SPLIT, TIGHT, clean_recolour, palettes, wanted, \
     weights
 from window import look
+from window.default_pin import DefaultPin
 from window.edit_line import EditLine
 from window.tool_window import Knob
 from window.widgets import Scrub, Tooltip, bad, centre_over, good, open_or_lift, remember_place, show_mixed, \
@@ -296,13 +298,101 @@ class HeldKnobs:
         self.sync()
 
 
-class SharesWindow(HeldKnobs, tk.Toplevel):
+MINE_KEYS = ("colours", "shares", "pins", "pattern", "angle", "tight")  # (a "use as default"'s: never the Clumps
+# Centre point (a dot on the piano roll) or Push)
+
+
+def clean_mine(v):
+    """A saved Shares default: only usable settings (None: none)."""
+    if not isinstance(v, dict):
+        return None
+    out = {}
+    if isinstance(v.get("colours"), int) and not isinstance(v["colours"], bool) and 1 <= v["colours"] <= 16:
+        out["colours"] = v["colours"]
+    sh = v.get("shares")
+    if isinstance(sh, list) and 1 <= len(sh) <= 16 and all(
+            isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and x >= 0 for x in sh):
+        out["shares"] = [float(x) for x in sh]
+    pins = v.get("pins")
+    if isinstance(pins, list) and all(isinstance(p, int) and not isinstance(p, bool) and 0 <= p < 16 for p in pins):
+        out["pins"] = sorted(set(pins))
+    if v.get("pattern") in PATTERNS:
+        out["pattern"] = v["pattern"]
+    for k, lo, hi in (("angle", -360, 360), ("tight", 0, MOST_TIGHT)):
+        x = v.get(k)
+        if isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) and lo <= x <= hi:
+            out[k] = float(x)
+    return out or None
+
+
+class SharesWindow(DefaultPin, HeldKnobs, tk.Toplevel):
     notes_pass = True  # (its clicks / drags don't wait for notes made in the background: notes_wait.pass_window)
+    KEY = "shares"  # (its section in shape-defaults.ini)
+    ATTR = "shares_window"
+
+    # ---- the user's own default ("use as default" pin, window/default_pin.py; user 2026-11-23): Colours, each
+    # colour's share + lock, Clumps' pattern / angle / tightness; put on when the window opens on recoloured shapes
+    # still at the program's own (none of these set), like the note tool pages
+
+    @classmethod
+    def clean_saved(cls, v):
+        return clean_mine(v)
+
+    @classmethod
+    def default_title(cls):
+        return tr("shares.title")
+
+    @classmethod
+    def editor_class(cls):
+        return shares_editor(cls)
+
+    @classmethod
+    def program_default(cls):
+        return {}
+
+    def can_save_default(self):
+        return bool(self.targets())
+
+    def default_now(self):
+        self.take_typing()
+        tgts = self.targets()
+        if not tgts:
+            return None
+        rc = clean_recolour(tgts[0].get("recolour")) or {}
+        return clean_mine({k: rc[k] for k in MINE_KEYS if k in rc}) or {}
+
+    @classmethod
+    def describe_default(cls, v, ppq):
+        words = []
+        if "colours" in v:
+            words.append(f"{tr('shares.colours').rstrip(':')} {v['colours']}")
+        if v.get("shares"):
+            words.append(" / ".join(fmt(round(x, 1)) for x in v["shares"]) + " %")
+        if "pattern" in v:
+            words.append(tr("shares.pattern_" + v["pattern"]))
+        return ", ".join(words) or tr("defaults.own_settings")
+
+    def change_rc(self, change, name, push=True):
+        """The selected shapes' Recolour changed (one undo step, App.change_recolour)."""
+        return self.app.change_recolour(change, name, push)
+
+    def put_mine(self):
+        """Recoloured shapes still at the program's own shares get the user's default (one undo step)."""
+        mine = self.saved_default()
+        if not mine:
+            return
+
+        def changed(old, sh):
+            if not old or old.get("mode") in (None, KEEP) or any(k in old for k in MINE_KEYS):
+                return old
+            return dict(old, **json.loads(json.dumps(mine)))
+        self.change_rc(changed, tr("recolour.undo_shares"))
+
     def __init__(self, app):
         super().__init__(app)
         self.withdraw()
         self.app = app
-        app.shares_window = self
+        setattr(app, self.ATTR, self)
         self.title(tr("shares.title"))
         self.transient(app)
         self.resizable(False, False)
@@ -354,14 +444,20 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
                               justify="left")
         self.hint.pack(anchor="w", fill="x", pady=(8, 0))
         self.edit_line = EditLine(box, app, "mode", self.hint, 220)  # (later colour steps hidden: PLAN.md stage C)
-        row = ttk.Frame(box)
+        row = self.bottom_row = ttk.Frame(box)
         row.pack(fill="x", pady=(10, 0))
-        ttk.Button(row, text=tr("shares.close"), command=self.close).pack(side="right")
+        self.close_button = ttk.Button(row, text=tr("shares.close"), command=self.close)
+        self.close_button.pack(side="right")
+        right = ttk.Frame(row)
+        right.pack(side="right", padx=(0, 6))
+        self.pin_row(right)
         self.even = ttk.Button(row, text=tr("shares.even"), command=self.on_even)
         self.even.pack(side="left")
         Tooltip(self.even, tr("shares.even_tip"))
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
+        if not self.editing_default:
+            self.put_mine()  # (a default saved: on at once, user 2026-11-23)
         self.sync()
         centre_over(self, app)
         remember_place(self, "shares")
@@ -593,7 +689,7 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
             if pins:
                 out["pins"] = pins
             return out
-        return self.app.change_recolour(changed, name or tr("recolour.undo_shares"), push)
+        return self.change_rc(changed, name or tr("recolour.undo_shares"), push)
 
     def set_share(self, i, v, name=None):
         return self.change(lambda L: (spread(L["shares"], i, v, L["pins"]), L["pins"]) if i < L["used"] else None,
@@ -665,7 +761,7 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
             return dict(out, colours=m) if m > L["least"] else out
 
         self.n_shown = self.n_var.get()
-        self.app.change_recolour(changed, tr("recolour.undo_colours"))
+        self.change_rc(changed, tr("recolour.undo_colours"))
         self.sync()
 
     # ---- Split: Clumps
@@ -681,7 +777,7 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
                 c[int(key[-1])] = value
                 return dict(old, centre=c)
             return dict(old, **{key: value})
-        return self.app.change_recolour(changed, name or tr("shares.undo_clumps"))
+        return self.change_rc(changed, name or tr("shares.undo_clumps"))
 
     def on_pattern(self):
         i = self.pattern.current()
@@ -720,7 +816,7 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
             px, py = old.get("push", (0, 0))
             p = [max(-MOST_PUSH, min(MOST_PUSH, px + dx)), max(-MOST_PUSH, min(MOST_PUSH, py + dy))]
             return dict(old, push=p)
-        self.app.change_recolour(pushed, tr("shares.undo_push"))
+        self.change_rc(pushed, tr("shares.undo_push"))
 
     def take_typing(self):
         """A number typed without Enter is used (closing: like Settings' typed voice limit)."""
@@ -737,7 +833,7 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
         if self.hold:
             self.call_off(self.hold)
         self.take_typing()
-        self.app.shares_window = None
+        setattr(self.app, self.ATTR, None)
         self.app.colour_edit_leave("mode")  # (Shuffle / Split's later colour steps worked out again, PLAN.md C)
         roll = self.app.roll
         if (roll.drag or ("",))[0] == "rccentre":  # (a Centre point dot held: let go, what it moved kept)
@@ -745,6 +841,65 @@ class SharesWindow(HeldKnobs, tk.Toplevel):
         self.destroy()
         self.app.roll.focus_set()
         self.app.roll.request_redraw()
+
+
+def shares_editor(cls):
+    """The Shares window changing the user's DEFAULT only (Settings → User set defaults; like
+    default_pin.default_editor): a stand-in Split: Clumps line no one sees (so every row shows); no shape, selection
+    or undo step touched; Push greyed (never in a default); OK saves, Close changes nothing."""
+    class Editor(cls):
+        ATTR = cls.ATTR + "_defaults"
+        editing_default = True
+
+        def __init__(self, app, done=None):
+            self.done = done
+            self.fake = cls.stand_in()
+            self.fake["recolour"] = clean_recolour(dict({"mode": "clumps", "seed": 1}, **(self.saved_default() or {})))
+            super().__init__(app)
+            self.title(tr("defaults.edit_title", name=cls.default_title()))
+            ttk.Button(self.bottom_row, text=tr("range_window.ok"), command=self.ok).pack(side="right", padx=(0, 6),
+                                                                                        before=self.close_button)
+            self.close_button.config(command=self.cancel)
+            self.protocol("WM_DELETE_WINDOW", self.cancel)
+            self.bind("<Escape>", lambda e: self.cancel())
+            self.tidy_editor()
+
+        def targets(self):
+            return [self.fake]
+
+        def pin_row(self, row):
+            """(no pin here: OK is what saves)"""
+
+        def change_rc(self, change, name, push=True):
+            old = clean_recolour(self.fake.get("recolour"))
+            new = change(old, self.fake)
+            new = clean_recolour(new) if new else None
+            if new == old:
+                return False
+            self.fake["recolour"] = new
+            self.sync()
+            return True
+
+        def sync(self):
+            super().sync()
+            self.what.config(text="")
+            for b in list(self.pushes.values()) + [self.push_none]:
+                b.state(["disabled"])
+            for k in ("centre0", "centre1"):  # (a dot on the piano roll: never in a default)
+                self.boxes[k]["entry"].config(state="disabled")
+
+        def ok(self):
+            self.take_typing()
+            self.save_default()
+            self.cancel()
+
+        def cancel(self):
+            if self.hold:
+                self.call_off(self.hold)
+            setattr(self.app, self.ATTR, None)
+            self.destroy()
+    Editor.__name__ = cls.__name__ + "Default"
+    return Editor
 
 
 def open_shares(app):
