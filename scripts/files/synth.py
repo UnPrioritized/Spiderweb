@@ -219,13 +219,17 @@ def cc_events(messages):
     return np.array(out, EVENT) if out else np.zeros(0, EVENT)
 
 
-def events(notes, ppq, bpm, chans=None, cc=None, exact=False, tempo=None):
+def events(notes, ppq, bpm, chans=None, cc=None, exact=False, tempo=None, orig=None):
     """The notes (rows start, end, key, velocity, ... in ticks) as BASSMIDI's event list: one channel (chans: each
     note's channel, never 10's; exact: chans are the stream's channels as they are, past 16 too), program 0, one
     tempo (tempo: the Conductor pane's as heard, [(tick, us)] from tick 0, tempo_file.heard_tempo: each change on
     its tick, before anything else there). At the same tick a note's end comes before the next start. Keys above
     127 are left out. cc = BASSMIDI events (cc_events) put among them: on a shared tick after the notes' ends, before
-    their starts."""
+    their starts. orig = (each note's start, end, each cc event's tick) in the SONG's ticks when the ticks given are
+    frames (ahead_pieces.FRAME_PPQ, no tempo): events sharing a frame keep the song's order (hunt 2026-11-22: a
+    1-tick note's end after the next same-key note's start cut that note)."""
+    if tempo and orig is not None:
+        raise ValueError("orig is for frames at one tempo")
     if tempo:
         changes = np.array([(_EV_TEMPO, int(u), 0, int(t), 0) for t, u in tempo[1:]], EVENT)
         cc = changes if cc is None or not len(cc) else np.concatenate([changes, cc])
@@ -254,7 +258,14 @@ def events(notes, ppq, bpm, chans=None, cc=None, exact=False, tempo=None):
         kind = np.r_[np.full(n, 2), np.zeros(n), np.ones(len(cc))]  # (ends, then the CCs, then starts)
     else:
         kind = np.r_[np.ones(n), np.zeros(n)]
-    ev[2:-1] = body[np.lexsort((kind, body["tick"]))]
+    if orig is not None:  # (ticks are frames: on a shared frame the song's own order first, then the rule above)
+        o_s, o_e, o_c = (np.asarray(a, np.int64) for a in orig)
+        if len(o_s) != len(keep) or len(o_e) != len(keep) or len(o_c) != (0 if cc is None else len(cc)):
+            raise ValueError("orig doesn't match the notes / cc")
+        key = np.r_[o_s[keep], o_e[keep], o_c]
+        ev[2:-1] = body[np.lexsort((kind, key, body["tick"]))]
+    else:
+        ev[2:-1] = body[np.lexsort((kind, body["tick"]))]
     ev[-1] = (_EV_END, 0, 0, ev[-2]["tick"], 0)
     return ev
 

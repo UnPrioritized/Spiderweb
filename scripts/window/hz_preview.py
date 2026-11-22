@@ -266,7 +266,7 @@ class Preview:
                     else [0])
             raw = [(t, s, a, b, c) for t, s, a, b in cc_events(sh, ppq, bpm) for c in used] if sh else []
         cc = synth_cc(raw) if raw or voiced else None
-        ev = events(notes, ppq, bpm, chans, cc, voiced, tempo) if notes is not None and len(notes) else None
+        ev = self._frame_events(notes, chans, cc, voiced) if notes is not None and len(notes) else None
         if ev is None or len(ev) <= 3:  # (no notes, or only ones above key 127, which can't sound: nothing to play)
             self.ev, self.span, self.last, self.card = None, (0, 0), 0, None
             self.clear()
@@ -276,9 +276,9 @@ class Preview:
         self.card = self.card_song(mode, notes, chans, voiced, raw, ppq, bpm, tempo)
         if (self.card and self.card[0]) != was:  # (Merlin <-> Kestrel by a CC7 / CC11 line: one engine's sound)
             old = None
-        ticks = ev["tick"][2:-1]
-        self.last = int(self.frames(int(ticks[-1])))
-        self.span = (int(self.frames(int(ticks[0]))), self.last)
+        frames = ev["tick"][2:-1]  # (the list is in frames: _frame_events)
+        self.last = int(frames[-1])
+        self.span = (int(frames[0]), self.last)
         if old is None or not same_time:
             self.clear()
             return self.set_end()
@@ -293,8 +293,27 @@ class Preview:
         last =int(diff[0]) if len(diff) else n
         lo = min(int(old["tick"][min(first, len(old) - 1)]), int(ev["tick"][min(first, len(ev) - 1)]))
         hi = max(int(old["tick"][max(len(old) - 1 - last, 0)]), int(ev["tick"][max(len(ev) - 1 - last, 0)]))
-        self.clear(self.frames(lo), self.frames(hi) + TAIL * RATE)
+        self.clear(lo, hi + TAIL * RATE)  # (frames already)
         self.set_end()
+
+    def _frame_events(self, notes, chans, cc, voiced):
+        """BASSMIDI's event list in FRAMES at one tempo (ahead_pieces.FRAME_PPQ), like Rendered ahead's
+        (Song.bass_events): BASSMIDI's own clock drifts over many tempo changes (hunt 2026-11-22: this preview stayed
+        on it while its Merlin / Kestrel engines moved to the real tempo). Events sharing a frame keep the song's
+        order; only a note with no length gets a frame."""
+        from files.ahead_pieces import FRAME_PPQ, FRAME_US
+        notes = np.asarray(notes)
+        fr = lambda t: np.rint(np.asarray(self.frames(np.asarray(t, np.float64)))).astype(np.int64)  # noqa: E731
+        rows = np.array(notes[:, :4], np.int64)
+        rows[:, 0] = fr(notes[:, 0])
+        rows[:, 1] = np.maximum(fr(notes[:, 1]), rows[:, 0] + (notes[:, 1] <= notes[:, 0]))
+        o_c = np.zeros(0, np.int64)
+        if cc is not None and len(cc):
+            o_c = cc["tick"].astype(np.int64)
+            cc = cc.copy()
+            cc["tick"] = fr(o_c)
+        return events(rows, FRAME_PPQ, 60e6 / FRAME_US, chans, cc, voiced,
+                      orig=(notes[:, 0].astype(np.int64), notes[:, 1].astype(np.int64), o_c))
 
     def card_mode(self):
         """What makes the pieces: the preview's OWN Engine (cfg "engine"; user 2026-11-03, it followed the main MIDI
@@ -365,7 +384,8 @@ class Preview:
                                                       lambda p: setattr(job, "done", int(p * n)))
                 job.card = True
             else:
-                job.result = self.synth.render(ev, ppq, f0, n, self.cfg["voices"], self.cfg["nofx"], job.cancel,
+                from files.ahead_pieces import FRAME_PPQ  # (the list is in frames: _frame_events)
+                job.result = self.synth.render(ev, FRAME_PPQ, f0, n, self.cfg["voices"], self.cfg["nofx"], job.cancel,
                                                lambda n: setattr(job, "done", n), stats, pre=job.pre)
         except SynthError as e:
             job.error = str(e)

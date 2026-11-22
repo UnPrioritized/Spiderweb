@@ -929,11 +929,7 @@ class LoadedSong:
         # a pedal down. Merlin lets every note go at the file's end, BASSMIDI never plays notes on its last tick)
         count = 1 + len(ports) + len(got) + len(own) + len(counted_tracks)
         # (every track written again in frames at one tempo, so no player's clock drifts: ahead_pieces.Retime)
-        rt = Retime(self.own, origin, t_copy)
-
-        def chunk(*parts):
-            body = rt.body(*parts)
-            return b"MTrk" + len(body).to_bytes(4, "big") + body
+        rt = Retime(self.own, origin, t_copy)  # (each track straight onto buf: rt.append)
         buf = PieceMidi(b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + min(65535, count).to_bytes(2, "big")
                         + FRAME_PPQ.to_bytes(2, "big"))
         buf += rt.tempo_track()
@@ -948,7 +944,7 @@ class LoadedSong:
                 head += _vlq(tk - last) + bytes([s, d1]) + (b"" if (s & 0xF0) in (0xC0, 0xD0) else bytes([d2]))
                 last = tk
             head += b"\x00\xff\x2f\x00"
-            buf += chunk(head)
+            rt.append(buf, head)
         got.reverse()  # (popped from the end: each track's body let go once it's in buf)
         while got:
             j, body, start, held, vel, cnt = got.pop()
@@ -974,12 +970,12 @@ class LoadedSong:
             head += _vlq(t_pre - last) + b"\xff\x01\x00"
             if self.sysex:  # (31-EDO: a GM / GS reset in the file wipes our tuning too: sent again right after it)
                 body = _retuned(body, int(self.tport[j]), self.sysex)
-            buf += chunk(bytes(head), body, b"\x00\xff\x2f\x00")
+            rt.append(buf, head, body, b"\x00\xff\x2f\x00")
             del body
-        for c in counted_tracks:
-            buf += rt.track(c)
+        while counted_tracks:  # (each let go once it's in buf)
+            rt.append(buf, memoryview(counted_tracks.pop(0))[8:])
         for c in own:
-            buf += rt.track(c)
+            rt.append(buf, memoryview(c)[8:])
         return buf, f0 - rt.zero
 
     def bass_events(self):

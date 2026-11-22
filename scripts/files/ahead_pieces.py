@@ -18,7 +18,6 @@ Each piece is made with the limiter OFF: Spiderweb's own runs over the joined pi
 Thread rules: Maker.step() runs on the window's thread (quick: it only looks at jobs and starts threads); the
 making runs in threads of its own; Maker.take() is called from the sound's thread."""
 
-import bisect
 import os
 import tempfile
 import threading
@@ -54,28 +53,33 @@ class Retime:
     origin is on (zero): anchors on their real frames (Song.frame), straight between them (midi_scan.rewrite, the
     rule Keep timing uses); the file's own tempo events left out (tempo_track writes the one tempo). Anchors = every
     tempo change + every ANCHOR_GRID ticks, the same ones whatever the piece: a tick lands on the same frame in
-    every piece and in one piece of the whole song (joins exact; the grid keeps the in-between sums small)."""
+    every piece and in one piece of the whole song (joins exact; the grid keeps the in-between sums small).
+    PAST THE PIECE (hunt 2026-11-22): after the anchor following t_end everything stays on that anchor's frame (an
+    own note's off far later at a very fast tempo made a file hours long: Merlin refused it); it's past the end +
+    POST_S, never heard. The grid is at most 64 beats, so even that last stretch stays well under 4-byte waits."""
 
-    ANCHOR_GRID = 1 << 20
+    ANCHOR_GRID = 1 << 20  # (ticks at most; 64 beats when that's less)
+    FLAT = 1 << 50  # (the last anchor's frame held this many ticks on: no event comes later)
 
     def __init__(self, song, origin, t_end):
         self.zero = song.frame(origin)
-        ticks = [t for t, _ in song.tempo]
+        ticks = np.asarray([t for t, _ in song.tempo], np.int64)
         t_end = max(t_end, origin)
-        g = self.ANCHOR_GRID
-        lo = max(0, bisect.bisect_right(ticks, origin) - 1)
-        hi = bisect.bisect_right(ticks, t_end)
-        first = max(ticks[lo] if ticks and ticks[lo] <= origin else 0, origin // g * g)
+        g = max(1, min(self.ANCHOR_GRID, 64 * int(song.ppq)))
+        lo = max(0, int(np.searchsorted(ticks, origin, "right")) - 1)
+        hi = int(np.searchsorted(ticks, t_end, "right"))
+        first = max(int(ticks[lo]) if len(ticks) and ticks[lo] <= origin else 0, origin // g * g)
         # (the last one past t_end: the next tempo change or grid point, never beyond a change: a straight line
         # over a change is the wrong slope)
         far = (t_end // g + 1) * g
         if hi < len(ticks):
-            far = min(far, ticks[hi])
-        inside = {t for t in ticks[lo:hi] if first < t <= t_end}
-        inside.update(range((first // g + 1) * g, t_end + 1, g))
-        anchors = [first] + sorted(inside) + [far]
-        self.bp_n = np.array(anchors, np.int64)
-        self.bp_f = np.array([song.frame(t) for t in anchors], np.int64) - self.zero
+            far = min(far, int(ticks[hi]))
+        changes = ticks[lo:hi]
+        inside = np.union1d(changes[(changes > first) & (changes <= t_end)],
+                            np.arange((first // g + 1) * g, t_end + 1, g, dtype=np.int64))
+        self.bp_n = np.concatenate([[first], inside, [far, far + self.FLAT]]).astype(np.int64)
+        f = song.frames(self.bp_n[:-1]) - self.zero
+        self.bp_f = np.append(f, f[-1]).astype(np.int64)
         self.origin, self.end = origin, song.frame(t_end) - self.zero
 
     def tempo_track(self):
@@ -85,8 +89,12 @@ class Retime:
         body = b"\x00\xff\x51\x03" + FRAME_US.to_bytes(3, "big") + _vlq(max(0, self.end)) + b"\xff\x2f\x00"
         return b"MTrk" + len(body).to_bytes(4, "big") + body
 
-    def body(self, *parts):
-        """Track body parts (each whole events, in order; waits from origin) written again in frames, as one."""
+    SLICE = 16 << 20  # (bytes rewritten at a time)
+
+    def append(self, buf, *parts):
+        """Track body parts (each whole events, in order; waits from origin) written again in frames as ONE MTrk
+        chunk onto the end of buf (a bytearray). Each slice goes straight into buf: no joined copies (hunt
+        2026-11-22: they took ~3x a dense track's size at once)."""
         from files import midi_scan, speed
         fast = speed.loops()
         rw = fast.midi_rewrite if fast is not None else midi_scan.rewrite
@@ -94,27 +102,30 @@ class Retime:
         st[midi_scan.RW_TICK], st[midi_scan.RW_DONE], st[midi_scan.RW_WRUN] = self.origin, 0, -1
         drop, none = np.zeros(128, np.uint8), np.zeros(0, np.int64)
         drop[0x51] = 1
-        out_parts = []
+        at = len(buf)
+        buf += b"MTrk\x00\x00\x00\x00"
+        most = max((len(p) for p in parts if p), default=0)
+        room = 4 * min(most, self.SLICE) + 64  # (a wait grows to 4 bytes at most: frames stay under 2^28)
+        out = np.empty(room, np.uint8) if fast is not None else bytearray(room)
         for part in parts:
             if not part:
                 continue
             src = np.frombuffer(part, np.uint8) if fast is not None else memoryview(bytes(part))
             p = 0
             while p < len(src):
-                end = min(len(src), p + (16 << 20))
-                out = np.empty(4 * (end - p) + 64, np.uint8) if fast is not None else bytearray(4 * (end - p) + 64)
+                end = min(len(src), p + self.SLICE)
                 used, o = rw(src[p:end], 0, end - p, True, self.bp_n, self.bp_f, True, drop, none,
                              np.zeros(1, np.int64), np.zeros(0, np.uint8), out, 0, st, 0, none)
-                out_parts.append(bytes(out[:o]))
+                buf += memoryview(out)[:o]
                 if used <= 0:  # (a broken event: what is written stays)
                     break
                 p += used
-        return b"".join(out_parts)
+        buf[at + 4:at + 8] = (len(buf) - at - 8).to_bytes(4, "big")
+        return buf
 
     def track(self, chunk):
-        """A whole MTrk chunk written again in frames."""
-        body = self.body(memoryview(chunk)[8:])
-        return b"MTrk" + len(body).to_bytes(4, "big") + body
+        """A whole MTrk chunk written again in frames (a new bytearray)."""
+        return self.append(bytearray(), memoryview(chunk)[8:])
 
 
 BLOCK_S = 2.0  # seconds a block (the grey / remake / play unit)
@@ -162,11 +173,11 @@ def _vlq_many(d):
     """Many delta times at once: (bytes each, the bytes in a row)."""
     d = d.astype(np.int64)
     n = np.ones(len(d), np.int64)
-    for k in (7, 14, 21, 28):  # (a 5th byte: a wait in song ticks over 2^28 at a very fast tempo; Retime
-        n += d >= (1 << k)    # reads it, the piece's file has frames)
+    for k in range(7, 63, 7):  # (past 4 bytes: a wait in song ticks over 2^28 at a very fast tempo; Retime reads
+        n += d >= (1 << k)     # it, the piece's file has frames; 9 bytes = any tick, hunt 2026-11-22)
     out = np.zeros(int(n.sum()), np.uint8)
     end = np.cumsum(n)
-    for k in range(5):
+    for k in range(9):
         sel = n > k
         out[end[sel] - 1 - k] = ((d[sel] >> (7 * k)) & 127) | (0x80 if k else 0)
     return n, out
@@ -508,9 +519,11 @@ class Song:
         if not tracks:
             return None, 0
         rt = Retime(self, t0, t_end)  # (one tempo, a tick a frame: any PPQ fits, no half-PPQ trick needed)
-        tracks = [rt.tempo_track()] + [rt.track(c) for c in tracks]
-        head = b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + len(tracks).to_bytes(2, "big")
-        return PieceMidi(head + FRAME_PPQ.to_bytes(2, "big") + b"".join(tracks)), f0 - rt.zero
+        buf = PieceMidi(b"MThd" + (6).to_bytes(4, "big") + (1).to_bytes(2, "big") + (len(tracks) + 1).to_bytes(2, "big")
+                        + FRAME_PPQ.to_bytes(2, "big") + rt.tempo_track())
+        for c in tracks:
+            rt.append(buf, memoryview(c)[8:])
+        return buf, f0 - rt.zero
 
     def tracks(self, t0, t_pre, t_end, file_ports=()):
         """The notes + CC lines of a piece from tick t0 (its tick 0; notes ending after t_pre sound in it) to t_end
@@ -571,26 +584,32 @@ class Song:
             from files import synth
             if len(self):
                 s = self.frames(self.start)
-                e = np.maximum(self.frames(self.end), s + 1)  # (a note under a frame long keeps one: its end
-                rows = np.stack([s, e, self.key, self.vel], axis=1)  # never comes before its start)
+                # (a note's end may share its start's frame: the song's order keeps it after its start (orig); only a
+                # note with no length at all gets a frame, else its end would come first and it would hang)
+                e = np.maximum(self.frames(self.end), s + (self.end <= self.start))
+                rows = np.stack([s, e, self.key, self.vel], axis=1)
             else:
                 rows = np.zeros((0, 4), np.int64)
             chans = self.port.astype(np.int64) * 16 + self.chan
             cf = self.frames(self.cc_ticks) if len(self.ccs) else ()
-            cc = [(int(f), m & 0xF0, (m >> 8) & 0x7F, (m >> 16) & 0x7F, (m >> 24) * 16 + (m & 15))
-                  for f, (_, m) in zip(cf, self.ccs)]
+            msgs = [(m & 0xF0, (m >> 8) & 0x7F, (m >> 16) & 0x7F, (m >> 24) * 16 + (m & 15)) for _, m in self.ccs]
+            cc = [(int(f), *x) for f, x in zip(cf, msgs)]
             extra = synth.cc_events(cc)
-            tunes = getattr(self, "tunes", ())
+            extra_o = synth.cc_events([(int(t), *x) for t, x in zip(self.cc_ticks, msgs)])["tick"]  # (same events,
+            tunes = getattr(self, "tunes", ())                                                      # song ticks)
             if tunes:  # (31-EDO's channels retuned at the start: Live.tune's events)
                 tune = np.array([(synth._EV_SCALETUNING, max(0, min(16383, int(round(8192 + c * 8192 / 100)))) | n << 16,
                                   ch, 0, 0) for ch, cents in tunes for n, c in enumerate(cents)], synth.EVENT)
                 extra = np.concatenate([tune, extra]) if len(extra) else tune
+                extra_o = np.r_[np.zeros(len(tune), np.int64), extra_o]
             used = sorted({int(c) for c in np.unique(chans)} | {int(c[4]) for c in cc})
             kit = EDO_DRUMS if getattr(self, "drums", False) else -1  # (31-EDO's channel 10 as drums)
             drums = np.array([(synth._EV_DRUMS, 1 if c == kit else 0, c, 0, 0) for c in used if c % 16 == 9],
                              synth.EVENT)
             extra = np.concatenate([drums, extra]) if len(drums) else extra
-            self._bass = synth.events(rows, FRAME_PPQ, 60e6 / FRAME_US, chans, extra, True)
+            extra_o = np.r_[np.zeros(len(drums), np.int64), extra_o]
+            self._bass = synth.events(rows, FRAME_PPQ, 60e6 / FRAME_US, chans, extra, True,
+                                      orig=(self.start, self.end, extra_o))
         return self._bass
 
 
