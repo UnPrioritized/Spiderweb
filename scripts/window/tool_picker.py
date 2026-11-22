@@ -23,9 +23,9 @@ GROUP = ("custom", "circle", "polygon")
 
 
 def pin_inside(deg=0):
-    """A push pin seen from the side, its needle pointing deg degrees clockwise from right (user 2026-11-23: 0 = not
-    pinned / no default saved, 90 = straight down = pinned / saved). Used by the tool list and the Gate windows'
-    "use as default" pin."""
+    """A push pin seen from the side, its needle pointing deg degrees clockwise from right (user 2026-11-23: 135 =
+    leaning, down-left = not pinned / no default saved (0, pointing right, "was too much"), 90 = straight down =
+    pinned / saved). Used by the tool list and the Gate windows' "use as default" pin."""
     a = math.radians(deg)
     ca, sa = math.cos(a), math.sin(a)
 
@@ -42,7 +42,7 @@ def pin_picture(scale, rgb, deg=0):
     return _picture(max(SIZE, round(SIZE * scale)), rgb, pin_inside(deg))
 
 
-_pin_inside = pin_inside(0)
+_pin_inside = pin_inside(135)
 
 
 def _arrow_inside(x, y):
@@ -101,7 +101,7 @@ class ToolPicker:
         self.last, self.pins, self.popup = tools[0][0] if FIRST not in self.label else FIRST, [], None
         size = max(SIZE, round(SIZE * app.scale))
         self.pin_on, self.pin_off = (_picture(size, look.rgb(look.ICON), pin_inside(90)),
-                                     _picture(size, look.rgb(look.ICON_OFF), pin_inside(0)))
+                                     _picture(size, look.rgb(look.ICON_OFF), pin_inside(135)))
         box = self.frame = ttk.Frame(parent)
         self.main = ttk.Radiobutton(box, variable=self.var, style="Toolbutton", takefocus=False)
         self.main.pack(side="left")

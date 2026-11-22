@@ -277,14 +277,26 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.pin = ttk.Label(row, cursor="hand2")
         self.pin.pack(side="left", padx=(0, 8))
         self.pin.bind("<ButtonRelease-1>", lambda e: self.pin_menu())
+        self.pin.bind("<Destroy>", lambda e: self.drop_pin_image(), add="+")
         self.pin_tip = Tooltip(self.pin, "")
         self.show_pin()
+
+    def drop_pin_image(self):
+        """The pin's picture freed now (a closed window's picture stayed in Tk: window_traces_freed)."""
+        old, self.pin_image = getattr(self, "pin_image", None), None
+        if old is not None:
+            try:
+                self.tk.call("image", "delete", str(old))
+            except tk.TclError:
+                pass
 
     def show_pin(self):
         from window.tool_picker import pin_picture
         saved = self.saved_default() is not None
-        self.pin_image = pin_picture(self.s, look.rgb(look.PIN_ON if saved else look.PIN_OFF), 90 if saved else 0)
-        self.pin.config(image=self.pin_image)
+        new = pin_picture(self.s, look.rgb(look.PIN_ON if saved else look.PIN_OFF), 90 if saved else 135)
+        self.pin.config(image=new)
+        self.drop_pin_image()
+        self.pin_image = new
         self.pin_tip.set_text(tr("defaults.pin_saved_tip" if saved else "defaults.pin_tip", name=self.tx("title")))
 
     def pin_menu(self):
@@ -310,6 +322,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         except OSError:
             self.app.status.config(text=tr("defaults.cant_save"))
         self.show_pin()
+        defaults_changed(self.app)
 
     def forget_default(self):
         try:
@@ -317,6 +330,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         except OSError:
             self.app.status.config(text=tr("defaults.cant_save"))
         self.show_pin()
+        defaults_changed(self.app)
 
     def made_of(self, i):
         """Shape i's stored settings from the window's."""
@@ -1091,6 +1105,15 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.app.roll.focus_set()
 
 
+def defaults_changed(app):
+    """A default saved / forgotten: an open Settings window's User set defaults list shows it at once (user
+    2026-11-23: it waited for a page change)."""
+    w = getattr(app, "settings_window", None)
+    fill = getattr(w, "fill_defaults", None)
+    if fill is not None and w.winfo_exists():
+        fill()
+
+
 def default_editor(cls):
     """cls (SubtractWindow / ExtendWindow) changing the user's DEFAULT only (Settings → User set defaults, double-click
     a row; user 2026-11-23): the same window on a stand-in shape no one sees; no shape, selection or undo step
@@ -1139,12 +1162,13 @@ def default_editor(cls):
         def settle(self, also=()):
             """(nothing tried on shapes to keep)"""
 
+        def show(self):
+            super().show()
+            self.on_tick.state(["disabled"])  # (a default goes only with Reset, never from here: user 2026-11-23)
+
         def ok(self):
             self.take_typing()
-            if self.ons[0]:
-                self.save_default()
-            else:
-                self.forget_default()
+            self.save_default()
             done = self.done
             self.close()
             if done:

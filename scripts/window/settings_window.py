@@ -611,6 +611,7 @@ class SettingsWindow(tk.Toplevel):
         from window.subtract_window import describe
         Tooltip(f.head(tr("defaults.page")), tr("defaults.page_tip"))
         f.note(tr("defaults.page_note"), tip=tr("defaults.page_tip"))
+        empty = self.defaults_empty = f.note(tr("defaults.none"), colour=look.HINT)
         box = ttk.Frame(f.page)
         box.grid(row=f.r, column=0, columnspan=2, sticky="ew", pady=3)
         f.r += 1
@@ -642,8 +643,20 @@ class SettingsWindow(tk.Toplevel):
         reset = ttk.Button(row, text=tr("defaults.reset"), takefocus=False, command=self.reset_defaults)
         reset.pack(side="left", padx=(6, 0))
         Tooltip(reset, tr("defaults.reset_tip"))
-        empty = self.defaults_empty = f.note(tr("defaults.none"), colour=look.HINT)
         self.default_window = None
+        page = self.pages["defaults"]
+
+        def fit_list(e=None):
+            """The list as tall as the page lets it, its buttons at the bottom just above Close (user 2026-11-23:
+            too much empty space under them)."""
+            if not box.winfo_exists():
+                return
+            room = page.winfo_height() - box.winfo_y() - row.winfo_reqheight() - round(12 * s)
+            want = max(round(120 * s), room)
+            if abs(box.winfo_reqheight() - want) > 1:
+                box.configure(height=want)
+        page.bind("<Configure>", fit_list, add="+")
+        self.fit_defaults_list = fit_list
 
         def fill():
             picked = set(tree.selection())
@@ -663,6 +676,7 @@ class SettingsWindow(tk.Toplevel):
                 empty.grid()
             for b in (change, reset):
                 b.state(["!disabled"] if got else ["disabled"])
+            box.after_idle(fit_list)  # (the "none yet" line came / went: the room changed)
         self.fill_defaults = fill
         tree.bind("<Double-1>", lambda e: (self.open_default(tree.identify_row(e.y)), "break")[1])
         tree.bind("<Return>", lambda e: (self.open_default(tree.focus()), "break")[1])
