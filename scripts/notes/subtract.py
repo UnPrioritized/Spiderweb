@@ -29,6 +29,7 @@ from files.speed import key_sort
 from notes.gaterange import DIRS, STRAIGHT, clean_graph, keys_up
 
 MOST = 10 ** 4  # beats a typed amount may be
+MOST_PCT = 1000  # % a typed amount may be (as Gate extend's)
 EPS = 1e-7  # rounding margin when the graph's height picks a whole tick
 
 
@@ -47,7 +48,15 @@ def clean_side(s):
     by = _beats(s.get("by"))
     if by is None:
         return None
+    pct = s.get("unit") == "pct"  # (typed %: "by" / "to" = % of each note's length, "plus" / "plus_to" = beats
+    # added; user 2026-11-23, PLAN.md stage C, like Gate extend's)
+    if pct:
+        by = min(by, MOST_PCT)
     out = {"by": by}
+    if pct:
+        out["unit"] = "pct"
+        if _beats(s.get("plus")):
+            out["plus"] = _beats(s.get("plus"))
     for key in ("touch", "off"):
         if s.get(key) is True:
             out[key] = True
@@ -62,11 +71,15 @@ def clean_side(s):
             out["cuts"] = cuts
     to = _beats(s.get("to"))
     if to is not None:  # (the graph: kept while it's off too)
+        if pct:
+            to = min(to, MOST_PCT)
         out.update(to=to, graph=clean_graph(s.get("graph") or ()) or [list(p) for p in STRAIGHT],
                    dir=s["dir"] if s.get("dir") in DIRS else "time")
         for key in ("vary", "rows", "join", "count"):
             if s.get(key) is True:
                 out[key] = True
+        if pct and _beats(s.get("plus_to")):
+            out["plus_to"] = _beats(s.get("plus_to"))
     return out
 
 
@@ -167,11 +180,20 @@ def mixed_subtract(x, y, f, mix):
     def one(a, b):
         a, b = (None if s is None else {k: v for k, v in s.items() if k != "cuts"} for s in (a, b))
         if side_used(a) and not side_used(b):
-            b = dict(a, by=0.0, **({"to": 0.0} if "to" in a else {}))
+            b = {k: v for k, v in a.items() if k not in ("plus", "plus_to")}
+            b.update(by=0.0, **({"to": 0.0} if "to" in a else {}))
         elif side_used(b) and not side_used(a):
-            a = dict(b, by=0.0, **({"to": 0.0} if "to" in b else {}))
+            a = {k: v for k, v in b.items() if k not in ("plus", "plus_to")}
+            a.update(by=0.0, **({"to": 0.0} if "to" in b else {}))
         elif a is None or b is None:
             return a if f < 0.5 else b
+        if a.get("unit") == "pct" or b.get("unit") == "pct":  # (typed %: both as % + ticks, step by step; a
+            # ticks end = 0 % + its ticks)
+            from notes.extend import _slim, full_form
+            a, b = full_form(a), full_form(b)
+            if ("to" in a) != ("to" in b):
+                return _slim(a if f < 0.5 else b)
+            return _slim(mix(a, b, f))
         return mix(a, b, f)
     x, y = plain_subtract(x), plain_subtract(y)
     return with_sides(one(end_side(x), end_side(y)), one(x.get("start"), y.get("start")))
@@ -266,6 +288,11 @@ def part_side(sub, whole, part, ppq, start=False):
     if not sub.get("vary") or "to" not in sub or sub["dir"] == "time" and sub.get("rows") or not len(whole) \
             or not len(part):
         return sub
+    if sub.get("unit") == "pct":  # (typed %: Gate extend's way)
+        from notes.extend import is_mixed, _cut_graph
+        if is_mixed(sub):
+            return _cut_graph(sub, whole, part, ppq, start)
+        ppq = 1
     down = sub["dir"] == "keys_down"
     r = keys_up(sub)
     col = (1 if start else 0) if r["dir"] == "time" else 2
@@ -322,7 +349,15 @@ def side_amounts(notes, side, ppq, touch, start=False):
     """Each note's ticks off one side (0 where unused); touch(notes) = the notes "Only notes that touch" takes."""
     if not side or side.get("off"):
         return np.zeros(len(notes), np.int64)
-    n = np.broadcast_to(np.asarray(amounts(notes, side, ppq, start), np.int64), (len(notes),))
+    if side.get("unit") == "pct":  # (% of each note's own length to the nearest tick, halves up, + ticks: Gate
+        # extend's way)
+        from notes.extend import is_mixed, ticks_part
+        p = np.broadcast_to(np.asarray(amounts(notes, side, 1, start), np.int64), (len(notes),))
+        n = ((notes[:, 1].astype(np.int64) - notes[:, 0]) * p * 2 + 100) // 200
+        if is_mixed(side):
+            n = n + np.asarray(amounts(notes, ticks_part(side), ppq, start), np.int64)
+    else:
+        n = np.broadcast_to(np.asarray(amounts(notes, side, ppq, start), np.int64), (len(notes),))
     if not side.get("touch"):
         return n
     takes = touch(notes)

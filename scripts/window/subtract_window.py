@@ -15,25 +15,51 @@ since. Ctrl+Z / Ctrl+Y step through the changes made in it."""
 
 import json
 import math
+import re
 import tkinter as tk
 from tkinter import ttk
 
 import numpy as np
 
 from files.lang import texts, tr, trn
-from files.mathexpr import calc, fmt
+from files.mathexpr import amount, fmt
 from notes.gaterange import DIRS, STRAIGHT, few_steps, gate_steps, y_gate
-from notes.subtract import (MOST, box_of, cut_marks, empty_side, end_side, is_subtracted, marked, part_subtract,
+from notes.subtract import (MOST, MOST_PCT, box_of, cut_marks, empty_side, end_side, is_subtracted, marked, part_subtract,
                             side_used, subtracts, ticks_of, touched, touching, with_sides)
 from window import look
 from window.range_window import PRESETS
-from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, traced, unit_text
+from window.widgets import (LocalUndo, PointGraph, Scrub, Tooltip, chart_edges, remember_place, show_mixed, traced,
+                            unit_text)
 
 GRAPH_KEYS = ("to", "graph", "dir", "rows", "join", "count")  # (a side's graph settings, shared by all)
 ALONG = ("time", "count")  # "Along a row:" choices (count = by note count)
 SIDES = ("end", "start")  # the tabs, Note end first (user 2026-10-20: it doesn't move when notes sound; sh["subtract"] = the end side, its
 # "start" = the start side)
 SIDE_LISTS = ("use", "bys", "touches", "varies", "owns", "g", "g_all")  # (each tab's, see side_data)
+UNITS = ("pct", "ticks")  # "Amount in:" choices ("% + ticks" = only shown as its text, not in the list: user 2026-11-23)
+_LAST_NUMBER = re.compile(r"(\d+(?:\.\d+)?)(\s*[%％]?\s*)$")
+
+
+def value_of(side, key):
+    """A stored side's "by" / "to" as the window's [% or None, beats] (0 % with ticks = ticks only)."""
+    if side.get("unit") != "pct":
+        return [None, float(side[key])]
+    p, b = float(side[key]), float(side.get("plus" if key == "by" else "plus_to") or 0.0)
+    return [None if p == 0 and b > 0 else p, b]
+
+
+def kind(v):
+    """An amount's kind: "ticks", "pct" or "both"."""
+    return "ticks" if v[0] is None else "pct" if not v[1] else "both"
+
+
+def step_text(text, delta):
+    """A box's text with its LAST number stepped by delta (never under 0): 50% + 10 -> 50% + 11; None when the text
+    doesn't end in a number."""
+    m = _LAST_NUMBER.search(text)
+    if not m:
+        return None
+    return text[:m.start(1)] + fmt(max(0.0, float(m.group(1)) + delta)) + m.group(2)
 
 
 def side_data():
@@ -158,31 +184,122 @@ class SubtractWindow(PointGraph, tk.Toplevel):
     def put_own(self, sh, part):
         put_own(sh, part)
 
+    # ---- TYPED AMOUNTS (user 2026-11-22, PLAN.md stages B + C): the % SIGN decides, never the dropdown: 50 = 50
+    # ticks, 50% = % of each note's length, 50% + 10 = both (files/mathexpr.amount). Each amount in the window =
+    # [% or None, beats] (None = no % typed). "Amount in" follows what's typed (Ticks / %; both = "% + ticks" shown,
+    # not in the list; shapes that differ = Mixed); picking Ticks or % turns every number into that unit (50% + 10
+    # -> 60 ticks). Text that can't work = the box red + why under it.
+
+    BOX_WIDTH = 12  # (letters the amount boxes show: "50% + 10")
+
     def as_shown(self, s):
-        """A stored side with its amounts as the window keeps them (here: beats as they are)."""
-        return s
+        """A stored side with its amounts as the window keeps them ([% or None, beats])."""
+        return dict(s, by=value_of(s, "by"), **({"to": value_of(s, "to")} if "to" in s else {}))
+
+    def stored(self, side):
+        """One side's window settings -> how it's stored (a % in either amount = unit "pct" + "plus" ticks)."""
+        side = dict(side)
+        by, to = side["by"], side.get("to")
+        if any(v is not None and v[0] is not None for v in (by, to)):
+            side["unit"] = "pct"
+            side["by"] = by[0] or 0.0
+            if by[1]:
+                side["plus"] = by[1]
+            if to is not None:
+                side["to"] = to[0] or 0.0
+                if to[1]:
+                    side["plus_to"] = to[1]
+        else:
+            side["by"] = by[1]
+            if to is not None:
+                side["to"] = to[1]
+        return side
 
     def widest_label(self):
         """The widest amount the graph's left edge shows (its margin)."""
-        return self.amount_text(99999)
+        return self.tx("pct_n", n=MOST_PCT) + " + " + trn("n.ticks", 99999, n=99999)
 
     def first_amount(self):
         """What a shape gets where it has no amount yet: 1 tick."""
-        return 1 / self.app.ppq
-
-    def uppq(self, ppq=None):
-        """Whole steps per stored unit: the PPQ (amounts kept in beats, shown in ticks); ppq: the one typed for."""
-        return ppq or self.app.ppq
-
-    def most(self):
-        return MOST
-
-    def amount_text(self, n):
-        return trn("n.ticks", n, n=n)
+        return [None, 1 / self.app.ppq]
 
     def made_of(self, i):
         """Shape i's stored settings from the window's."""
-        return with_sides(self.side_of("end", i) or {"by": 0.0, "off": True}, self.side_of("start", i))
+        end, start = self.side_of("end", i), self.side_of("start", i)
+        return with_sides(self.stored(end) if end else {"by": 0.0, "off": True}, start and self.stored(start))
+
+    def hook_scrub(self, scrub):
+        """A box's Scrub: its LAST number steps (50% + 10 -> 50% + 11)."""
+        scrub.step_text = step_text
+
+    def scaled(self, v, k):
+        """An amount k times as big (each part at most the most it may be)."""
+        return [None if v[0] is None else min(v[0] * k, MOST_PCT), min(v[1] * k, MOST)]
+
+    def shape_values(self):
+        """Per shape with an amount on the tab shown: the amounts it uses."""
+        d = self.sides[self.side]
+        out = []
+        for i, b in enumerate(d["bys"]):
+            if b is None:
+                continue
+            g = d["g"] if d["g_all"] or not d["owns"][i] else d["owns"][i]
+            out.append([b, g["to"]] if d["varies"][i] and g and "to" in g else [b])
+        return out
+
+    def shape_kinds(self):
+        """Each shape's kind of amount: "ticks", "pct" or "both" (10 ticks changing to 50% = both)."""
+        out = set()
+        for vs in self.shape_values():
+            ks = {kind(v) for v in vs}
+            out.add(ks.pop() if len(ks) == 1 else "both")
+        return out
+
+    def unit_row(self, box):
+        """"Amount in:" Ticks / % (follows what's typed)."""
+        row = ttk.Frame(box)
+        row.pack(anchor="w", pady=(6, 0))
+        self.unit_label = ttk.Label(row, text=self.tx("unit"))
+        self.unit_label.pack(side="left")
+        self.unit_box = ttk.Combobox(row, values=[self.tx("unit_" + u) for u in UNITS], state="readonly", width=24)
+        self.unit_box.pack(side="left", padx=4)
+        self.unit_box.bind("<<ComboboxSelected>>", lambda e: self.pick_unit(UNITS[self.unit_box.current()]))
+        self.unit_tip = Tooltip(self.unit_box, self.tx("unit_tip"))
+        Tooltip(self.unit_label, self.tx("unit_tip"))
+
+    def show_unit(self):
+        """The dropdown as the tab shown's amounts are."""
+        kinds = self.shape_kinds() or {kind(self.first_amount())}  # (nothing yet: what a shape would get)
+        both = self.tx("unit_both")
+        if both not in getattr(self.unit_box, "fit_also", ()):
+            self.unit_box.fit_also = (both, tr("widgets.mixed"))
+        if kinds == {"both"}:  # (shown, not a choice: user 2026-11-23)
+            self.unit_box.set(both)
+        elif len(kinds) == 1:
+            self.unit_box.current(UNITS.index(kinds.pop()))
+        show_mixed(self.unit_box, len(kinds) > 1, self.unit_tip, self.tx("unit_tip"))
+
+    def pick_unit(self, unit):
+        """Ticks or % picked: every number on the tab shown takes that unit (50% + 10 -> 60 ticks, or 60%)."""
+        if not self.idx:
+            return self.show_controls()
+        self.take_typing()
+        d = self.sides[self.side]
+        ppq = self.app.ppq
+
+        def moved(v):
+            if v is None:
+                return None
+            n = (v[0] or 0) + ticks_of(v[1], ppq)
+            return [None, min(n / ppq, MOST)] if unit == "ticks" else [float(min(n, MOST_PCT)), 0.0]
+        d["bys"] = [moved(b) for b in d["bys"]]
+        for g in [d["g"], *d["owns"]]:
+            if g and "to" in g:
+                g["to"] = moved(g["to"])
+        self.accepted(self.by_box)
+        self.show_controls()
+        self.store()
+        self.hist.mark()
 
     def __init__(self, app):
         super().__init__(app)
@@ -221,6 +338,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         if tabs:
             self.use_tick.pack(anchor="w")
         self.use_tip = Tooltip(self.use_tick, "")
+        self.unit_row(box)
         self.extra_rows(box)
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(6, 0))
@@ -280,9 +398,6 @@ class SubtractWindow(PointGraph, tk.Toplevel):
                                   label=label, drag_box=True, no_undo=True))
             self.to_tip = Tooltip(e, self.tx("to_tip"))
         return e
-
-    def hook_scrub(self, scrub):
-        """A box's Scrub, for a window whose boxes hold more than one number (Gate extend: "50% + 10")."""
 
     def make_graph(self, part, s):
         """The part shown while "Change across the shape" is ticked: Across, the row ticks, the graph, presets."""
@@ -420,10 +535,6 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         b = next((b for b in self.bys if b is not None), None) or self.first_amount()
         return {"to": self.scaled(b, 4), "graph": [list(p) for p in STRAIGHT], "dir": "time"}
 
-    def scaled(self, value, k):
-        """An amount k times as big (at most the most it may be)."""
-        return min(value * k, self.most())
-
     def show_controls(self):
         """The ticks, boxes and graph as the shapes' settings are: ticked when every shape has it, half-ticked when
         only some do; a box shows the number they share, else stays empty."""
@@ -449,6 +560,7 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.rows_var.set(bool(g.get("rows")))
         self.join_var.set(bool(g.get("join")))
         self.along_box.current(1 if g.get("count") else 0)
+        self.show_unit()
 
     def sync(self):
         """The main window changed the selection or the shapes (sync_panel)."""
@@ -504,22 +616,33 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.seen = (self.by_var.get(), self.to_var.get())
         self.draw()
 
-    # ---- the amounts: kept in beats, shown in whole ticks
+    # ---- the amounts: [% or None, beats], ticks shown whole
 
-    def text_of(self, beats):
-        return fmt(ticks_of(beats, self.uppq()))
+    def text_of(self, v):
+        p, b = v
+        ticks = ticks_of(b, self.app.ppq)
+        parts = [] if p is None else [fmt(p) + "%"]
+        if ticks or p is None:
+            parts.append(fmt(ticks))
+        return " + ".join(parts)
 
     def read(self, text, ppq=None):
-        """Typed ticks -> beats (whole ticks, 0 or more, at most MOST beats), or None (empty, not a number, under
-        0). ppq: the one it was typed for (default the project's)."""
-        ppq = self.uppq(ppq)
+        """Typed text -> [% or None, beats] (whole % and whole ticks, each at most its most), or None (self.why = the
+        reason to show, "" = none: an empty box). ppq: the one it was typed for (default the project's)."""
+        ppq = ppq or self.app.ppq
+        self.why = ""
+        if not text.strip():
+            return None
         try:
-            v = calc(text)
-        except (ValueError, ZeroDivisionError):
+            p, t = amount(text)
+        except ValueError as e:
+            self.why = str(e)
             return None
-        if not math.isfinite(v) or v < 0:
+        if p < 0 or t < 0:
+            self.why = self.tx("below_zero")
             return None
-        return min(math.floor(v + 0.5) / ppq, self.most())
+        p = None if "%" not in text and "％" not in text or p == 0 and t > 0 else min(math.floor(p + 0.5), MOST_PCT)
+        return [None if p is None else float(p), min(math.floor(t + 0.5) / ppq, MOST)]
 
     def put_all(self, what):
         """A tick changed ("on", "use", "touch", "vary"): every shape takes it (a half-ticked one: a click = all
@@ -582,17 +705,42 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         self.hist.mark(key)
 
     def refused(self, box, var):
-        """A typed amount that can't be used: back to the last good one."""
-        self.show_controls()
+        """A typed amount that can't be used: left as typed, red, with why under it (user 2026-11-22); an emptied
+        box: back to the last good one."""
+        if not getattr(self, "why", ""):
+            return self.show_controls()
+        box.config(style="Bad.TEntry")
+        if not hasattr(self, "why_label"):
+            row = self.by_box.master
+            self.why_label = ttk.Label(row.master, foreground=look.ERROR, wraplength=int(420 * self.s), justify="left")
+        self.why_label.config(text=self.why)
+        if not self.why_label.winfo_manager():
+            self.why_label.pack(anchor="w", after=self.by_box.master, pady=(2, 0))
 
     def accepted(self, box):
-        """A typed amount taken (a window showing why one was refused takes that back)."""
+        """A typed amount taken: the red + why gone."""
+        box.config(style="TEntry")
+        if hasattr(self, "why_label") and self.why_label.winfo_manager():
+            self.why_label.pack_forget()
 
     # ---- showing
 
     def put_unit(self):
-        self.by_unit.config(text=unit_text(self.to_var.get() if self.vary_var.get() else self.by_var.get(),
-                                           "subtract.ticks", "subtract.tick"))
+        """The word after the boxes: "of each note" (only %), ticks (a ticks part in every box shown), or both."""
+        texts = [self.by_var.get()] + ([self.to_var.get()] if self.vary_var.get() else [])
+        kinds, t = set(), 0
+        for text in texts:
+            try:
+                t = amount(text)[1]
+            except ValueError:
+                t = 0
+            kinds.add("pct" if ("%" in text or "％" in text) and not t else "ticks")
+        if kinds == {"pct"}:
+            self.by_unit.config(text=self.tx("pct_word"))
+        elif kinds == {"ticks"}:
+            self.by_unit.config(text=unit_text(fmt(t), "subtract.ticks", "subtract.tick"))
+        else:
+            self.by_unit.config(text=self.tx("both_word"))
 
     def show(self):
         """The window as the settings are: what can be used greyed or not, the graph shown while it's used."""
@@ -638,15 +786,26 @@ class SubtractWindow(PointGraph, tk.Toplevel):
         return got[0] if got else self.first_amount(), g["to"]
 
     def gates(self):
-        """The first and second amount in whole steps, for the pale steps (None: none drawn)."""
+        """The first and second amount in whole steps, for the pale steps (None: % and ticks both, none drawn)."""
         a, b = self.ends()
-        u = self.uppq()
-        return ticks_of(a, u), ticks_of(b, u)
+        if kind(a) == kind(b) == "ticks":
+            return ticks_of(a[1], self.app.ppq), ticks_of(b[1], self.app.ppq)
+        if kind(a) == kind(b) == "pct":
+            return int(a[0]), int(b[0])
+        return None
 
     def label_at(self, y):
         """The amount the notes get at height y (0..1) of the graph, as text."""
-        a, b = self.gates()
-        return self.amount_text(y_gate(a, b, y))
+        a, b = self.ends()
+        ppq = self.app.ppq
+        parts = []
+        if a[0] is not None or b[0] is not None:
+            parts.append(self.tx("pct_n", n=y_gate(int(a[0] or 0), int(b[0] or 0), y)))
+        ta, tb = ticks_of(a[1], ppq), ticks_of(b[1], ppq)
+        if ta or tb or not parts:
+            n = y_gate(ta, tb, y)
+            parts.append(trn("n.ticks", n, n=n))
+        return " + ".join(parts)
 
     def draw(self):
         """The graph: amounts at 0, 25 ... 100 % up, the whole-tick amounts the notes get (pale steps), the line."""

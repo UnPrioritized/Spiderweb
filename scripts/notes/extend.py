@@ -146,15 +146,16 @@ def part_extend(ext, whole, part, ppq):
     return part_side(ext, whole, part, unit_ppq(ext, ppq))
 
 
-def _cut_graph(ext, whole, part, ppq):
-    """The graph of ext over the piece's stretch only, heights unchanged (see part_extend)."""
+def _cut_graph(ext, whole, part, ppq, start=False):
+    """The graph of ext over the piece's stretch only, heights unchanged (see part_extend). Gate subtract's mixed
+    sides too (start: its note start side, across time measured from note ends: subtract.places)."""
     if not ext.get("vary") or "to" not in ext or ext["dir"] == "time" and ext.get("rows") or not len(whole) \
             or not len(part):
         return ext
     from notes.gaterange import keys_up, reversed_graph
     down = ext["dir"] == "keys_down"
     r = keys_up(ext)
-    col = 0 if r["dir"] == "time" else 2
+    col = (1 if start else 0) if r["dir"] == "time" else 2
     w0, w1 = int(whole[:, col].min()), int(whole[:, col].max())
     span = max(w1 - w0, 1)
     u0, u1 = (min(1.0, max(0.0, (int(f(part[:, col])) - w0) / span)) for f in (np.min, np.max))
