@@ -46,6 +46,8 @@ What's new:
 
 • Shape library folders: the drawer's shape library can hold folders (real folders in the shapes folder). Make, rename and delete them there, drag shapes in or use right-click → Move to, and every shape list (the Shape box, Nested, Tiles, Stir and Deform) groups your shapes under folder headings. Deleted shapes, folders and palettes now go to the Recycle Bin. See [page:drawer|Drawer].
 
+• Every list of your own saved things keeps one file per item in the user folder's presets folder: Hz bass, Stir and Warp presets, Chop rhythms, saved curve patterns and shapes, Hz shape lines, wobble waves and colour formats. Deleting one sends it to the Recycle Bin. The old one-file lists are split up the first time each list opens, then renamed with "-old" at the end. Files you add or remove there show up the next time the list opens. The Custom formula window's saved list now shows the newest first.
+
 • Fixed: shape pictures cut corners (a stray line across busy drawings) and left out detail. They now show every line, the colours you painted, and the shape's whole name.
 
 • Drawer: Tracing picture… (beside Deform…) shows a picture faintly under the board to draw over, with its strength and Move / size. It's never saved in the shape. On Windows you can also drop a picture file onto the Image to notes window. See [page:drawer|Drawer].
