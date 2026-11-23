@@ -44,6 +44,10 @@ What's new:
 
 • Shape pictures: while the Shape list is open, a small picture of the highlighted shape shows beside it, and the drawer's shape library shows the shape under the mouse. Ctrl+click or Shift+click picks several shapes in the library to delete them together. The drawer's Save without a name asks for one ("Shape 1" filled in), and Ctrl+A there picks every stroke.
 
+• Shape library folders: the drawer's shape library can hold folders (real folders in the shapes folder). Make, rename and delete them there, drag shapes in or use right-click → Move to, and every shape list (the Shape box, Nested, Tiles, Stir and Deform) groups your shapes under folder headings. Deleted shapes, folders and palettes now go to the Recycle Bin. See [page:drawer|Drawer].
+
+• Fixed: shape pictures cut corners (a stray line across busy drawings) and left out detail. They now show every line, the colours you painted, and the shape's whole name.
+
 • Drawer: Tracing picture… (beside Deform…) shows a picture faintly under the board to draw over, with its strength and Move / size. It's never saved in the shape. On Windows you can also drop a picture file onto the Image to notes window. See [page:drawer|Drawer].
 
 • Warp: Save… beside Preset keeps a shape's bend as your own preset, at the top of the Preset list, for any shape in any project. See [page:warp|Warp].

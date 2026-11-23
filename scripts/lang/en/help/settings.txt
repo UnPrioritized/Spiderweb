@@ -22,7 +22,7 @@ Look:
 
 Note colours:
 
-• Palette: the colours of the notes on the piano roll, one per MIDI channel (the numbers under them; channel 10's colour is used only when a project ticks Use channel 10). Default is built in and never changes; New… makes your own palette from the one in use, and Rename… / Delete work on yours. Switching palettes shows at once.
+• Palette: the colours of the notes on the piano roll, one per MIDI channel (the numbers under them; channel 10's colour is used only when a project ticks Use channel 10). Default is built in and never changes; New… makes your own palette from the one in use, and Rename… / Delete work on yours (Delete sends it to the Recycle Bin). Switching palettes shows at once.
 
 • Click a colour to change it (changing Default makes a copy first). Random picks soft colours, Gradient… blends from a first to a last colour.
 
