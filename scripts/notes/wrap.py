@@ -23,7 +23,7 @@ GAPS = ("whole", "each")
 WRAP_DEFAULTS = {"slices": 8, "colours": 8, "angle": 0.0, "round": 100.0, "gaps": "whole", "own": False, "most": 15}
 MOST_SLICES = 100_000  # (no real limit, user 2026-11-23: only a guard against nonsense)
 MOST_COLOURS = 16  # (16 with "Use channel 10"; the window allows areas.most_colours)
-SMOOTH = 2  # (tilted: the outline's sides smoothed this many times, each row end with the ones above and below)
+SMOOTH = 1  # (tilted: the outline's sides smoothed this many times, each row end with the ones above and below)
 TIE = 0.3  # (tilted: every cut this share of a key before its place, so no row lies right on one)
 SLIVER_PASSES = 8  # (tilted: slivers folded in this many rounds at most, shortest first)
 SLIVER = 0.03  # (tilted: a piece shorter than this share of the shape's length, trapped in another slice, joins it)
@@ -86,6 +86,10 @@ def apply_wrap(a, cfg, ppq=960, tag=False):
             k = cfg["slices"] - 1 - k
     g = out[:, -1]
     lap, own = g // ROUND, g % ROUND
+    if cfg.get("rounds"):  # ("Repeated colours get new channels": each time the slices go round the colours again =
+        # a round of its own, paired with the shape's own rounds, user 2026-11-23)
+        laps = (cfg["slices"] - 1) // cfg["colours"] + 1
+        lap = lap * laps + k // cfg["colours"]
     out[:, -1] = (own + k % cfg["colours"]) % cfg["most"] + lap * ROUND
     return np.column_stack([out, k]).astype(np.int64) if tag else out
 

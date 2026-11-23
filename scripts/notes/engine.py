@@ -2669,6 +2669,8 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
         if step["cfg"] and step["cfg"].get("mode") == "wrap":  # (Wrapped slices colour: one colour = group 0)
             if tracks is None:
                 tracks = np.zeros(len(notes), np.int64)
+            if sh.get("_rounds"):  # ("Repeated colours get new channels": each round of the slices its own)
+                step = dict(step, cfg=dict(step["cfg"], rounds=True))
             if step.get("tag"):  # ("Each slice becomes its own shape": each note's slice rides along as one more
                 # column of the notes, through the steps after it: tagged_notes)
                 got = apply_wrap(np.column_stack([notes, tracks]).astype(np.int64), step["cfg"], ppq, tag=True)
