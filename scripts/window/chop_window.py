@@ -1,29 +1,25 @@
 """The Chop window (chop.py): the selected shapes' notes cut into a rhythm, shown live on the piano roll (the shared
-part: tool_window.py). A rhythm list (our own rhythms + ones saved by the user in spiderweb/rhythms.json), a strip
+part: tool_window.py). A rhythm list (our own rhythms + ones saved by the user, one file each in user/presets/Chop rhythms/), a strip
 showing one repeat of the rhythm where pieces can be drawn (drag), deleted (right-click / right-drag) and made louder / quieter
 (drag a piece up / down), the rhythm's length in steps, one step's length (picked like the snap), the pieces'
 velocities as % of each note or fixed 1..127 and how much they count, and Absolute (the rhythm follows the song's
 grid)."""
 
-import os
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
-from files import saved_lists
-from files.about import USER
 from files.lang import tr
 from files.mathexpr import calc, fmt
 from files.snap import SNAPS, snap_beats, snap_text
 from notes.fx import before_page, pages
 from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pieces, rhythm, step_ticks, switched,
                         too_many, top)
-from window import look
+from window import look, preset_files
 from window.snap_picker import SnapPicker
 from window.tool_window import ORANGE, ToolWindow, page_place_added
 from window.widgets import Scrub, Tooltip, bad, good, read_number, traced
 from window.widgets_tips import greyed_why
 
-RHYTHMS_FILE = os.path.join(USER, "rhythms.json")
 CELLS = (1, 2, 3, 4, 6, 8)  # the strip's grid: cells per step
 TYPED = "ticks"  # cfg["snap"] when the step length was typed in ticks (cfg["len"] holds it)
 MAX_TICKS = 10 ** 7
@@ -36,20 +32,13 @@ def load_rhythms():
         fixed = r.get("fixed") is True
         pieces = clean_pieces(r["pieces"], steps, fixed)
         return pieces and {"name": str(r["name"]), "steps": steps, "pieces": pieces, "fixed": fixed}
-    return saved_lists.entries(RHYTHMS_FILE, "rhythms", clean)
+    return preset_files.RHYTHMS.entries(clean)
 
 
 def save_rhythm(name, item, parent):
-    """The saved rhythm `name` replaced by item (None: deleted), every other one kept as saved; what went wrong is
-    said. True when saved."""
-    try:
-        kept = saved_lists.change(RHYTHMS_FILE, "rhythms", lambda n: n == name, [item] if item else ())
-    except OSError as e:
-        messagebox.showerror(tr("chop.save_title"), tr("chop.couldn_t_save", e=e), parent=parent)
-        return False
-    if kept:
-        messagebox.showwarning(tr("chop.save_title"), tr("chop.file_broken", path=kept), parent=parent)
-    return True
+    """The saved rhythm `name` saved as item (the newest now; any capitals = the same rhythm), or None: deleted (to
+    the Recycle Bin). What went wrong is said. True when done."""
+    return preset_files.change(preset_files.RHYTHMS, name, item, parent, tr("chop.save_title"))
 
 
 def piece_beats(snap, app):
@@ -353,7 +342,7 @@ class ChopWindow(ToolWindow):
             if name.casefold() not in taken:
                 break
             prompt = tr("chop.name_taken", name=name)
-        if any(r["name"] == name for r in load_rhythms()) and not messagebox.askyesno(
+        if any(r["name"].casefold() == name.casefold() for r in load_rhythms()) and not messagebox.askyesno(
                 tr("chop.save_title"), tr("chop.replace_ask", name=name), icon="warning", default="no", parent=self):
             return
         if save_rhythm(name, {"name": name, "steps": self.cfg["steps"], "pieces": self.cfg["pieces"],

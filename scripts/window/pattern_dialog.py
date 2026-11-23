@@ -20,7 +20,6 @@ import numpy as np
 
 from files.lang import tr, trn
 from files.mathexpr import as_written, calc, fmt, formula, split_pair
-from files import saved_lists
 from files.about import USER
 from files.safefile import write_text
 from notes.bezier import (SYM_MODES, add_anchor, can_delete, delete_point, drag_point, fit_symmetric, handle_lines,
@@ -34,7 +33,7 @@ from notes.pattern import (AROUND, LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG,
 from files.clipboard import put_text
 from roll.roll_shared import ALT, grab_while_panning
 from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
-from window import look
+from window import look, preset_files
 from window.formula_host import put_sym, sym_choices, sym_label
 from window.formula_paste import FormulaPaste
 from window.panel_custom import GAP_COLOR
@@ -83,18 +82,27 @@ def load_patterns(layer="pattern"):
         if graphs:
             item["graphs"] = graphs
         return keep_sym(item, p)
-    return saved_lists.entries(PATTERNS_FILE, FILE_KEYS[layer], clean)
+    return folder_of(layer).entries(clean)
 
 
 def save_pattern(name, item, layer="pattern"):
-    """The saved pattern / shape `name` replaced by item (None: deleted), every other one kept as saved. Returns
-    where a damaged file was kept aside (tell the user), else None. OSError when it can't be written."""
-    return saved_lists.change(PATTERNS_FILE, FILE_KEYS[layer], lambda n: n == name, [item] if item else ())
+    """The saved pattern / shape `name` saved as item (the newest now), None: deleted (to the Recycle Bin). OSError
+    when it can't be. (The window's Save / Delete go through save_file, which says what went wrong.)"""
+    if item is None:
+        folder_of(layer).delete(name, lambda: False)
+    else:
+        folder_of(layer).save(dict(item, name=name))
+
+
+def folder_of(layer):
+    """The saved list's folder (user/presets/Curve patterns or Curve shapes; window/preset_files.py)."""
+    return preset_files.CURVE_SHAPES if layer == "shape" else preset_files.PATTERNS
 
 
 def move_old_curves():
     """The funnel's saved curve formulas (y of x, stretched to go from 0 to 1) become saved shapes; curves.json is
-    renamed curves-old.json (kept, just in case)."""
+    renamed curves-old.json (kept, just in case). (They go into the old one-file list, patterns.json, which is then
+    split into the presets folders like any old list.)"""
     try:
         with open(OLD_CURVES_FILE, encoding="utf-8") as f:
             old = [(str(c["name"]), str(c["formula"])) for c in json.load(f).get("curves", [])]
@@ -535,7 +543,7 @@ class FormulaDialog(tk.Toplevel):
     def fill_list(self):
         self.saved = load_patterns(self.kind)
         self.items = [("preset", pid, name) for pid, name, _, _ in self.presets()]
-        self.items += [("saved", item, item["name"]) for item in self.saved]
+        self.items += [("saved", item, item["name"]) for item in reversed(self.saved)]  # (newest first, user)
         self.listbox.delete(0, "end")
         for kind, _, name in self.items:
             self.listbox.insert("end", name)
@@ -572,7 +580,7 @@ class FormulaDialog(tk.Toplevel):
         if not name:
             return messagebox.showerror(tr("pattern_dialog.spiderweb"), tr("pattern_dialog.name_first"),
                                         parent=self)
-        if any(p["name"] == name for p in self.saved) and not messagebox.askyesno(
+        if any(p["name"].casefold() == name.casefold() for p in self.saved) and not messagebox.askyesno(
                 tr("pattern_dialog.spiderweb"), tr("pattern_dialog.replace", name=name), parent=self):
             return
         item = {"name": name, "vars": dict(self.pat["vars"])}
@@ -608,16 +616,9 @@ class FormulaDialog(tk.Toplevel):
             self.fill_list()
 
     def save_file(self, name, item):
-        """save_pattern, saying what went wrong. True when saved."""
-        try:
-            kept = save_pattern(name, item, self.kind)
-        except OSError as e:
-            messagebox.showerror(tr("pattern_dialog.spiderweb"), tr("pattern_dialog.couldn_t_save", e=e), parent=self)
-            return False
-        if kept:
-            messagebox.showwarning(tr("pattern_dialog.spiderweb"), tr("pattern_dialog.file_broken", path=kept),
-                                   parent=self)
-        return True
+        """The saved pattern / shape `name` saved as item (the newest now), or None: deleted (to the Recycle Bin),
+        saying what went wrong. True when done."""
+        return preset_files.change(folder_of(self.kind), name, item, self, tr("pattern_dialog.spiderweb"))
 
     # ------------------------------------------------------------ the formulas and their numbers
     def on_edit_mode(self):
