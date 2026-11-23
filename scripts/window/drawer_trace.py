@@ -87,19 +87,20 @@ class DrawerTrace:
         couldn't be read (a message says why)."""
         try:
             a, alpha = P.pixels(path, self)
-        except (tk.TclError, OSError, ValueError, MemoryError) as e:
+            h0, w0 = h, w = a.shape[:2]  # (the proportions: from the file, the sides may shrink unevenly)
+            k = max(1, math.ceil(max(w, h) / MOST_SIDE))
+            ky, kx = min(k, h), min(k, w)  # (each side by itself, never below 1 px: a 1 x 2000 picture divided by
+            if k > 1:                       # zero, hunt 2026-11-23)
+                a = P._shrink(a, ky, kx)
+                alpha = P._shrink(alpha, ky, kx) if alpha is not None else None
+        except Exception as e:  # (anything a picture file can throw: said, never a crash)
             from window.image_window import _kinds
             messagebox.showerror(tr("trace.title"), tr("image.cant_open", e=e, kinds=_kinds()), parent=self)
             return False
         h, w = a.shape[:2]
-        k = max(1, math.ceil(max(w, h) / MOST_SIDE))
-        if k > 1:
-            a = P._shrink(a, k, k)
-            alpha = P._shrink(alpha, k, k) if alpha is not None else None
-        h, w = a.shape[:2]
         if not w or not h:
             return False
-        bw, bh = (1.0, h / w) if w >= h else (w / h, 1.0)
+        bw, bh = (1.0, h0 / w0) if w0 >= h0 else (w0 / h0, 1.0)
         self.trace = {"rgb": np.asarray(a, np.float32), "alpha": alpha, "name": os.path.basename(path),
                       "box": [(1 - bw) / 2, (1 - bh) / 2, (1 + bw) / 2, (1 + bh) / 2], "id": 0}
         if self.strength() == 0:  # (picked again after hiding it: shown)
@@ -116,9 +117,12 @@ class DrawerTrace:
 
     def strength(self):
         try:
-            return min(100, max(0, int(round(float(self.trace_strength.get())))))
+            v = float(self.trace_strength.get())
         except ValueError:
             return STRENGTH
+        if v != v:  # (nan)
+            return STRENGTH
+        return int(round(min(100.0, max(0.0, v))))  # (clamped BEFORE rounding: 1e999 / inf = 100, hunt 2026-11-23)
 
     def set_strength(self, v):
         self.trace_strength.set(str(v))
@@ -135,6 +139,8 @@ class DrawerTrace:
         on = ["!disabled"] if self.trace else ["disabled"]
         for w in (self.trace_remove_btn, self.trace_box, self.trace_lab, self.trace_tick):
             w.state(on)
+        if not self.trace_adjust.get():  # (a drag going on when it was unticked (a tool key): over)
+            self._trace_drag = None
         if not self.trace:
             self.trace_adjust.set(False)
         shown = bool(self.trace)
@@ -234,8 +240,10 @@ class DrawerTrace:
         self._trace_drag = (corner, self.from_screen(e.x, e.y), list(self.trace["box"]))
 
     def on_drag(self, e):
-        if not self.adjusting() or self._trace_drag is None:
+        if not self.adjusting():
             return super().on_drag(e)
+        if self._trace_drag is None:
+            return
         corner, (pu, pv), box = self._trace_drag
         u, v = self.from_screen(e.x, e.y)
         u0, v0, u1, v1 = box
@@ -256,9 +264,36 @@ class DrawerTrace:
         self.redraw()
 
     def on_release(self, e, second=False):
-        if not self.adjusting() or self._trace_drag is None:
+        if not self.adjusting():
             return super().on_release(e, second)
+        if self._trace_drag is None:  # (called off by Esc / Ctrl+Z: the let go does nothing)
+            return
         self._trace_drag = None
+
+    def trace_put_back(self):
+        """A picture drag called off: the picture back where the press found it."""
+        if self._trace_drag is not None:
+            self.trace["box"] = list(self._trace_drag[2])
+            self.trace["id"] += 1
+            self._trace_drag = None
+            self.redraw()
+
+    def trace_escape(self):
+        """Esc (Drawer.on_key asks first): a picture drag going on is called off, the picture back. True = taken
+        (hunt 2026-11-23, user took A)."""
+        if self.adjusting() and self._trace_drag is not None:
+            self.trace_put_back()
+            return True
+        return False
+
+    def trace_holds_keys(self):
+        """Ctrl+Z / Ctrl+Y (Drawer.undo / redo ask first): nothing while Move / size picture is ticked (the picture
+        isn't in the drawing's undo, so the drawing must not change unseen; hunt 2026-11-23, user took A); a picture
+        drag going on is called off. True = taken."""
+        if self.adjusting():
+            self.trace_put_back()
+            return True
+        return False
 
     def on_double(self, e):
         if not self.adjusting():

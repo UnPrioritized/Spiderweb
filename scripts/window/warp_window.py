@@ -576,13 +576,19 @@ class WarpWindow(DefaultPin, tk.Toplevel):
 
     # ---- own bends (QoL K, user 2026-11-23; window/warp_own.py)
 
+    def reload_own(self):
+        """The own bends read again from the file; which shape is which bend is worked out anew (a bend saved over
+        the same name kept its old matches: hunt 2026-11-23)."""
+        self.own = wo.load_presets()
+        self._own_seen = {}
+
     def own_names(self):
         """The own bends as the list shows them: newest first."""
         return list(reversed(self.own))
 
     def fill_presets(self):
         """The Preset list: own bends (newest first), a line, the ready-made presets."""
-        self.own = wo.load_presets()
+        self.reload_own()
         set_names(self.boxes["preset"], [p["name"] for p in self.own_names()],
                   [tr(f"warp.preset_{k}") for k in pr.PRESETS])
 
@@ -592,7 +598,7 @@ class WarpWindow(DefaultPin, tk.Toplevel):
         if not w or not self.own:
             return None
         frame = tuple((rc or {}).get("frame") or ())
-        key = (self.key_of(w), frame, len(self.own), id(self.own))
+        key = (self.key_of(w), frame)  # (forgotten at every reload of the list: reload_own; hunt 11-23)
         if key not in self._own_seen:
             if len(self._own_seen) > 200:
                 self._own_seen.pop(next(iter(self._own_seen)))
@@ -649,7 +655,7 @@ class WarpWindow(DefaultPin, tk.Toplevel):
             if any(name.casefold() == tr(f"warp.preset_{k}").casefold() for k in pr.PRESETS):
                 messagebox.showinfo(tr("warp.own_save_title"), tr("warp.own_built_in", name=name), parent=self)
                 continue
-            self.own = wo.load_presets()
+            self.reload_own()
             if not any(wo.same_name(p, name) for p in self.own) or messagebox.askyesno(
                     tr("warp.own_save_title"), tr("warp.own_replace", name=name), parent=self):
                 break
@@ -663,7 +669,7 @@ class WarpWindow(DefaultPin, tk.Toplevel):
         p = self.shown_own()
         if p:
             return self.delete_named(p)
-        self.own = wo.load_presets()
+        self.reload_own()
         if not self.own:
             return self.sync()
         m = tk.Menu(self, tearoff=0)

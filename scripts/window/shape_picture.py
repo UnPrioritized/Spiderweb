@@ -178,7 +178,7 @@ def peek_listbox(lb, scale=1.0):
         peek.show(lb.get(i), lb, lb.winfo_rooty() + box[1])
     lb.bind("<Motion>", motion, add="+")
     peek.motion = motion  # (tests)
-    for seq in ("<Leave>", "<ButtonPress>", "<MouseWheel>", "<Destroy>"):
+    for seq in ("<Leave>", "<ButtonPress>", "<MouseWheel>", "<KeyPress>", "<Destroy>"):  # (a key may change the rows)
         lb.bind(seq, lambda e: peek.show(None, lb, 0), add="+")
     return peek
 

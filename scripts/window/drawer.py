@@ -613,6 +613,8 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
 
     def on_key(self, e):
         k = e.keysym.lower()
+        if k == "escape" and self.trace_escape():  # (a tracing picture drag called off: drawer_trace)
+            return "break"
         if self.deform_win:  # (Deform… open: the drawer's keys wait, Esc cancels it; hunt 2026-11-16)
             return self.deform_key(e)
         if isinstance(e.widget, (tk.Entry, ttk.Entry)):
@@ -1143,6 +1145,8 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
             self.redo_stack = self.redo_kept
 
     def undo(self):
+        if self.trace_holds_keys():  # (Move / size picture ticked: the drawing stays; drawer_trace, hunt 11-23)
+            return
         if self.erasing():  # (nothing while an eraser box is held)
             return
         if self.lasso_undo():  # (a lasso loop: its last edit back, else it goes; nothing else undone)
@@ -1153,6 +1157,8 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         self.restore(self.undo_stack, self.redo_stack)
 
     def redo(self):
+        if self.trace_holds_keys():
+            return
         if self.erasing() or self.lasso_holding():
             return
         if self.lasso:  # (a lasso loop: only its own edits come back)
@@ -1202,6 +1208,7 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
     def refresh_list(self, select=None):
         self.end_rename(False)
         names = library_names()
+        self.peek.show(None, self.listbox, 0)  # (the rows change: a picture of a gone / moved row goes, hunt 11-23)
         self.listbox.delete(0, "end")
         for n in names:
             self.listbox.insert("end", n)

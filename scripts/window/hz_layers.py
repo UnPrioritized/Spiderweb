@@ -407,6 +407,9 @@ class LayerStrip:
         win.sel = set()
         win.box_kept = None
         self.put(with_layers(dict(hz, layers=info), every, cur), tr("hz.step_notes_layer"))
+        if not self.app.hz_layers.get():  # (the list hidden: shown, so the faded notes' layer can be seen + picked;
+            self.app.hz_layers.set(True)  # hunt 2026-11-23, user took B)
+            win.on_layers()
 
     def move_menu(self, menu, picked):
         """The note menu's "Move to layer ▸" (hz_mouse.show_menu / show_box_menu): every other layer, then a new
