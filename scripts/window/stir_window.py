@@ -25,7 +25,8 @@ from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window import stir_presets as sp
 from window.default_pin import DefaultPin
-from window.drawer import library_lists, shape_path
+from window.drawer import shape_path
+from window.drawer_library import library_choices
 from window.edit_line import EditLine
 from window.shares_window import AngleKnob, HeldKnobs
 from window.tool_window import Knob, ThinBar
@@ -1564,11 +1565,13 @@ class StirWindow(DefaultPin, HeldKnobs, tk.Toplevel):
     def refresh_areas(self):
         """The Area dropdown's choices: Whole shape and the built-in areas, then the shape library's drawings (the
         built-in Circle / Square left out: the areas above are those exactly)."""
-        top, saved = library_lists()
-        self.library = [n for n in top if shape_path(n) or n.lower() not in ("circle", "square")] + saved
+        top, saved, folders = library_choices()
+        top = [n for n in top if shape_path(n) or n.lower() not in ("circle", "square")]
+        self.library = top + saved + [n for _, _, names in folders for n in names]  # (the order shown)
         shown = self.area_box.get()
         set_names(self.area_box, [tr("stir.area_" + a) for a in self.areas] + [tr("stir.area_draw"),
-                                                                                tr("stir.area_pick")], self.library)
+                                                                                tr("stir.area_pick")], top + saved,
+                  folders)
         self.area_box.set(shown)
 
     def on_area(self):

@@ -16,7 +16,8 @@ from notes.custom import (CUSTOM_FLAGS, ENDS, HZ_DEFAULTS, SPAM_FILLS, box_frame
 from notes.even_steps import (drawing_mark, gate_stretched, range_restored, remarked, same_drawing, snapped_shape,
                               ticked, unticked)
 from window import look
-from window.drawer import Drawer, clean_name, library_lists, library_names, load_drawing, save_shape, shape_stamp
+from window.drawer import Drawer, clean_name, library_names, load_drawing, save_shape, shape_stamp
+from window.drawer_library import library_choices
 from window.panel_funnel import GATE_STEPS
 from files.mathexpr import calc, fmt
 from roll.roll_live import BOX_TOOLS, STROKE_TOOLS
@@ -259,7 +260,7 @@ class CustomPanel:
         self.custom_info.pack(fill="x", pady=(2, 0))
 
     def refresh_custom_names(self):
-        set_names(self.custom_combo, *library_lists())
+        set_names(self.custom_combo, *library_choices())  # (folders = grey headings: PLAN.md stage E)
 
     def custom_template(self, name):
         """A library shape ready to place: (strokes filling the 0..1 box, width/height as drawn, its areas coloured

@@ -12,7 +12,7 @@ from files.mathexpr import calc, fmt
 from notes.custom import shelve_patterns, unshelve
 from notes.tiles import BY, FLIPS, LAYOUTS, MOST_BEATS, MOST_KEYS, TILES_DEFAULTS, too_many
 from window import look
-from window.drawer import library_lists
+from window.drawer_library import library_choices
 from window.panel_nested import DROP_WIDTH, NOTES_CHOICES, drop_row
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, set_names, unchanged, unit_word
 
@@ -137,7 +137,7 @@ class TilesPanel:
         return {w: on and (w is not self.tiles_warn or warn) for w in self.tiles_rows}
 
     def refresh_tiles_names(self):
-        set_names(self.tiles_of_box, *library_lists())
+        set_names(self.tiles_of_box, *library_choices())
 
     def tiles_targets(self):
         return [t for t in self.custom_targets() if tiles_on(t)]

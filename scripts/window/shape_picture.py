@@ -209,7 +209,8 @@ def peek_dropdown(cb, scale=1.0):
                 return peek.show(None, lb, 0)
             cur = lb.curselection()
             i = cur[0] if cur else None
-            name = lb.get(i) if i is not None and i != getattr(cb, "divider_at", None) else None
+            from window.widgets import skipped  # (the divider and folder headings have none)
+            name = lb.get(i).lstrip(" ") if i is not None and i not in skipped(cb) else None
             box = lb.bbox(i) if name else None
             here = system.program_in_front()
             front["seen"] = front["seen"] or here is True

@@ -20,7 +20,7 @@ from notes.custom import stroke_points
 from window.widgets import enter_presses  # (THE CONTROL SCHEME)
 from window import look
 from window.drawer_mirror import mirror_fns
-from window.widgets import (LocalUndo, Scrub, Tooltip, bad, good, name_index, name_list, read_number,
+from window.widgets import (LocalUndo, Scrub, Tooltip, bad, good, name_index, name_list, name_place, read_number,
                             remember_place, set_names)
 
 # key: (text key, slider low, slider high, box low, box high, default)
@@ -249,9 +249,10 @@ class DeformWindow(tk.Toplevel):
         return e
 
     def area_names(self):
-        from window.drawer_library import library_names
-        self.library = library_names()
-        set_names(self.area, [tr("deform.area_" + k) for k in AREAS], self.library)
+        from window.drawer_library import library_choices  # (folders = grey headings: PLAN.md stage E)
+        top, saved, folders = library_choices()
+        self.library = list(top) + list(saved) + [n for _, _, names in folders for n in names]  # (the order shown)
+        set_names(self.area, [tr("deform.area_" + k) for k in AREAS], list(top) + list(saved), folders)
 
     def focus_first(self):
         if self.winfo_exists():
@@ -341,7 +342,7 @@ class DeformWindow(tk.Toplevel):
 
     def state_text(self):
         return json.dumps({"v": {k: self.boxes[k].value for k in self.boxes}, "kind": self.kind.current(),
-                           "area": self.area.current(), "hard": self.hard.get(), "centre": self.centre,
+                           "area": name_place(self.area), "hard": self.hard.get(), "centre": self.centre,
                            "middle": self.area_middle})
 
     def put_state(self, text):
@@ -352,6 +353,7 @@ class DeformWindow(tk.Toplevel):
                 self.put(k, v)
             self.kind.current(s["kind"])
             self.area.current(s["area"])  # (the dropdown's own place: the divider row counts)
+            self.area.set(self.area.get().lstrip(" "))  # (a shape inside a folder: shown without the indent)
             self.shape = self._shapes.get(name_index(self.area))
             self.area_line.config(text="")
             self.hard.set(s["hard"])

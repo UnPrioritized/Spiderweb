@@ -242,7 +242,9 @@ def letter_jump(cb):
         when = int(when)
         jump["text"] = (jump["text"] if when - jump["at"] < JUMP_MS else "") + char.casefold()
         jump["at"] = when
-        values = cb.tk.splitlist(cb.tk.call(lb, "get", 0, "end"))
+        skip = skipped(cb)  # (folder names indented: they count from the name itself; headings are never picked)
+        values = ["\0" if i in skip else str(v).lstrip(" ")
+                  for i, v in enumerate(cb.tk.splitlist(cb.tk.call(lb, "get", 0, "end")))]
         k = next((i for i, f in enumerate(values) if f.casefold().startswith(jump["text"])), None)
         if k is None and len(jump["text"]) > 1:  # (the same letter again: the next name with it)
             jump["text"] = char.casefold()
@@ -265,6 +267,7 @@ def name_list(cb):
     keep_width(cb)
     cb.jump = letter_jump(cb)
     cb.divider_at = None
+    cb.headings = set()  # rows that are folder headings (set_names folders=): grey, never picked, like the divider
     cb.row_colours = {}  # {row in the open list: its text colour}
     cb.name_before = cb.get()
     pop = cb.tk.call("ttk::combobox::PopdownWindow", cb)
@@ -277,10 +280,17 @@ def name_list(cb):
         for k, colour in cb.row_colours.items():  # (rows with a colour of their own, e.g. orange = a warning)
             if k < int(cb.tk.call(lb, "size")):
                 cb.tk.call(lb, "itemconfigure", k, "-foreground", colour)
-        k = cb.divider_at
-        if k is not None and k < int(cb.tk.call(lb, "size")):
-            cb.tk.call(lb, "itemconfigure", k, "-foreground", look.HINT, "-selectforeground", look.HINT,
-                       "-selectbackground", cb.tk.call(lb, "cget", "-background"))
+        size = int(cb.tk.call(lb, "size"))
+        for k in skipped(cb):
+            if k < size:
+                cb.tk.call(lb, "itemconfigure", k, "-foreground", look.HINT, "-selectforeground", look.HINT,
+                           "-selectbackground", cb.tk.call(lb, "cget", "-background"))
+        k = name_place(cb)
+        if cb.current() < 0 <= k < size:  # (a name shown without its folder indent: its row picked in the list)
+            cb.tk.call(lb, "selection", "clear", 0, "end")
+            cb.tk.call(lb, "selection", "set", k)
+            cb.tk.call(lb, "activate", k)
+            cb.tk.call(lb, "see", k)
 
     def hidden():
         cb.list_open = False
@@ -289,16 +299,26 @@ def name_list(cb):
     cb.tk.call("bind", pop, "<Unmap>", "+" + cb.register(hidden))
 
     def picked(e):
-        k = cb.divider_at
-        if k is None or cb.current() != k:
-            cb.name_before = cb.get()
-            return None
-        values = cb.cget("values")
-        if cb.list_open or not values:  # (a click on the divider: as before, nothing picked)
-            cb.set(cb.name_before)
-            return "break"
-        before = list(values).index(cb.name_before) if cb.name_before in values else k - 1
-        cb.current(k + 1 if before < k and k + 1 < len(values) else k - 1)  # (the wheel: over it)
+        k, skip = cb.current(), skipped(cb)
+        values = list(cb.cget("values"))
+        if k in skip:
+            if cb.list_open or not values:  # (a click on the divider / a heading: as before, nothing picked)
+                cb.set(cb.name_before)
+                return "break"
+            before = (values.index(cb.name_before) if cb.name_before in values else
+                      cb.shown_at if 0 <= getattr(cb, "shown_at", -1) < len(values) else k - 1)
+            step = 1 if before < k else -1  # (the wheel: over it, the way it went; at an end: back)
+            j = k
+            while 0 <= j < len(values) and j in skip:
+                j += step
+            if not 0 <= j < len(values):
+                j = before
+            cb.current(j)
+            k = j
+        cb.shown_at = k
+        text = cb.get()
+        if text != text.lstrip(" "):  # (a shape inside a folder heading: the box shows its name alone)
+            cb.set(text.lstrip(" "))
         cb.name_before = cb.get()
         return None
     tag = f"NameList{cb}"
@@ -307,25 +327,61 @@ def name_list(cb):
     def wheel(e):  # (what it shows NOW is where the wheel starts: set by the program since, e.g. undo, counts)
         if not cb.list_open:
             cb.name_before = cb.get()
+            k = name_place(cb)
+            if cb.current() < 0 <= k:  # (a name shown without its folder indent: the wheel steps from its row)
+                cb.shown_at = k
+                cb.current(k)
     for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):  # (before the dropdown's own wheel step)
         cb.bind_class(tag, seq, wheel)
     cb.bindtags((tag,) + cb.bindtags())
     return cb
 
 
-def set_names(cb, top, saved):
-    """A name_list's choices: the ready-made names, the divider (only when both kinds are there), the saved ones."""
-    values = list(top) + ([DIVIDER] if top and saved else []) + list(saved)
-    cb.divider_at = len(top) if top and saved else None
+FOLDER_INDENT = "    "  # (a folder heading's names, one level in: set_names folders=)
+
+
+def set_names(cb, top, saved, folders=()):
+    """A name_list's choices: the ready-made names, the divider (only when both kinds are there), the saved ones,
+    then folders = [(heading, depth, names)]: each a grey heading row (never picked) indented by depth, its names
+    one level further in (the box shows a picked one without the indent). name_index counts the names only."""
+    rest = list(saved)
+    heads = []
+    for head, depth, names in folders:
+        heads.append(len(rest))
+        rest.append(FOLDER_INDENT * depth + head)
+        rest += [FOLDER_INDENT * (depth + 1) + n for n in names]
+    values = list(top) + ([DIVIDER] if top and rest else []) + rest
+    cb.divider_at = len(top) if top and rest else None
+    start = len(top) + (1 if cb.divider_at is not None else 0)
+    cb.headings = {start + h for h in heads}
     cb.config(values=values)
     return values
 
 
+def skipped(cb):
+    """The rows that can't be picked: the divider and folder headings."""
+    d = getattr(cb, "divider_at", None)
+    return set(getattr(cb, "headings", ())) | ({d} if d is not None else set())
+
+
+def name_place(cb):
+    """The shown name's row: cb.current(), or (a name inside a folder, shown without its indent) the first row
+    holding it indented; -1 when none."""
+    k = cb.current()
+    if k >= 0 or not getattr(cb, "headings", None):
+        return k
+    text, skip = cb.get(), skipped(cb)
+    for i, v in enumerate(cb.cget("values")):
+        if i not in skip and str(v).lstrip(" ") == text and str(v) != text:
+            return i
+    return -1
+
+
 def name_index(cb):
-    """The picked choice's place in the names as given to set_names (ready-made, then saved: the divider not
-    counted), or -1 (none, or the divider)."""
-    k, d = cb.current(), getattr(cb, "divider_at", None)
-    return -1 if k < 0 or k == d else k - 1 if d is not None and k > d else k
+    """The picked choice's place in the names as given to set_names (ready-made, then saved, then each folder's:
+    the divider and headings not counted), or -1 (none, the divider or a heading)."""
+    k, skip = name_place(cb), skipped(cb)
+    return -1 if k < 0 or k in skip else k - sum(1 for s in skip if s < k)
 
 
 def grid_shown(w, on):

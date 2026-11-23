@@ -189,6 +189,42 @@ def library_lists():
     return top, [n for n, _ in sorted(rest, key=lambda r: (-r[1], r[0].lower()))]
 
 
+def library_choices():
+    """The shape dropdowns with folders (Shape box, Nested, Tiles, Stir, Deform…; user 2026-11-24): (built-ins as
+    in library_names, the loose saved shapes newest first, [(heading, depth, names newest first)] per folder in the
+    drawer's order: a folder shown when it or a folder inside holds a shape). A second file with a used name is left
+    out (its name finds the other)."""
+    entries = [e for e in library_entries() if e["same"] is None]
+    every = library_folders()  # (read once: each call looks at the disk)
+    by_lower = {e["name"].lower(): e["name"] for e in entries}
+    top = [by_lower.get(b.lower(), b) for b in BUILT_IN]
+    newest = lambda es: [e["name"] for e in sorted(es, key=lambda e: (-e["stamp"][0], e["name"].lower()))]
+    shapes_in = {}
+    for e in entries:
+        if not built_in_name(e["name"]):
+            shapes_in.setdefault(e["folder"], []).append(e)
+    full = {f for f in shapes_in if f}
+    for f in list(full):
+        while "/" in f:
+            f = f.rpartition("/")[0]
+            full.add(f)
+    groups = []
+
+    def fill(parent, depth):
+        subs = [f for f in every if f.rpartition("/")[0] == parent and f in full]
+        for f in sorted(subs, key=lambda f: (f.lower(), f)):
+            groups.append((f.rpartition("/")[2], depth, newest(shapes_in.get(f, ()))))
+            fill(f, depth + 1)
+    fill("", 0)
+    return top, newest(shapes_in.get("", ())), groups
+
+
+def choice_names(choices):
+    """Every saved name of library_choices in the order the dropdown shows them (name_index's order after top)."""
+    _, loose, groups = choices
+    return list(loose) + [n for _, _, names in groups for n in names]
+
+
 def placed_strokes(strokes):
     """A drawing's strokes as a placed shape gets them: hidden ones left out (layers list), lines that meet end to
     end joined (custom.join_strokes), no layer data. None if nothing is left."""

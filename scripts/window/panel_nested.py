@@ -12,7 +12,7 @@ from notes.areas import most_colours
 from notes.custom import shelve_patterns, unshelve
 from notes.nested import MOST_COLOURS, MOST_SHORTEST, MOST_STEPS, NESTED_DEFAULTS, even_nested
 from window import look
-from window.drawer import library_lists
+from window.drawer_library import library_choices
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, name_list, set_names, unchanged
 
 SAME_SHAPE = tr("panel_custom.nested_of_same")
@@ -169,8 +169,8 @@ class NestedPanel:
 
     def refresh_nested_names(self):
         """Copies of: "Same as the shape" and the built-in shapes, then the saved ones (newest first)."""
-        top, saved = library_lists()
-        set_names(self.nested_of_box, [SAME_SHAPE] + list(top), saved)
+        top, saved, folders = library_choices()
+        set_names(self.nested_of_box, [SAME_SHAPE] + list(top), saved, folders)
 
     def on_nested_of(self):
         """A shape picked in Copies of: the copies are made of it (its own copy of the drawing goes into each
