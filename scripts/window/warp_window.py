@@ -13,7 +13,7 @@ Mirror: ONE dropdown Off / Sideways / Up / down / 4-way / Half turn (user 2026-1
 
 import json
 import tkinter as tk
-from tkinter import ttk
+from tkinter import messagebox, simpledialog, ttk
 
 from files import settings
 from files.lang import tr
@@ -28,6 +28,8 @@ from window.edit_line import EditLine
 from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, open_or_lift, remember_place, \
     same_or_blank, unchanged
 from window.widgets_tips import greyed_why
+from window import warp_own as wo
+from window.widgets import name_index, name_list, set_names, unhighlight
 
 BENDS = (True, False)  # (Smooth, Straight cells: the Bend dropdown by place)
 CELLS = ("cols", "rows")  # (the Custom boxes: cells across, cells up)
@@ -153,6 +155,8 @@ class WarpWindow(DefaultPin, tk.Toplevel):
         self._warps = {}  # id(a shape's recolour) -> (that recolour, its Warp in full): each cleaned once (hunt 11-10)
         self._keys = {}  # id(a Warp from warps()) -> (it, fit_key(it))
         self._seen = {}  # fit_key(a Warp) -> pr.matches (what the Preset row shows for it)
+        self._own_seen = {}  # (fit_key(a Warp), its frame) -> the own bend (warp_own) it is as seen, or None
+        self.own = wo.load_presets()  # the user's own bends (QoL K), newest last
         box = ttk.Frame(self, padding=12)
         box.pack(fill="both", expand=True)
         self.what = ShortLabel(box, text="", foreground=look.HINT)
@@ -202,6 +206,22 @@ class WarpWindow(DefaultPin, tk.Toplevel):
             b.bind("<<ComboboxSelected>>", lambda e, act=act: act())
             Tooltip(b, tr(f"warp.{name}_tip"))
             self.boxes[name] = b
+        # (own bends, QoL K, user 2026-11-23: at the TOP of the Preset list under a line, like Stir's presets;
+        # Save… / Delete beside it)
+        b = name_list(self.boxes["preset"])
+        b.config(postcommand=self.fill_presets)
+        self.fill_presets()
+        orow = ttk.Frame(form)  # (the box + its buttons on one line: a third column widened the whole window)
+        orow.grid(row=3, column=1, columnspan=2, sticky="w", padx=(6, 0), pady=2)
+        b.grid_forget()
+        b.pack(in_=orow, side="left")
+        b.lift()  # (made before the row's frame: kept over it)
+        self.own_save = ttk.Button(orow, text=tr("warp.own_save"), command=self.save_own)
+        self.own_save.pack(side="left", padx=(6, 0))
+        Tooltip(self.own_save, tr("warp.own_save_tip"))
+        self.own_del = ttk.Button(orow, text=tr("warp.own_delete"), command=self.delete_own)
+        self.own_del.pack(side="left", padx=(4, 0))
+        Tooltip(self.own_del, tr("warp.own_delete_tip"))
         # (the preset's Bend % (-100 .. 100, a number box like Strength) + Across / Up (greyed for the round ones);
         # each change lays the preset again: one undo step, a held label drag one step too)
         word = ttk.Label(form, text=tr("warp.amount"))
@@ -554,11 +574,122 @@ class WarpWindow(DefaultPin, tk.Toplevel):
         self.app.change_recolour(change, undo)
         self.sync()
 
-    def on_preset(self):
-        i = self.boxes["preset"].current()
-        if i < 0:
+    # ---- own bends (QoL K, user 2026-11-23; window/warp_own.py)
+
+    def own_names(self):
+        """The own bends as the list shows them: newest first."""
+        return list(reversed(self.own))
+
+    def fill_presets(self):
+        """The Preset list: own bends (newest first), a line, the ready-made presets."""
+        self.own = wo.load_presets()
+        set_names(self.boxes["preset"], [p["name"] for p in self.own_names()],
+                  [tr(f"warp.preset_{k}") for k in pr.PRESETS])
+
+    def own_of(self, t):
+        """The own bend shape t's Warp is as seen (its newest match), or None."""
+        rc, w = self.cleaned(t)
+        if not w or not self.own:
+            return None
+        frame = tuple((rc or {}).get("frame") or ())
+        key = (self.key_of(w), frame, len(self.own), id(self.own))
+        if key not in self._own_seen:
+            if len(self._own_seen) > 200:
+                self._own_seen.pop(next(iter(self._own_seen)))
+            seen = wo.to_seen(wo.bend_of(w), frame or None)
+            self._own_seen[key] = next((p for p in self.own_names() if wo.same(seen, p["bend"])), None)
+        return self._own_seen[key]
+
+    def shown_own(self):
+        """The one own bend every selected shape is (None: mixed, none, or not one)."""
+        got = [self.own_of(t) for t in self.targets()]
+        return got[0] if got and got[0] and all(p is got[0] for p in got) else None
+
+    def lay_own(self, p):
+        """Own bend p on every selected shape, as it looks there (one undo step); each keeps its Strength / Moves /
+        Colour edges / Folds / At the edges, a shape without a Warp takes the window's picks."""
+        self.app.roll.warp_drop_pick()
+
+        def change(old, sh):
+            got = (old or {}).get("warp")
+            base = dict(wp_.empty(self.cols, self.rows), smooth=self.smooth, edge=self.edge, edges=self.edges,
+                        folds=self.folds, **self.kind_picks(sh))
+            new = wp_.kind_kept(wo.laid(wp_.full(got) if got else None, p["bend"], (old or {}).get("frame"), base),
+                                base)
+            out = dict(old) if old else {"mode": KEEP, "seed": new_seed()}
+            if new:
+                out["warp"] = new
+            else:
+                out.pop("warp", None)
+            return out
+        self.app.change_recolour(change, tr("warp.undo_own"))
+        self.sync()
+
+    def save_own(self):
+        """The selected shapes' bend (as seen) kept as an own bend under a name (asked)."""
+        tgts = self.targets()
+        if not tgts:
             return
-        name = pr.PRESETS[i]
+        seen = []
+        for t in tgts:
+            rc, w = self.cleaned(t)
+            seen.append(wo.to_seen(wo.bend_of(w), (rc or {}).get("frame")) if w else None)
+        if not seen[0] or not wo.clean_bend(seen[0]):
+            return messagebox.showinfo(tr("warp.own_save_title"), tr("warp.own_nothing"), parent=self)
+        if not all(wo.same(s, seen[0]) for s in seen):
+            return messagebox.showinfo(tr("warp.own_save_title"), tr("warp.own_differ"), parent=self)
+        shown = self.shown_own()
+        name = shown["name"] if shown else ""
+        while True:
+            name = simpledialog.askstring(tr("warp.own_save_title"), tr("warp.own_save_prompt"), parent=self,
+                                          initialvalue=name)
+            if not self.winfo_exists() or not name or not name.strip():
+                return
+            name = name.strip()
+            if any(name.casefold() == tr(f"warp.preset_{k}").casefold() for k in pr.PRESETS):
+                messagebox.showinfo(tr("warp.own_save_title"), tr("warp.own_built_in", name=name), parent=self)
+                continue
+            self.own = wo.load_presets()
+            if not any(wo.same_name(p, name) for p in self.own) or messagebox.askyesno(
+                    tr("warp.own_save_title"), tr("warp.own_replace", name=name), parent=self):
+                break
+        if wo.change_presets(name, wo.clean_bend(seen[0]), self):
+            self.fill_presets()
+        self.sync()
+
+    def delete_own(self):
+        """The own bend the box names deleted from the list (asked; the shapes keep their Warps); naming none = a
+        menu of them to pick from."""
+        p = self.shown_own()
+        if p:
+            return self.delete_named(p)
+        self.own = wo.load_presets()
+        if not self.own:
+            return self.sync()
+        m = tk.Menu(self, tearoff=0)
+        for p in self.own_names():
+            m.add_command(label=p["name"], command=lambda p=p: self.delete_named(p))
+        b = self.own_del
+        m.tk_popup(b.winfo_rootx(), b.winfo_rooty() + b.winfo_height())
+
+    def delete_named(self, p):
+        if not self.winfo_exists() or not messagebox.askyesno(tr("warp.own_delete_title"),
+                                                              tr("warp.own_delete_ask", name=p["name"]), parent=self):
+            return
+        if wo.change_presets(p["name"], None, self):
+            self.fill_presets()
+        self.sync()
+
+    def on_preset(self):
+        b = self.boxes["preset"]
+        unhighlight(b)
+        k = name_index(b)
+        if k < 0:
+            return self.sync()
+        own = self.own_names()
+        if k < len(own):
+            return self.lay_own(own[k])
+        name = pr.PRESETS[k - len(own)]
         way = "across" if name in pr.NO_WAY else self.way_var.get() or self.preset_way
         # (a box at 0 % (the shown preset flattened) never lays the new one flat: the last bend picked instead)
         self._lay(name, self.shown_bend() or self.preset_bend, way, tr("warp.undo_preset"))
@@ -829,11 +960,19 @@ class WarpWindow(DefaultPin, tk.Toplevel):
         kinds = {p[0] if p else ("custom" if w else "none") for p, w in zip(ps, ws)}
         b = self.boxes["preset"]
         one = next(iter(kinds)) if len(kinds) == 1 else None
+        own = self.shown_own() if one == "custom" else None  # (an own bend laid and not edited since: its name)
         if one in pr.PRESETS:
-            b.current(pr.PRESETS.index(one))
+            b.set(tr(f"warp.preset_{one}"))
+        elif own:
+            b.set(own["name"])
         else:
             b.set(tr("warp.preset_none") if one == "none" else tr("warp.preset_custom") if one == "custom" else "")
         live = one in pr.PRESETS
+        tgts = bool(ws)
+        self.own_save.state(["!disabled"] if tgts and one not in (None, "none") else ["disabled"])
+        greyed_why(self.own_save, tr("warp.why_own_save"))
+        self.own_del.state(["!disabled"] if self.own else ["disabled"])
+        greyed_why(self.own_del, tr("warp.why_no_own"))
         e = self.amount_entry
         try:
             typing = self.focus_get()
@@ -848,10 +987,11 @@ class WarpWindow(DefaultPin, tk.Toplevel):
         finally:
             self.app._loading = False
         e.state(["!disabled"] if live else ["disabled"])
-        greyed_why(e, tr("warp.why_bend"))  # (QoL H: greyed controls say why)
+        why = tr("warp.why_own_bend") if own else tr("warp.why_bend")  # (own bends: no Bend % / way, user)
+        greyed_why(e, why)  # (QoL H: greyed controls say why)
         for w in self.way_buttons:
             w.state(["!disabled"] if live and one not in pr.NO_WAY else ["disabled"])
-            greyed_why(w, tr("warp.why_bend") if not live else tr("warp.why_way"))
+            greyed_why(w, why if not live else tr("warp.why_way"))
 
     def close(self):
         roll = self.app.roll
@@ -920,6 +1060,12 @@ def warp_editor(cls):
                 greyed_why(b, tr("deform.why_default_shape"))
             self.boxes["mirror"].state(["disabled"])  # (a drawing aid, never in a default: hunt)
             greyed_why(self.boxes["mirror"], tr("deform.why_default_brush"))
+            for b in (self.own_save, self.own_del):  # (own bends are the shapes' bends, never a default)
+                b.state(["disabled"])
+                greyed_why(b, tr("deform.why_default_shape"))
+
+        def own_names(self):
+            return []  # (the default lays a ready-made preset only)
 
         def sync_preset(self, ws):
             """The preset a shape without a Warp gets: picked, its Bend % and way changeable."""

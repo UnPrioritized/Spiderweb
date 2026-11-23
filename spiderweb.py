@@ -56,6 +56,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     drawer_library.py the drawer's shape library (shapes/*.json): names, loading, saving, renaming
     shape_picture.py small rough pictures of library shapes beside the Shape list and the drawer's library
     drawer_trace.py  the drawer's tracing picture: a faint picture under the board, moved / sized, never saved
+    warp_own.py      Warp own bends: named Warp grids saved by the user, flipped to look the same on any shape
     drawer_mirror.py the drawer's Mirror maths: a point's mirror copies, which points pair up
     drawer_areas.py  the drawer's Areas tool (colouring areas by hand) and colour swatches
     drawer_mouse.py  the mouse on the drawer's board (drawing, Select, sticking), copy / paste / flip / turn

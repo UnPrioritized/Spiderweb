@@ -26,6 +26,8 @@ The arrow keys nudge the picked points (Shift moves them ten times further); qui
 
 Preset lays a ready-made bend onto the grid: Arc, Arc lower, Arc upper, Arch, Bulge, Shell lower, Shell upper, Flag, Wave, Fish, Rise, Fisheye, Inflate, Squeeze or Twist. Bend sets how strong it is, from -100 to 100 % (a minus number bends the other way); Across or Up turns it to run along the time or along the keys (the round ones, Fisheye, Inflate and Twist, have no way).
 
+Your own bends: Save… beside Preset keeps the selected shape's bend under a name: its grid size, points, curve handles, split lines and Cells (Strength, Moves and the other settings stay each shape's own). Your bends sit at the top of the Preset list, above a line, and work in every project. Picking one puts the whole grid on the selected shapes the way it looked when you saved it, even on a flipped or turned shape; Bend and Across / Up are only for the ready-made presets. Delete takes the one shown out of the list (or, when none is shown, lets you pick which); the Warps on your shapes stay.
+
 The points and their curve handles are set for you on the grid as it is, so a small grid already shows the whole bend and a finer one follows it more closely. A preset is a starting point: drag a point or a dot afterwards and Preset shows Custom. Picking a preset again lays it again over your changes (Ctrl+Z brings them back).
 
 Picking a preset, changing Bend and changing the way are each one undo step; dragging the Bend word sideways changes it live. Changing the grid size of an untouched preset lays it again on the new grid.
