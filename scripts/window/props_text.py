@@ -26,7 +26,7 @@ def kind_text(sh):
     return KINDS.get(sh.get("kind"), sh.get("kind") or "?")
 
 
-MADE_BY = ("plain", "fill_gaps", "fold", "line_flip", "split_lines", "mask")
+MADE_BY = ("plain", "fill_gaps", "fold", "line_flip", "split_lines", "mask", "wrap")
 
 
 def made_text(sh):

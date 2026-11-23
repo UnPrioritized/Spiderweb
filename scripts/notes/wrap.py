@@ -68,9 +68,10 @@ def rows_of(a, gaps):
     return order, row, np.minimum.reduceat(a[order, 0], first), np.maximum.reduceat(a[order, 1], first)
 
 
-def apply_wrap(a, cfg, ppq=960):
+def apply_wrap(a, cfg, ppq=960, tag=False):
     """a: notes as an int64 array of (start, end, key, velocity, ..., colour group) rows (other columns ride along;
-    the last one = the colour group, custom.ROUND rounds in it) -> the notes cut into slices and coloured."""
+    the last one = the colour group, custom.ROUND rounds in it) -> the notes cut into slices and coloured. tag: one
+    more last column, each note's slice (0 = the first; "Each slice becomes its own shape")."""
     if not len(a) or not cfg:
         return a
     th = math.radians(cfg["angle"])
@@ -83,7 +84,7 @@ def apply_wrap(a, cfg, ppq=960):
     g = out[:, -1]
     lap, own = g // ROUND, g % ROUND
     out[:, -1] = (own + k % cfg["colours"]) % cfg["most"] + lap * ROUND
-    return out
+    return np.column_stack([out, k]).astype(np.int64) if tag else out
 
 
 def upright(a, cfg):
