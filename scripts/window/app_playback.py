@@ -117,6 +117,7 @@ def readable(n):
 TAP_VELOCITY = 100  # a piano key pressed while picking Glissando keys (tap_key)
 AHEAD_IDLE_MS = 150  # Rendered ahead's making while stopped looks this often (M2)
 READY_AFTER_MS = 1500  # Built-in BASSMIDI made ready this long after the start (ready_builtin); None = never (tests)
+END_SHARE = 0.9  # End: the play line this far across the view (the last notes in view before it)
 STOP_MODES = ("stay", "back", "back_still")  # Settings → Sound "When playback stops" (stopped_back; user 2026-11-23)
 LIVE_SETTLE_S = 0.4  # a synth opened right at Space runs this long before the notes (hunt 2026-10-25: a new BASSMIDI
 # stream lost its first 12-46 ms; notes 0.4 s after it opened lost none)
@@ -145,20 +146,23 @@ class Playback:
         self.roll.show_playhead()
         self.schedule_autosave()
 
-    def see_playhead(self):
-        """The piano roll (and a shown track list) scrolled so the play line shows, like a page turn; zoom kept."""
+    def see_playhead(self, right=False):
+        """The piano roll (and a shown track list) scrolled so the play line shows, like a page turn; zoom kept.
+        right: the line near the right edge (End: the last notes before it stay in view, user 2026-11-23)."""
         roll = self.roll
         if roll.sx is not None:
             x = roll.t2x(self.playhead)
             if x < roll.kb_w or x > roll.winfo_width() - 6 * roll.scale:
-                roll.view_t = math.floor(self.playhead * roll.sx) / roll.sx
+                back = (roll.winfo_width() - roll.kb_w) * END_SHARE / roll.sx if right else 0.0
+                roll.view_t = math.floor((self.playhead - back) * roll.sx) / roll.sx
                 roll.clamp_view()
                 roll.request_redraw()
         tracks = getattr(self, "track_list", None)
         if tracks is not None and tracks.sx is not None and tracks.winfo_ismapped():
             x = tracks.t2x(self.playhead)
             if x < tracks.name_w or x > tracks.winfo_width() - 6 * self.scale:
-                tracks.view_t = self.playhead
+                back = (tracks.winfo_width() - tracks.name_w) * END_SHARE / tracks.sx if right else 0.0
+                tracks.view_t = self.playhead - back
                 tracks.clamp()
                 tracks.request_redraw()
 
@@ -177,7 +181,7 @@ class Playback:
         if playing:
             self.stop_play()
         self.set_playhead(beat)
-        self.see_playhead()
+        self.see_playhead(right=end)
         if playing:
             self.start_play(keep=True)
 

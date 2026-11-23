@@ -56,22 +56,35 @@ def lists_close_away(root):
     if not system.WINDOWS:
         return
 
-    def watch(pop, seen):
+    opened = {}  # list path -> how many times it opened (a watcher from an earlier opening stops)
+
+    def watch(pop, seen, sunk=False, n=None):
+        n = opened.get(pop) if n is None else n
         try:
-            if not int(root.tk.call("winfo", "ismapped", pop)):
+            if n != opened.get(pop) or not int(root.tk.call("winfo", "ismapped", pop)):
                 return
             front = system.program_in_front()
-            if front is False and seen:
+            if front is False and seen and not sunk:
+                # (another program in front: the list SINKS behind it, nothing hidden or let go yet; hiding it then
+                # gave Windows a reason to bring Spiderweb back on top with a custom Alt+Tab, user 2026-11-23)
+                root.tk.call("wm", "attributes", pop, "-topmost", 0)
+                root.tk.call("lower", pop)
+                sunk = True
+            elif front is True and sunk:  # (Spiderweb in front again: the list closes, nothing picked)
                 root.tk.call("ttk::combobox::Unpost", root.tk.call("winfo", "parent", pop))
                 return
-            root.after(LIST_WATCH_MS, watch, pop, seen or front is True)
+            root.after(LIST_WATCH_MS, watch, pop, seen or front is True, sunk, n)
         except tk.TclError:  # (the dropdown's window closed meanwhile)
             pass
     try:
         cb = ttk.Combobox(root)  # (Tk's list code loaded before adding to its binding)
         root.tk.call("ttk::combobox::PopdownWindow", cb)
         cb.destroy()
-        cmd = root.register(lambda pop: watch(pop, False))
+        def mapped(pop):
+            opened[pop] = opened.get(pop, 0) + 1
+            root.tk.call("wm", "attributes", pop, "-topmost", 1)
+            watch(pop, False)
+        cmd = root.register(mapped)
         root.tk.call("bind", "ComboboxPopdown", "<Map>", "+" + cmd + " %W")
     except tk.TclError:
         pass
