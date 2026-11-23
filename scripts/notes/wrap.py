@@ -54,7 +54,9 @@ def shares(n, rnd):
     """The cuts' shares of a row, f(1) .. f(n - 1) (rising): Round blended with Even by rnd (0..100)."""
     k = np.arange(1, n, dtype=float)
     r = rnd / 100
-    return r * (1 - np.cos(np.pi * k / n)) / 2 + (1 - r) * k / n
+    # (rounded: cos 90 = 6e-17 made the middle cut 0.4999999999999999, so rows an odd number of ticks long put it a
+    # tick to the left, user 2026-11-23: "a few ticks out of place" at 100 %, none at 0 %)
+    return np.round(r * (1 - np.cos(np.pi * k / n)) / 2 + (1 - r) * k / n, 12)
 
 
 def rows_of(a, gaps):
