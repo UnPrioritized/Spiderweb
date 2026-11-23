@@ -205,6 +205,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     project.py       project files (.spwb packed, old .json plain), autosave (+ its backup), MIDI export
     dropfiles.py     files dragged in from Explorer onto the main window (Windows' OLE drop target)
     safefile.py      saving without half-written files
+    recent.py        File → Open Recent lists, the pickers' last folders, project backups on Save
     pip_age.py       the start's package offers skip versions under 14 days old (asks PyPI their dates)
     saved_lists.py   the user's lists kept in one file (patterns, rhythms, colour formats): a damaged one loses nothing
     errors.py        spiderweb-error.log and the "something went wrong" message; spiderweb-crash.log when the

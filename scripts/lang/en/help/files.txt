@@ -2,6 +2,10 @@ Everything is saved on its own (autosave.json in the user folder next to Spiderw
 
 The File menu (top left) holds New (Ctrl+N), Open… (Ctrl+O), Save (Ctrl+S) and Save as… (Ctrl+Shift+S) for project files (.spwb). Save writes into the file you opened or saved last; the first time, it asks for a name. The title bar shows the file's name, with a * while there are changes it doesn't have yet (zooming and scrolling don't count).
 
+File → Open Recent lists the last 16 projects and the last 16 MIDI files you loaded, newest first. A file that has been moved or deleted is taken off the list when you pick it. Clear List empties one list. Open… and Load MIDI… each start in the folder you used last for them.
+
+Each time Save writes over a project file, the old file is kept as a backup first, in the user folder's backups\project folder (one folder per project). Settings → General → Backups sets how many are kept per project (5 at first, 0 = none) and how big all of them together may get (1 GB at first); the oldest go first. File → Open a Backup… opens one as a project with no file of its own, so Save asks where to keep it.
+
 Opening a file replaces what's on the piano roll (Undo can't bring it back), so if your shapes aren't saved in a project file, Spiderweb asks to save them first. New starts a new MIDI: every shape goes, and the [page:conductor|Conductor pane]'s tempo and signatures too (back to 120 BPM and 4/4). Like opening a file, New can't be undone, so it offers to save unsaved work first.
 
 A new project (New or Load MIDI) starts with the PPQ, keys, channel settings, Domino start and output file set in [page:settings#New projects:|Settings] → New projects, not with the ones of the project open now. Opening a project file uses that file's own settings, so a file from someone else plays as they made it, but your tool settings for new shapes, Snap and the Hz bass window's view stay as you had them.
@@ -14,7 +18,7 @@ To open .spwb projects by double-clicking them, press "Open .spwb files with Spi
 
 Shapes are stored in beats, so changing PPQ doesn't move them.
 
-Export MIDI (Ctrl+E) writes the file set under Output file, with the PPQ from Project and the tempo and signatures from the Conductor pane. PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red).
+Export MIDI (Ctrl+E) writes the file set under Output file, with the PPQ from Project and the tempo and signatures from the Conductor pane. PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red). When the file is already there, Spiderweb asks before replacing it, unless it's exactly the file Spiderweb wrote there last (since it was opened): then it's replaced without asking and the status line says so. Warnings about the file still pop up. Export to Domino works the same way.
 
 Keys (under Project) set to 256: the piano roll goes up to key 255 instead of 127, and the MIDI file keeps those keys. That's for players that support 256 keys (handy for tunings like 31-EDO, which need more keys per octave). Many MIDI programs can't read keys above 127, and playback here skips them (unless 31-EDO Audio is on).
 

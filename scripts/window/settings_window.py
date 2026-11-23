@@ -319,6 +319,7 @@ class SettingsWindow(tk.Toplevel):
             say(tr("updates.checking")), updates.check(report=say))).pack(side="left")
         self.build_tips(f)
         self.build_file_link(f)
+        self.build_backups(f)
         self.build_new_projects(page("new", tr("settings.cat_new")))  # (user 2026-11-18: its own page)
         self.build_defaults(page("defaults", tr("defaults.page")))  # (user 2026-11-23: PLAN.md stage D2)
         f = page("look", tr("settings.look_tab"))
@@ -375,6 +376,8 @@ class SettingsWindow(tk.Toplevel):
             panel.take_voices()
         take = getattr(self, "take_opacity", None)
         if take is not None and self.opacity_box.winfo_exists() and not self.opacity_box.instate(["disabled"]):
+            take(True)
+        for take in getattr(self, "backup_take", {}).values():  # (General's backup boxes)
             take(True)
         take = getattr(self, "take_new_typed", None)  # (New projects' PPQ / output boxes)
         if take is not None:
@@ -516,6 +519,50 @@ class SettingsWindow(tk.Toplevel):
         wraps = on and app.wrap_offrange.get()  # ("Show wrapped notes": greyed while nothing wraps)
         self.wrapped_box.state(["!disabled"] if wraps else ["disabled"])  # (readonly stays)
         self.wrapped_label.state(["!disabled"] if wraps else ["disabled"])
+
+    def build_backups(self, f):
+        """Backups Save keeps of a project file (QoL E, user 2026-11-23): how many per project (0 = none) and how
+        big all of them together may grow (GB). Typed = Enter / leaving the box; dragged / wheel like any number box;
+        middle-click = the default."""
+        from files.recent import BACKUP_COUNT, BACKUP_GB, trim
+        from window.widgets import Scrub, bad, good
+        app = self.app
+        f.head(tr("settings.head_backups"))
+        self.backup_take = {}
+        for var, (lo, hi, default), name, unit, whole, steps in (
+                (app.backup_count, BACKUP_COUNT, "settings.backup_count", "", True, (1, 5, 1)),
+                (app.backup_gb, BACKUP_GB, "settings.backup_gb", "settings.unit_gb", False, (0.5, 5, 0.1))):
+            row = ttk.Frame(f.page)
+            text = tk.StringVar(value=f"{var.get():g}")
+            e = ttk.Entry(row, textvariable=text, width=7)
+            e.pack(side="left")
+            if unit:
+                ttk.Label(row, text=tr(unit)).pack(side="left", padx=(3, 0))
+            good(e)
+
+            def took(left=False, e=e, text=text, var=var, lo=lo, hi=hi, whole=whole):
+                try:
+                    v = float(text.get().replace(",", "."))
+                    if not lo <= v <= hi or whole and not v.is_integer():
+                        raise ValueError
+                except ValueError:
+                    bad(e)
+                    return
+                v = int(v) if whole else round(v, 2)
+                text.set(f"{v:g}")
+                good(e)
+                if v != var.get():
+                    var.set(v)
+                    if not whole:  # (a smaller cap: the oldest backups go now, not at the next Save)
+                        trim(v)
+                    app.schedule_autosave()
+            self.backup_take[name] = took  # (tests)
+            e.bind("<Return>", lambda ev, took=took: (took(), "break")[1])
+            e.bind("<FocusOut>", lambda ev, took=took: took(True))
+            e.bind("<Button-2>", lambda ev, took=took, text=text, default=default: (text.set(f"{default:g}"), took()))
+            f.row(tr(name), row, tip=tr(name + "_tip"))
+            label = f.page.grid_slaves(row=f.r - 1, column=0)[0]  # (Form.row's name label)
+            Scrub(app, [(e, text, took)], steps, lo, hi, label=label, no_undo=True)
 
     def build_file_link(self, f):
         """"Open .spwb files with Spiderweb" (14, user 2026-10-29): Windows told that double-clicking a .spwb opens

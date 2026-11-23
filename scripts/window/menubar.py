@@ -17,6 +17,28 @@ from window.strum_window import open_strum
 from window.trim_window import open_trim
 
 
+RECENT_FOLDER_MOST = 48  # characters of a recent file's folder shown beside its name (the rest "…")
+
+
+def fill_recent(app, m, kind):
+    """One Open recent list, filled each time it opens: name + folder, newest first, then Clear list."""
+    import os
+    from files import recent
+    m.delete(0, "end")
+    paths = recent.items(kind)
+    for p in paths:
+        where = os.path.dirname(p)
+        if len(where) > RECENT_FOLDER_MOST:
+            where = "…" + where[-(RECENT_FOLDER_MOST - 1):]
+        m.add_command(label=tr("menu.recent_item", name=os.path.basename(p), folder=where),
+                      command=lambda p=p: app.open_recent(kind, p))
+    if not paths:
+        m.add_command(label=tr("menu.recent_none"), state="disabled")
+    m.add_separator()
+    m.add_command(label=tr("menu.recent_clear"), state="normal" if paths else "disabled",
+                  command=lambda: recent.clear(kind))
+
+
 def build_menu(app):
     from window.settings_window import open_settings
     own = look.DARK
@@ -46,11 +68,19 @@ def build_menu(app):
         m.add_command(label=tr(key, **kw), accelerator=tr(keys) if keys else "", command=command)
 
     def sync_file(m):  # (a project's MIDI: found again only while not loaded; a copy for sharing once it is)
-        m.entryconfig(7, state="normal" if app.midi_link is not None and app.loaded is None else "disabled")
-        m.entryconfig(8, state="normal" if app.loaded is not None else "disabled")
+        m.entryconfig(9, state="normal" if app.midi_link is not None and app.loaded is None else "disabled")
+        m.entryconfig(10, state="normal" if app.loaded is not None else "disabled")
     f = menu("menu.file", sync_file)
     add(f, "menu.new", "menu.ctrl_n", app.new_project)
     add(f, "menu.open", "menu.ctrl_o", app.open_project)
+    # File → Open recent ▸ Projects ▸ / Loaded MIDI ▸ (QoL E, user 2026-11-23: 16 each, Clear list)
+    rec = tk.Menu(f, tearoff=False)
+    f.add_cascade(label=tr("menu.open_recent"), menu=rec)
+    for kind, key in (("projects", "menu.recent_projects"), ("midi", "menu.recent_midi")):
+        sub = tk.Menu(rec, tearoff=False)
+        sub.config(postcommand=lambda m=sub, k=kind: fill_recent(app, m, k))
+        rec.add_cascade(label=tr(key), menu=sub)
+    add(f, "menu.open_backup", "", app.open_backup)
     add(f, "menu.save", "menu.ctrl_s", app.save_project)
     add(f, "menu.save_as", "menu.ctrl_shift_s", app.save_project_as)
     f.add_separator()

@@ -61,6 +61,8 @@ from files.errors import write_log
 from files.midi_copy import Added, Retime
 from files.midi_read import M_CUT, M_RMID, Cancelled, FileChanged, MidiError
 from files.safefile import write_bytes, write_text
+from files import recent
+from files.recent import file_stamp
 from files.settings import SPACE_BARS, SPACE_KEYS, save_app_settings, with_app_settings
 from files.snap import clean_snap
 from files.unzip import allowance
@@ -697,6 +699,7 @@ class ProjectFiles:
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
                               "edo10_piano": self.edo10_piano.get(), "stop_mode": self.stop_mode.get(),
+                              "backup_count": self.backup_count.get(), "backup_gb": self.backup_gb.get(),
                               "edo31_pin_a": self.edo_pin_a.get(), "edo31_a_hz": self.edo_a,
                               "loaded_synths": self.loaded_synths,
                               **{"kestrel_" + k: v for k, v in self.kestrel_opts.items()},
@@ -937,6 +940,12 @@ class ProjectFiles:
             from window.app_playback import STOP_MODES
             if win.get("stop_mode") in STOP_MODES:
                 self.stop_mode.set(win["stop_mode"])
+            lo, hi, _ = recent.BACKUP_COUNT  # (Settings → General backups, QoL E)
+            if type(win.get("backup_count")) is int and lo <= win["backup_count"] <= hi:
+                self.backup_count.set(win["backup_count"])
+            lo, hi, _ = recent.BACKUP_GB
+            if type(win.get("backup_gb")) in (int, float) and lo <= win["backup_gb"] <= hi:
+                self.backup_gb.set(float(win["backup_gb"]))
             from files.playback import EDO_A_RANGE, set_edo_a
             v = win.get("edo31_a_hz")
             if isinstance(v, (int, float)) and not isinstance(v, bool) and EDO_A_RANGE[0] <= v <= EDO_A_RANGE[1]:
@@ -1153,10 +1162,32 @@ class ProjectFiles:
         elif not opened:
             self.use_new_defaults()
 
-    def open_project(self, path=None):
+    def open_backup(self):
+        """File → Open a Backup… (QoL E): a picker in user\\backups\\project; the backup opens as a project with no
+        file of its own (Save asks where, so the backups folder stays only backups)."""
+        os.makedirs(recent.BACKUPS, exist_ok=True)
+        path = filedialog.askopenfilename(title=tr("project.open_backup"), initialdir=recent.BACKUPS,
+                                          filetypes=open_types())
+        if path:
+            self.open_project(path, backup=True)
+
+    def open_recent(self, kind, path):
+        """File → Open recent ▸ (QoL E): a file gone = said + taken off the list."""
+        if not os.path.isfile(path):
+            recent.remove(kind, path)
+            messagebox.showerror(tr("project.spiderweb"), tr("project.recent_gone", path=path), parent=self)
+            return
+        if kind == "midi":
+            from window.load_midi import load_midi
+            load_midi(self, path)
+        else:
+            self.open_project(path)
+
+    def open_project(self, path=None, backup=False):
         """path = a file dropped / opened with Spiderweb (window/open_files.py); None = asks."""
         if path is None:
-            path = filedialog.askopenfilename(title=tr("project.open_project"), initialdir=OUTPUT_DIR,
+            path = filedialog.askopenfilename(title=tr("project.open_project"),
+                                              initialdir=recent.folder("projects", OUTPUT_DIR),
                                               filetypes=open_types())
         from window.drawer import offer_shape_file
         if path and offer_shape_file(self, path):  # (a library shape's file: offered into the library instead)
@@ -1165,8 +1196,13 @@ class ProjectFiles:
             return
         if self.load_file(path, mine=False):
             self._saved_shapes = self.saved_key()
-            self.project_file = None if self.own_file(path) else os.path.normpath(path)
+            self.project_file = None if self.own_file(path) or backup else os.path.normpath(path)
+            if self.project_file:
+                recent.add("projects", path)
             self.mark_saved()
+            if backup:
+                self._saved_shapes = None  # (no file of its own yet: Open / New ask to save it first)
+                self.status.config(text=tr("project.backup_opened", name=os.path.basename(path)))
             self.sync_panel()
             self.tell_load_notes()
             self.find_loaded_later()
@@ -1175,6 +1211,7 @@ class ProjectFiles:
         """Load MIDI's end: a NEW project (user 2026-10-23: always one) with the file's PPQ (and 256 keys for a 256
         keys MIDI), its notes drawn under the shapes. Not an undo step: like Open, the old project was asked about
         first (may_replace). The view keeps its zoom and goes to the song's start (user 2026-10-24: not Fit view)."""
+        recent.add("midi", lm.path)  # (File → Open recent, QoL E)
         r = self.roll
         zoom = r.sx, r.sy, r.view_top
         data = self.project_data()
@@ -1376,11 +1413,14 @@ class ProjectFiles:
         if ask or not path:
             os.makedirs(OUTPUT_DIR, exist_ok=True)
             path = filedialog.asksaveasfilename(title=tr("project.save_project"),
-                                                initialdir=os.path.dirname(path) if path else OUTPUT_DIR,
+                                                initialdir=os.path.dirname(path) if path else
+                                                recent.folder("projects", OUTPUT_DIR),
                                                 initialfile=os.path.basename(as_packed_name(path)) if path else "",
                                                 defaultextension=PROJECT_EXT, filetypes=save_types())
         if not path:
             return False
+        if not self.own_file(path):  # (the old file kept in user\backups\project first, QoL E)
+            recent.back_up(path, self.backup_count.get(), self.backup_gb.get())
         try:
             self.write_json(path)
         except OSError as e:
@@ -1388,6 +1428,8 @@ class ProjectFiles:
             return False
         self._saved_shapes = self.saved_key()
         self.project_file = None if self.own_file(path) else os.path.normpath(path)
+        if self.project_file:
+            recent.add("projects", path)
         self.mark_saved()
         self.schedule_autosave()  # (it remembers the file and that it's saved)
         return True
@@ -1494,9 +1536,8 @@ class ProjectFiles:
                     return
                 targets = lists if got == "every" else lists[:1]
         path = output_path(self.pvar["output"].get())
-        if os.path.exists(path) and not messagebox.askyesno(
-                tr("project.confirm_save_as"), tr("project.already_exists_do_you_want_to",
-                                                  basename=os.path.basename(path)), icon="warning", default="no"):
+        quiet = self.may_overwrite(path)
+        if not quiet:
             return
         from files.midi_copy import copy_through
         job = self._exporting = {"done": 0, "total": lm.mf.size, "error": None, "finished": False, "cancel": False,
@@ -1624,17 +1665,20 @@ class ProjectFiles:
             if isinstance(e, FileChanged):
                 messagebox.showerror(tr("project.spiderweb"), tr("load.export_gone", path=lm.path), parent=self)
             elif e is None and job["plan"] is not None:
-                messagebox.showinfo(tr("project.spiderweb"), tr(
+                self.wrote_file(path)
+                extra = self.tempo_notes(job["plan"]) + own_note() + mixed
+                self.say_saved(quiet, path, tr(
                     "load.exported_tempo" if targets else "load.exported_sigs", path=path, notes=trn("n.notes", left, n=left),
                     tracks=", ".join(str(n + 1) for n in targets[:10]) + (", …" if len(targets) > 10 else ""),
-                    note=self.tempo_notes(job["plan"]) + own_note() + mixed)
-                                    + (tr("load.exported_tracks_too") if listed else ""))
+                    note=extra) + (tr("load.exported_tracks_too") if listed else ""), warn=bool(extra))
             elif e is None:
-                messagebox.showinfo(tr("project.spiderweb"), tr(
+                self.wrote_file(path)
+                extra = own_note() + mixed
+                self.say_saved(quiet, path, tr(
                     ("load.exported_own_extracted" if len(hid.h_s) else "load.exported_own") if len(notes) else
                     "load.exported_tracks" if listed else "load.exported", path=path, notes=trn("n.notes", left, n=left))
-                                    + (tr("load.exported_tracks_too") if listed and len(notes) else "")
-                                    + own_note() + mixed)
+                               + (tr("load.exported_tracks_too") if listed and len(notes) else "") + extra,
+                               warn=bool(extra))
             elif isinstance(e, MidiError):
                 messagebox.showerror(tr("project.spiderweb"), tr(e.key, **e.info))
             elif isinstance(e, OSError):
@@ -1765,10 +1809,8 @@ class ProjectFiles:
         if not ask_big(self, "midi", len(out)):
             return
         path = output_path(self.pvar["output"].get())
-        if os.path.exists(path) and not messagebox.askyesno(  # (asked like the Output file dialog does)
-                tr("project.confirm_save_as"), tr("project.already_exists_do_you_want_to",
-                                                  basename=os.path.basename(path)),
-                icon="warning", default="no"):
+        quiet = self.may_overwrite(path)  # (asked like the Output file dialog does; not for our own last file)
+        if not quiet:
             return
         if long_silences(out) and not messagebox.askokcancel(
                 tr("project.spiderweb"), tr("project.long_silences", ppq=ppq, beats=MAX_DELTA // ppq), icon="warning"):
@@ -1781,6 +1823,7 @@ class ProjectFiles:
                                                  own=self.with_file_tracks(), least=self.least_tracks(),
                                                  filled=self.filled_slots(notes))):
             return
+        self.wrote_file(path)
         channels = tracks  # (the tracks written, in every mode: pastes / your tracks make several in Single too)
         note = (tr("project.ppq_many_midi_programs_can_t", ppq=ppq, PPQ_WARN=PPQ_WARN)
                 if ppq >= PPQ_WARN else "")
@@ -1790,10 +1833,10 @@ class ProjectFiles:
             note += tr("project.ports_midi_edo" if engine.edo_lanes else "project.ports_midi")
         mixed = self.track_list.mixed_note()  # (tracks holding several channels: no longer one each, PLAN #11 E1)
         note += mixed + self.tempo_notes(plan) + self.cc_note(cc, True)
-        messagebox.showinfo(tr("project.spiderweb"),
-                            tr("project.saved_notes_mixed" if mixed else "project.saved_notes_on_track_s_one", notes=trn("n.notes", len(notes),
-                                                                               n=len(notes)),  # (as written)
-                               tracks=trn("n.tracks", channels, n=channels), path=path, note=note))
+        self.say_saved(quiet, path, tr("project.saved_notes_mixed" if mixed else "project.saved_notes_on_track_s_one",
+                                       notes=trn("n.notes", len(notes), n=len(notes)),  # (as written)
+                                       tracks=trn("n.tracks", channels, n=channels), path=path, note=note),
+                       warn=bool(note))
 
     def tempo_notes(self, plan):
         """The export message's lines about the Tempo pane (file_plan's warnings)."""
@@ -1965,6 +2008,31 @@ class ProjectFiles:
         own = sum(1 for ms in cc.values() for e in ms if e[1] is None) if midi else 0
         return trn("project.cc_left_out_midi", own, n=own) if own else ""
 
+    def may_overwrite(self, path):
+        """Export's "replace it?" question (QoL E, user 2026-11-23): skipped when the file is EXACTLY as Spiderweb
+        wrote it this session (same size + modified time). False = don't write; "quiet" = ours, no question asked;
+        True = a new file or the user said yes."""
+        if not os.path.exists(path):
+            return True
+        if self.written_files.get(os.path.normcase(os.path.normpath(path))) == file_stamp(path):
+            return "quiet"
+        return messagebox.askyesno(tr("project.confirm_save_as"), tr("project.already_exists_do_you_want_to",
+                                                                     basename=os.path.basename(path)),
+                                   icon="warning", default="no", parent=self)
+
+    def wrote_file(self, path):
+        """Remembers a file Spiderweb just wrote (may_overwrite)."""
+        stamp = file_stamp(path)
+        if stamp is not None:
+            self.written_files[os.path.normcase(os.path.normpath(path))] = stamp
+
+    def say_saved(self, quiet, path, text, warn=False, show=None):
+        """The export's done message: a quiet re-export with nothing to warn about = the status line only."""
+        if quiet == "quiet" and not warn:
+            self.status.config(text=tr("project.saved_again", name=os.path.basename(path)))
+        else:
+            (show or messagebox.showinfo)(tr("project.spiderweb"), text, parent=self)
+
     def write_out(self, path, busy, write):
         """write() makes the file at path (its folder made first), with the busy text key showing. False when it
         couldn't (said in plain words)."""
@@ -2015,10 +2083,8 @@ class ProjectFiles:
             return
         notes, long = cut_gates(notes)
         path = dms_path(output_path(self.pvar["output"].get()))
-        if os.path.exists(path) and not messagebox.askyesno(
-                tr("project.confirm_save_as"), tr("project.already_exists_do_you_want_to",
-                                                  basename=os.path.basename(path)),
-                icon="warning", default="no"):
+        quiet = self.may_overwrite(path)
+        if not quiet:
             return
         # (changes past the song's end make no sound: left out, Domino's ticks stop; signatures too without a tempo
         # line: one far past the song failed the export, hunt 2026-10-23)
@@ -2032,6 +2098,7 @@ class ProjectFiles:
                                own=self.with_file_tracks(), least=self.least_tracks(),
                                typed=plan.get("typed"), filled=self.filled_slots(notes)))):
             return
+        self.wrote_file(path)
         tracks = len(track_slots(notes, self.pad_tracks(), self.least_tracks())) + len(self.with_file_tracks())
         ports = slot_ports(auto_count(notes[:, 4]), cc, self.picture_use10)  # (as dms_data decides)
         text = (tr("project.saved_dms", notes=trn("n.notes", len(notes), n=len(notes)),
@@ -2043,8 +2110,10 @@ class ProjectFiles:
                 + self.loaded_left_out())
         slow = tempo_items(tempo)[1] if tempo else 0
         warn = self.tempo_notes(plan) + (tr("project.dms_tempo_slow") if slow else "") + self.cc_note(cc)
-        (messagebox.showwarning if long or ports or warn else messagebox.showinfo)(tr("project.spiderweb"),
-                                                                                    text + warn)
+        bad = bool(long or ports or warn)
+        self.say_saved(quiet, path, text + warn, warn=bad or high or mod or self.loaded is not None
+                       or bool(self.track_list.mixed_note(domino=True)),
+                       show=messagebox.showwarning if bad else None)
 
     def loaded_left_out(self, short=False):
         """The Domino messages' line when a MIDI is loaded: its notes never go into a Domino copy / .dms (plan step
