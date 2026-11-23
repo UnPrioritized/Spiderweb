@@ -292,6 +292,8 @@ class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzLfo, 
         for k, step in (("<Up>", 1), ("<Down>", -1)):  # (a Quick detune pulled: one voice more / fewer; else the
             c.bind(k, lambda e, step=step, k=k: "break" if self.detune_count(step)  # selected notes a key)
                    or not e.state & (CTRL | ALT_STATE) and self.nudge_notes(k[1:-1].lower()) else None)
+        c.bind("<Home>", lambda e: None if e.state & CTRL else self.home_end(False))  # (the preview's play line:
+        c.bind("<End>", lambda e: None if e.state & CTRL else self.home_end(True))    # the start / the last note)
         for k in ("<Left>", "<Right>"):  # (the selected notes a tick sideways)
             c.bind(k, lambda e, k=k: "break" if not e.state & (CTRL | ALT_STATE)
                    and self.nudge_notes(k[1:-1].lower()) else None)

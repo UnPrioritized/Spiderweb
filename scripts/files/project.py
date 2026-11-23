@@ -696,7 +696,7 @@ class ProjectFiles:
                               "rebar_between": getattr(self.tempo_pane, "rebar_between", False),
                               "midi_device": self.midi_device.get(), "play_voices": self.play_voices,
                               "play_voice_guard": self.play_guard.get(), "play_limiter": self.play_limiter.get(),
-                              "edo10_piano": self.edo10_piano.get(),
+                              "edo10_piano": self.edo10_piano.get(), "stop_mode": self.stop_mode.get(),
                               "edo31_pin_a": self.edo_pin_a.get(), "edo31_a_hz": self.edo_a,
                               "loaded_synths": self.loaded_synths,
                               **{"kestrel_" + k: v for k, v in self.kestrel_opts.items()},
@@ -934,6 +934,9 @@ class ProjectFiles:
             self.play_limiter.set(win.get("play_limiter") is True)
             self.edo10_piano.set(win.get("edo10_piano") is True)
             self.out.edo_drums = not self.edo10_piano.get()
+            from window.app_playback import STOP_MODES
+            if win.get("stop_mode") in STOP_MODES:
+                self.stop_mode.set(win["stop_mode"])
             from files.playback import EDO_A_RANGE, set_edo_a
             v = win.get("edo31_a_hz")
             if isinstance(v, (int, float)) and not isinstance(v, bool) and EDO_A_RANGE[0] <= v <= EDO_A_RANGE[1]:

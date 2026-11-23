@@ -32,7 +32,7 @@ Note colours:
 
 • Overlapping shapes keep their colours (Multi channel): a shape that overlaps an earlier one moves whole to the next row of channels, so its colours stay the same. Plain notes made with Turn into plain notes or Turn into plain shapes follow it too: with it off, one that overlaps another takes the next free channels instead.
 
-Sound: the MIDI out used for playback, and with Built-in BASSMIDI its soundfonts (several can be stacked, each overriding the ones above it: see [page:playback#Soundfonts can be stacked|Playback]), voice limit, lowering it by itself when it can't keep up, slowing down to keep up, and Use OmniMIDI Limiter.
+Sound: the MIDI out used for playback, When playback stops (where the play line goes when you stop: see [page:playback#Home moves the play line|Playback]), and with Built-in BASSMIDI its soundfonts (several can be stacked, each overriding the ones above it: see [page:playback#Soundfonts can be stacked|Playback]), voice limit, lowering it by itself when it can't keep up, slowing down to keep up, and Use OmniMIDI Limiter.
 
 For 31-EDO projects: "31-EDO tuning" (C pinned, or A = a Hz you type) and "31-EDO: play channel 10 as piano" (see [page:edo31|31-EDO]).
 

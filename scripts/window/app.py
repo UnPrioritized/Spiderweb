@@ -315,6 +315,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.play_limiter = tk.BooleanVar(self, value=False)  # (off to start, as in the driver it copies)
         # 31-EDO: channel 10 as tuned rows in a piano sound (user 2026-11-10; off = drums, the template's way)
         self.edo10_piano = tk.BooleanVar(self, value=False)
+        self.stop_mode = tk.StringVar(self, value="stay")  # (Settings → Sound "When playback stops": STOP_MODES)
+        self.play_from = 0.0  # (where the play line was set last: "back" stop modes return there)
         # 31-EDO tuning (user 2026-11-12): C pinned (default, today's sound) or A = edo_a Hz (playback.set_edo_a)
         self.edo_pin_a = tk.BooleanVar(self, value=False)
         self.edo_a = EDO_A_DEFAULT  # (the Hz in use with "A =", kept while C pinned is picked)

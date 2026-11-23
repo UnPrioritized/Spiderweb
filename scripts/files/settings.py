@@ -123,6 +123,7 @@ APP_KEYS = {
     "play_voice_guard": ("sound", "lower_by_itself", bool),
     "play_limiter": ("sound", "omnimidi_limiter", bool),
     "edo10_piano": ("sound", "edo31_channel_10_as_piano", bool),
+    "stop_mode": ("sound", "when_playback_stops", str),  # (app_playback.STOP_MODES, user 2026-11-23)
     "edo31_pin_a": ("sound", "edo31_tuned_to_a", bool),  # (off = C pinned, user 2026-11-12)
     "edo31_a_hz": ("sound", "edo31_a_hz", float),
     "loaded_synths": ("sound", "loaded_midi_synths", int),

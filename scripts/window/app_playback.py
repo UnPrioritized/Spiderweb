@@ -117,6 +117,7 @@ def readable(n):
 TAP_VELOCITY = 100  # a piano key pressed while picking Glissando keys (tap_key)
 AHEAD_IDLE_MS = 150  # Rendered ahead's making while stopped looks this often (M2)
 READY_AFTER_MS = 1500  # Built-in BASSMIDI made ready this long after the start (ready_builtin); None = never (tests)
+STOP_MODES = ("stay", "back", "back_still")  # Settings → Sound "When playback stops" (stopped_back; user 2026-11-23)
 LIVE_SETTLE_S = 0.4  # a synth opened right at Space runs this long before the notes (hunt 2026-10-25: a new BASSMIDI
 # stream lost its first 12-46 ms; notes 0.4 s after it opened lost none)
 
@@ -127,13 +128,65 @@ class Playback:
     def toggle_play(self):
         if self.player.running:
             self.stop_play()
+            self.stopped_back()
         else:
             self.start_play()
+
+    def stopped_back(self):
+        """After the user's Stop / the song's end (never a stop the program makes to start again): Settings → Sound
+        "When playback stops" (user 2026-11-23, like Domino's): stay / back to where the play line was set last
+        (scrolled there) / back there without scrolling (the next Play scrolls)."""
+        mode = self.stop_mode.get()
+        if mode not in ("back", "back_still"):
+            return
+        self.playhead = max(0.0, self.play_from)
+        if mode == "back":
+            self.see_playhead()
+        self.roll.show_playhead()
+        self.schedule_autosave()
+
+    def see_playhead(self):
+        """The piano roll (and a shown track list) scrolled so the play line shows, like a page turn; zoom kept."""
+        roll = self.roll
+        if roll.sx is not None:
+            x = roll.t2x(self.playhead)
+            if x < roll.kb_w or x > roll.winfo_width() - 6 * roll.scale:
+                roll.view_t = math.floor(self.playhead * roll.sx) / roll.sx
+                roll.clamp_view()
+                roll.request_redraw()
+        tracks = getattr(self, "track_list", None)
+        if tracks is not None and tracks.sx is not None and tracks.winfo_ismapped():
+            x = tracks.t2x(self.playhead)
+            if x < tracks.name_w or x > tracks.winfo_width() - 6 * self.scale:
+                tracks.view_t = self.playhead
+                tracks.clamp()
+                tracks.request_redraw()
+
+    def playhead_key(self, end):
+        """Home = the play line to the start, End = to the last note's end (user 2026-11-23); shown, and playing goes
+        on from there."""
+        if end:
+            n = self.rendered
+            beat = int(n[:, 1].max()) / self.ppq if len(n) else 0.0
+            if self.loaded is not None:
+                from notes.loaded_shown import shown_end
+                beat = max(beat, shown_end(self) / self.loaded.ppq)
+        else:
+            beat = 0.0
+        playing = self.player.running
+        if playing:
+            self.stop_play()
+        self.set_playhead(beat)
+        self.see_playhead()
+        if playing:
+            self.start_play(keep=True)
 
     def start_play(self, keep=False):
         """keep = started again at once (play line moved while playing, new PPQ): Built-in BASSMIDI keeps a voice
         limit lowered by itself."""
         self.scrub_end()
+        if not keep:  # (a "back" stop mode returns here: stopped_back)
+            self.play_from = self.playhead
         self.colour_edit_leave()  # (a colour step being edited: heard whole, its later steps back; PLAN.md stage C)
         try:
             ppq, bpm, beats = self.read_project()
@@ -551,6 +604,7 @@ class Playback:
         self.playhead = self.player.position()
         if not self.player.running:
             self.stop_play()
+            self.stopped_back()  # (the song's end)
             return
         lp = self.loaded_play
         if lp is not None and lp.error is not None:  # (its reading failed: stop, never play on silent; user)
@@ -585,6 +639,7 @@ class Playback:
                 return
             if self.ahead_play.ended():  # (the ring died away: stops there, user 2026-11-03)
                 self.stop_play()
+                self.stopped_back()
                 return
             sec = self.ahead_play.heard_sec()
             pmap = self.player.map
@@ -1249,7 +1304,7 @@ class Playback:
                                              f"{'on' if self.play_limiter.get() else 'off'}")
 
     def set_playhead(self, beat):
-        self.playhead = max(0.0, beat)
+        self.playhead = self.play_from = max(0.0, beat)
         self.roll.show_playhead()
         self.schedule_autosave()
 

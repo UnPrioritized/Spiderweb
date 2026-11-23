@@ -861,6 +861,13 @@ class SettingsWindow(tk.Toplevel):
         keep_width(dev)
         letter_jump(dev)
         dev.configure(postcommand=lambda: dev.configure(values=devices()))  # (re-listed when it opens)
+        from window.app_playback import STOP_MODES  # ("When playback stops", user 2026-11-23: like Domino's)
+        stop_names = {k: tr("settings.stop_" + k) for k in STOP_MODES}
+        self.stop_var = tk.StringVar(value=stop_names.get(app.stop_mode.get(), stop_names["stay"]))
+        stop = f.row(tr("settings.row_stop"), ttk.Combobox(page, textvariable=self.stop_var, state="readonly",
+                                                           values=list(stop_names.values())), tip=tr("settings.stop_tip"))
+        stop.bind("<<ComboboxSelected>>", lambda e: (  # (read by place: translations)
+            app.stop_mode.set(STOP_MODES[max(0, stop.current())]), app.schedule_autosave()))
         self.builtin_off = f.note(tr("settings.builtin_off"), under=True)
         self.builtin_title = f.head(tr("bs.title"))
         self.sound_sep = page.grid_slaves(row=f.r - 1, column=0)[0]  # (the heading's line: hidden with it)

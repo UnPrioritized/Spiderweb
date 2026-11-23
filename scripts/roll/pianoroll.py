@@ -2778,6 +2778,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 return "break"
             if self.shape_nudge(k):  # (selected shapes: one tick / one key)
                 return "break"
+        elif k in ("home", "end") and not e.state & (CTRL | ALT) and not self.holding():
+            self.app.playhead_key(k == "end")  # (the play line to the start / the last note's end)
+            return "break"
         elif k == "g" and not e.state & CTRL:
             self.app.live.set(not self.app.live.get())
         elif k == "m" and not e.state & CTRL:

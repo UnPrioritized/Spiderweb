@@ -139,6 +139,14 @@ class HzSound:
         self.draw_preview()
         return "break"
 
+    def home_end(self, end):
+        """Home / End (preview on): the play line to the start / the last note's end (user 2026-11-23, like the
+        piano roll's). Preview off: nothing (Space plays nothing here then either)."""
+        if not self.preview_on.get():
+            return "break"
+        self.put_play_line(max((n["t"] + n["len"] for n in self.tones), default=0.0) if end else 0.0)
+        return "break"
+
     def put_play_line(self, beat):
         """A click on the bar numbers (preview on): the play line goes there (playing: plays on from there)."""
         self.preview.put_line(max(0.0, beat))
