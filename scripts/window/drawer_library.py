@@ -1,5 +1,5 @@
-"""The drawer's shape library (moved out of drawer.py): built-in shapes plus the user's own in spiderweb/shapes/*.json:
-names, files, load / save / rename, shape files dropped from elsewhere."""
+"""The drawer's shape library (moved out of drawer.py): built-in shapes plus the user's own in user/shapes/**.json
+(sub folders, any depth): names, files, folders, load / save / rename / move, shape files dropped from elsewhere."""
 
 import json
 import os
@@ -32,6 +32,12 @@ DEVICES = {"CON", "PRN", "AUX", "NUL", *(f"{d}{n}" for d in ("COM", "LPT") for n
 # before 1.5) go by their file name.
 
 _names = {}  # file path -> ((modified time, size), the name inside)
+# SUB FOLDERS (PLAN.md, user 2026-11-24): real folders inside the library, any depth, what File Explorer shows. A
+# shape's folder = "" at the top, else its path inside the library with "/" ("Spikes/Old"). Names stay unique over
+# the whole library (placed shapes, projects, Nested / Tiles / Stir find shapes by name): when two files hold the
+# same name, the FIRST one counts (top files, then folders A-Z, each folder's files before its sub folders); the
+# other is still listed, marked (library_entries "same").
+FOLDER_DEPTH = 32  # (deeper folders are left out: a loop of links can't hang the scan)
 
 
 def stamp(path):
@@ -61,23 +67,85 @@ def _name_in(path, stem):
     return name or stem
 
 
+def folder_path(folder):
+    """A library folder ("" = the library itself, "A/B") as a path on disk."""
+    return os.path.join(LIBRARY, *folder.split("/")) if folder else LIBRARY
+
+
+def folder_of(path):
+    """The library folder a file / folder on disk sits in ("" = the top)."""
+    rel = os.path.relpath(os.path.dirname(path), LIBRARY)
+    return "" if rel in (".", "") else "/".join(rel.split(os.sep))
+
+
+def _scan():
+    """([(name, path, folder, (modified time, size))] of every saved shape in the order above, [every folder]).
+    Names come from _names (read again only when a file's stamp changed)."""
+    files, folders, seen = [], [], set()
+
+    def visit(full, rel, depth):
+        try:
+            with os.scandir(full) as it:
+                found = sorted(it, key=lambda e: (e.name.lower(), e.name))
+        except OSError:
+            return
+        subs = []
+        for e in found:
+            try:
+                if e.is_dir():
+                    subs.append(e)
+                elif e.name.lower().endswith(".json") and e.is_file():
+                    st = e.stat()  # (Windows: from the folder listing itself, no extra disk read)
+                    now = (st.st_mtime_ns, st.st_size)
+                    known = _names.get(e.path)
+                    if not known or known[0] != now:
+                        known = _names[e.path] = (now, _name_in(e.path, e.name[:-5]))
+                    seen.add(e.path)
+                    files.append((known[1], e.path, rel, now))
+            except OSError:
+                pass
+        for e in subs:
+            sub = f"{rel}/{e.name}" if rel else e.name
+            folders.append(sub)
+            if depth < FOLDER_DEPTH:
+                visit(e.path, sub, depth + 1)
+
+    visit(LIBRARY, "", 1)
+    if len(_names) > len(seen):  # (files moved / deleted: their names aren't kept forever)
+        for gone in [p for p in _names if p not in seen]:
+            del _names[gone]
+    return files, folders
+
+
 def _saved():
-    """The saved shapes: {name in lower case: (name, file path)}."""
-    try:
-        files = sorted(f for f in os.listdir(LIBRARY) if f.lower().endswith(".json"))
-    except OSError:
-        return {}
+    """The saved shapes: {name in lower case: (name, file path)} (the first file holding a name)."""
     out = {}
-    for f in files:
-        path = os.path.join(LIBRARY, f)
-        now = stamp(path)
-        if now is None:
-            continue
-        known = _names.get(path)
-        if not known or known[0] != now:
-            known = _names[path] = (now, _name_in(path, f[:-5]))
-        out.setdefault(known[1].lower(), (known[1], path))
+    for name, path, _, _ in _scan()[0]:
+        out.setdefault(name.lower(), (name, path))
     return out
+
+
+def library_entries():
+    """Every saved shape's file, for the lists: [{"name", "path", "folder", "stamp", "same"}] in the scan's order;
+    "same" = the folder of the file whose name counts when this one holds a name already used (else None)."""
+    first, out = {}, []
+    for name, path, folder, now in _scan()[0]:
+        key = name.lower()
+        same = first[key] if key in first else None
+        first.setdefault(key, folder)
+        out.append({"name": name, "path": path, "folder": folder, "stamp": now, "same": same})
+    return out
+
+
+def library_folders():
+    """Every folder in the library ("A", "A/B", ...), each before its sub folders, A-Z."""
+    return _scan()[1]
+
+
+def shape_folder(name):
+    """The folder of the saved shape called `name` ("" = the top), or None (not saved)."""
+    path = shape_path(name)
+    return folder_of(path) if path else None
 
 
 def saved_names():
@@ -137,9 +205,10 @@ def load_drawing(name, layers=False):
     return (strokes if layers else placed_strokes(strokes)), areas
 
 
-def load_layers(name):
-    """load_drawing as drawn."""
-    path, b = shape_path(name), built_in_name(name)
+def load_layers(name, path=None):
+    """load_drawing as drawn. path: that very file (a second file holding a name already used), not the one the
+    name finds."""
+    path, b = path or shape_path(name), built_in_name(name)
     strokes, areas = None, []
     if path:
         try:
@@ -163,14 +232,19 @@ def file_stem(name, what="shape"):
     return stem or what
 
 
-def free_path(name, keep=None):
-    """A file for a shape called `name` that no other shape uses ("x (2).json" if "x.json" is taken). keep: the
-    shape's own file now (it may stay that one, e.g. only upper / lower case changed)."""
-    stem, k = file_stem(name), 2
-    path = os.path.join(LIBRARY, stem + ".json")
+def _free_file(where, stem, keep=None):
+    """where/stem.json, or "stem (2).json"... when that file is taken. keep: the shape's own file now (it may stay
+    that one, e.g. only upper / lower case changed)."""
+    path, k = os.path.join(where, stem + ".json"), 2
     while os.path.exists(path) and os.path.normcase(path) != os.path.normcase(keep or ""):
-        path, k = os.path.join(LIBRARY, f"{stem} ({k}).json"), k + 1
+        path, k = os.path.join(where, f"{stem} ({k}).json"), k + 1
     return path
+
+
+def free_path(name, keep=None, folder=""):
+    """A file for a shape called `name` in that library folder that no other shape uses ("x (2).json" if "x.json"
+    is taken). keep: as in _free_file."""
+    return _free_file(folder_path(folder), file_stem(name), keep)
 
 
 def shape_text(name, strokes, areas=()):
@@ -181,24 +255,126 @@ def shape_text(name, strokes, areas=()):
     return text + "}\n"
 
 
-def save_shape(name, strokes, areas=()):
-    """Saves a library shape (over the one with that name, if any). Returns its file."""
-    os.makedirs(LIBRARY, exist_ok=True)
-    path = shape_path(name) or free_path(name)
+def save_shape(name, strokes, areas=(), folder=""):
+    """Saves a library shape: over the one with that name if any (in ITS folder), else a new file in `folder`.
+    Returns its file."""
+    path = shape_path(name) or free_path(name, folder=folder)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
     write_text(path, shape_text(name, strokes, areas))
     return path
 
 
-def rename_shape(old, new):
-    """A saved shape gets a new name (its file too, when it can). Raises OSError; ValueError if it can't be read."""
-    path = shape_path(old)
-    strokes, areas = load_drawing(old, layers=True)
+def rename_shape(old, new, path=None):
+    """A saved shape gets a new name (its file too, when it can; it stays in its folder). path: that very file (a
+    second file holding a name already used). Raises OSError; ValueError if it can't be read."""
+    path = path or shape_path(old)
+    strokes, areas = load_layers(old, path)
     if not path or strokes is None:
         raise ValueError(old)
-    to = free_path(new, keep=path)
+    to = _free_file(os.path.dirname(path), file_stem(new), keep=path)
     write_text(to, shape_text(new, strokes, areas))
     if os.path.normcase(to) != os.path.normcase(path):
         os.remove(path)
+
+
+def move_shape(path, folder):
+    """A saved shape's file moved into that library folder (its file name kept, " (2)" when taken there). Returns
+    the new file. Raises OSError (FileNotFoundError: the folder is gone)."""
+    where = folder_path(folder)
+    if os.path.normcase(os.path.dirname(path)) == os.path.normcase(where):
+        return path
+    if not os.path.isdir(where):
+        raise FileNotFoundError(where)
+    to = _free_file(where, os.path.basename(path)[:-5])
+    os.rename(path, to)  # (never over a file: _free_file found a free name)
+    return to
+
+
+# ---------------------------------------------------------------- folders
+# Folder names ARE their names on disk (unlike shapes): characters Windows refuses are REFUSED, not swapped (user
+# 2026-11-24). folder_problem says why; the window shows it and keeps its box open.
+
+def folder_problem(name):
+    """None when `name` can be a folder's name, else what's wrong: "empty", "chars" (one of BAD_CHARS or a hidden
+    character), "end" (ends with a dot or a space), "device" (a name Windows keeps for itself), "long"."""
+    if not name.strip():
+        return "empty"
+    if any(c in BAD_CHARS or c < " " for c in name):
+        return "chars"
+    if name.rstrip(". ") != name:
+        return "end"
+    if name.split(".")[0].strip().upper() in DEVICES:
+        return "device"
+    if len(name) > NAME_MAX:
+        return "long"
+    return None
+
+
+def _check_name(name):
+    name = name.strip()
+    problem = folder_problem(name)
+    if problem:
+        raise ValueError(problem)
+    return name
+
+
+def make_folder(name, parent=""):
+    """A new folder called `name` inside `parent` ("" = the top). Returns its folder ("A/name"). Raises ValueError
+    (folder_problem's word), FileExistsError (one with that name is there), OSError."""
+    name = _check_name(name)
+    rel = f"{parent}/{name}" if parent else name
+    os.makedirs(folder_path(parent), exist_ok=True)
+    os.mkdir(folder_path(rel))
+    return rel
+
+
+def rename_folder(folder, name):
+    """A folder gets a new name, in the same place (only upper / lower case changed works too). Returns its new
+    folder. Raises like make_folder."""
+    name = _check_name(name)
+    parent = folder.rpartition("/")[0]
+    rel = f"{parent}/{name}" if parent else name
+    src, dst = folder_path(folder), folder_path(rel)
+    if os.path.exists(dst) and os.path.normcase(dst) != os.path.normcase(src):
+        raise FileExistsError(dst)
+    os.rename(src, dst)
+    return rel
+
+
+def move_folder(folder, into):
+    """A folder (and all it holds) moved into another folder ("" = the top). Returns its new folder. Raises
+    ValueError("inside") when `into` is that folder or one inside it, FileExistsError, OSError."""
+    if into == folder or into.startswith(folder + "/"):
+        raise ValueError("inside")
+    name = folder.rpartition("/")[2]
+    if folder.rpartition("/")[0] == into:
+        return folder
+    rel = f"{into}/{name}" if into else name
+    if os.path.exists(folder_path(rel)):
+        raise FileExistsError(folder_path(rel))
+    os.rename(folder_path(folder), folder_path(rel))
+    return rel
+
+
+def folder_count(folder):
+    """(saved shapes, sub folders) inside a folder, all the way down: the Delete question says them."""
+    files, folders = _scan()
+    inside = folder + "/"
+    shapes = sum(1 for _, _, f, _ in files if f == folder or f.startswith(inside))
+    return shapes, sum(1 for f in folders if f.startswith(inside))
+
+
+def delete_folder(folder, for_good=False):
+    """A folder and all it holds deleted: to the Recycle Bin / trash (user 2026-11-24); for_good: deleted outright
+    (only after the window warned that there is no trash). True = gone; False = no trash here (nothing done: ask,
+    then call again with for_good); None = the system's own question was cancelled. Raises OSError."""
+    from files import system
+    path = folder_path(folder)
+    if for_good:
+        import shutil
+        shutil.rmtree(path)
+        return True
+    return system.to_trash(path)
 
 
 def free_name(name):

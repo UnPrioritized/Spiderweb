@@ -391,6 +391,66 @@ def show_file(path):
     return open_path(os.path.dirname(path))
 
 
+def to_trash(path):
+    """A file / folder moved to the Recycle Bin (Windows; Mac: the Trash; Linux: the desktop's trash folder).
+    True = gone; False = no trash for it here (nothing done); None = Windows' own "delete for good?" question (a
+    drive without a Recycle Bin) was cancelled. Mac / Linux untested."""
+    import os
+    path = os.path.abspath(path)
+    if WINDOWS:
+        try:
+            class OP(ctypes.Structure):
+                _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT), ("pFrom", wintypes.LPCWSTR),
+                            ("pTo", wintypes.LPCWSTR), ("fFlags", wintypes.WORD), ("aborted", wintypes.BOOL),
+                            ("maps", ctypes.c_void_p), ("title", wintypes.LPCWSTR)]
+            # FO_DELETE; ALLOWUNDO | NOCONFIRMATION | SILENT | NOERRORUI | WANTNUKEWARNING (asks before deleting
+            # for good where there is no Recycle Bin)
+            op = OP(None, 3, path + "\0", None, 0x40 | 0x10 | 0x4 | 0x400 | 0x4000, False, None, None)
+            failed = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+        except (AttributeError, OSError):
+            return False
+        if not os.path.exists(path):
+            return True
+        return None if op.aborted else False if failed else None
+    import shutil
+    if MAC:  # (untested)
+        trash = os.path.expanduser("~/.Trash")
+        if not os.path.isdir(trash):
+            return False
+        base, ext = os.path.splitext(os.path.basename(path))
+        to, k = os.path.join(trash, base + ext), 2
+        while os.path.exists(to):
+            to, k = os.path.join(trash, f"{base} {k}{ext}"), k + 1
+        try:
+            shutil.move(path, to)
+        except OSError:
+            return False
+        return True
+    # Linux: the freedesktop trash (files/ + info/<name>.trashinfo), home drive only
+    import time
+    from urllib.parse import quote
+    home = os.environ.get("XDG_DATA_HOME") or os.path.expanduser("~/.local/share")
+    trash = os.path.join(home, "Trash")
+    try:
+        os.makedirs(os.path.join(trash, "files"), exist_ok=True)
+        os.makedirs(os.path.join(trash, "info"), exist_ok=True)
+        name, k = os.path.basename(path), 2
+        while os.path.exists(os.path.join(trash, "files", name)) or os.path.exists(
+                os.path.join(trash, "info", name + ".trashinfo")):
+            name, k = f"{os.path.basename(path)} {k}", k + 1
+        info = os.path.join(trash, "info", name + ".trashinfo")
+        with open(info, "x", encoding="utf-8") as f:
+            f.write(f"[Trash Info]\nPath={quote(path)}\nDeletionDate={time.strftime('%Y-%m-%dT%H:%M:%S')}\n")
+        try:
+            os.rename(path, os.path.join(trash, "files", name))  # (another drive: fails, no trash for it)
+        except OSError:
+            os.remove(info)
+            return False
+    except OSError:
+        return False
+    return True
+
+
 _small_icon = []  # (the title bars' icon, loaded once: kept for as long as the program runs)
 
 
