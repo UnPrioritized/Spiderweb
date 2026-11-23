@@ -39,10 +39,12 @@ from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.layers import DrawerLayers
 from window.sticky import BEND, REACH, Targets, key_points
 from window.side_panel import ScrollingSide
-from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, Tooltip, long_line, remember_place, traced, wrap_to_room
+from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Tooltip, long_line, menu_click, remember_place, traced,
+                            wrap_to_room)
 from window.widgets_tips import greyed_why
 from window.shape_picture import peek_listbox
-from window.drawer_list import LibraryList
+from tkinter import font as tkfont
+from window.drawer_list import INDENT, OPEN, LibraryList
 
 GRIDS = ["4", "8", "12", "16", "24", "32", "48", "64"]
 TOOLS = [("select", tr("drawer.select"), "v"), ("slice", tr("drawer.slice"), "k"), ("lasso", tr("drawer.lasso"), "j"),
@@ -221,6 +223,7 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         lb.bind("<F2>", lambda e: (self.start_rename(), "break")[1])
         lb.bind("<Right>", lambda e: (self.list_key_side(1), "break")[1])  # (folders: open / shut, like File Explorer)
         lb.bind("<Left>", lambda e: (self.list_key_side(-1), "break")[1])
+        lb.bind("<ButtonPress-3>", self.list_menu)  # (THE CONTROL SCHEME: right-click = a menu)
         lb.bind("<FocusIn>", lambda e: lb.config(selectbackground=look.LIST_HERE,
                                                  selectforeground=look.LIST_HERE_TEXT))
         lb.bind("<FocusOut>", lambda e: lb.config(selectbackground=LIST_AWAY, selectforeground=look.LIST_AWAY_TEXT))
@@ -255,6 +258,9 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         b = ttk.Button(btns, text=tr("drawer.import"), command=self.import_shared)
         b.pack(side="left", padx=4)
         Tooltip(b, tr("drawer.import_tip"))
+        b = ttk.Button(btns, text=tr("drawer.new_folder"), command=self.new_folder)
+        b.pack(side="right")
+        Tooltip(b, tr("drawer.new_folder_tip"))
         row = ttk.Frame(side)
         row.pack(fill="x", pady=(8, 0))
         b = ttk.Button(row, text=tr("deform.button"), command=self.open_deform)
@@ -1216,13 +1222,15 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         """A click on a folder's ▸ / ▾ opens / shuts it. A click on the name already picked, while the list has the
         keyboard: renamed after the double-click time if no second click comes (like Windows' file lists)."""
         self.stop_slow_click()
+        if menu_click(e):  # (the click that closed the list's right-click menu)
+            return "break"
         lb = self.listbox
         i = lb.nearest(e.y)
         box = lb.bbox(i)
         if box and box[1] <= e.y < box[1] + box[3] and not e.state & 0x5 and self.on_arrow(i, e.x):
             self.toggle_folder(self.rows[i])
             return "break"
-        if (box and box[1] <= e.y < box[1] + box[3] and lb.curselection() == (i,) and self.rows[i]["kind"] != "folder"
+        if (box and box[1] <= e.y < box[1] + box[3] and lb.curselection() == (i,)
                 and self.focus_get() is lb):
             self._slow_click = self.after(DOUBLE_CLICK_MS, self.start_rename)
 
@@ -1231,15 +1239,15 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
             self.after_cancel(self._slow_click)
             self._slow_click = None
 
-    def start_rename(self):
-        """A box over the picked name in the list to type its new name: Enter or a click elsewhere = renamed,
-        Esc = not."""
+    def start_rename(self, text=None):
+        """A box over the picked name (shape or folder) in the list to type its new name: Enter or a click elsewhere
+        = renamed, Esc = not. text: put in the box instead of the name (a refused folder name, typed again)."""
         self._slow_click = None
         row = self.picked_row()
-        if not row or row["kind"] == "folder" or self.renaming:
+        if not row or self.renaming:
             return
-        name = row["name"]
-        if not row["path"]:
+        name = text if text is not None else row["name"]
+        if row["kind"] == "built":
             messagebox.showinfo(tr("drawer.spiderweb"), tr("drawer.is_built_in_rename", name=name), parent=self)
             return
         lb = self.listbox
@@ -1248,7 +1256,9 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         lb.update_idletasks()
         x, y, w, h = lb.bbox(i)
         box = self.renaming = ttk.Entry(lb)
-        box.old, box.row = name, row
+        box.old, box.row = row["name"], row
+        font = tkfont.Font(font=lb.cget("font"))  # (past the row's indent and a folder's ▸ / ▾)
+        x += font.measure(INDENT * row["depth"] + (OPEN if row["kind"] == "folder" else ""))
         box.insert(0, name)
         box.select_range(0, "end")
         box.icursor("end")
@@ -1264,7 +1274,10 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         if not box:
             return
         old, new, row = box.old, clean_name(box.get()), box.row
+        typed = box.get()
         box.destroy()
+        if row["kind"] == "folder":
+            return self.finish_folder_rename(row, typed, keep)
         if not keep or not new or new == old:
             return
         marked = row["same"] is not None  # (a second file holding a name already used: only that file changes)
@@ -1344,7 +1357,10 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
             self.open_shape("", [], [])
 
     def delete_selected(self):
-        """Deletes the picked shapes (several: one question for all, QoL I); built-in ones can't go."""
+        """Deletes the picked shapes (several: one question for all, QoL I); built-in ones can't go. Folders picked:
+        delete_with_folders."""
+        if any(r["kind"] == "folder" for r in self.picked_rows()):
+            return self.delete_with_folders()
         rows = [r for r in self.picked_rows() if r["kind"] != "folder"]
         names = [r["name"] for r in rows]
         if not names:
@@ -1378,21 +1394,27 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
                 failed = failed or e
                 continue
             deleted.append(name)
-            if row["same"] is not None:  # (a second file holding a used name: the name still finds the other)
-                continue
-            if name.lower() == (self.saved_name or "").lower():  # the drawing open here: not saved any more
-                self.saved_name = self.saved_stamp = None
-                self.dirty = True
-                self.redraw()
-            if app.custom_shape.lower() == name.lower() and not app.custom_template(app.custom_shape):
-                app.custom_shape = "Circle"  # (the Custom shape tool used it: back to Circle, user)
-                app.schedule_autosave()
-                app.status.config(text=tr("drawer.deleted_in_use", name=name))
+            self.shape_gone(name)
         if failed:
             messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_delete", e=failed), parent=self)
         if deleted:
             app.sync_custom()  # (a placed shape's "not in the library" mark, hunt 10-27)
         self.refresh_list()
+
+    def shape_gone(self, name):
+        """A shape's file was deleted: when no other file holds its name now, the drawing open here isn't saved any
+        more, and the Custom shape tool goes back to Circle (user)."""
+        app = self.app
+        if shape_path(name):  # (a second file holding that name: it is found now)
+            return
+        if name.lower() == (self.saved_name or "").lower():  # the drawing open here: not saved any more
+            self.saved_name = self.saved_stamp = None
+            self.dirty = True
+            self.redraw()
+        if app.custom_shape.lower() == name.lower() and not app.custom_template(app.custom_shape):
+            app.custom_shape = "Circle"  # (the Custom shape tool used it: back to Circle, user)
+            app.schedule_autosave()
+            app.status.config(text=tr("drawer.deleted_in_use", name=name))
 
     def save(self):
         """Save to the library under the name in the box. Returns the name, or None if it wasn't saved."""

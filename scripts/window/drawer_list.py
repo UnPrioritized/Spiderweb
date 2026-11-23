@@ -2,12 +2,13 @@
 ▸ / ▾ (open ones remembered in settings.ini), picking, which folder a new shape is saved into."""
 
 import json
-from tkinter import font as tkfont
+import tkinter as tk
+from tkinter import font as tkfont, messagebox
 
 from files import settings
-from files.lang import tr
+from files.lang import tr, trn
 from window import look
-from window.drawer_library import BUILT_IN, library_entries, library_folders, shape_folder
+from window.drawer_library import BAD_CHARS, BUILT_IN, library_entries, library_folders, shape_folder
 
 INDENT = "    "  # (one folder level deeper)
 OPEN, SHUT = "▾ ", "▸ "
@@ -181,6 +182,161 @@ class LibraryList:
         box = self.listbox.bbox(i)
         x0 = (box[0] if box else 0) + lead
         return x0 - 2 <= x <= x0 + font.measure(OPEN) + 2
+
+    # -------------------------------------------------------- folders: new / rename / delete (stage C)
+
+    def pick_folder(self, folder):
+        """Fills the list again with that folder's row picked (its folders above opened)."""
+        f, changed = parent_of(folder), False
+        while f:
+            changed = changed or f not in self.open_folders
+            self.open_folders.add(f)
+            f = parent_of(f)
+        if changed:
+            self.save_open_folders()
+        self.fill_rows(lambda r: r["kind"] == "folder" and r["folder"] == folder)
+        self.listbox.focus_set()
+
+    def keep_fresh(self, do):
+        """do() moves files (a folder renamed / moved): the drawing open here stays "saved" when it was."""
+        from window.drawer_library import shape_stamp
+        fresh = bool(self.saved_name) and not self.changed_elsewhere()
+        got = do()
+        if fresh:
+            self.saved_stamp = shape_stamp(self.saved_name)
+        return got
+
+    def folder_moved(self, old, new):
+        """Open folders under the old name follow the folder to its new name / place."""
+        moved = {f for f in self.open_folders if f == old or f.startswith(old + "/")}
+        self.open_folders = (self.open_folders - moved) | {new + f[len(old):] for f in moved}
+        self.save_open_folders()
+
+    def new_folder(self):
+        """New folder (button / menu): "New folder" inside the picked folder (or the picked shape's), at the top when
+        nothing is; its name box opens at once, like File Explorer."""
+        from window.drawer_library import folder_path, make_folder
+        import os
+        self.end_rename(True)
+        parent = self.save_folder()
+        base, name, k = tr("drawer.new_folder_name"), None, 2
+        name = base
+        while os.path.exists(os.path.join(folder_path(parent), name)):
+            name, k = f"{base} ({k})", k + 1
+        try:
+            made = make_folder(name, parent)
+        except (OSError, ValueError) as e:
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_make_folder", e=e), parent=self)
+            return
+        if parent:
+            self.open_folders.add(parent)
+        self.pick_folder(made)
+        self.start_rename()
+
+    def finish_folder_rename(self, row, typed, keep):
+        """The rename box on a folder row closed: renamed. A name Windows refuses is REFUSED with the reason and the
+        box opens again with what was typed (user 2026-11-24)."""
+        from window.drawer_library import folder_problem, rename_folder
+        new = typed.strip()
+        if not keep or not new or new == row["name"]:
+            return
+        problem = folder_problem(new)
+        try:
+            if problem:
+                raise ValueError(problem)
+            got = self.keep_fresh(lambda: rename_folder(row["folder"], new))
+        except ValueError as e:
+            why = tr(f"drawer.folder_{e}", name=new, chars=" ".join(BAD_CHARS))
+        except FileExistsError:
+            why = tr("drawer.folder_taken", name=new)
+        except OSError as e:
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_rename", e=e), parent=self)
+            return
+        else:
+            self.folder_moved(row["folder"], got)
+            self.pick_folder(got)
+            self.app.refresh_custom_names()
+            return
+        messagebox.showerror(tr("drawer.spiderweb"), why, parent=self)
+        self.after_idle(lambda: self.winfo_exists() and self.start_rename(typed))
+
+    def delete_with_folders(self):
+        """Delete with folder rows picked: ONE question (folders, the shapes inside, other picked shapes); folders go to
+        the Recycle Bin (user 2026-11-24; none there = asked again, then deleted for good), picked shapes outside
+        them are deleted like any shape."""
+        import os
+        from window.drawer_library import delete_folder, folder_count
+        rows = self.picked_rows()
+        folders = [r["folder"] for r in rows if r["kind"] == "folder"]
+        folders = [f for f in folders if not any(f.startswith(o + "/") for o in folders)]  # (inside another: goes too)
+        inside = lambda f: any(f == o or f.startswith(o + "/") for o in folders)
+        loose = [r for r in rows if r["kind"] == "shape" and not inside(r["folder"])]
+        shapes = sum(folder_count(f)[0] for f in folders)
+        names = [e["name"] for e in library_entries() if inside(e["folder"])] + [r["name"] for r in loose]
+        ask = (tr("drawer.delete_folder", name=folders[0]) if len(folders) == 1 else
+               tr("drawer.delete_folders", n=len(folders)))
+        ask += trn("drawer.delete_folder_shapes", shapes, n=shapes) if shapes else ""
+        ask += trn("drawer.delete_folder_loose", len(loose), n=len(loose)) if loose else ""
+        ask += tr("drawer.delete_folder_bin")
+        if not messagebox.askyesno(tr("drawer.spiderweb"), ask, icon="warning", parent=self):
+            return
+        failed = None
+        for f in folders:
+            try:
+                done = delete_folder(f)
+                if done is False and messagebox.askyesno(tr("drawer.spiderweb"), tr("drawer.no_bin", name=f),
+                                                         icon="warning", default="no", parent=self):
+                    delete_folder(f, for_good=True)
+            except OSError as e:
+                failed = failed or e
+        for r in loose:
+            try:
+                os.remove(r["path"])
+            except OSError as e:
+                failed = failed or e
+        for name in names:
+            self.shape_gone(name)
+        if failed:
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_delete", e=failed), parent=self)
+        self.app.sync_custom()
+        self.save_open_folders()
+        self.refresh_list()
+
+    def list_menu(self, e):
+        """Right-click on the list (THE CONTROL SCHEME: a menu, never deleting by itself): the row under the mouse
+        picked first if it isn't; Open / Rename / Delete / New folder."""
+        from window.widgets import popup_menu
+        lb = self.listbox
+        self.end_rename(True)
+        i = lb.nearest(e.y)
+        box = lb.bbox(i) if i >= 0 else None
+        if box and box[1] <= e.y < box[1] + box[3]:
+            if i not in lb.curselection():
+                lb.selection_clear(0, "end")
+                lb.selection_set(i)
+                lb.activate(i)
+        else:
+            lb.selection_clear(0, "end")
+        self.sync_library()
+        lb.focus_set()
+        rows = self.picked_rows()
+        m = tk.Menu(self, tearoff=0)
+        one = rows[0] if len(rows) == 1 else None
+        if one:
+            if one["kind"] == "folder":
+                label = tr("drawer.menu_shut") if one["folder"] in self.open_folders else tr("drawer.menu_open")
+                m.add_command(label=label, accelerator=tr("drawer.menu_enter"), command=self.open_selected)
+            else:
+                m.add_command(label=tr("drawer.open"), accelerator=tr("drawer.menu_enter"), command=self.open_selected)
+            m.add_command(label=tr("drawer.rename"), accelerator=tr("menu.key_f2"), command=self.start_rename,
+                          state="disabled" if one["kind"] == "built" else "normal")
+        if rows:
+            m.add_command(label=tr("drawer.delete"), accelerator=tr("drawer.del"), command=self.delete_selected,
+                          state="disabled" if all(r["kind"] == "built" for r in rows) else "normal")
+            m.add_separator()
+        m.add_command(label=tr("drawer.new_folder"), command=self.new_folder)
+        popup_menu(m, lb, e)
+        return "break"
 
     def list_key_side(self, way):
         """Right = open the picked folder; Left = shut it, or from a shape inside: up to its folder (like File
