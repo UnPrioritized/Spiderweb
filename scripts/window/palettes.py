@@ -216,10 +216,14 @@ def rename(old, new):
         settings.put("look", "palette", new)
 
 
-def delete(name):
-    os.remove(user_palettes()[name][0])
+def delete(name, ask_for_good):
+    """The palette's file to the Recycle Bin (user 2026-11-24; no bin = ask_for_good() first). True = gone."""
+    from files import system
+    if not system.bin_or_delete(user_palettes()[name][0], ask_for_good):
+        return False
     if settings.get("look", "palette", DEFAULT) == name:
         settings.put("look", "palette", DEFAULT)
+    return True
 
 
 def apply(colours, app=None):

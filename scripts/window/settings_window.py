@@ -1374,7 +1374,10 @@ class SettingsWindow(tk.Toplevel):
                                                               tr("palette.delete_ask", name=now), parent=self):
             return
         try:
-            palettes.delete(now)
+            if not palettes.delete(now, lambda: messagebox.askyesno(
+                    tr("palette.delete_title"), tr("palette.no_bin", name=now), icon="warning", default="no",
+                    parent=self)):
+                return
             palettes.apply(palettes.colours_of(palettes.DEFAULT), self.app)
         except OSError as e:
             messagebox.showerror(tr("palette.title"), tr("palette.not_saved", e=e), parent=self)

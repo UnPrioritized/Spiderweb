@@ -451,6 +451,18 @@ def to_trash(path):
     return True
 
 
+def bin_or_delete(path, ask_for_good):
+    """The user's own file deleted (user 2026-11-24: everything goes to the Recycle Bin): to_trash; no bin here =
+    ask_for_good() (the window asks "delete for good?") and only then removed. True = gone, False = kept (cancelled).
+    Raises OSError."""
+    import os
+    got = to_trash(path)
+    if got is False and ask_for_good():
+        os.remove(path)
+        return True
+    return bool(got)
+
+
 _small_icon = []  # (the title bars' icon, loaded once: kept for as long as the program runs)
 
 

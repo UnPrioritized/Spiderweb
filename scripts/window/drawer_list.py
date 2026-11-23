@@ -291,7 +291,7 @@ class LibraryList:
                 failed = failed or e
         for r in loose:
             try:
-                os.remove(r["path"])
+                self.bin_shape(r)
             except OSError as e:
                 failed = failed or e
         for name in names:
@@ -301,6 +301,14 @@ class LibraryList:
         self.app.sync_custom()
         self.save_open_folders()
         self.refresh_list()
+
+    def bin_shape(self, row):
+        """A shape's file to the Recycle Bin (user 2026-11-24); no bin here = asked, then deleted for good. True =
+        gone. Raises OSError."""
+        from files import system
+        return system.bin_or_delete(row["path"], lambda: messagebox.askyesno(
+            tr("drawer.spiderweb"), tr("drawer.no_bin_shape", name=row["name"]), icon="warning", default="no",
+            parent=self))
 
     def list_menu(self, e):
         """Right-click on the list (THE CONTROL SCHEME: a menu, never deleting by itself): the row under the mouse
@@ -360,27 +368,34 @@ class LibraryList:
         return None
 
     def drop_target(self, y):
-        """(row index or None, folder) the rows would be moved into at height y: a folder row = into it, a shape row
-        = its folder, below the rows = the top."""
+        """(row to light up or None, folder) the rows would be moved into at height y: a folder row = into it; a
+        shape row = its folder (that folder's row lit, user 2026-11-24: a drop there lands in it); below the rows
+        or a top-level shape = the top (nothing lit)."""
         lb = self.listbox
         i = lb.nearest(y)
         box = lb.bbox(i) if i >= 0 else None
         if not box or y >= box[1] + box[3]:
             return None, ""
         r = self.rows[i]
-        return (i, r["folder"]) if r["kind"] == "folder" else (None, r["folder"])
+        if r["kind"] == "folder":
+            return i, r["folder"]
+        f = r["folder"] if r["kind"] == "shape" and r["depth"] else ""  # (a built-in's own file: shown at the top)
+        lit = next((k for k, q in enumerate(self.rows) if q["kind"] == "folder" and q["folder"] == f), None)
+        return lit, f
 
     def drag_motion(self, e):
         d = getattr(self, "_drag", None)
         if not d:
             return None
+        if d.get("dead"):  # (built-ins only: nothing moves, and never the list's own drag-picking either)
+            return "break"
         if not d["on"]:
             if abs(e.y - d["y"]) < self.DRAG_PX and abs(e.x - d["x"]) < self.DRAG_PX:
                 return "break"
             d["on"], d["rows"] = True, self.picked_rows()
             self.stop_slow_click()
             if not any(r["path"] or r["kind"] == "folder" for r in d["rows"]):  # (built-ins only: nothing to move)
-                self._drag = None
+                d["dead"] = True
                 return "break"
             self.listbox.config(cursor="fleur")
         lb = self.listbox
@@ -401,6 +416,8 @@ class LibraryList:
         if not d:
             return None
         lb = self.listbox
+        if d.get("dead"):
+            return "break"
         if not d["on"]:
             if d["keep"]:  # (a click on a row picked among several: now only that one)
                 lb.selection_clear(0, "end")

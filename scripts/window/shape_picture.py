@@ -135,9 +135,16 @@ class ShapePeek:
             self.win.wm_overrideredirect(True)
             if self.topmost:  # (over a dropdown's open list, which stays on top; never over other programs:
                 self.win.attributes("-topmost", True)  # the drawer's one isn't, hunt 2026-11-23)
-            self.canvas = tk.Canvas(self.win, width=s, height=s, background=look.BOARD, highlightthickness=1,
-                                    highlightbackground=look.BOARD_EDGE)
+            box = tk.Frame(self.win, background=look.BOARD, highlightthickness=1,
+                           highlightbackground=look.BOARD_EDGE)
+            box.pack()
+            self.canvas = tk.Canvas(box, width=s, height=s, background=look.BOARD, highlightthickness=0)
             self.canvas.pack()
+            # (the whole name under the drawing: a long one's tip covered the picture, user 2026-11-24)
+            self.caption = tk.Label(box, background=look.BOARD, foreground=look.PEEK_TEXT, font=look.font(8),
+                                    wraplength=s - 4, justify="center")
+            self.caption.pack(fill="x", padx=2, pady=(0, 2))
+        self.caption.config(text=name)
         c = self.canvas
         c.delete("all")
         room = s - 2 * EDGE
@@ -152,7 +159,8 @@ class ShapePeek:
         left, top, right, bottom = work_area(beside, x, row_y)
         if x + s + 2 > right:
             x = beside.winfo_rootx() - s - 6
-        y = max(top, min(row_y, bottom - s - 2))
+        self.win.update_idletasks()
+        y = max(top, min(row_y, bottom - self.win.winfo_reqheight() - 2))
         self.win.wm_geometry(f"+{max(left, x)}+{y}")
         self.win.deiconify()
         self.win.lift()
@@ -196,6 +204,7 @@ def peek_dropdown(cb, scale=1.0):
     if path is None:
         return None
     pop = cb.tk.call("ttk::combobox::PopdownWindow", cb)
+    cb.pictured = True  # (ListTip.dropdown: a shape row's name is on its picture, no tip of its own)
     lb = tk.Listbox.__new__(tk.Listbox)  # (a Python handle on Tk's own list, like ListTip.dropdown)
     lb.tk, lb._w, lb.master, lb.children, lb._tclCommands = cb.tk, path, cb, {}, None
     peek = ShapePeek(cb, scale, topmost=True)

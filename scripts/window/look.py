@@ -350,6 +350,7 @@ AREA_HOVER = pick("#e8eef8", "#4a5060")  # the area under the mouse (when it has
 BOARD_MIDDLE = pick("#7f8fb0")
 BOARD_GRID_MAJOR, BOARD_GRID = pick("#9aa4b4", "#66707e"), pick("#dde3ec", "#48484c")
 BOARD_EDGE = pick("#606060", "#8a8a8c")
+PEEK_TEXT = pick("#000000", "#e2e2e4")  # the shape's name under its little picture beside a shape list
 SWATCH_EDGE, SWATCH_EDGE_ON = pick("#909090", "#8a8a8e"), pick("#000000", "#ffffff")  # area colour boxes (picked)
 STROKE_PICKED, POINT_PICKED = pick("#ff8c1a"), pick("#c05a00", "#ff8c1a")
 OPEN_END, OPEN_END_EDGE = pick("#ff2020"), pick("#800000")  # red dots at a stroke's open ends

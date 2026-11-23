@@ -209,7 +209,7 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         self.listbox.pack(side="left", fill="x", expand=True)
         sb.pack(side="left", fill="y")
         lb = self.listbox
-        ListTip(lb, row_tip=self.row_tip)
+        ListTip(lb, row_tip=self.row_tip, no_tip=lambda i: self.row_shape(i) is not None)  # (name on its picture)
         self.peek = peek_listbox(lb, self.scale, self.row_shape)  # (QoL I: the picture of the shape under the mouse)
         lb.bind("<ButtonPress-1>", self.list_press)
         lb.bind("<<ListboxSelect>>", lambda e: self.sync_library(), add="+")
@@ -1392,8 +1392,9 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         app, failed, deleted = self.app, None, []
         for row in files:
             name = row["name"]
-            try:
-                os.remove(row["path"])
+            try:  # (to the Recycle Bin, user 2026-11-24; no bin = asked, then for good)
+                if not self.bin_shape(row):
+                    continue
             except OSError as e:
                 failed = failed or e
                 continue

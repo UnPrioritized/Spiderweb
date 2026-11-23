@@ -162,10 +162,11 @@ class ListTip(Tooltip):
 
     WATCH_MS = 250  # while the mouse rests on a row: how often the row is checked for a refill / scroll under it
 
-    def __init__(self, listbox, owner=None, row_tip=None):
-        """row_tip(row) -> a row's own tip ("" = none), shown under its whole text when that is cut off."""
+    def __init__(self, listbox, owner=None, row_tip=None, no_tip=None):
+        """row_tip(row) -> a row's own tip ("" = none), shown under its whole text when that is cut off.
+        no_tip(row) -> True: that row shows no tip (a shape picture beside the list says its name)."""
         super().__init__(listbox, "", owner)
-        self.row, self.y, self.watch_job, self.row_tip = None, 0, None, row_tip
+        self.row, self.y, self.watch_job, self.row_tip, self.no_tip = None, 0, None, row_tip, no_tip
         listbox.bind("<Motion>", self.motion, add="+")
         listbox.bind("<ButtonRelease-1>", self.let_go, add="+")
 
@@ -179,7 +180,8 @@ class ListTip(Tooltip):
             return
         lb = tk.Listbox.__new__(tk.Listbox)
         lb.tk, lb._w, lb.master, lb.children, lb._tclCommands = cb.tk, path, cb, {}, None
-        tip = cls(lb, cb)
+        from window.widgets import skipped  # (a shape row with a picture: its name is on the picture)
+        tip = cls(lb, cb, no_tip=lambda i: getattr(cb, "pictured", False) and i not in skipped(cb))
         Tooltip.RAW[lb._w] = lb.tooltips
         cb.tk.call("bind", pop, "<Unmap>", "+" + cb.register(lambda: (setattr(tip, "row", None), tip.hide())))
         cb.bind("<Destroy>", lambda e: Tooltip.RAW.pop(lb._w, None) if e.widget is cb else None, add="+")
@@ -192,6 +194,8 @@ class ListTip(Tooltip):
         box = lb.bbox(i) if i >= 0 else None
         if not box or not box[1] <= y < box[1] + box[3]:
             return None, ""
+        if self.no_tip and self.no_tip(i):
+            return i, ""
         edge = lb.winfo_width() - int(lb.cget("borderwidth")) - int(lb.cget("highlightthickness"))
         from window.widgets import DIVIDER
         text = lb.get(i) if box[0] + box[2] > edge else ""
