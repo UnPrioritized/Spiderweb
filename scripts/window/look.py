@@ -157,6 +157,7 @@ LIST_AWAY = pick("#d9d9d9", "#55555a")  # a picked list row while the keyboard i
 LIST_AWAY_TEXT = pick("black", "#e2e2e4")
 LIST_HERE = pick("SystemHighlight" if WINDOWS else "#3874d8", "#2f6fd0")  # ... while it has the keyboard
 LIST_HERE_TEXT = pick("SystemHighlightText" if WINDOWS else "#ffffff", "#ffffff")
+DROP_ROW = pick("#cfe3ff", "#2d4a73")  # the shape library's folder row rows are dragged onto (dropped = moved in)
 ICON = pick("#000000", "#e2e2e4")  # small drawn pictures on buttons (snap notes, ▾, a pinned tool's pin)
 ICON_OFF = pick("#b0b0b0", "#6c6c70")  # an unpinned tool's pin
 SEARCH_HIT = pick("#fff08a", "#6b6420")  # Help: the words searched for

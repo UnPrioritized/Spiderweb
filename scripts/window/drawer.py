@@ -224,6 +224,8 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         lb.bind("<Right>", lambda e: (self.list_key_side(1), "break")[1])  # (folders: open / shut, like File Explorer)
         lb.bind("<Left>", lambda e: (self.list_key_side(-1), "break")[1])
         lb.bind("<ButtonPress-3>", self.list_menu)  # (THE CONTROL SCHEME: right-click = a menu)
+        lb.bind("<B1-Motion>", self.drag_motion, add="+")
+        lb.bind("<ButtonRelease-1>", self.drag_release, add="+")  # (after ListTip's own let go)
         lb.bind("<FocusIn>", lambda e: lb.config(selectbackground=look.LIST_HERE,
                                                  selectforeground=look.LIST_HERE_TEXT))
         lb.bind("<FocusOut>", lambda e: lb.config(selectbackground=LIST_AWAY, selectforeground=look.LIST_AWAY_TEXT))
@@ -1230,9 +1232,11 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         if box and box[1] <= e.y < box[1] + box[3] and not e.state & 0x5 and self.on_arrow(i, e.x):
             self.toggle_folder(self.rows[i])
             return "break"
-        if (box and box[1] <= e.y < box[1] + box[3] and lb.curselection() == (i,)
-                and self.focus_get() is lb):
+        slow = box and box[1] <= e.y < box[1] + box[3] and lb.curselection() == (i,) and self.focus_get() is lb
+        if slow:
             self._slow_click = self.after(DOUBLE_CLICK_MS, self.start_rename)
+        if box and box[1] <= e.y < box[1] + box[3]:
+            return self.drag_press(e, i)  # (picked rows dragged onto a folder = moved there: stage D)
 
     def stop_slow_click(self):
         if self._slow_click:

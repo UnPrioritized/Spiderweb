@@ -333,10 +333,153 @@ class LibraryList:
         if rows:
             m.add_command(label=tr("drawer.delete"), accelerator=tr("drawer.del"), command=self.delete_selected,
                           state="disabled" if all(r["kind"] == "built" for r in rows) else "normal")
+            self.move_menu(m, rows)
             m.add_separator()
         m.add_command(label=tr("drawer.new_folder"), command=self.new_folder)
         popup_menu(m, lb, e)
         return "break"
+
+    # -------------------------------------------------------- moving (stage D)
+
+    DRAG_PX = 5  # (the mouse moves this far with the button held before rows are dragged)
+
+    def drag_press(self, e, i):
+        """A plain press on a row: maybe the start of dragging the picked rows. On a row already picked among several,
+        the pick stays (like File Explorer) until the let go shows it was a click."""
+        self._drag = None
+        if e.state & 0x5:  # (Shift / Ctrl: picking, never dragging)
+            return None
+        lb = self.listbox
+        keep = i in lb.curselection() and len(lb.curselection()) > 1
+        self._drag = {"i": i, "y": e.y, "x": e.x, "on": False, "keep": keep, "target": None}
+        if keep:
+            lb.focus_set()
+            lb.activate(i)
+            lb.selection_anchor(i)
+            return "break"
+        return None
+
+    def drop_target(self, y):
+        """(row index or None, folder) the rows would be moved into at height y: a folder row = into it, a shape row
+        = its folder, below the rows = the top."""
+        lb = self.listbox
+        i = lb.nearest(y)
+        box = lb.bbox(i) if i >= 0 else None
+        if not box or y >= box[1] + box[3]:
+            return None, ""
+        r = self.rows[i]
+        return (i, r["folder"]) if r["kind"] == "folder" else (None, r["folder"])
+
+    def drag_motion(self, e):
+        d = getattr(self, "_drag", None)
+        if not d:
+            return None
+        if not d["on"]:
+            if abs(e.y - d["y"]) < self.DRAG_PX and abs(e.x - d["x"]) < self.DRAG_PX:
+                return "break"
+            d["on"], d["rows"] = True, self.picked_rows()
+            self.stop_slow_click()
+            if not any(r["path"] or r["kind"] == "folder" for r in d["rows"]):  # (built-ins only: nothing to move)
+                self._drag = None
+                return "break"
+            self.listbox.config(cursor="fleur")
+        lb = self.listbox
+        if e.y < 0:
+            lb.yview_scroll(-1, "units")
+        elif e.y > lb.winfo_height():
+            lb.yview_scroll(1, "units")
+        i, folder = self.drop_target(e.y)
+        if d["target"] is not None and d["target"] != i and d["target"] < lb.size():
+            lb.itemconfig(d["target"], background="")
+        if i is not None and i != d["target"]:
+            lb.itemconfig(i, background=look.DROP_ROW)
+        d["target"], d["folder"] = i, folder
+        return "break"  # (never the list's own drag-picking)
+
+    def drag_release(self, e):
+        d, self._drag = getattr(self, "_drag", None), None
+        if not d:
+            return None
+        lb = self.listbox
+        if not d["on"]:
+            if d["keep"]:  # (a click on a row picked among several: now only that one)
+                lb.selection_clear(0, "end")
+                lb.selection_set(d["i"])
+                self.sync_library()
+            return None
+        lb.config(cursor="")
+        if d["target"] is not None and d["target"] < lb.size():
+            lb.itemconfig(d["target"], background="")
+        self.move_rows(d["rows"], d["folder"])
+        return "break"
+
+    def move_rows(self, rows, into):
+        """The rows' shapes and folders moved into the folder `into` ("" = the top). Folders inside a moved folder
+        go along; a folder can't go inside itself; built-ins stay. The moved rows are picked after, shown."""
+        from window.drawer_library import move_folder, move_shape
+        folders = [r["folder"] for r in rows if r["kind"] == "folder"]
+        folders = [f for f in folders if not any(f.startswith(o + "/") for o in folders)]
+        inside = lambda f: any(f == o or f.startswith(o + "/") for o in folders)
+        shapes = [r for r in rows if r["kind"] == "shape" and not inside(r["folder"]) and r["folder"] != into]
+        new_paths, new_folders, failed = set(), set(), []
+
+        def do():
+            for f in folders:
+                try:
+                    got = move_folder(f, into)
+                except ValueError:  # (into itself / its own sub folder)
+                    failed.append(tr("drawer.move_inside", name=f.rpartition("/")[2]))
+                    continue
+                except FileExistsError:
+                    failed.append(tr("drawer.move_taken", name=f.rpartition("/")[2]))
+                    continue
+                except OSError as e:
+                    failed.append(str(e))
+                    continue
+                if got != f:
+                    self.folder_moved(f, got)
+                new_folders.add(got)
+            for r in shapes:
+                try:
+                    new_paths.add(move_shape(r["path"], into))
+                except OSError as e:
+                    failed.append(str(e))
+        self.keep_fresh(do)
+        if failed:
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_move", e="\n".join(failed)), parent=self)
+        if into:
+            self.open_folders.add(into)
+        self.pick_folder_rows(new_folders, new_paths)
+        self.app.refresh_custom_names()
+
+    def pick_folder_rows(self, folders, paths):
+        """Fills the list again with these folders / shape files picked (folders above them opened)."""
+        import os
+        from window.drawer_library import folder_of
+        for f in list(folders) + [folder_of(p) for p in paths]:
+            f = parent_of(f) if f in folders else f
+            while f:
+                self.open_folders.add(f)
+                f = parent_of(f)
+        self.save_open_folders()
+        norm = {os.path.normcase(p) for p in paths}
+        self.fill_rows(lambda r: (r["kind"] == "folder" and r["folder"] in folders)
+                       or (r["path"] is not None and os.path.normcase(r["path"]) in norm))
+
+    def move_menu(self, m, rows):
+        """The list menu's "Move to" submenu: the top + every folder (indented); the picked folders themselves and
+        their sub folders greyed, and the one folder all picked rows are already in."""
+        sub = tk.Menu(m, tearoff=0)
+        picked = [r["folder"] for r in rows if r["kind"] == "folder"]
+        here = {r["folder"] if r["kind"] != "folder" else parent_of(r["folder"]) for r in rows}
+        same = here.pop() if len(here) == 1 else None
+        for f in [""] + library_folders():
+            bad = f == same or any(f == p or f.startswith(p + "/") for p in picked)
+            label = (INDENT * f.count("/") + f.rpartition("/")[2]) if f else tr("drawer.move_top")
+            sub.add_command(label=label, state="disabled" if bad else "normal",
+                            command=lambda f=f: self.move_rows(self.picked_rows(), f))
+        movable = any(r["path"] or r["kind"] == "folder" for r in rows)
+        m.add_cascade(label=tr("drawer.move_to"), menu=sub, state="normal" if movable else "disabled")
 
     def list_key_side(self, way):
         """Right = open the picked folder; Left = shut it, or from a shape inside: up to its folder (like File
