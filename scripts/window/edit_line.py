@@ -15,6 +15,13 @@ from window.widgets import Tooltip
 MOST_NAMES_CHARS = 60  # (the names cut with "…" past this many letters)
 
 
+def page_tab(st, n):
+    """A note tool page's tab name, numbered n among all the shape's pages: "Claw 2", "Trim 1"; a Trim shape page in
+    Wrapped slices mode "Slices 1" (hunt 2026-11-23: both modes read "Trim n")."""
+    wrap = st.get("tool") == "trim" and (st.get("cfg") or {}).get("mode") == "wrap"
+    return tr("trim.tab_wrap" if wrap else f"{st['tool']}.tab", n=n)
+
+
 def step_name(rc, kind, n=0, sh=None):
     """The name of colour step kind ("mode", "stir", "warp", "liquify", "turned"; n = the n-th of its kind) of
     Recolour rc: "Shuffle" / "Split: Scattered" / "Split: Clumps", "Stir 2", "Warp", "Liquify", "Reverse track
@@ -24,7 +31,7 @@ def step_name(rc, kind, n=0, sh=None):
         ps = pages(sh.get("fx")) if sh is not None else []
         if n >= len(ps):
             return tr("order.page")
-        return tr(f"{ps[n]['tool']}.tab", n=n + 1) + (tr("tool_window.off_mark") if ps[n].get("off") else "")
+        return page_tab(ps[n], n + 1) + (tr("tool_window.off_mark") if ps[n].get("off") else "")
     if kind == "mode":
         return tr("recolour." + (rc or {}).get("mode", "shuffle"))
     if kind == "stir":  # (a tab set to Shape: "Stir n ◇", PLAN.md "Deform shapes")

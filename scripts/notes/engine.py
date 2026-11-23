@@ -2689,24 +2689,28 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
 def wrap_outline(sh, step, ppq):
     """The drawn outline for a Wrapped slices page (wrap.py), as loops of (tick, key) points, or None (then the slices
     follow the notes' own outline). Only for a drawn custom shape whose notes are still where the drawing puts them:
-    no flip / turn steps, no page before it that moves or cuts notes (another Wrapped slices page only cuts and
-    colours), not pasted / merged / a sliced piece (user 2026-11-23: a circle's borders must be truly straight and
-    truly mirrored; the notes' stepped outline bent them)."""
-    if sh.get("kind") != "custom" or "notes" in sh or sh.get("_m") or sh.get("cut") or sh.get("cut_of") \
-            or sh.get("merge") or sh.get("text"):
+    no step before it that moves or cuts notes (another Wrapped slices page only cuts and colours; flips / turns
+    AFTER it are already undone here, a flip as sh["_m"]: the drawing is flipped back the same way, hunt 2026-11-23),
+    not pasted / merged / a sliced piece / text (user 2026-11-23: a circle's borders must be truly straight and truly
+    mirrored; the notes' stepped outline bent them). "Each piece" on a shape with no fill: the drawing doesn't show
+    the gaps between its outline's notes, so the notes' outline (hunt)."""
+    if sh.get("kind") != "custom" or "notes" in sh or sh.get("cut") or sh.get("cut_of") or sh.get("merge") \
+            or sh.get("text"):
+        return None
+    if (step.get("cfg") or {}).get("gaps") == "each" and sh.get("fill") not in ("fill", "spam"):
         return None
     fx = sh.get("fx") or []
-    if any(st["tool"] in ("flip", "turn") for st in fx):
-        return None
-    plain = {k: v for k, v in step.items() if k not in ("tag", "cfg")}
-    for st in fx:
-        if {k: v for k, v in st.items() if k not in ("tag", "cfg")} == plain and st.get("cfg", {}).get("mode") == "wrap":
-            break
+    same = lambda st: st.get("tool") == "trim" and not st.get("off") and \
+        {k: v for k, v in (st.get("cfg") or {}).items() if k != "rounds"} == \
+        {k: v for k, v in (step.get("cfg") or {}).items() if k != "rounds"}
+    at = max((j for j, st in enumerate(fx) if same(st)), default=len(fx))  # (this page: the last like it, so every
+    for st in fx[:at]:  # step before it is looked at, not only those before the first page like it: hunt)
         if st["tool"] in ("glue", "vel", "colours") or st.get("off") or (
                 st["tool"] == "trim" and (st.get("cfg") or {}).get("mode") == "wrap"):
             continue
         return None
-    loops = [np.column_stack([arr[:, 0] * ppq, arr[:, 1]]) for arr in cached_arrays(sh) if len(arr) >= 3]
+    drawn = unflipped(sh) if sh.get("_m") else sh  # (the notes are made from the drawing flipped back)
+    loops = [np.column_stack([arr[:, 0] * ppq, arr[:, 1]]) for arr in cached_arrays(drawn) if len(arr) >= 3]
     return loops or None
 
 

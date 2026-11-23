@@ -26,6 +26,7 @@ MOST_COLOURS = 16  # (16 with "Use channel 10"; the window allows areas.most_col
 SMOOTH = 1  # (tilted: the outline's sides smoothed this many times, each row end with the ones above and below)
 TIE = 0.3  # (tilted: every cut this share of a key before its place, so no row lies right on one)
 SLIVER_PASSES = 8  # (tilted: slivers folded in this many rounds at most, shortest first)
+SLIVER_DRAWN = 0.005  # (the same on a drawn outline: crumbs only)
 SLIVER = 0.03  # (tilted: a piece shorter than this share of the shape's length, trapped in another slice, joins it)
 
 
@@ -313,8 +314,9 @@ def tilted(a, cfg, th, outline=None):
     ta, tb = np.clip(ta, s0[note], e0[note]), np.clip(tb, s0[note], e0[note])
     keep = tb > ta
     note, k, ta, tb = note[keep], k[keep], ta[keep], tb[keep]
-    if not drawn:  # (a drawn outline has no rounding to make slivers; folding there dragged borders near the points)
-        k = no_slivers(note, k, ta, tb, key[note], SLIVER * w_t)
+    # (a drawn outline: only crumbs folded, SLIVER_DRAWN of the length (1-5 tick strays near the points, hunt
+    # 2026-11-23); the full fold there dragged borders near the points and would eat real thin slice tips)
+    k = no_slivers(note, k, ta, tb, key[note], (SLIVER_DRAWN if drawn else SLIVER) * w_t)
     # touching bits of one note in one slice = one note again
     new = np.ones(len(note), bool)
     new[1:] = (note[1:] != note[:-1]) | (k[1:] != k[:-1])

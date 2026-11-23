@@ -149,7 +149,7 @@ class TrimWindow(ToolWindow):
         f = ttk.Frame(box)
         f.grid(row=2, column=0, columnspan=2, sticky="nw")
         f.columnconfigure(0, minsize=round(80 * s))
-        self.wvars, self.wentries = {}, {}
+        self.wvars, self.wentries, self.scrubs = {}, {}, {}
         for r, key, tip, steps in ((0, "slices", "trim.tip_slices", (1, 10, 1)),
                                    (1, "colours", "trim.tip_colours", (1, 5, 1))):
             lb = ttk.Label(f, text=tr(f"trim.{key}"))
@@ -158,8 +158,8 @@ class TrimWindow(ToolWindow):
             e = self.wentries[key] = ttk.Entry(f, textvariable=var, width=7)
             e.grid(row=r, column=1, sticky="w", pady=2)
             self.entry_keys(e, key)
-            Scrub(self.app, [(e, var, lambda key=key: self.on_wentry(key, False))], steps, *self.limits(key),
-                  label=lb)
+            self.scrubs[key] = Scrub(self.app, [(e, var, lambda key=key: self.on_wentry(key, False))], steps,
+                                     *self.limits(key), label=lb)
             for w in (lb, e):
                 Tooltip(w, tr(tip))
         lb = ttk.Label(f, text=tr("trim.angle"))
@@ -395,6 +395,10 @@ class TrimWindow(ToolWindow):
 
     def show_wrap(self):
         c = self.cfg
+        m = self.most()  # ("Use channel 10" may have changed with the window open: the box and its drag follow, hunt)
+        self.scrubs["colours"].hi = m
+        if c["colours"] > m:
+            c["colours"] = m
         self.wentries["colours"].config(style="TEntry")
         for key, var in self.wvars.items():
             if var.get() != self.wshown(key):

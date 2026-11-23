@@ -820,6 +820,7 @@
  "chop.tab": "Chop {n}",
  "path.tab": "Path {n}",
  "trim.tab": "Trim {n}",
+ "trim.tab_wrap": "Slices {n}",
  "trim.window_title": "Trim shape",
  "trim.step": "Trim shape",
  "trim.shape": "Shape: {shape_label}",

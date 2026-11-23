@@ -18,6 +18,7 @@ from notes.recolour import clean_recolour, page_added, page_removed
 from notes.sliced import steps_kept
 from window import look
 from window.default_pin import DefaultPin
+from window.edit_line import page_tab
 from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, fit_screen, greyed_why, placed, wheel_ready, wheel_turns
 
 NEW = "new"  # the "+" tab
@@ -506,7 +507,7 @@ class ToolWindow(DefaultPin, tk.Toplevel):
         for st in fx:
             if is_page(st):
                 n += 1
-                parts.append(tr(f"{st['tool']}.tab", n=n) + (tr("tool_window.off_mark") if st.get("off") else ""))
+                parts.append(page_tab(st, n) + (tr("tool_window.off_mark") if st.get("off") else ""))
             elif st["tool"] == "turn":
                 parts.append(tr("tool_window.turn_cw" if st["deg"] > 0 else "tool_window.turn_ccw",
                                 deg=f"{round(abs(st['deg']), 1):g}"))
@@ -523,7 +524,7 @@ class ToolWindow(DefaultPin, tk.Toplevel):
             if is_page(st):
                 n += 1
                 if st["tool"] == self.KEY:
-                    tabs.append((k, tr(f"{self.KEY}.tab", n=n), st.get("off", False)))
+                    tabs.append((k, page_tab(st, n), st.get("off", False)))
         if self.at is None:
             self.tab.set(NEW)
         else:

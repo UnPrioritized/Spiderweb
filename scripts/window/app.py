@@ -3434,6 +3434,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if (self.defaults.get("cycle") or {}).get("n", 0) > most:
                 self.defaults["cycle"] = dict(self.defaults["cycle"], n=most)
             self.over_15([self.custom_defaults])  # (new shapes' Nested / Tiles / Ripples Colours)
+        w = getattr(self, "trim_window", None)  # (an open Trim shape window: its Colours box follows, hunt 2026-11-23)
+        if w:
+            w.show()
         self.on_channel_mode()
 
     def on_channel_mode(self):
