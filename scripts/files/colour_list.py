@@ -5,16 +5,12 @@ A format: {"name", "lists": [{"start", "each", "end"}], "sep": line / comma / sp
 the custom text between colours (\\n \\t \\r \\\\ \\xNN \\uNNNN codes), "alpha": what {a} writes, "pad": write at
 least this many colours (0 = just the picture's), "filler": the colour written for those extra ones}. Tags work in
 "each" only: {n} {n0} {n:2} {hex} {HEX} {r} {g} {b} {a}; {{ and }} = a plain { and }. Lists are written one after
-another, a line apart. The user's formats are kept in spiderweb/colour_formats.json (built-in ones can't change)."""
+another, a line apart. The user's formats are kept one file each in user/presets/Colour formats/ (built-in ones can't change)."""
 
-import os
 import re
 
-from files import saved_lists
-from files.about import USER
 from files.lang import tr
 
-FORMATS_FILE = os.path.join(USER, "colour_formats.json")
 TAG = re.compile(r"\{\{|\}\}|\{[^{}\s]*\}?")
 GOOD = re.compile(r"^\{(n|n0|n:\d|hex|HEX|r|g|b|a)\}$")
 SEPS = {"line": "\n", "comma": ",", "space": " ", "none": ""}
@@ -137,14 +133,10 @@ def clean_format(f):
 
 
 def load_formats():
-    """The user's formats ([] when there's no file or it can't be read; one that can't be read: left out)."""
-    return saved_lists.entries(FORMATS_FILE, "formats", clean_format)
-
-
-def change_formats(drop, add=()):
-    """The user's formats whose name drop(name) says yes to removed, add's put on the end, every other one kept as
-    saved. Returns where a damaged file was kept aside (tell the user), else None. OSError if it can't be written."""
-    return saved_lists.change(FORMATS_FILE, "formats", drop, add, ensure_ascii=False)
+    """The user's formats, newest last (one file each in user/presets/Colour formats/, window/preset_files.py; one
+    that can't be read: left out)."""
+    from window import preset_files
+    return preset_files.FORMATS.entries(clean_format)
 
 
 # ------------------------------------------------------------------ Paste colours: colours read out of any text

@@ -5,6 +5,7 @@ line ends (shown only, never copied; user found hidden spaces confusing). Built-
 makes "<name> (mine)". The formats themselves: files/colour_list.py."""
 
 import copy
+import os
 import re
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
@@ -12,7 +13,7 @@ from tkinter import messagebox, simpledialog, ttk
 from files import clipboard
 from files import colour_list as CL
 from files.lang import tr, trn
-from window import look
+from window import look, preset_files
 from window.widgets import name_list, remember_place, set_names
 
 WS = re.compile(r"^[ \t]+|[ \t]+$", re.M)
@@ -285,22 +286,22 @@ class FormatWindow(tk.Toplevel):
                      None)
         if taken and not messagebox.askyesno(tr("fmt.title"), tr("fmt.replace_ask", name=taken), parent=self):
             return False
-        if not self.save_file(lambda n: n.casefold() == name.casefold(), [f]):
+        if not preset_files.change(preset_files.FORMATS, name, f, self, tr("fmt.title")):  # (any capitals: over it)
             return False
         self.yours, self.fmt = CL.load_formats(), copy.deepcopy(f)
         self.saved, self.cur = copy.deepcopy(f), 0
         self.show_format()
         return True
 
-    def save_file(self, drop, add=()):
-        """CL.change_formats, saying what went wrong. True when saved."""
+    def drop_renamed(self, old):
+        """The old name's file gone after a rename (deleted outright: the format lives on under its new name)."""
         try:
-            kept = CL.change_formats(drop, add)
+            for p in preset_files.FORMATS.paths_of(old, exact=True):
+                os.remove(p)
         except OSError as e:
-            messagebox.showerror(tr("fmt.title"), tr("fmt.cant_save", path=CL.FORMATS_FILE, e=e), parent=self)
+            messagebox.showerror(tr("fmt.title"), tr("presets.save_failed", path=preset_files.FORMATS.path(), e=e),
+                                 parent=self)
             return False
-        if kept:
-            messagebox.showwarning(tr("fmt.title"), tr("fmt.file_broken", path=kept), parent=self)
         return True
 
     def save_as(self):
@@ -316,7 +317,7 @@ class FormatWindow(tk.Toplevel):
         if name and name.strip() and name.strip() != old:
             new = name.strip()[:100]
             # (a new name differing only in capitals: store already replaced it)
-            if self.store(new) and (old.casefold() == new.casefold() or self.save_file(lambda n: n == old)):
+            if self.store(new) and (old.casefold() == new.casefold() or self.drop_renamed(old)):
                 self.yours = CL.load_formats()
                 self.show_format()
 
@@ -324,7 +325,7 @@ class FormatWindow(tk.Toplevel):
         name = self.fmt["name"]
         if not messagebox.askyesno(tr("fmt.title"), tr("fmt.delete_ask", name=name), parent=self):
             return
-        if not self.save_file(lambda n: n == name):
+        if not preset_files.change(preset_files.FORMATS, name, None, self, tr("fmt.title")):  # (to the Recycle Bin)
             return
         self.yours, self.fmt, self.cur = CL.load_formats(), copy.deepcopy(self.built[0]), 0
         self.saved = copy.deepcopy(self.fmt)

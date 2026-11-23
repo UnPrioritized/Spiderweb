@@ -1,24 +1,20 @@
 """LFO… (stage I of the Hz bass Sketch extras, 2026-11-13; the plugin's LFO dialog): a window to design one wobble on
 a note (the picked Sketch stretch, else the whole note; the other selected notes get it too, Same cycles / Same
 speed): its wave shape (the six ready ones, or one DRAWN in the wave editor and kept in the shared shape bank,
-user/hz_wobbles.json, also listed in the Sketch wobble's right-click menu), Upside down, depth + cycles, the depth
+user/presets/Hz wobble waves/, one file each, also listed in the Sketch wobble's right-click menu), Upside down, depth + cycles, the depth
 and speed lines (points, Alt curves, the depth presets, the speed lock) and the phase. Every change shows on the
 notes at once (one undo step in all, like the Simplify window). Apply = a LIVE wobble (still editable in Sketch);
 Bake = into bend points; Delete = the wobble there goes, the pitch line as it was; Cancel = as before, no step.
 From the note's right-click menu (LFO…), the Sketch wobble's menu, or Ctrl+L on the Hz window."""
 
 import copy
-import json
-import os
 import tkinter as tk
 from tkinter import messagebox, ttk
 
 import numpy as np
 
-from files.about import USER
 from files.lang import tr, trn
 from files.mathexpr import fmt
-from files.safefile import write_text
 from notes.hz_settings import WAVE_DRAWN, clean_wave
 from notes.hzbass import (NOTE_BEND_MOST, ON_POINT, WOBBLE_RATE, WOBBLE_RATE_MOST, WOBBLE_SHAPES, bend_of, bent_part,
                           clean_speed, depth_most, depth_pts, fit_wobbles, set_depth, speed_mean, wobble_points)
@@ -26,7 +22,6 @@ from roll.roll_shared import ALT, CTRL, SHIFT
 from window import look
 from window.widgets import REDO_KEYS, UNDO_KEYS, Tooltip, delete_menu, menu_click, name_list, remember_place, set_names
 
-BANK_FILE = os.path.join(USER, "hz_wobbles.json")  # the shape bank: drawn waves saved by name ({"shapes": [...]})
 GRAB = 7  # px: how near a point a press takes it
 CURVE_PX = 40  # px: Alt+dragging a piece this far up / down = a full curve
 PAD = 10  # px round an editor's drawing area
@@ -41,22 +36,12 @@ EDITOR_W, WAVE_H, LINE_H = 300, 120, 54  # px at 100 %: the editors' sizes
 
 # ------------------------------------------------------------ the shape bank
 
-def read_bank():
-    """(the saved drawn waves [{"name", "points"}] in saving order, whether the file is there but can't be read)."""
-    from window.hz_trace import read_named
-    return read_named(BANK_FILE, clean_wave)
-
-
 def load_bank():
-    """The saved drawn waves, newest LAST (saving order); none when the file can't be read."""
-    return read_bank()[0]
-
-
-def save_bank(items):
-    """Writes the bank (OSError when it can't). A file there that can't be read is kept as hz_wobbles.json.bad
-    first; True when it was."""
-    from window.hz_trace import save_named
-    return save_named(BANK_FILE, items, clean_wave)
+    """The saved drawn waves [{"name", "points", "path"}], newest LAST (user/presets/Hz wobble waves/, one file
+    each)."""
+    from window import preset_files
+    from window.hz_trace import read_named
+    return read_named(preset_files.WOBBLES, clean_wave)
 
 
 def ready_name(name):
@@ -583,9 +568,8 @@ class LfoWindow(tk.Toplevel):
     # ---- the shape bank
 
     def fill_bank(self):
-        """The bank's list, read again each time it opens (newest first; each remembers its place in the file)."""
-        items = load_bank()
-        self.bank = [dict(t, at=k) for k, t in reversed(list(enumerate(items)))]
+        """The bank's list, read again each time it opens (newest first; each remembers its file)."""
+        self.bank = list(reversed(load_bank()))
         set_names(self.bank_box, [], [t["name"] for t in self.bank])
         self.show_bank()
 
@@ -610,42 +594,32 @@ class LfoWindow(tk.Toplevel):
 
     def save_wave(self):
         """The wave as it is (a ready shape too: as drawn points) saved in the bank under a name."""
-        from window.hz_trace import free_shape_name
+        from window import preset_files
+        from window.hz_trace import add_named
         from window.settings_window import ask_name
         name = ask_name(self, tr("hz.lfo_save_title"), tr("hz.lfo_save_ask"),
                         check=lambda n: tr("hz.lfo_ready_name", name=n) if ready_name(n) else None)
         if name is None:
             return
         pts = clean_wave(wave_points(self.run))
-        items = load_bank()
-        name = free_shape_name(name, items)
-        items.append({"name": name, "points": pts})
         try:
-            bad = save_bank(items)
+            name = add_named(preset_files.WOBBLES, name, pts)
         except OSError as e:
             return messagebox.showerror(tr("hz.lfo_title"), tr("hz.lfo_not_saved", e=e), parent=self)
         self.run.update(shape=WAVE_DRAWN, wave=pts)
         self.fill_bank()
         self.live()
-        self.says.config(text=tr("hz.lfo_kept_bad") if bad else tr("hz.lfo_saved", name=name),
-                         foreground=look.WARN if bad else look.INFO)
+        self.says.config(text=tr("hz.lfo_saved", name=name), foreground=look.INFO)
 
     def delete_wave(self):
-        """The picked saved wave taken out of the bank (asked first); the wobble keeps its wave."""
+        """The picked saved wave's file to the Recycle Bin (asked first); the wobble keeps its wave."""
+        from window import preset_files
         if self.bank_pick is None:
             return
         t = self.bank[self.bank_pick]
         if not messagebox.askyesno(tr("hz.lfo_delete_title"), tr("hz.lfo_delete_ask", name=t["name"]), parent=self):
             return
-        items = load_bank()
-        k = t["at"]
-        if k >= len(items) or items[k] != {"name": t["name"], "points": t["points"]}:  # (the file changed since)
-            k = next((j for j, s in enumerate(items) if s == {"name": t["name"], "points": t["points"]}), None)
-        if k is not None:
-            try:
-                save_bank(items[:k] + items[k + 1:])
-            except OSError as e:
-                messagebox.showerror(tr("hz.lfo_title"), tr("hz.lfo_not_saved", e=e), parent=self)
+        preset_files.bin_file(t["path"], t["name"], self, tr("hz.lfo_delete_title"))
         self.fill_bank()
 
     def focused(self):

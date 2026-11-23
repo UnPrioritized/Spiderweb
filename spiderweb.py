@@ -211,13 +211,13 @@ Files (the scripts live in scripts/, one subfolder per group):
     safefile.py      saving without half-written files
     recent.py        File → Open Recent lists, the pickers' last folders, project backups on Save
     pip_age.py       the start's package offers skip versions under 14 days old (asks PyPI their dates)
-    saved_lists.py   the user's lists kept in one file (patterns, rhythms, colour formats): a damaged one loses nothing
     errors.py        spiderweb-error.log and the "something went wrong" message; spiderweb-crash.log when the
                      program dies outright (both next to Spiderweb)
     about.py         version number, the program's folder, the user folder (moving old files in)
     settings.py      the app's own settings (user/settings.ini: the look, later more)
     (window/) settings_window.py  the Settings window (gear button): Look (+ note colour palettes), Updates
     (window/) palettes.py  note colour palettes (user/palettes/), switched live
+    (window/) preset_files.py  every saved list (presets, rhythms, formulas...) one file each in user/presets/
     (window/) button_look.py  Settings → Look's Button style (system's own, Plain, Raised, Outlined, Flat)
     system.py        what's asked of Windows / Linux (double-click speed, free memory, an error box)
     c_fill.py        makes a C runtime's do-nothing complex-number stand-ins work (before NumPy loads)

@@ -17,18 +17,14 @@ piano roll's. The shape is the Hz bass's (its picked layer's) sound setting hz["
 window's `extra`."""
 
 import copy
-import json
 import math
-import os
 import tkinter as tk
 from tkinter import messagebox, ttk
 
 import numpy as np
 
-from files.about import USER
 from files.lang import tr
 from files.mathexpr import calc
-from files.safefile import write_text
 from notes.hz_settings import clean_trace
 from notes.hzbass import (FULL_LENGTH, HZ_DEFAULTS, START_TRACE, TRACE_POINTS, clean_extra, hz_gate,
                           key_range, length_ticks, trace_hits, trace_line)
@@ -57,44 +53,24 @@ SHAPES = {"straight": [list(p) for p in START_TRACE],  # (as it starts: shown af
           "triangle": [[0.0, 0.0], [0.5, 1.0], [1.0, 0.0]],
           "sine": [[i / 32, round(0.5 - 0.5 * math.cos(2 * math.pi * i / 32), 6)] for i in range(33)],
           "square": [[0.0, 0.0], [0.0, 1.0], [0.5, 1.0], [0.5, 0.0], [1.0, 0.0]]}
-SHAPES_FILE = os.path.join(USER, "hz_shapes.json")  # the user's saved lines (Save…; in the shapes box after the
-# ready-made ones, newest first)
 
 
-def read_named(path, clean_points):
-    """(the named lines [{"name", "points"}] of a {"shapes": [...]} file in saving order, whether the file is there
-    but can't be read). clean_points(an entry's points) = the points kept, or nothing usable: a broken entry is left
-    out; a missing file = none. (The Hz shape window's saved lines and the LFO window's shape bank.)"""
-    if not os.path.exists(path):
-        return [], False
-    try:
-        with open(path, encoding="utf-8-sig") as f:
-            data = json.load(f)
-        shapes = data.get("shapes") if isinstance(data, dict) else None
-        if not isinstance(shapes, list):
-            return [], True
-    except (OSError, ValueError):
-        return [], True
-    out = []
-    for s in shapes:
-        try:
-            name, pts = clean_shape_name(str(s["name"])), clean_points(s["points"])
-        except (TypeError, KeyError, IndexError):
-            continue
-        if name and pts:
-            out.append({"name": name, "points": pts})
-    return out, False
+def read_named(folder, clean_points):
+    """The named lines [{"name", "points", "path"}] of a presets folder (window/preset_files.py), oldest first.
+    clean_points(an item's points) = the points kept, or nothing usable: that file is left out. (The Hz shape
+    window's saved lines and the LFO window's shape bank; one file each since 2026-11-24, "path" = its file.)"""
+    def clean(s):
+        name, pts = clean_shape_name(str(s["name"])), clean_points(s["points"])
+        return name and pts and {"name": name, "points": pts}
+    return [dict(item, path=p) for p, item in folder.found(clean)]
 
 
-def save_named(path, items, clean_points):
-    """Writes a read_named file (OSError when it can't be). A file there that can't be read is kept first as
-    <name>.bad (hunt: saving over it lost every older line); returns True when it was."""
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    kept = read_named(path, clean_points)[1]
-    if kept:
-        os.replace(path, path + ".bad")
-    write_text(path, json.dumps({"shapes": items}, indent=1))
-    return kept
+def add_named(folder, name, points):
+    """A new saved line: the name made free (" (2)"... when taken, free_shape_name), written as the newest. Returns
+    the name it got. OSError when it can't be written."""
+    name = free_shape_name(name, [s for _, s in folder.found(lambda s: s)])  # (every file's name, usable or not)
+    folder.save({"name": name, "points": points})
+    return name
 
 
 def trace_points(raw):
@@ -102,19 +78,10 @@ def trace_points(raw):
     return clean_trace(raw) or ([list(p) for p in START_TRACE] if raw == [list(p) for p in START_TRACE] else None)
 
 
-def read_shapes():
-    """(the user's saved lines [{"name", "points"}] in saving order, whether the file is there but can't be read)."""
-    return read_named(SHAPES_FILE, trace_points)
-
-
 def load_shapes():
-    """The user's saved lines in saving order (none when the file can't be read)."""
-    return read_shapes()[0]
-
-
-def save_shapes(items):
-    """Writes the saved lines (hz_shapes.json; a broken one kept as .bad first: True when it was)."""
-    return save_named(SHAPES_FILE, items, trace_points)
+    """The user's saved lines [{"name", "points", "path"}], newest last (user/presets/Hz shape lines/)."""
+    from window import preset_files
+    return read_named(preset_files.HZ_LINES, trace_points)
 
 
 def clean_shape_name(name):
@@ -851,9 +818,8 @@ class TraceWindow(tk.Toplevel):
 
     def fill_shapes(self):
         """The shapes box's list, read again each time it opens: the ready-made shapes, a divider, the saved lines
-        newest first (each remembers its place in the file: "at")."""
-        items = load_shapes()
-        self.saved = [dict(s, at=k) for k, s in reversed(list(enumerate(items)))]
+        newest first (each remembers its file: "path")."""
+        self.saved = list(reversed(load_shapes()))
         set_names(self.shapes_box, [tr("hz.trace_" + k) for k in SHAPES], [s["name"] for s in self.saved])
         self.pick = None if self.pick and self.pick[0] == "saved" else self.pick  # (places may have moved)
         self.show_pick()
@@ -901,37 +867,27 @@ class TraceWindow(tk.Toplevel):
                         check=lambda n: tr("hz.trace_built_in", name=n) if built_in_name(n) else None)
         if name is None:
             return
-        items = load_shapes()
-        name = free_shape_name(name, items)
-        items.append({"name": name, "points": [list(p) for p in self.pts]})
+        from window import preset_files
         try:
-            kept = save_shapes(items)
+            name = add_named(preset_files.HZ_LINES, name, [list(p) for p in self.pts])
         except OSError as e:
             return messagebox.showerror(tr("hz.trace_title"), tr("hz.trace_not_saved", e=e), parent=self)
         self.fill_shapes()
         self.pick = ("saved", 0)  # (the newest: on top)
         self.show_pick()
-        self.says.config(text=tr("hz.trace_kept_bad") if kept else tr("hz.trace_saved", name=name),
-                         foreground=look.WARN if kept else look.INFO)
+        self.says.config(text=tr("hz.trace_saved", name=name), foreground=look.INFO)
 
     def delete_shape(self):
-        """The saved line picked in the box taken out of the file (asked first; only that one, even when another
-        has the same name). The line drawn stays."""
+        """The saved line picked in the box: its file to the Recycle Bin (asked first; only that one, even when
+        another has the same name). The line drawn stays."""
+        from window import preset_files
         if not self.pick or self.pick[0] != "saved" or self.drag is not None or self.bar is not None:
             return
         s = self.saved[self.pick[1]]
         if not messagebox.askyesno(tr("hz.trace_delete_title"), tr("hz.trace_delete_ask", name=s["name"]),
                                    parent=self):
             return
-        items = load_shapes()
-        k = s["at"]
-        if k >= len(items) or items[k] != {"name": s["name"], "points": s["points"]}:  # (the file changed since)
-            k = next((i for i, t in enumerate(items) if t == {"name": s["name"], "points": s["points"]}), None)
-        if k is not None:
-            try:
-                save_shapes(items[:k] + items[k + 1:])
-            except OSError as e:
-                messagebox.showerror(tr("hz.trace_title"), tr("hz.trace_not_saved", e=e), parent=self)
+        preset_files.bin_file(s["path"], s["name"], self, tr("hz.trace_delete_title"))
         self.pick = None
         self.fill_shapes()
 

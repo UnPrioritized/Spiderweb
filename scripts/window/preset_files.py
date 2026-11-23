@@ -261,6 +261,24 @@ def change(folder, name, item, parent, title):
     return False
 
 
+def bin_file(path, name, parent, title):
+    """One item's own file (lists that tell same-named items apart by file) to the Recycle Bin, as change does it.
+    A file already gone = done. True when gone."""
+    from tkinter import messagebox
+    from files import system
+    from files.lang import tr
+    if not os.path.exists(path):
+        return True
+    try:
+        return system.bin_or_delete(path, lambda: messagebox.askyesno(title, tr("presets.no_bin", name=name),
+                                                                       parent=parent))
+    except system.BinError:
+        messagebox.showerror(title, tr("presets.bin_in_use", name=name), parent=parent)
+    except OSError as e:
+        messagebox.showerror(title, tr("presets.save_failed", path=os.path.dirname(path), e=e), parent=parent)
+    return False
+
+
 # The lists (folder names are fixed English words: they're never translated, like "shapes" / "palettes")
 HZ_PRESETS = Folder("Hz bass", "hz_presets.json", "presets")
 STIR = Folder("Stir", "stir_presets.json", "presets")
