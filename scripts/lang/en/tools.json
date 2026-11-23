@@ -335,6 +335,8 @@
  "drawer.couldn_t_delete": "Couldn't delete:\n{e}",
  "drawer.draw_something_first": "Draw something first.",
  "drawer.give_the_shape_a_name_first": "Give the shape a name first.",
+ "drawer.shape_n": "Shape {n}",
+ "drawer.name_ask": "Name for the shape library:",
  "drawer.is_already_in_the_library_replace": "\"{name}\" is already in the library. Replace it?\nShapes already placed on the piano roll stay as they are.",
  "drawer.couldn_t_save": "Couldn't save:\n{e}",
  "drawer.deleted_in_use": "Deleted \"{name}\" from the shape library: the Custom shape tool now uses Circle.",

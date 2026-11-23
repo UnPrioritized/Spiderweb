@@ -284,7 +284,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
                 self.bind(k, self.hotkey(fn))
         for keys, fn in (("c C", self.copy), ("x X", self.cut), ("v V", self.paste), ("h H", lambda: self.flip(True)),
                          ("j J", lambda: self.flip(False)), ("Left", lambda: self.turn(False)),
-                         ("Right", lambda: self.turn(True))):
+                         ("Right", lambda: self.turn(True)), ("a A", self.pick_all)):  # (Ctrl+A: QoL F)
             for k in keys.split():
                 self.bind(f"<Control-{k}>", self.hotkey(fn))
 
@@ -294,6 +294,15 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
         return self.make_side(int(300 * self.scale), "drawer")
 
     SIDE_SKIP = (tk.Listbox, ttk.Treeview)  # (the lists scroll themselves)
+
+    def pick_all(self):
+        """Ctrl+A (QoL F, user 2026-11-23): every stroke that can be picked (not hidden / locked), like the piano
+        roll's Select all. A half-drawn line is dropped first."""
+        if self.draft is not None:
+            self.cancel_draft()
+        self.tool.set("select")
+        self.sel, self.picks, self.boxes = None, {i for i in range(len(self.strokes)) if self.pickable(i)}, []
+        self.redraw()
 
     def hotkey(self, fn):
         """A drawer shortcut that leaves text boxes alone (the name box, a layer being renamed)."""
@@ -596,6 +605,8 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
             self.cancel_draft()
         elif k == "return":
             self.finish_poly()
+        elif k == "backspace" and self.draft_back():  # (a half-drawn Polyline / Arc: last point off, QoL F)
+            pass
         elif k in ("delete", "backspace"):
             self.delete_selected_stroke()
         elif not e.state & CTRL:
@@ -1336,9 +1347,16 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
         if not self.strokes:
             messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.draw_something_first"), parent=self)
             return None
-        if not name:
-            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.give_the_shape_a_name_first"), parent=self)
-            return None
+        if not name:  # (QoL F, user 2026-11-23: asked for, "Shape n" filled in, instead of an error)
+            from tkinter import simpledialog
+            have = {n.lower() for n in library_names()}
+            n = 1
+            while tr("drawer.shape_n", n=n).lower() in have:
+                n += 1
+            name = clean_name(simpledialog.askstring(tr("drawer.spiderweb"), tr("drawer.name_ask"), parent=self,
+                                                     initialvalue=tr("drawer.shape_n", n=n)) or "")
+            if not name:
+                return None
         taken = name.lower() in (n.lower() for n in library_names())
         if taken and name.lower() != (self.saved_name or "").lower():
             if not messagebox.askyesno(tr("drawer.spiderweb"),

@@ -138,6 +138,25 @@ def build_menu(app):
         m.entryconfig(7, state="normal" if app.tumour_targets() else "disabled")
         m.entryconfig(9, state="normal" if app.fill_targets() else "disabled")
         m.entryconfig(10, state="normal" if fold_targets(app) else "disabled")
+        m.entryconfig(12, state="normal" if tools else "disabled")  # (Gate tools ▸)
+        m.entryconfig(13, state="normal" if app.merge_pair() else "disabled")
+        m.entryconfig(14, state="normal" if tools else "disabled")  # (Glue)
+
+    def sync_gates(m):
+        """Gate tools ▸ (QoL F, user 2026-11-23: the right-click menu's gate items, greyed the same way)."""
+        from window.sustain_window import any_sustained, sustain_targets
+        from window.subtract_window import any_subtracted, subtract_targets
+        from window.extend_window import any_extended
+        from window.strips_window import any_strips, strips_targets
+        gates_vars["sustain"].set(any_sustained(app))
+        gates_vars["subtract"].set(any_subtracted(app))
+        gates_vars["extend"].set(any_extended(app))
+        gates_vars["strips"].set(bool(strips_targets(app)) and any_strips(app))
+        gf = app.gate_flip_state()
+        gates_vars["flip"].set(bool(gf and gf[1]))
+        for i, on in ((0, sustain_targets(app)), (1, subtract_targets(app)), (2, subtract_targets(app)),
+                      (3, gf and gf[0]), (4, strips_targets(app)), (5, app.line_targets())):
+            m.entryconfig(i, state="normal" if on else "disabled")
     t = menu("menu.tools", sync_tools)
     add(t, "roll_menu.claw_machine", "roll_menu.alt_w", lambda: open_claw(app))
     add(t, "roll_menu.strum", "roll_menu.alt_s", lambda: open_strum(app))
@@ -150,6 +169,31 @@ def build_menu(app):
     t.add_separator()
     add(t, "fill_gaps.menu", "", lambda: open_fill(app))
     add(t, "fold.menu", "", lambda: open_fold(app))
+    # every tool listed (QoL F, user 2026-11-23: the gate tools were missing; no new keys)
+    t.add_separator()
+    from window.extend_window import open_extend
+    from window.lines_window import open_lines
+    from window.merge_window import open_merge
+    from window.strips_window import open_strips
+    from window.subtract_window import open_subtract
+    from window.sustain_window import open_sustain
+    gates = tk.Menu(t, tearoff=False, postcommand=lambda: sync_gates(gates))
+    gates_vars = {k: tk.BooleanVar(app, value=False) for k in ("sustain", "subtract", "extend", "flip", "strips")}
+    for key, var, command in (("sustain.menu", "sustain", lambda: open_sustain(app)),
+                              ("subtract.menu", "subtract", lambda: open_subtract(app)),
+                              ("extend.menu", "extend", lambda: open_extend(app)),
+                              ("roll_menu.gate_flip", "flip", app.gate_flip),
+                              ("strips.menu", "strips", lambda: open_strips(app))):
+        gates.add_checkbutton(label=tr(key), variable=gates_vars[var], command=command)
+    add(gates, "lines.menu_split", "", lambda: open_lines(app, "split"))
+    t.add_cascade(label=tr("menu.gate_tools"), menu=gates)
+    add(t, "join_split.merge_menu", "", lambda: open_merge(app))
+    add(t, "roll_menu.glue", "", app.glue_selected)
+    t.add_separator()
+    add(t, "stir.button", "", app.open_stir)
+    add(t, "warp.button", "", app.open_warp)
+    add(t, "liquify.button", "", app.open_liquify)
+    add(t, "recolour.shares", "", app.open_shares)
 
     v = menu("menu.view")
     redraw = lambda: (app.roll.request_redraw(), app.schedule_autosave())

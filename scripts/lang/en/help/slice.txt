@@ -17,7 +17,7 @@ To freeze a shape, right-click it → Turn into plain notes. It becomes pasted n
 
 ## Slice with shape
 
-Pick Slice ▾ → Slice with shape, then click a shape: it becomes a knife. Everything under its notes is cut out as its own piece and selected, and the knife itself stays as it was. Only its notes cut: on each key row, the stretches its notes cover, so a ring cuts out a ring and leaves the hole alone.
+Pick Slice ▾ → Slice with shape (the button then reads "Slice with shape (K)" until you pick Slice again), then click a shape: it becomes a knife. Everything under its notes is cut out as its own piece and selected, and the knife itself stays as it was. Only its notes cut: on each key row, the stretches its notes cover, so a ring cuts out a ring and leaves the hole alone.
 
 Or right-click a shape lying over others → Slice with shape. The shape in front cuts the shapes behind it. With several shapes selected (a Select box), the one in front cuts only the other selected ones.
 

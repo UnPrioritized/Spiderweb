@@ -741,7 +741,17 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             b = ttk.Radiobutton(bar, text=f"{label} ({hot.upper()})", value=key, variable=self.tool,
                                 style="Toolbutton")
             b.pack(side="left", padx=1)
-            Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"] if key in TOOL_TOPICS else tr("app.lasso_tip"))
+            tip = Tooltip(b, BY_ID[TOOL_TOPICS[key]]["tip"] if key in TOOL_TOPICS else tr("app.lasso_tip"))
+            if key in ("slice", "lasso"):  # (QoL F, user 2026-11-23: the button names the ▾ mode picked, tip too)
+                var = self.slice_mode if key == "slice" else self.lasso_mode
+                base = tip.text
+
+                def named(*_, b=b, tip=tip, key=key, var=var, hot=hot, base=base):
+                    name = tr(f"app.{key}_now_{var.get()}")
+                    b.config(text=f"{name} ({hot.upper()})")
+                    tip.set_text(tr("app.mode_now", name=name) + "\n" + base)
+                var.trace_add("write", named)
+                named()
             if key in ("slice", "lasso"):  # (its ▾: Slice / Slice with shape, Lasso / Polygonal...; picking one
                 from window.tool_picker import arrow_picture  # picks the tool too)
                 if not hasattr(self, "_tool_arrow"):

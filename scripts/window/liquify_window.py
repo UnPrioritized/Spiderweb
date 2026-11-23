@@ -32,6 +32,7 @@ BRUSH = {"size": (100.0, 4.0, 1000.0, "px", (5, 50, 1)),
          "pressure": (50.0, 1.0, 100.0, "%", (1, 10, 0.1)),
          "rate": (80.0, 0.0, 100.0, "%", (1, 10, 0.1)),
          "smoothing": (0.0, 0.0, 100.0, "%", (1, 10, 0.1))}
+SIZE_STEP = 0.1  # [ / ] change the Size by this share of it (at least 1 px)
 
 
 def saved(name):
@@ -259,6 +260,8 @@ class LiquifyWindow(DefaultPin, tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.close)
         # (Esc: a straight stroke's start placed goes first, like on the piano roll; then the window closes)
         self.bind("<Escape>", lambda e: self.on_escape())
+        for key, bigger in (("<bracketleft>", False), ("<bracketright>", True)):  # (not inside a typing box)
+            self.bind(key, lambda e, b=bigger: None if isinstance(e.widget, ttk.Entry) else self.size_step(b))
         help_page(self, self.app, "liquify")  # (THE CONTROL SCHEME: F1 = this window's page)
         self.sync()
         remember_place(self, "liquify")
@@ -403,6 +406,17 @@ class LiquifyWindow(DefaultPin, tk.Toplevel):
         self.brush[name] = v
         put(name, fmt(v))
         self.app.roll.draw_liquify_brush()
+
+    def size_step(self, bigger):
+        """[ / ] (QoL F, user 2026-11-23, like image editors): the brush Size a step smaller / bigger, the step
+        growing with the size (a tenth of it, at least 1 px), within its limits."""
+        d, lo, hi = BRUSH["size"][:3]
+        now = self.brush["size"]
+        step = max(1.0, round(now * SIZE_STEP))
+        v = min(hi, max(lo, now + step if bigger else now - step))
+        e, var, _ = self.boxes["size"]
+        var.set(fmt(v))
+        self.on_box("size")
 
     def on_edge(self):
         i = self.edge_box.current()

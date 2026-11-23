@@ -1014,6 +1014,23 @@ class DrawerMouse:
         self.redraw()
         return False
 
+    def draft_back(self):
+        """Backspace while a Polyline / Arc is half drawn (QoL F, user 2026-11-23; the piano roll's twin): its last
+        placed point goes, nothing placed left = dropped. True when used (else Backspace deletes strokes)."""
+        d = self.draft
+        if not d or d["kind"] not in ("poly", "arc") or self.tool.get() not in ("poly", "arc") or self.drag:
+            return False
+        pts = d["pts"]
+        if d["kind"] == "arc" and (self.arc_bend or len(pts) == 3):
+            self.arc_bend = False
+            d["pts"] = [pts[0], pts[-1]]
+        elif d["kind"] == "poly" and len(pts) > 2:
+            del pts[-2]
+        else:
+            self.cancel_draft()
+        self.redraw()
+        return True
+
     def finish_poly(self):
         if not (self.draft and self.draft["kind"] == "poly" and self.tool.get() == "poly"):
             return

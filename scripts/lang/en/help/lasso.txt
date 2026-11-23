@@ -8,7 +8,7 @@ Above: after Enter, the piece inside was dragged to the right, leaving a hole.
 
 ## Three ways to draw
 
-The ▾ next to the Lasso button picks how you draw the loop:
+The ▾ next to the Lasso button picks how you draw the loop (the button then shows its name, e.g. "Polygonal lasso (J)", and Spiderweb remembers it, the Magnetic Width too):
 
 Lasso (drag): drag round the notes and let go. The loop closes straight back to where you started, and it's smoothed into a few curved points you can edit.
 

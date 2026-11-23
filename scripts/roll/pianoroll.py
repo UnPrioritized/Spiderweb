@@ -2383,6 +2383,25 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         else:
             self.commit_draft()
 
+    def draft_back(self):
+        """Backspace while a Polyline / Arc is half drawn (QoL F, user 2026-11-23): its last placed point goes (the
+        one following the mouse stays); nothing placed left = the shape is dropped. True when it was used."""
+        d = self.draft
+        if not d or d["kind"] not in ("poly", "arc") or self.drag:
+            return False  # (the mouse button held: nothing yet)
+        pts = d["pts"]
+        if d["kind"] == "arc" and (self.arc_bend or len(pts) == 3):  # (end placed / middle placed: back to 2)
+            self.arc_bend = False
+            d["pts"] = [pts[0], pts[-1]]
+        elif d["kind"] == "poly" and len(pts) > 2:
+            del pts[-2]
+        else:
+            self.drop_hz_keys()
+            self.cancel_draft()
+        self.drag = None
+        self.request_redraw()
+        return True
+
     def finish_poly(self):
         if not (self.draft and self.draft["kind"] == "poly"):
             return
@@ -2714,6 +2733,10 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return "break"
         if self.lasso_key(e):  # (Enter cuts, Esc throws the loop away, Backspace = a Polygonal loop's last point)
             return "break"
+        lq = getattr(self.app, "liquify_window", None)  # ([ / ] while Liquify is open: its brush Size, QoL F)
+        if lq is not None and lq.winfo_exists() and e.keysym in ("bracketleft", "bracketright") and not e.state & (CTRL | ALT):
+            lq.size_step(e.keysym == "bracketright")
+            return "break"
         if self.pen_key(e):  # ([ / ] with the Freehand tool: the pen thinner / thicker)
             return "break"
         k = e.keysym.lower()
@@ -2753,6 +2776,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 elif self.box_kept:  # (a box that selected no shape: over nothing / only a loaded MIDI's notes)
                     self.box_kept = None
                     self.request_redraw()
+        elif k == "backspace" and self.draft is not None and not e.state & (CTRL | ALT):
+            if self.draft_back():  # (a half-drawn Polyline / Arc: its last point off)
+                return "break"
         elif k in ("return", "kp_enter"):
             if not (self.app.vel.confirm() | self.app.tempo_pane.confirm()):  # Enter = done with a velocity /
                 self.finish_poly()                                             # tempo line

@@ -27,7 +27,7 @@ Holding Alt while brushing always gives the opposite: Twirl turns the other way,
 
 ## Brush settings
 
-Size: the brush's size in pixels on the screen (zooming doesn't change it).
+Size: the brush's size in pixels on the screen (zooming doesn't change it). While the Liquify window is open, [ and ] make it smaller and bigger, in steps of about a tenth of the size.
 
 Density: how hard the brush's edge is. Higher = the full push reaches further out (the dashed inner circle), lower = it fades out softly from the middle.
 

@@ -1,6 +1,6 @@
 The drawer ([page:custom|Custom shape] → Drawer…) is where you draw shapes for your library. Its tools work like the piano roll's: [page:drawer_select|Select (V)], Slice (K) (see [page:drawer_slice|Drawer: Slice]), Lasso (J) (see [page:drawer_lasso|Drawer: Lasso]), [page:drawer_erase|Eraser (E)], [page:drawer_line|Line (L)], [page:drawer_poly|Polyline (P)], [page:drawer_free|Freehand (F)], [page:drawer_curve|Curve (C)], [page:drawer_arc|Arc (A)], [page:drawer_square|Square (S)] and [page:drawer_circle|Circle (O)]. Areas (B) colours the areas inside (see [page:drawer_areas|Drawer: Areas]). Drag a stroke out, or click where it starts and click where it ends (right-click or Esc cancels). Double right-click switches between Select and the tool you used last.
 
-Grid (top bar) sets how many grid squares the board has across (4 to 64). Clear removes everything drawn (Ctrl+Z brings it back). Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes. Help (F1) opens these pages.
+Grid (top bar) sets how many grid squares the board has across (4 to 64). Clear removes everything drawn (Ctrl+Z brings it back). Ctrl+Z undoes, Ctrl+Y or Ctrl+Shift+Z redoes. Ctrl+A picks every stroke (not hidden or locked ones). Backspace while drawing a polyline or arc takes its last point off. Help (F1) opens these pages.
 
 Points stick to other strokes when the mouse is near them: to their points first, then to where two lines cross, then to where a line crosses the grid (a line through a grid point lands on it), then anywhere along a line (a purple mark shows where). A point stuck to a line is exactly on it, so the outline counts as closed there. Away from lines, points snap to the grid. Shift draws freely.
 
@@ -21,7 +21,7 @@ Groups: pick some strokes, right-click one (on the board or in Layers) > Group. 
 
 Clicking a grouped stroke on the board picks the whole group, so it moves, flips and turns as one; Ctrl+click picks a single stroke. Drag rows into a group or out of it in Layers, or drag the group's row to move it all. Right-click > Ungroup takes the group apart (the strokes stay). Pasted copies aren't in a group.
 
-Save keeps it in the library (the shapes folder inside the user folder next to Spiderweb); Use on the piano roll picks it for the Custom shape tool. On the piano roll it stretches to the box you drag.
+Save keeps it in the library (the shapes folder inside the user folder next to Spiderweb; with no name typed, it asks for one, "Shape 1" or the next free number filled in); Use on the piano roll picks it for the Custom shape tool. On the piano roll it stretches to the box you drag.
 
 Open (or double-click a name, or Enter) opens a saved shape from the library; New starts an empty drawing. Both ask first if the drawing has changes that aren't saved.
 
