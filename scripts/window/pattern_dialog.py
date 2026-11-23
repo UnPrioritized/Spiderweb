@@ -96,7 +96,7 @@ def save_pattern(name, item, layer="pattern"):
 
 
 def folder_of(layer):
-    """The saved list's folder (user/presets/Curve patterns or Curve shapes; window/preset_files.py)."""
+    """The saved list's folder (user/presets/Formula patterns or Formula shapes; window/preset_files.py)."""
     return preset_files.CURVE_SHAPES if layer == "shape" else preset_files.PATTERNS
 
 

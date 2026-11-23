@@ -53,7 +53,7 @@ Custom… (at the top of each list) shows every shape or pattern with its formul
 
 When its two halves match (like Wave, Bounce, S-curve or Circle), the points come as symmetric halves: moving a point moves its partner in the other half too. Double-click the line to add a point, right-click a point to remove it, Alt+drag for a sharp corner.
 
-The grid shows the numbers (x from 0 to 1 along one loop; y in keys); the mouse wheel zooms, dragging empty space (or middle-dragging) moves around, and Fit view shows all of it again. Save puts it in your list (one file each in the user folder's presets\Curve patterns or presets\Curve shapes; Delete sends it to the Recycle Bin), and from then on it's in the Formula menu too. Copy formula (next to Name) copies it as text with the numbers from the boxes filled in, to share or keep (changes made by hand and graphs aren't in it; a shape's "t from … to …" is).
+The grid shows the numbers (x from 0 to 1 along one loop; y in keys); the mouse wheel zooms, dragging empty space (or middle-dragging) moves around, and Fit view shows all of it again. Save puts it in your list (one file each in the user folder's presets\Formula patterns or presets\Formula shapes; Delete sends it to the Recycle Bin), and from then on it's in the Formula menu too. Copy formula (next to Name) copies it as text with the numbers from the boxes filled in, to share or keep (changes made by hand and graphs aren't in it; a shape's "t from … to …" is).
 
 ## Paste formula
 Paste formula… (next to Copy formula) opens a window to paste a formula into: from a website, a graphing site, a piece of code, or another user's Copy formula.
