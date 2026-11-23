@@ -11,6 +11,8 @@ Meet in the middle: both notes stretch toward each other and meet halfway. When 
 
 Every gap between the selected notes is filled, big ones too. To leave a gap alone, leave the notes on one side of it out of the selection.
 
+To keep the shapes editable, or to close only the small gaps, use [page:extend|Gate extend] instead: a note it lengthens never runs into the next note on its key, so a big amount in ticks (for example 99999) works like Stretch right, and a small amount closes only the gaps up to that size.
+
 ## Notes that overlap
 
 When a note runs on into the next one, it's cut where the next one starts, and both are kept.
