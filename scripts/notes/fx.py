@@ -35,7 +35,7 @@ from notes.glue import clean_glue
 from notes.strum import clean_strum
 from notes.trim import clean_trim
 
-# (old files' order first; "path" = Copy along a path, copypath.py; "trim" = Gate trim, trim.py)
+# (old files' order first; "path" = Copy along a path, copypath.py; "trim" = Shape trim, trim.py + wrap.py)
 TOOLS = ("chop", "claw", "strum", "path", "trim")
 CLEAN = {"chop": clean_chop, "claw": clean_claw, "strum": clean_strum, "path": clean_path, "trim": clean_trim}
 AXES = ("time", "keys")

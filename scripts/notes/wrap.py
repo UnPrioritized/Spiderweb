@@ -292,8 +292,8 @@ def tilted(a, cfg, th, outline=None):
         x = -rest / np.where(np.abs(coef) > 1e-15, coef, 1.0)
         return np.clip(x, xa[p], xb[p])
 
-    left = np.where(i == 0, xa[p], cut_x(i - 1))
-    right = np.where(i == m[p], xb[p], cut_x(i))
+    right = np.where(i == m[p], xb[p], cut_x(i))  # (each cut once: a bit's start = the bit before's end)
+    left = np.where(i == 0, xa[p], np.r_[0.0, right[:-1]])
     left = np.minimum(left, right)
     k = np.where(upp, ka[p] + i, kb[p] - i)
     note = idx[p]
@@ -302,9 +302,12 @@ def tilted(a, cfg, th, outline=None):
         xm = (left + right) / 2
         lo_m, hi_m = a_lo[p] + b_lo[p] * xm, a_hi[p] + b_hi[p] * xm
         um_ = c * xm - s * y[p]
-        slack = 0.5 / h  # (half a key: rows end on the outline give or take their rounding)
-        out_ = ~(np.isin(q[p], has) | np.isin(q[p] + 1, has)) | (um_ < lo_m - slack) | (um_ > hi_m + slack)
-        k = inner_slices(k, out_, key[note], np.floor(bt0 + left * bw + 0.5))
+        out_ = ~(np.isin(q[p], has) | np.isin(q[p] + 1, has)) | (um_ < lo_m - 1e-12) | (um_ > hi_m + 1e-12)
+        k, left_out = inner_slices(k, out_, note)  # (the bits are in order along each note: no sorting)
+        if left_out.any():  # (a whole note outside, a spam note at a row's end: its key's nearest bit inside)
+            sel = np.isin(key[note], np.unique(key[note][left_out]))
+            o = np.flatnonzero(sel)[np.lexsort((left[sel], key[note][sel]))]
+            k[o] = inner_slices(k[o], left_out[o], key[note][o])[0]
     ta = np.floor(bt0 + left * bw + 0.5).astype(np.int64)
     tb = np.floor(bt0 + right * bw + 0.5).astype(np.int64)
     ta, tb = np.clip(ta, s0[note], e0[note]), np.clip(tb, s0[note], e0[note])
@@ -322,27 +325,24 @@ def tilted(a, cfg, th, outline=None):
     return out, k[first]
 
 
-def inner_slices(k, out_, key, start):
-    """Pieces' slices with the ones marked out_ (outside the outline) taking the slice of the nearest piece inside on
-    their key (the one before along the key, else the one after; none inside: kept)."""
-    if not out_.any() or out_.all():
-        return k
-    o = np.lexsort((start, key))
-    ko, oo, yo = k[o], out_[o], key[o]
-    pos = np.arange(len(o))
-    before = np.maximum.accumulate(np.where(~oo, pos, -1))
-    after = np.minimum.accumulate(np.where(~oo, pos, len(o))[::-1])[::-1]
-    ok_b = (before >= 0) & (yo[np.maximum(before, 0)] == yo)
-    ok_a = (after < len(o)) & (yo[np.minimum(after, len(o) - 1)] == yo)
+def inner_slices(k, out_, group):
+    """Pieces in order within each group (a note, or a key sorted along time): the ones marked out_ (outside the
+    outline) take the slice of the nearest piece inside in their group (the one before, else the one after) ->
+    (the slices, the ones left outside: no piece inside in their group)."""
+    if not out_.any():
+        return k, out_
+    pos = np.arange(len(k))
+    before = np.maximum.accumulate(np.where(~out_, pos, -1))
+    after = np.minimum.accumulate(np.where(~out_, pos, len(k))[::-1])[::-1]
+    ok_b = (before >= 0) & (group[np.maximum(before, 0)] == group)
+    ok_a = (after < len(k)) & (group[np.minimum(after, len(k) - 1)] == group)
     near_b = np.where(ok_b, pos - before, np.inf)
     near_a = np.where(ok_a, after - pos, np.inf)
     src = np.where(near_b <= near_a, before, after)
-    fix = oo & (ok_b | ok_a)
-    ko = ko.copy()
-    ko[fix] = ko[np.clip(src[fix], 0, len(o) - 1)]
+    fix = out_ & (ok_b | ok_a)
     out = k.copy()
-    out[o] = ko
-    return out
+    out[fix] = k[np.clip(src[fix], 0, len(k) - 1)]
+    return out, out_ & ~(ok_b | ok_a)
 
 
 def no_slivers(note, k, ta, tb, key, most):

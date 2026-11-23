@@ -85,7 +85,7 @@ On shapes with millions of notes, after letting go the new notes take a moment t
 
 ## Edits that change notes
 
-Some colours depend on the other notes in the shape: Stir, Warp and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes ([page:glue|Glue], [page:chop|Chop], [page:claw|Claw machine], [page:strum|Strum], [page:trim|Gate trim], [page:subtract|Gate subtract], [page:extend|Gate extend], [page:sustain|Sustain], [page:fill_gaps|Fill gaps]...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
+Some colours depend on the other notes in the shape: Stir, Warp and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes ([page:glue|Glue], [page:chop|Chop], [page:claw|Claw machine], [page:strum|Strum], [page:trim|Shape trim], [page:subtract|Gate subtract], [page:extend|Gate extend], [page:sustain|Sustain], [page:fill_gaps|Fill gaps]...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
 
 Bends can never be perfectly smooth: MIDI notes sit on whole keys and whole ticks. See [page:deform#How exact a bend can be|Deform: Colours or Shape].
 

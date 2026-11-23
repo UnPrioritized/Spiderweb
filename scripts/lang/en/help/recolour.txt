@@ -70,7 +70,7 @@ A Stir turned back to nothing (Reset, or every knob at 0) keeps its place in the
 
 Shapes from files made before keep their look: their effects load in the order they always ran.
 
-The list shows the shape's note tool pages too ([page:claw|Claw], [page:strum|Strum], [page:chop|Chop], [page:trim|Gate trim], [page:path|Copy along a path]). A colour effect above a page colours the notes before that page: a Stir above Copy along a path is copied like a painted stamp, every copy the same; below it, one swirl goes across all the copies. A page you add goes at the end. Pages can be dragged into any order (their tabs follow), and while you change a colour effect above a page, that page is switched off too.
+The list shows the shape's note tool pages too ([page:claw|Claw], [page:strum|Strum], [page:chop|Chop], [page:trim|Shape trim], [page:path|Copy along a path]). A colour effect above a page colours the notes before that page: a Stir above Copy along a path is copied like a painted stamp, every copy the same; below it, one swirl goes across all the copies. A page you add goes at the end. Pages can be dragged into any order (their tabs follow), and while you change a colour effect above a page, that page is switched off too.
 
 ## With the rest of Spiderweb
 
@@ -84,7 +84,7 @@ Slicing a drawn shape keeps each piece's colours, and the pieces keep Recolour, 
 
 Turn into plain notes, [page:merge|Gate sensitive merge], [page:domino|Copy to Domino] and [page:files|Export MIDI] all keep the colours you see.
 
-Some colours depend on the other notes in the shape: Stir, Warp and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes ([page:glue|Glue], Chop, Claw machine, Strum, Gate trim, Gate subtract, [page:extend|Gate extend], Sustain, [page:fill_gaps|Fill gaps]...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
+Some colours depend on the other notes in the shape: Stir, Warp and Liquify take the colour of the nearest note, Per chord and Per run follow their group, Shuffle changes a colour that would sound together with another, and Shuffle and Clumps count from the shape's first note and lowest key. So editing notes ([page:glue|Glue], Chop, Claw machine, Strum, Shape trim, Gate subtract, [page:extend|Gate extend], Sustain, [page:fill_gaps|Fill gaps]...) can change colours elsewhere in the shape, and in Single channel where overlapping notes end. To keep the colours as they are, use Turn into plain notes first.
 
 ## Your own default
 

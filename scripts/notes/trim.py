@@ -1,4 +1,4 @@
-"""Gate trim (a user's request, 2026-10-23): on each key, every RUN of notes touching end to end (a gap of even one
+"""Shape trim, its row trim (once called Gate trim; a user's request, 2026-10-23): on each key, every RUN of notes touching end to end (a gap of even one
 tick starts a new run; all colours together) keeps "keep" % of its whole length (up to 3 decimals), or with "by"
 "ticks" a fixed "length" (beats, whole ticks at the PPQ; a run shorter stays whole), counted from its start ("side"
 "left") or from its end ("right"). The notes aren't squeezed: the ones inside stay as they are, the note the cut

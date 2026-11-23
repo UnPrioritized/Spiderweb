@@ -1,4 +1,4 @@
-"""The Gate trim window (trim.py): each key row's runs of touching notes cut down to a share of their length, or to
+"""The Shape trim window (trim.py: Trim rows; wrap.py: Wrapped slices): each key row's runs of touching notes cut down to a share of their length, or to
 a number of ticks, shown live on the piano roll (the shared part: tool_window.py). One number (Keep [n] [% / ticks
 of each row], a slider for the %) and which end stays."""
 

@@ -14,7 +14,7 @@ Colours and channel show how its notes take turns over channels and what decides
 
 ## The steps
 
-Under the basics is one list of every step done to the notes after they're made, the top one first, each working on what the one above it left: note tool pages ([page:claw|Claw machine], [page:strum|Strum], [page:chop|Chop], [page:trim|Gate trim], [page:path|Copy along a path]), [page:glue|glue], [page:sustain|Sustain], [page:gate_flip|Gate aware flip], [page:extend|Gate extend], [page:subtract|Gate subtract] and the colour effects (Shuffle or Split, each Stir tab, Warp, Liquify, Reverse track order). A flip, turn or velocity line done after a note tool page is a step too.
+Under the basics is one list of every step done to the notes after they're made, the top one first, each working on what the one above it left: note tool pages ([page:claw|Claw machine], [page:strum|Strum], [page:chop|Chop], [page:trim|Shape trim], [page:path|Copy along a path]), [page:glue|glue], [page:sustain|Sustain], [page:gate_flip|Gate aware flip], [page:extend|Gate extend], [page:subtract|Gate subtract] and the colour effects (Shuffle or Split, each Stir tab, Warp, Liquify, Reverse track order). A flip, turn or velocity line done after a note tool page is a step too.
 
 The greyed lines at the top can't move: "The notes as drawn" (the drawing, its fill, Colours and velocity: every step works on them) and, in Single channel, "Overlaps fixed", so the steps work on the notes as you hear them.
 

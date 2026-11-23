@@ -421,7 +421,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.strum_window = None
         self.strum_pos = ""  # (the same for the strum window)
         self.trim_window = None
-        self.trim_pos = ""  # (and the Gate trim window)
+        self.trim_pos = ""  # (and the Shape trim window)
         self.chop_window = None
         self.chop_pos = ""  # (and the chop window)
         self.path_window = None  # Copy along a path (path_window.py)
@@ -3756,6 +3756,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 for c in [t.get(k) for k in CENTRE_KEYS] + list((t.get("patterns_kept") or {}).values()):
                     if isinstance(c, dict) and c.get("colours", 0) > most:
                         over.append((c, "colours"))
+                for st in t.get("fx") or ():  # (Shape trim's Wrapped slices pages: their colours, and the 16 they
+                    c = st.get("cfg") if st.get("tool") == "trim" else None  # go round)
+                    if isinstance(c, dict) and c.get("mode") == "wrap":
+                        over += [(c, k) for k in ("colours", "most") if c.get(k, 0) > most]
             if over:
                 found.append(sh)
             if clamp:
