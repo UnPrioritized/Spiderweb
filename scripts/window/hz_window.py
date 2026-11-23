@@ -387,6 +387,7 @@ class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzLfo, 
         self.show_stale()
         self.show_clash(sh)
         self.show_cc()
+        self.show_count()
         self.after_idle(self.layout)  # (its width changed)
         # (a funnel / text keeps the length it's drawn)
         self.grow_box.config(state="normal" if sh is not None and sh["kind"] != "funnel" and not sh.get("text")

@@ -2,9 +2,9 @@ Layers in the Hz bass window's toolbar shows the layers list on the left (it's h
 
 Click a layer to pick it: you place and edit only its notes, and the other layers' notes show faded. + adds a layer. M mutes a layer, S plays it alone (solo).
 
-Right-click a layer to rename it, change its colour, delete it, move it up or down, or copy its sound to another layer. You can also drag a row to move it, or click a picked layer's name again to rename it. The Delete key removes the picked layer.
+Right-click a layer to rename it, change its colour, delete it, move it up or down, or copy its sound to another layer. You can also drag a row to move it, or click a picked layer's name again to rename it. The Delete key removes the picked layer. Duplicate layer (in the same menu) copies the layer, its notes and its sound, right under it.
 
-[page:hz_slides|Slides] only go between notes of the same layer.
+[page:hz_slides|Slides] only go between notes of the same layer. To move notes to another layer, right-click them (or a selection) and pick "Move to layer": a note joined to others by slides takes them along, so its slides stay whole. "New layer" there makes a layer for them.
 
 With [page:channels#Multi channel: shapes whose|Multi channel], when two layers play the same key at the same time, the notes of the lower layer in the list go on another MIDI channel (one channel can't play a key twice at once). Orange text in the toolbar says how many.
 

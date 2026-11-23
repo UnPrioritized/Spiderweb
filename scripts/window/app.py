@@ -2453,6 +2453,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self.play_changed()
         if self.hz_window:
             self.hz_window.show_cc()  # (its CC lines on other shapes' channels: the notes just made)
+            self.hz_window.show_count()  # (QoL L: the notes just made, counted)
         # placed pictures: their notes are drawn in the picture's own colours (the first picture's: they share them)
         self.picture_owners = np.array([picture_like(sh) for sh in self.shapes], bool)
         self.picture_pal = self.slots_pal()

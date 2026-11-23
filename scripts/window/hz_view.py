@@ -612,6 +612,20 @@ class HzView:
         self.said_until = time.perf_counter() + StatusLine.HOLD_MS / 1000
         self.status.config(text=text)
 
+    def made_count(self, sh):
+        """EXACTLY how many notes the Hz bass made last (QoL L, user 2026-11-23: was the quick "about" count): the
+        notes made now; while they wait for a slow drag, the last exact count (the quick one before any)."""
+        app = self.app
+        if not app.notes_late:
+            notes = app.notes_tracks(sh)[0]
+            self.last_made = (id(sh), len(notes) if notes is not None else 0)
+        kept = getattr(self, "last_made", None)
+        return kept[1] if kept and kept[0] == id(sh) else app.note_count(sh)
+
+    def show_count(self):
+        """The status line's count again once the notes are made (after each change: App.shapes_changed)."""
+        self.show_status()
+
     def show_status(self, e=None):
         if time.perf_counter() < self.said_until:
             return
@@ -619,7 +633,7 @@ class HzView:
         text = tr("hz.one_note") if n == 1 else tr("hz.n_notes", n=n)
         sh = self.target()
         if sh is not None and all_tones(sh.get("hz") or {}):  # (every layer's: what the piano roll gets)
-            made = self.app.note_count(sh)
+            made = self.made_count(sh)
             text += "     " + trn("hz.repeats", made, n=f"{made:,}")
         if e is not None and e.x >= self.kb_w and e.y >= self.ruler_h:
             k = self.key_at(e.y)

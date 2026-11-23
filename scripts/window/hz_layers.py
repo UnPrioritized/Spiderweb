@@ -297,6 +297,8 @@ class LayerStrip:
         m.add_separator()
         m.add_command(label=tr("hz.layer_add"), command=self.add,
                       state="normal" if len(plain_layers(hz)["layers"]) < LAYERS else "disabled")
+        m.add_command(label=tr("hz.layer_duplicate"), command=lambda: self.duplicate(i),
+                      state="normal" if len(plain_layers(hz)["layers"]) < LAYERS else "disabled")
         m.add_command(label=tr("hz.layer_delete"), command=lambda: self.remove(i),
                       state="normal" if len(plain_layers(hz)["layers"]) > 1 else "disabled")
         m.tk_popup(e.x_root, e.y_root)
@@ -347,6 +349,82 @@ class LayerStrip:
         every = layers_of(hz)
         hz = dict(hz, layers=hz["layers"] + [new_entry(hz["layers"])])
         self.put(with_layers(hz, every + [empty_layer(every)], len(every)), tr("hz.step_layer_add"))
+
+    def duplicate(self, i):
+        """Layer i copied (its notes AND sound, mute / solo off) right under it, the copy picked (QoL L, user
+        2026-11-23: the same notes twice = louder, or a start for a second sound)."""
+        hz = self.edited_hz()
+        if hz is None:
+            return
+        hz = plain_layers(copy.deepcopy(hz))
+        if len(hz["layers"]) >= LAYERS or not 0 <= i < len(hz["layers"]):
+            return self.win.bell()
+        every, info = layers_of(hz), list(hz["layers"])
+        entry = {k: v for k, v in new_entry(info).items()}
+        entry["name"] = tr("hz.layer_copy_name", name=self.name_of(hz, i))
+        every.insert(i + 1, copy.deepcopy(every[i]))
+        info.insert(i + 1, entry)
+        self.put(with_layers(dict(hz, layers=info), every, i + 1), tr("hz.step_layer_duplicate"))
+
+    def move_notes(self, picked, k):
+        """The notes picked (places in the shown layer's notes) moved into layer k (k = the count: a new layer under
+        the others), with every note a slide joins them to (a slide moves with both its ends: slides stay within one
+        layer). They get new numbers there; the shown layer stays picked. One undo step (QoL L, user 2026-11-23)."""
+        hz = self.edited_hz()
+        win = self.win
+        if hz is None or not picked:
+            return
+        hz = plain_layers(copy.deepcopy(hz))
+        cur, n = hz["layer"], len(hz["layers"])
+        if k == cur or not 0 <= k <= n or (k == n and n >= LAYERS):
+            return win.bell()
+        every, info = layers_of(hz), list(hz["layers"])
+        if k == n:
+            every.append(empty_layer(every))
+            info.append(new_entry(info))
+        src = every[cur].get("tones") or []
+        ids = {win.tones[j]["id"] for j in picked if j < len(win.tones)}
+        joined = {}  # (each note's slide partners, both ways)
+        for a in src:
+            for s in a.get("to") or ():
+                joined.setdefault(a["id"], set()).add(s["id"])
+                joined.setdefault(s["id"], set()).add(a["id"])
+        todo = list(ids)
+        while todo:
+            for b in joined.get(todo.pop(), ()):
+                if b not in ids:
+                    ids.add(b)
+                    todo.append(b)
+        have = list(every[k].get("tones") or [])
+        base = next_id(have)
+        moving = [m for m in src if m["id"] in ids]
+        new_id = {m["id"]: base + j for j, m in enumerate(moving)}
+        moved = [dict(copy.deepcopy(m), id=new_id[m["id"]],
+                      to=[dict(s, id=new_id[s["id"]]) for s in m.get("to") or () if s["id"] in new_id])
+                 for m in moving]
+        every[cur] = dict(every[cur], tones=[m for m in src if m["id"] not in ids])
+        every[k] = dict(every[k], tones=clean_tones(have + moved))
+        win.sel = set()
+        win.box_kept = None
+        self.put(with_layers(dict(hz, layers=info), every, cur), tr("hz.step_notes_layer"))
+
+    def move_menu(self, menu, picked):
+        """The note menu's "Move to layer ▸" (hz_mouse.show_menu / show_box_menu): every other layer, then a new
+        layer under them."""
+        hz = self.hz()
+        if hz is None:
+            return
+        info = plain_layers(hz)["layers"]
+        cur = hz.get("layer", 0)
+        to = tk.Menu(menu, tearoff=False)
+        for k in range(len(info)):
+            if k != cur:
+                to.add_command(label=self.name_of(hz, k), command=lambda k=k: self.move_notes(picked, k))
+        if len(info) > 1:
+            to.add_separator()
+        to.add_command(label=tr("hz.layer_new_for_notes"), command=lambda: self.move_notes(picked, len(info)),
+                       state="normal" if len(info) < LAYERS else "disabled")
+        menu.add_cascade(label=tr("hz.move_to_layer"), menu=to)
 
     def with_more(self, hz, more):
         """hz (being saved by commit) with notes pasted from Domino put in: more[k] goes into the layer k + 1 places
