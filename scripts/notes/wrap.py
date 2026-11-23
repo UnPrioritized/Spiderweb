@@ -1,6 +1,6 @@
-"""Wrapped slices (Shape trim's second mode; a tester's "beach ball" request, 2026-11-23, PLAN.md): the shape's notes
+"""Wrapped slices (Trim shape's second mode; a tester's "beach ball" request, 2026-11-23, PLAN.md): the shape's notes
 are cut into curved slices as if it were wrapped round a ball or a can, each slice its own colour. A page of the
-Shape trim window ("tool": "trim" with "mode": "wrap"; trim.py keeps the row trim).
+Trim shape window ("tool": "trim" with "mode": "wrap"; trim.py keeps the row trim).
 
 Each row (all notes on one key from its first start to its last end: "gaps" "whole"; or each run of touching notes
 on its own, as the row trim counts them: "each") is cut into "slices" pieces. Cut k of n sits at share f(k) of the

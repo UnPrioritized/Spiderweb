@@ -4,7 +4,7 @@ What changed in each version, newest first. This page opens by itself the first 
 
 What's new:
 
-• Gate trim is now called Shape trim, and it has a second mode: Wrapped slices. It cuts a shape's notes into curved slices as if the shape were wrapped round a ball, each slice its own colour, so a circle becomes a striped beach ball. Pick the number of slices and colours, the angle (top and bottom, sideways or slanted), and how round the slices look. Any shape works, and each slice can become a shape of its own. See [page:trim|Shape trim].
+• Gate trim is now called Trim shape, and it has a second mode: Wrapped slices. It cuts a shape's notes into curved slices as if the shape were wrapped round a ball, each slice its own colour, so a circle becomes a striped beach ball. Pick the number of slices and colours, the angle (top and bottom, sideways or slanted), and how round the slices look. Any shape works, and each slice can become a shape of its own. See [page:trim|Trim shape].
 
 • Draw on Domino: while a shape waits on Domino (before it goes in), your drawing tool works like Select on it. Drag its line or inside to move it, drag its points or a curve's handles, drag its box corners and sides to resize it, or just outside a corner to turn it. Press anywhere else to draw a new shape; hold Ctrl to draw even on top of it. The pointer shows the move arrows where a press changes the shape. See [page:companion|Draw on Domino].
 
@@ -20,7 +20,7 @@ What's new:
 
 • Gate extend and Gate subtract: type the amount the way you mean it. 120 = ticks, 50% = half of each note's length, 50% + 10 = both, and math like 960*2 works. Gate subtract can use % now too. Amount in follows what you type. See [page:extend#The amount|Gate extend].
 
-• Your own defaults: the pin next to OK / Accept / Close in the tool windows (Gate extend and subtract, Sustain, Spam gate range, Tumours, Claw machine, Strum, Chop, Shape trim, Copy along a path, Shares, Stir, Warp, Liquify, Fill with tempo jumps, Channel per strip, Add between, Image to notes) saves the window's settings as what shapes start with. Settings → [page:settings#User set defaults|User set defaults] lists them, changes them and resets them, and can hide the pins.
+• Your own defaults: the pin next to OK / Accept / Close in the tool windows (Gate extend and subtract, Sustain, Spam gate range, Tumours, Claw machine, Strum, Chop, Trim shape, Copy along a path, Shares, Stir, Warp, Liquify, Fill with tempo jumps, Channel per strip, Add between, Image to notes) saves the window's settings as what shapes start with. Settings → [page:settings#User set defaults|User set defaults] lists them, changes them and resets them, and can hide the pins.
 
 • Warp and Liquify no longer carry the last picks over to the next shape: every opening starts from the program's own, or from your pinned default.
 

@@ -1,4 +1,4 @@
-Select one or more shapes, then right-click one: Shape trim… (also in the Tools menu; it used to be called Gate trim). Mode picks what it does:
+Select one or more shapes, then right-click one: Trim shape… (also in the Tools menu; it used to be called Gate trim). Mode picks what it does:
 
 • Trim rows: each row of touching notes on a key is cut down to a share of its whole length.
 • Wrapped slices: the notes are cut into curved slices, as if the shape were wrapped round a ball or a can, and each slice gets its own colour.
