@@ -179,7 +179,7 @@ Autosave and problems
   autosave-backup.json: open it with File -> Open... if something went
   wrong. The first time a new version starts, it packs the older
   version's settings, palettes, shapes and presets into a zip in
-  user/backups/ first.
+  user/backups/settings/ first.
 - If Spiderweb runs into an error, the details go to spiderweb-error.log
   next to it. If it closes by itself, spiderweb-crash.log there says where
   (it's written the next time Spiderweb starts). Please include these files

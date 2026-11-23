@@ -66,7 +66,7 @@ While the window is open the piano roll shows the area as a dashed line. With th
 
 A Circle, a Square and a Diamond, each turned 90° and twisted half a turn inside; outside them nothing changes.
 
-Below the line in the Area dropdown are the drawings in your shape library: pick one and the area takes that drawing's outline, as drawn (Size is the width of its box). The stir keeps its own copy, so changing or deleting the library drawing later changes nothing here.
+Below the line in the Area dropdown are the drawings in your shape library (those in folders under a grey heading per folder): pick one and the area takes that drawing's outline, as drawn (Size is the width of its box). The stir keeps its own copy, so changing or deleting the library drawing later changes nothing here.
 
 The colours stir from the area's middle out along each arm to the outline, so a star's arms stir right out to their tips; a part of the drawing away from the middle (a frame around a hole) stirs most halfway across it, and a hole stays as it is. A drawing with only open lines has no inside, so it can't be an area.
 
@@ -158,11 +158,11 @@ Stir 1 turns the stripes 90°; Stir 2 adds a small swirl in one spot.
 
 ## Presets
 
-The Preset row above the tabs keeps stirs you like, so you can use them again in any project. Save… keeps the shown tab's stir under a name you type (the same name again replaces it). With "Save all tabs" ticked, every tab goes into the preset, and the list shows how many it holds, e.g. "Swirl (3 tabs)".
+The Preset row above the tabs keeps stirs you like, so you can use them again in any project. Save… keeps the shown tab's stir under a name you type (a name already used asks before replacing it). With "Save all tabs" ticked, every tab goes into the preset, and the list shows how many it holds, e.g. "Swirl (3 tabs)".
 
 Picking a preset puts it in place of the shown tab only; a preset of several tabs puts all of them there, and the other tabs stay as they are. It is one undo step.
 
-The Centre point and the area are counted in % of the shape, so a preset fits any shape. A preset keeps the stir as it looks, also on a shape you flipped or turned since stirring it, and looks the same on a flipped shape (only Straight to round can't be mirrored: it stays as it was). The list names the preset the shown tab is. Delete takes that preset out of the list after asking (with none shown, you pick which one); the stirs on your shapes stay. To save, select one shape: with several shapes stirred differently, Save asks you to pick one.
+The Centre point and the area are counted in % of the shape, so a preset fits any shape. A preset keeps the stir as it looks, also on a shape you flipped or turned since stirring it, and looks the same on a flipped shape (only Straight to round can't be mirrored: it stays as it was). The list names the preset the shown tab is. Delete sends that preset to the Recycle Bin after asking (with none shown, you pick which one); the stirs on your shapes stay. To save, select one shape: with several shapes stirred differently, Save asks you to pick one.
 
 Reset puts the shown stir back to nothing; the tab keeps its place in the order of the steps ([page:properties|Properties…]) until you take it away with ×. An area picked after Reset starts plain (Size 50 %, no stretch, angle or slant). The button reads "Stir… (on)" while a selected shape has one. Picking Off in the Recolour dropdown keeps the stir; with Off, only the shape's own colours are stirred (Shuffle's settings such as Per chord or Colours wait until you pick Shuffle again).
 
