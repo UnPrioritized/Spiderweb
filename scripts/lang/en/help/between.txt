@@ -14,7 +14,7 @@ In the window:
 
 OK keeps it all as one undo step, Cancel puts everything back.
 
-Push: the steps travel straight from one shape to the next unless pushed. The pad beside the picture works like a game controller's stick: drag from the middle and the steps leave the picked shape that way, the further out the harder, then curve round to reach the next shape. The middle pulls the stick in (hold Shift to place it anywhere), Ctrl gives 8 ways only, double-click = no push.
+Push: the steps travel straight from one shape to the next unless pushed. The pad beside the picture works like a game controller's stick: drag from the middle and the steps leave the picked shape that way, the further out the harder, then curve round to reach the next shape. The middle pulls the stick in (hold Shift to place it anywhere), Ctrl gives 8 ways only, double-click or middle-click = no push.
 [clip:between-push]
 
 Click a shape's line in the picture to pick which one the pad pushes (the first shape, the last, or a key shape; the picked one has a pale yellow band). Pushing the last shape sets the way the steps arrive at it. Notes pushed past the top key or below key 0 are cut off. Smooth through keys lets the steps go through each key shape without a corner.

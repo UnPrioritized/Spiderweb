@@ -2,7 +2,7 @@
 points and pieces dragged, a wobble on a piece. Everything it makes is the note's own bend line (tone["bend"], see
 hz_bend.py), so the Bend tool, Copy / Paste bend and presets go on working with it. Points and curve squares
 work like the Bend tool's (hz_bend.BEND_TOOLS), but a press on a note's line only picks the note: a DOUBLE-click
-there adds a point (sketch_double), a double-click on a point takes it away. On empty space a press starts a new note there (grid; Shift free) and the
+there adds a point (sketch_double); a point goes by its right-click menu (Delete point). On empty space a press starts a new note there (grid; Shift free) and the
 drag sets its end (hz_mouse's "new" drag, sketch_new_to); Ctrl+drag = a Select box.
 
 While it's on, each note shows as a thick line where it's heard (its tune and bend; not the Pitch line / vibrato,

@@ -27,6 +27,9 @@ For a shape that wipes away or grows in (like the moon's phases), copy it a few 
 ## Wrapped slices
 
 Every row is cut into slices, and slice by slice the colours go round. A filled circle becomes a striped beach ball whose stripes meet in two points. Any shape works: a triangle fans out from its tip, a square gets straight stripes like a can. The points come only from the outline getting narrower; nothing is added. No note is lost or moved: notes are only cut where a slice ends.
+[clip:trim-wrapped]
+
+8 slices in 4 colours: a circle at 0° and at 45°, and a square.
 
 • Slices: how many slices each row is cut into. Slices thinner than a tick, or than a key where they run sideways, can't show and vanish.
 • Colours: how many colours the slices go round (15 at most, 16 with "Use channel 10"). Slice 1 keeps the shape's own colour. The colours show in Multi channel. With "Repeated colours get new channels" ticked, each time the slices go round the colours again they get channels of their own.

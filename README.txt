@@ -44,9 +44,9 @@ What it can do
 - Note tools: Claw machine, Strum and Chop pages that change the notes of a
   shape, Add between (shapes that step from one shape to another),
   Recolour, Stir, Warp and Liquify (swirl, bend with a grid, or brush the
-  colours you drew, or the shape itself), Gate trim, Gate extend, Fill gaps, Fold tracks (many
-  tracks onto fewer), slicing (with a line, a Lasso loop or another shape)
-  and merging. The Properties window lists every step done to a shape:
+  colours you drew, or the shape itself), Trim shape (with Wrapped
+  slices), Gate extend, Fill gaps, Fold tracks (many tracks onto fewer),
+  slicing (with a line, a Lasso loop or another shape) and merging. The Properties window lists every step done to a shape:
   drag to change their order.
 - Draw on Domino (Experimental, Windows): Spiderweb's drawing tools right
   on Domino's piano roll; each finished shape goes into Domino's current
@@ -116,7 +116,9 @@ buttons) go back and forth.
                    menu
   Space            play / stop
   Right-drag       listen to the notes under the mouse
-  Wheel            scroll (Ctrl+wheel = zoom, middle-drag = scroll)
+  Wheel            scroll (Shift = sideways, Ctrl+Shift = zoom time,
+                   Alt = zoom keys, Ctrl+Alt = zoom both; middle-drag
+                   = scroll)
   Ctrl+Z / Ctrl+Y  undo / redo
   Tab              track list <-> piano roll
   Ctrl+E           Export MIDI (File menu): writes the .mid file

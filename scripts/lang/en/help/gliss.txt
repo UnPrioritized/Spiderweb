@@ -13,7 +13,7 @@ The side panel's Grids picks which grid sizes the step can be: Halves (1/1, 1/2,
 
 While the Glissando tool is in use, or a run is selected, click the piano keys on the left to pick which keys the run plays. Picked keys light up blue, and each click plays the key so you can hear it.
 
-A click picks that note in every octave: click C, E and G for a C major run. Click a lit key again to unpick that note in every octave. Ctrl+click picks or unpicks just that one key. Hold the button and move up or down to hear other keys: the key you let go on is the one picked.
+A click picks that note in every octave: click C, E and G for a C major run. Click a lit key again to unpick that note in every octave. Ctrl+click picks or unpicks just that one key. Hold the button and move up or down to hear other keys: the key you let go on is the one picked. While you hold a key, its row on the piano roll gets a faint shade so you can see where it lines up.
 [clip:gliss-keys]
 
 C, E and G picked (lit blue on the piano keys) for the selected run on the left; the run on the right uses the white keys.

@@ -1,6 +1,6 @@
 How the mouse and keys work everywhere: [page:controls|Mouse and keys].
 
-Tools: V [page:select|Select], K [page:slice|Slice], J [page:lasso|Lasso], L [page:line|Line], P [page:poly|Polyline], F [page:free|Freehand], C [page:curve|Curve], A [page:arc|Arc], S [page:custom|Custom shape], O [page:box|Circle], Q Polygon, N [page:funnel|Funnel], X [page:text|Text], H [page:hz_bass|Hz bass], I [page:picture|Image]. G = [page:live|Live shape] on / off. M = [page:masks|Mask] on / off.
+Tools: V [page:select|Select], K [page:slice|Slice], J [page:lasso|Lasso], L [page:line|Line], P [page:poly|Polyline], F [page:free|Freehand], C [page:curve|Curve], A [page:arc|Arc], R [page:gliss|Glissando], S [page:custom|Custom shape], O [page:box|Circle], Q Polygon, N [page:funnel|Funnel], X [page:text|Text], H [page:hz_bass|Hz bass], I [page:picture|Image]. G = [page:live|Live shape] on / off. M = [page:masks|Mask] on / off.
 
 Drawing: Shift = don't snap. Ctrl = perfect (circle, equal-sided polygon or star, proportions). Esc = cancel what's half drawn. [ / ] = line tools' pen one key thinner / thicker (Shift, or { / }: five keys; see [page:thickness|Thickness]); while the Liquify window is open, [ / ] = its brush smaller / bigger. Backspace = take the last point off a polyline or arc you're still drawing (piano roll and drawer). Enter, double-click or right-click = finish a polyline (right-click drops an unfinished arc or a shape started with a click).
 

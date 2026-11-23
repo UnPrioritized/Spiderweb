@@ -33,8 +33,8 @@ Windows, nothing to install. Linux and Windows users can also [run it from sourc
 - **Image to notes:** turn an image into notes in up to 15 colours (16 with channel 10).
 - **Note tools:** Claw machine, Strum and Chop pages that change the notes of a shape, Add between (shapes that step
   from one shape to another), Recolour, Stir, Warp and Liquify (swirl, bend with a grid, or brush the colours you
-  drew, or the shape itself), Gate trim, Gate extend, Fill gaps, Fold tracks (many tracks onto fewer), slicing (with a line, a Lasso loop
-  or another shape) and merging. The Properties window lists every step done to a shape: drag to change their order.
+  drew, or the shape itself), Trim shape (with Wrapped slices), Gate extend, Fill gaps, Fold tracks (many tracks
+  onto fewer), slicing (with a line, a Lasso loop or another shape) and merging. The Properties window lists every step done to a shape: drag to change their order.
 - **Draw on Domino** (Experimental, Windows): Spiderweb's drawing tools right on Domino's piano roll; each finished
   shape goes into Domino's current track by itself. Take brings Domino's selected notes (several tracks, and with a
   tick in Settings the tracks onion skin shows) into Spiderweb to change, and Send puts them back into their
@@ -93,7 +93,7 @@ forward buttons) go back and forth.
 | Select (V) | Click a shape, drag it or its points; right-click = its menu |
 | Space | Play / stop |
 | Right-drag | Listen to the notes under the mouse |
-| Wheel | Scroll (Ctrl+wheel = zoom, middle-drag = scroll) |
+| Wheel | Scroll (Shift = sideways, Ctrl+Shift = zoom time, Alt = zoom keys, Ctrl+Alt = zoom both; middle-drag = scroll) |
 | Ctrl+Z / Ctrl+Y | Undo / redo |
 | Tab | Track list ↔ piano roll |
 | Ctrl+E | Export MIDI (File menu): writes the .mid file |

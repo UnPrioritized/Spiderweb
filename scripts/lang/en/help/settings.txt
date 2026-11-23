@@ -4,7 +4,7 @@ General: how often to look for a new version (and Check now), tips on or off, Sh
 
 New projects: what New and [page:load_midi|Load MIDI] start with: PPQ, keys, channel settings, Domino start and output file (Load MIDI takes the file's own PPQ). They're set right on the page, with the same names as in the Project panel, or Use the open project's settings fills them in from the open project. Untick Start new projects with these settings to have New keep the open project's settings instead. Fit view on New shows the whole empty project instead of keeping the zoom.
 
-User set defaults: every tool window whose default you saved with its pin (the pin next to OK or Close: Gate extend, Sustain, Stir, Claw machine and so on), one row each with what it holds. Untick "Show the "use as default" pin in tool windows" to hide the pins; defaults you saved are still used.
+User set defaults: every tool window whose default you saved with its pin (the pin at the bottom of the window, most often next to OK or Close: Gate extend, Sustain, Stir, Claw machine and so on), one row each with what it holds. Untick "Show the "use as default" pin in tool windows" to hide the pins; defaults you saved are still used.
 
 Double-click a row, press Enter or Change… to open that window and change its default; shapes aren't touched, and only one opens at a time. Pick rows (Ctrl / Shift click, drag over them, Ctrl+A) and press Reset… to go back to the program's own defaults; it asks once. The defaults are kept in shape-defaults.ini in the user folder.
 
