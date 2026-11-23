@@ -54,6 +54,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     settings_backup.py  an update's first start: the older version's settings + presets zipped into user/backups
     drawer.py        the custom shape drawer window
     drawer_library.py the drawer's shape library (shapes/*.json): names, loading, saving, renaming
+    shape_picture.py small rough pictures of library shapes beside the Shape list and the drawer's library
     drawer_mirror.py the drawer's Mirror maths: a point's mirror copies, which points pair up
     drawer_areas.py  the drawer's Areas tool (colouring areas by hand) and colour swatches
     drawer_mouse.py  the mouse on the drawer's board (drawing, Select, sticking), copy / paste / flip / turn

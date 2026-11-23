@@ -1,4 +1,4 @@
-Pick a shape in the panel, or draw your own with [page:drawer|Drawer…]. Then drag a box on the piano roll (or click two corners); the drawing stretches to fill it. Ctrl keeps its drawn proportions.
+Pick a shape in the panel, or draw your own with [page:drawer|Drawer…]. Then drag a box on the piano roll (or click two corners); the drawing stretches to fill it. Ctrl keeps its drawn proportions. While the Shape list is open, a small picture of the highlighted shape shows beside it.
 
 The box covers every key you drag over, the first and last ones whole: its top and bottom sit on the lines between keys, so a sloped side steps the same on every row, the bottom and top rows too. A drag that stays on one key makes nothing.
 

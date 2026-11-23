@@ -33,6 +33,7 @@ from window.range_window import open_range_graph
 from window.widgets import (Scrub, Tooltip, bad, good, leave_box, line_up, name_index, name_list, pack_shown, set_names,
                             unchanged, unit_word)
 from window.widgets_tips import greyed_why
+from window.shape_picture import peek_dropdown
 
 GAP_COLOR = look.WARN  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 MISSING_MARK = "✕ "  # in the Shape box: a placed shape whose library shape was renamed or deleted (user, 2026-10-05)
@@ -99,6 +100,7 @@ class CustomPanel:
         # (shape names can be long: widens with the panel, Drawer… after it; user 2026-11-10)
         self.custom_combo.pack(side="left", padx=(5, 0), fill="x", expand=True)
         self.custom_combo.bind("<<ComboboxSelected>>", lambda e: self.on_custom_pick())
+        self.custom_peek = peek_dropdown(self.custom_combo, self.scale)  # (QoL I: the highlighted shape's picture)
         b = ttk.Button(row, text=tr("panel_custom.drawer"), command=self.open_drawer)
         b.pack(side="left", padx=(4, 0))
         Tooltip(b, tr("panel_custom.drawer_tip"))

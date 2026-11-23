@@ -9,7 +9,7 @@ import re
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-from files.lang import tr
+from files.lang import tr, trn
 from notes.bezier import handle_lines, pen_handles
 import numpy as np
 
@@ -39,6 +39,8 @@ from window.layers import DrawerLayers
 from window.sticky import BEND, REACH, Targets, key_points
 from window.side_panel import ScrollingSide
 from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, Tooltip, long_line, remember_place, traced, wrap_to_room
+from window.widgets_tips import greyed_why
+from window.shape_picture import peek_listbox
 
 GRIDS = ["4", "8", "12", "16", "24", "32", "48", "64"]
 TOOLS = [("select", tr("drawer.select"), "v"), ("slice", tr("drawer.slice"), "k"), ("lasso", tr("drawer.lasso"), "j"),
@@ -194,14 +196,18 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
         box.pack(fill="x")
         row = ttk.Frame(box)
         row.pack(fill="x")
-        self.listbox = tk.Listbox(row, height=12, activestyle="none", exportselection=False, font=look.font(9))
+        # (several picked with Ctrl / Shift click like a file list, to delete together: QoL I, user 2026-11-23)
+        self.listbox = tk.Listbox(row, height=12, activestyle="none", exportselection=False, font=look.font(9),
+                                  selectmode="extended")
         sb = ttk.Scrollbar(row, orient="vertical", command=self.listbox.yview)
         self.listbox.config(yscrollcommand=sb.set)
         self.listbox.pack(side="left", fill="x", expand=True)
         sb.pack(side="left", fill="y")
         lb = self.listbox
         ListTip(lb)
+        self.peek = peek_listbox(lb, self.scale)  # (QoL I: the picture of the shape under the mouse)
         lb.bind("<ButtonPress-1>", self.list_press)
+        lb.bind("<<ListboxSelect>>", lambda e: self.sync_library(), add="+")
         # (a 3rd quick click after the double-click that opened it: nothing, never a slow-click rename; hunt 2026-11-23)
         bind_double(lb, lambda e: (self.stop_slow_click(), self.open_selected()), lambda e: self.stop_slow_click())
         # Keys while the list has the keyboard work on the list (the drawing's own keys: click the board). Blue =
@@ -218,13 +224,16 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
         self._slow_click = None
         btns = ttk.Frame(box)
         btns.pack(fill="x", pady=(4, 0))
+        self.lib_buttons = {}
         for i, (key, cmd) in enumerate((("open", self.open_selected), ("delete", self.delete_selected),
                                         ("rename", self.start_rename), ("new", self.new))):
-            b = ttk.Button(btns, text=tr("drawer." + key), command=cmd, width=1)  # (4 equal widths: grid below)
-            b.grid(row=0, column=i, sticky="ew", padx=(4 if i else 0, 0))
+            b = self.lib_buttons[key] = ttk.Button(btns, text=tr("drawer." + key), command=cmd, width=1)
+            b.grid(row=0, column=i, sticky="ew", padx=(4 if i else 0, 0))  # (4 equal widths)
             btns.columnconfigure(i, weight=1, uniform="lib")
             if key == "rename":
                 Tooltip(b, tr("drawer.rename_tip"))
+            if key in ("open", "rename"):
+                greyed_why(b, tr("drawer.why_several_picked"))
         name = ttk.Frame(box)
         name.pack(fill="x", pady=(8, 0))
         ttk.Label(name, text=tr("drawer.name")).pack(side="left")
@@ -1196,11 +1205,22 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
             i = names.index(select)
             self.listbox.selection_set(i)
             self.listbox.see(i)
+        self.sync_library()
         self.app.refresh_custom_names()
 
     def picked(self):
+        """The one shape picked in the library list (None when none or several are)."""
         cur = self.listbox.curselection()
-        return self.listbox.get(cur[0]) if cur else None
+        return self.listbox.get(cur[0]) if len(cur) == 1 else None
+
+    def picked_all(self):
+        return [self.listbox.get(i) for i in self.listbox.curselection()]
+
+    def sync_library(self):
+        """Open / Rename greyed while several shapes are picked (their tips say why)."""
+        state = ["disabled"] if len(self.listbox.curselection()) > 1 else ["!disabled"]
+        for key in ("open", "rename"):
+            self.lib_buttons[key].state(state)
 
     def list_press(self, e):
         """A click on the name already picked, while the list has the keyboard: renamed after the double-click time
@@ -1321,33 +1341,50 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
             self.open_shape("", [], [])
 
     def delete_selected(self):
-        name = self.picked()
-        if not name:
+        """Deletes the picked shapes (several: one question for all, QoL I); built-in ones can't go."""
+        names = self.picked_all()
+        if not names:
             return
-        saved = name.lower() in (n.lower() for n in saved_names())
-        if not saved:
-            messagebox.showinfo(tr("drawer.spiderweb"), tr("drawer.is_built_in_and_can_t", name=name), parent=self)
+        mine = {n.lower() for n in saved_names()}
+        gone = [n for n in names if n.lower() in mine]
+        if not gone:
+            text = (tr("drawer.is_built_in_and_can_t", name=names[0]) if len(names) == 1
+                    else tr("drawer.all_built_in"))
+            messagebox.showinfo(tr("drawer.spiderweb"), text, parent=self)
             return
-        back = tr("drawer.the_built_in_comes_back_in", built_in_name=built_in_name(name)) if built_in_name(name) else ""
-        if not messagebox.askyesno(
-                tr("drawer.spiderweb"), tr("drawer.delete_from_the_library_shapes_already",
-                                           name=name) + back, icon="warning", parent=self):
+        if len(names) == 1:
+            name = names[0]
+            back = (tr("drawer.the_built_in_comes_back_in", built_in_name=built_in_name(name))
+                    if built_in_name(name) else "")
+            ask = tr("drawer.delete_from_the_library_shapes_already", name=name) + back
+        else:
+            ask = trn("drawer.delete_several", len(gone), n=len(gone))
+            if len(gone) < len(names):
+                ask += trn("drawer.delete_several_built_in", len(names) - len(gone), n=len(names) - len(gone))
+            if any(built_in_name(n) for n in gone):
+                ask += tr("drawer.delete_several_back")
+        if not messagebox.askyesno(tr("drawer.spiderweb"), ask, icon="warning", parent=self):
             return
-        try:
-            os.remove(shape_path(name))
-        except OSError as e:
-            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_delete", e=e), parent=self)
-            return self.refresh_list()
-        if name.lower() == (self.saved_name or "").lower():  # the drawing open here: not saved any more
-            self.saved_name = self.saved_stamp = None
-            self.dirty = True
-            self.redraw()
-        app = self.app
-        if app.custom_shape.lower() == name.lower() and not app.custom_template(app.custom_shape):
-            app.custom_shape = "Circle"  # (the Custom shape tool used it: back to Circle, user)
-            app.schedule_autosave()
-            app.status.config(text=tr("drawer.deleted_in_use", name=name))
-        app.sync_custom()  # (a placed shape's "not in the library" mark, hunt 10-27)
+        app, failed, deleted = self.app, None, []
+        for name in gone:
+            try:
+                os.remove(shape_path(name))
+            except OSError as e:
+                failed = failed or e
+                continue
+            deleted.append(name)
+            if name.lower() == (self.saved_name or "").lower():  # the drawing open here: not saved any more
+                self.saved_name = self.saved_stamp = None
+                self.dirty = True
+                self.redraw()
+            if app.custom_shape.lower() == name.lower() and not app.custom_template(app.custom_shape):
+                app.custom_shape = "Circle"  # (the Custom shape tool used it: back to Circle, user)
+                app.schedule_autosave()
+                app.status.config(text=tr("drawer.deleted_in_use", name=name))
+        if failed:
+            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_delete", e=failed), parent=self)
+        if deleted:
+            app.sync_custom()  # (a placed shape's "not in the library" mark, hunt 10-27)
         self.refresh_list()
 
     def save(self):

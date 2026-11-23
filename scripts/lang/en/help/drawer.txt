@@ -25,7 +25,7 @@ Save keeps it in the library (the shapes folder inside the user folder next to S
 
 Open (or double-click a name, or Enter) opens a saved shape from the library; New starts an empty drawing. Both ask first if the drawing has changes that aren't saved.
 
-Rename (or F2, or click the picked name again) changes a saved shape's name; Delete removes it. While the list has the keyboard (its picked name is blue), Delete and Enter work on the list; click the board to give the keyboard back to the drawing (the picked name turns grey).
+Rename (or F2, or click the picked name again) changes a saved shape's name; Delete removes it. Ctrl+click or Shift+click picks several names (like a file list) to delete them together; Open and Rename work on one shape only. Resting the mouse on a name shows a small picture of that shape beside the list. While the list has the keyboard (its picked name is blue), Delete and Enter work on the list; click the board to give the keyboard back to the drawing (the picked name turns grey).
 
 Export copies the whole drawing as a line of text to share; Import adds a shared drawing to your library (see [page:sharing|Sharing shapes]).
 
