@@ -266,6 +266,7 @@ class DrawerAreas:
             side = board & self.mirror_side(u[None, :], v[:, None])
             img[side] = rgb(look.MIRROR_SIDE)
         img = np.where(tint[face][..., None], lut[face], img).astype(np.uint8)
+        img = self.trace_blend(img, u, v)  # (the tracing picture over the colours, faint: drawer_trace)
         if self._area_img is None or (self._area_img.width(), self._area_img.height()) != (cw, ch):
             self._area_pic = Photo(self, cw, ch)
             self._area_img = self._area_pic.photo

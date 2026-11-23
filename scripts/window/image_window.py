@@ -43,6 +43,15 @@ def _photo(master, rgb):
     return pic
 
 
+PICTURE_ENDS = (".png", ".gif", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff")  # (dropped files taken: a kind
+# this Spiderweb can't read still says why when it's let go)
+
+
+def dropped_pictures(paths):
+    """The dragged files the Image window takes: picture files only, the first one (runs inside the drop: no Tk)."""
+    return [p for p in paths if p.lower().endswith(PICTURE_ENDS)][:1]
+
+
 def _kinds():
     """The picture kinds this Spiderweb reads, in words."""
     return tr("image.kinds_all") if speed.pillow() else tr("image.kinds_basic")
@@ -230,6 +239,9 @@ class ImageWindow(DefaultPin, tk.Toplevel):
                                           if b is not None and b.winfo_ismapped()), None))  # (THE CONTROL SCHEME:
         # Enter = the main button SHOWN: Apply, Place, or OK in the default editor; hunt 2026-11-23)
         self.show_settings()
+        # a picture file dropped onto the window opens like Open… (QoL J, user 2026-11-23; Windows only)
+        from files.dropfiles import accept_drops
+        self.drops = accept_drops(self, dropped_pictures, lambda paths: self.load(paths[0]))
         if last and os.path.isfile(last[0]):
             self.load(last[0], quiet=True)
         self.redraw()

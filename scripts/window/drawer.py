@@ -33,6 +33,7 @@ from window.canvas_keep import KeptItems
 from window.drawer_areas import AREA_FRAME, BOARD, OFF_BOARD, DrawerAreas
 from window.drawer_deform import DrawerDeform
 from window.drawer_lasso import DrawerLasso
+from window.drawer_trace import DrawerTrace
 from window.drawer_mouse import CTRL, MOD_KEYS, SHIFT, STICK_RANK, DrawerMouse
 from window.help_texts import BY_ID, DRAWER_TOOL_TOPICS
 from window.layers import DrawerLayers
@@ -67,7 +68,7 @@ from window.drawer_library import (LIBRARY, BUILT_IN, BAD_CHARS, NAME_MAX, DEVIC
 
 # ---------------------------------------------------------------- window
 
-class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, ScrollingSide, tk.Toplevel):
+class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, ScrollingSide, tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -250,9 +251,12 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
         b = ttk.Button(btns, text=tr("drawer.import"), command=self.import_shared)
         b.pack(side="left", padx=4)
         Tooltip(b, tr("drawer.import_tip"))
-        b = ttk.Button(side, text=tr("deform.button"), command=self.open_deform)
-        b.pack(anchor="w", pady=(8, 0))
+        row = ttk.Frame(side)
+        row.pack(fill="x", pady=(8, 0))
+        b = ttk.Button(row, text=tr("deform.button"), command=self.open_deform)
+        b.pack(side="left")
         Tooltip(b, tr("deform.button_tip"))
+        self.build_trace(side, row)  # (the tracing picture beside it: QoL J)
         self.pos_label = wrap_to_room(ttk.Label(side, text="", foreground=look.INFO, font=look.font(9),
                                                 justify="left"))
         self.pos_label.pack(fill="x", pady=(8, 0))
@@ -1503,7 +1507,9 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
         cw, ch = self.canvas.winfo_width(), self.canvas.winfo_height()
         (x0, y0), (x1, y1) = self.to_screen(0, 1), self.to_screen(1, 0)
         img = self.area_image(cw, ch) if cw > 1 and ch > 1 else None
-        if img is not None:  # the board with the areas' colours
+        if img is None and cw > 1 and ch > 1:  # the board with the tracing picture on it (drawer_trace)
+            img = self.trace_image(cw, ch)
+        if img is not None:  # the board with the areas' colours (and / or the tracing picture)
             c.create_image(0, 0, image=img, anchor="nw")
         else:
             c.create_rectangle(x0, y0, x1, y1, fill=BOARD, outline="")  # the board
@@ -1535,6 +1541,7 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
                         c.create_line(0, y, cw, y, fill=color)
                     i += step
         c.create_rectangle(x0, y0, x1, y1, outline=look.BOARD_EDGE)
+        self.trace_outline(c)  # (Move / size picture on: its edge + corners)
         mode, mx, my = self.mirror_mode(), *self.to_screen(0.5, 0.5)  # Mirror: thin lines across the window
         for on, coords in ((mode in ("h", "both"), (mx, 0, mx, ch)), (mode in ("v", "both"), (0, my, cw, my))):
             if on:

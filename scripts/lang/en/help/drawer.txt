@@ -31,6 +31,8 @@ Export copies the whole drawing as a line of text to share; Import adds a shared
 
 Deform… (under the library) bends the drawing with Turn, Twist, Bulge and Ripple, live on the board (see [page:drawer_deform|Drawer: Deform]).
 
+Tracing picture… (beside Deform…) opens a picture that shows faintly under the board, to draw over. Once one is open, Remove, Picture strength and "Move / size picture" show under it. Picture strength sets how strongly it shows (0 % hides it; middle-click goes back to 30 %). Tick "Move / size picture" to drag it around, or drag one of its corners to make it bigger or smaller; picking a drawing tool turns that off again. The picture is only a guide: it is never saved in the shape, and it goes when the drawer closes. PNG and GIF always work; JPG and other kinds need Pillow.
+
 Lines and curves that meet end to end count as one outline, and so does a line whose ends land on another line or on itself. Closed: Empty, Fill and Spam all work. Gaps (red dots at the loose ends): Fill and Spam close each one with a straight line (see [page:fill|Inside fill]).
 
 Wheel = zoom, middle-drag = scroll, Reset view = back to the middle of the board.

@@ -359,6 +359,7 @@ STICK_GUIDE = pick("#dcb4ee", "#7a5a90")  # the drawer's Circle guide: the touch
 LIST_LINE = pick("#e6e6e6", "#4a4a4e")  # the faint line under each row of the drawer's Layers list
 MIRROR_SIDE = pick("#f0f0f2", "#36363a")  # Mirror: the side that gets the mirrored copy (faint grey)
 MIRROR_LINE = pick("#0097a7", "#26c6da")  # Mirror: the line it's mirrored across
+TRACE_EDGE = pick("#e07000", "#ffa040")  # the drawer's tracing picture: its edge + corners while Move / size is on
 
 # --- Small windows
 TOOL_ROW, TOOL_HOVER = pick("#ffffff", "#2f2f31"), pick("#e5f3ff", "#3d4a5c")  # the drawing tools list
