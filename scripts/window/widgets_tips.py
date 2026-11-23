@@ -162,9 +162,10 @@ class ListTip(Tooltip):
 
     WATCH_MS = 250  # while the mouse rests on a row: how often the row is checked for a refill / scroll under it
 
-    def __init__(self, listbox, owner=None):
+    def __init__(self, listbox, owner=None, row_tip=None):
+        """row_tip(row) -> a row's own tip ("" = none), shown under its whole text when that is cut off."""
         super().__init__(listbox, "", owner)
-        self.row, self.y, self.watch_job = None, 0, None
+        self.row, self.y, self.watch_job, self.row_tip = None, 0, None, row_tip
         listbox.bind("<Motion>", self.motion, add="+")
         listbox.bind("<ButtonRelease-1>", self.let_go, add="+")
 
@@ -194,7 +195,9 @@ class ListTip(Tooltip):
         edge = lb.winfo_width() - int(lb.cget("borderwidth")) - int(lb.cget("highlightthickness"))
         from window.widgets import DIVIDER
         text = lb.get(i) if box[0] + box[2] > edge else ""
-        return i, "" if text == DIVIDER else text
+        text = "" if text == DIVIDER else text.strip()
+        own = self.row_tip(i) if self.row_tip else ""
+        return i, "\n".join(t for t in (text, own) if t)
 
     def enter(self, e):
         self.motion(e)

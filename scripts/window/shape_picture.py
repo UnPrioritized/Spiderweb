@@ -168,8 +168,9 @@ class ShapePeek:
                 self.win = None
 
 
-def peek_listbox(lb, scale=1.0):
-    """The drawer's library list: the picture of the row under the mouse (none while a button is held)."""
+def peek_listbox(lb, scale=1.0, name_of=None):
+    """The drawer's library list: the picture of the row under the mouse (none while a button is held).
+    name_of(row) = the shape a row shows (None: no picture, e.g. a folder row); else the row's text."""
     peek = ShapePeek(lb, scale)
 
     def motion(e):
@@ -179,7 +180,7 @@ def peek_listbox(lb, scale=1.0):
         box = lb.bbox(i) if i >= 0 else None
         if not box or not box[1] <= e.y < box[1] + box[3]:
             return peek.show(None, lb, 0)
-        peek.show(lb.get(i), lb, lb.winfo_rooty() + box[1])
+        peek.show(name_of(i) if name_of else lb.get(i), lb, lb.winfo_rooty() + box[1])
     lb.bind("<Motion>", motion, add="+")
     peek.motion = motion  # (tests)
     for seq in ("<Leave>", "<ButtonPress>", "<MouseWheel>", "<KeyPress>", "<Destroy>"):  # (a key may change the rows)

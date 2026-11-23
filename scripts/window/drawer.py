@@ -42,6 +42,7 @@ from window.side_panel import ScrollingSide
 from window.widgets import REDO_KEYS, UNDO_KEYS, ListTip, Tooltip, long_line, remember_place, traced, wrap_to_room
 from window.widgets_tips import greyed_why
 from window.shape_picture import peek_listbox
+from window.drawer_list import LibraryList
 
 GRIDS = ["4", "8", "12", "16", "24", "32", "48", "64"]
 TOOLS = [("select", tr("drawer.select"), "v"), ("slice", tr("drawer.slice"), "k"), ("lasso", tr("drawer.lasso"), "j"),
@@ -68,7 +69,8 @@ from window.drawer_library import (LIBRARY, BUILT_IN, BAD_CHARS, NAME_MAX, DEVIC
 
 # ---------------------------------------------------------------- window
 
-class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, ScrollingSide, tk.Toplevel):
+class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, LibraryList, ScrollingSide,
+             tk.Toplevel):
     def __init__(self, app):
         super().__init__(app)
         self.app = app
@@ -205,8 +207,8 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         self.listbox.pack(side="left", fill="x", expand=True)
         sb.pack(side="left", fill="y")
         lb = self.listbox
-        ListTip(lb)
-        self.peek = peek_listbox(lb, self.scale)  # (QoL I: the picture of the shape under the mouse)
+        ListTip(lb, row_tip=self.row_tip)
+        self.peek = peek_listbox(lb, self.scale, self.row_shape)  # (QoL I: the picture of the shape under the mouse)
         lb.bind("<ButtonPress-1>", self.list_press)
         lb.bind("<<ListboxSelect>>", lambda e: self.sync_library(), add="+")
         # (a 3rd quick click after the double-click that opened it: nothing, never a slow-click rename; hunt 2026-11-23)
@@ -217,6 +219,8 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         lb.bind("<BackSpace>", lambda e: "break")
         lb.bind("<Return>", lambda e: (self.open_selected(), "break")[1])
         lb.bind("<F2>", lambda e: (self.start_rename(), "break")[1])
+        lb.bind("<Right>", lambda e: (self.list_key_side(1), "break")[1])  # (folders: open / shut, like File Explorer)
+        lb.bind("<Left>", lambda e: (self.list_key_side(-1), "break")[1])
         lb.bind("<FocusIn>", lambda e: lb.config(selectbackground=look.LIST_HERE,
                                                  selectforeground=look.LIST_HERE_TEXT))
         lb.bind("<FocusOut>", lambda e: lb.config(selectbackground=LIST_AWAY, selectforeground=look.LIST_AWAY_TEXT))
@@ -1208,42 +1212,17 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
 
     # ------------------------------------------------------------ library
 
-    def refresh_list(self, select=None):
-        self.end_rename(False)
-        names = library_names()
-        self.peek.show(None, self.listbox, 0)  # (the rows change: a picture of a gone / moved row goes, hunt 11-23)
-        self.listbox.delete(0, "end")
-        for n in names:
-            self.listbox.insert("end", n)
-        if select in names:
-            i = names.index(select)
-            self.listbox.selection_set(i)
-            self.listbox.see(i)
-        self.sync_library()
-        self.app.refresh_custom_names()
-
-    def picked(self):
-        """The one shape picked in the library list (None when none or several are)."""
-        cur = self.listbox.curselection()
-        return self.listbox.get(cur[0]) if len(cur) == 1 else None
-
-    def picked_all(self):
-        return [self.listbox.get(i) for i in self.listbox.curselection()]
-
-    def sync_library(self):
-        """Open / Rename greyed while several shapes are picked (their tips say why)."""
-        state = ["disabled"] if len(self.listbox.curselection()) > 1 else ["!disabled"]
-        for key in ("open", "rename"):
-            self.lib_buttons[key].state(state)
-
     def list_press(self, e):
-        """A click on the name already picked, while the list has the keyboard: renamed after the double-click time
-        if no second click comes (like Windows' file lists)."""
+        """A click on a folder's ▸ / ▾ opens / shuts it. A click on the name already picked, while the list has the
+        keyboard: renamed after the double-click time if no second click comes (like Windows' file lists)."""
         self.stop_slow_click()
         lb = self.listbox
         i = lb.nearest(e.y)
         box = lb.bbox(i)
-        if (box and box[1] <= e.y < box[1] + box[3] and lb.curselection() == (i,)
+        if box and box[1] <= e.y < box[1] + box[3] and not e.state & 0x5 and self.on_arrow(i, e.x):
+            self.toggle_folder(self.rows[i])
+            return "break"
+        if (box and box[1] <= e.y < box[1] + box[3] and lb.curselection() == (i,) and self.rows[i]["kind"] != "folder"
                 and self.focus_get() is lb):
             self._slow_click = self.after(DOUBLE_CLICK_MS, self.start_rename)
 
@@ -1256,10 +1235,11 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         """A box over the picked name in the list to type its new name: Enter or a click elsewhere = renamed,
         Esc = not."""
         self._slow_click = None
-        name = self.picked()
-        if not name or self.renaming:
+        row = self.picked_row()
+        if not row or row["kind"] == "folder" or self.renaming:
             return
-        if not shape_path(name):
+        name = row["name"]
+        if not row["path"]:
             messagebox.showinfo(tr("drawer.spiderweb"), tr("drawer.is_built_in_rename", name=name), parent=self)
             return
         lb = self.listbox
@@ -1268,11 +1248,11 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         lb.update_idletasks()
         x, y, w, h = lb.bbox(i)
         box = self.renaming = ttk.Entry(lb)
-        box.old = name
+        box.old, box.row = name, row
         box.insert(0, name)
         box.select_range(0, "end")
         box.icursor("end")
-        box.place(x=0, y=y - 3, relwidth=1, height=h + 6)
+        box.place(x=x, y=y - 3, relwidth=1, width=-x, height=h + 6)  # (x: past a folder's indent)
         box.focus_set()
         box.bind("<Return>", lambda e: (self.end_rename(True), lb.focus_set(), "break")[2])
         box.bind("<Escape>", lambda e: (self.end_rename(False), lb.focus_set(), "break")[2])
@@ -1283,17 +1263,18 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         box, self.renaming = self.renaming, None
         if not box:
             return
-        old, new = box.old, clean_name(box.get())
+        old, new, row = box.old, clean_name(box.get()), box.row
         box.destroy()
         if not keep or not new or new == old:
             return
-        if new.lower() != old.lower() and new.lower() in (n.lower() for n in library_names()):
+        marked = row["same"] is not None  # (a second file holding a name already used: only that file changes)
+        if (new.lower() != old.lower() or marked) and new.lower() in (n.lower() for n in library_names()):
             messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.rename_taken", name=new), parent=self)
             return
-        here = (self.saved_name or "").lower() == old.lower()  # (the drawing open here)
+        here = not marked and (self.saved_name or "").lower() == old.lower()  # (the drawing open here)
         fresh = here and not self.changed_elsewhere()
         try:
-            rename_shape(old, new)
+            rename_shape(old, new, row["path"])
         except ValueError:
             messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_read_the_shape", name=old), parent=self)
             return
@@ -1306,7 +1287,7 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
             if clean_name(self.name.get()).lower() == old.lower():
                 self.name.set(new)
         app = self.app
-        if app.custom_shape.lower() == old.lower():  # (the Custom shape tool's shape: renamed there too)
+        if not marked and app.custom_shape.lower() == old.lower():  # (the Custom shape tool's shape: renamed too)
             app.custom_shape = new
             app.schedule_autosave()
         app.sync_custom()  # (a placed shape's "not in the library" mark, hunt 10-27)
@@ -1328,6 +1309,14 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
                                    parent=self)
 
     def open_selected(self):
+        """Open (Enter / double-click): a shape into the drawer; a folder opens / shuts."""
+        row = self.picked_row()
+        if row and row["kind"] == "folder":
+            return self.toggle_folder(row)
+        if row and row["same"] is not None:  # (its name finds the other file: saving would go over that one)
+            messagebox.showinfo(tr("drawer.spiderweb"), tr("drawer.same_name_open", name=row["name"],
+                                folder=row["same"] or tr("drawer.top_folder")), parent=self)
+            return
         name = self.picked()
         if not name or not self.keep_changes():
             return
@@ -1356,11 +1345,12 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
 
     def delete_selected(self):
         """Deletes the picked shapes (several: one question for all, QoL I); built-in ones can't go."""
-        names = self.picked_all()
+        rows = [r for r in self.picked_rows() if r["kind"] != "folder"]
+        names = [r["name"] for r in rows]
         if not names:
             return
-        mine = {n.lower() for n in saved_names()}
-        gone = [n for n in names if n.lower() in mine]
+        files = [r for r in rows if r["path"]]  # (each by its own file: two files may hold one name)
+        gone = [r["name"] for r in files]
         if not gone:
             text = (tr("drawer.is_built_in_and_can_t", name=names[0]) if len(names) == 1
                     else tr("drawer.all_built_in"))
@@ -1380,13 +1370,16 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         if not messagebox.askyesno(tr("drawer.spiderweb"), ask, icon="warning", parent=self):
             return
         app, failed, deleted = self.app, None, []
-        for name in gone:
+        for row in files:
+            name = row["name"]
             try:
-                os.remove(shape_path(name))
+                os.remove(row["path"])
             except OSError as e:
                 failed = failed or e
                 continue
             deleted.append(name)
+            if row["same"] is not None:  # (a second file holding a used name: the name still finds the other)
+                continue
             if name.lower() == (self.saved_name or "").lower():  # the drawing open here: not saved any more
                 self.saved_name = self.saved_stamp = None
                 self.dirty = True
@@ -1427,7 +1420,7 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
                                        icon="warning", parent=self):
                 return None
         try:  # (as drawn, layers and all: lines meeting end to end are joined when the shape is placed)
-            save_shape(name, self.strokes, self.areas)
+            save_shape(name, self.strokes, self.areas, folder=self.save_folder())
         except OSError as e:
             messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_save", e=e), parent=self)
             return None
@@ -1477,7 +1470,7 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         old = clean_name(old) or tr("drawer.imported_shape")
         name = free_name(old)
         try:
-            save_shape(name, strokes, areas)
+            save_shape(name, strokes, areas, folder=self.save_folder())
         except OSError as e:
             messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_save", e=e), parent=self)
             return
