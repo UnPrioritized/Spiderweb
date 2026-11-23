@@ -24,6 +24,7 @@ WRAP_DEFAULTS = {"slices": 8, "colours": 8, "angle": 0.0, "round": 100.0, "gaps"
 MOST_SLICES = 100_000  # (no real limit, user 2026-11-23: only a guard against nonsense)
 MOST_COLOURS = 16  # (16 with "Use channel 10"; the window allows areas.most_colours)
 BINS = 512  # (tilted rows: at most this many strips across the shape; row ends blend between them)
+SLIVER = 0.03  # (tilted: a piece shorter than this share of the shape's length, trapped in another slice, joins it)
 
 
 def clean_wrap(c):
@@ -118,11 +119,11 @@ def upright(a, cfg):
 def tilted(a, cfg, th):
     """Any other angle -> (the pieces, each one's slice). The notes' box is squeezed to a square (x = time, y = keys,
     0..1 each: a circle drawn as an ellipse is a ball), the rows tilted by th: u = along a row, v = across. Rows =
-    strips across v (BINS of them, never thinner than a key row's step, so every strip meets each row it crosses);
-    each strip's rows' ends = where its notes reach (strip_rows), counted at the strip's middle and blended evenly
-    from one strip's middle to the next (held flat, the row ends stepped: slices began again at every strip, a
-    sawtooth along flat edges). A note's centre line is cut at the strips' middles; inside such a piece u and the
-    row ends all run evenly, so the slice cuts fall exactly."""
+    lines across v at BINS strip middles; each one's ends = where it crosses the SMOOTH outline through the key
+    rows' ends (outline_rows; taken from the notes on each line they were noisy: rough diagonal borders and slivers
+    where a border runs nearly along the keys, user 2026-11-23), blended evenly from one middle to the next (held
+    flat they stepped: a sawtooth along flat edges). A note's centre line is cut at the middles; inside such a piece
+    u and the row ends all run evenly, so the slice cuts fall exactly."""
     n = cfg["slices"]
     f = shares(n, cfg["round"])
     s0, e0, key = a[:, 0], a[:, 1], a[:, 2]
@@ -134,8 +135,9 @@ def tilted(a, cfg, th):
     x0, x1 = (s0 - t0) / w_t, (e0 - t0) / w_t
     yc = (key - k0 + 0.5) / h
     v0, v1 = x0 * s + yc * c, x1 * s + yc * c
-    vlo, vhi = float(min(v0.min(), v1.min())), float(max(v0.max(), v1.max()))
-    w = max((vhi - vlo) / BINS, abs(c) / h, 1e-12)
+    edge = 0.5 / h * abs(c)  # (the outline reaches half a key past the top and bottom rows' middles)
+    vlo, vhi = float(min(v0.min(), v1.min())) - edge, float(max(v0.max(), v1.max())) + edge
+    w = max((vhi - vlo) / BINS, 1e-12)
     nb = int((vhi - vlo) / w) + 1
 
     def pieces(off):
@@ -151,13 +153,8 @@ def tilted(a, cfg, th):
         return (idx, q, np.clip(np.minimum(xa_, xb_), x0[idx], x1[idx]),
                 np.clip(np.maximum(xa_, xb_), x0[idx], x1[idx]))
 
-    # each strip's rows
-    sidx, sb, sxa, sxb = pieces(0.0)
-    sb = np.clip(sb, 0, nb - 1)
-    sy = yc[sidx]
-    su_a, su_b = sxa * c - sy * s, sxb * c - sy * s
-    rlo, rhi, rstrip = strip_rows(cfg["gaps"], sb, np.minimum(su_a, su_b), np.maximum(su_a, su_b), key[sidx], h, c,
-                                  s, w_t)
+    # each strip middle's rows: where its line crosses the smooth outline through the key rows' ends
+    rlo, rhi, rstrip = outline_rows(a, cfg["gaps"], t0, w_t, k0, h, c, s, vlo, w, nb)
     lifted = rlo + rstrip * 8.0  # (u is within -2..2: each strip's rows lifted above the ones before)
 
     def ends_at(q, u):
@@ -218,6 +215,7 @@ def tilted(a, cfg, th):
     ta, tb = np.clip(ta, s0[note], e0[note]), np.clip(tb, s0[note], e0[note])
     keep = tb > ta
     note, k, ta, tb = note[keep], k[keep], ta[keep], tb[keep]
+    k = no_slivers(note, k, ta, tb, key[note], SLIVER * w_t)
     # touching bits of one note in one slice = one note again
     new = np.ones(len(note), bool)
     new[1:] = (note[1:] != note[:-1]) | (k[1:] != k[:-1])
@@ -228,32 +226,117 @@ def tilted(a, cfg, th):
     return out, k[first]
 
 
-def strip_rows(gaps, b, ulo, uhi, key, h, c, s, w_t):
-    """The rows of the strips (pieces b = strip, u from ulo to uhi): each row's u ends and strip, in strip order then
-    along the strip. "whole": a strip = one row. "each": pieces next to each other along the strip are one row: on
-    one key when they touch (no tick between), on keys one apart when no more than one key row's step apart along u
-    (1 / (h |s|)); anything else = a gap."""
-    if gaps != "each":
-        nb = int(b.max()) + 1
-        lo, hi = np.full(nb, np.inf), np.full(nb, -np.inf)
-        np.minimum.at(lo, b, ulo)
-        np.maximum.at(hi, b, uhi)
-        has = np.isfinite(lo)
-        return lo[has], hi[has], np.flatnonzero(has)
-    order = np.lexsort((ulo, b))
-    bo, lo_o, hi_o, ko = b[order], ulo[order], uhi[order], key[order]
-    seg = np.ones(len(order), bool)
-    seg[1:] = bo[1:] != bo[:-1]
-    sid = np.cumsum(seg) - 1
-    lift = sid * 4.0  # (u is within -2..2: each strip lifted above the ones before)
-    reach = np.maximum.accumulate(hi_o + lift) - lift  # (the furthest u so far in the strip)
-    step = 1 / (h * abs(s))
-    tick = 1 / w_t
-    gap = np.zeros(len(order), bool)
-    prev_reach = reach[:-1]
-    d = lo_o[1:] - prev_reach
-    same = ko[1:] == ko[:-1]
-    near = np.abs(ko[1:] - ko[:-1]) == 1
-    gap[1:] = np.where(same, d > tick * 0.5 * abs(c) + 1e-12, ~near | (d > step * 1.001))
-    first = np.flatnonzero(seg | gap)
-    return lo_o[first], np.maximum.reduceat(hi_o, first), bo[first]
+def no_slivers(note, k, ta, tb, key, most):
+    """Each slice's pieces in order (note, then time) -> their slices with SLIVERS folded in: a piece shorter than most
+    ticks between two touching pieces of one other slice on its key takes theirs (user 2026-11-23: "sliver
+    everywhere"; where a slice border only grazes a key row, less than a key deep, which a key row can't show)."""
+    # whole pieces of one note in one slice first (a note's bits are in order, so equal neighbours join)
+    grp = np.r_[True, (note[1:] != note[:-1]) | (k[1:] != k[:-1])]
+    gid = np.cumsum(grp) - 1
+    f_ = np.flatnonzero(grp)
+    gs, ge = ta[f_], np.maximum.reduceat(tb, f_)
+    gk, gkey = k[f_], key[f_]
+    o = np.lexsort((gs, gkey))  # (along each key)
+    s_, e_, k_, y_ = gs[o], ge[o], gk[o], gkey[o]
+    if len(o) >= 3:
+        inner = ((y_[:-2] == y_[1:-1]) & (y_[2:] == y_[1:-1]) & (e_[:-2] == s_[1:-1]) & (e_[1:-1] == s_[2:])
+                 & (k_[:-2] == k_[2:]) & (k_[1:-1] != k_[:-2]) & (e_[1:-1] - s_[1:-1] < most))
+        fold = np.flatnonzero(inner) + 1
+        k_ = k_.copy()
+        k_[fold] = k_[fold - 1]
+        gk = gk.copy()
+        gk[o] = k_
+    return gk[gid]
+
+
+def outline_rows(a, gaps, t0, w_t, k0, h, c, s, vlo, w, nb):
+    """The rows of each strip middle's line (v = vlo + (q + 0.5) w, q = 0 .. nb - 1): (each row's u from, u to, its
+    q), in q order then along the line. The outline: each key row's runs ("whole": the row first start .. last end;
+    "each": runs of touching notes) as points at their ends, joined to the run they overlap on the next key (each
+    end to its nearest: the leftmost / rightmost overlapping run there, both ways); an end with no partner goes
+    straight up / down half a key, a run with nothing overlapping above / below gets a flat cap half a key out.
+    Each edge knows which side is inside: crossing it going along +u enters (a row's start) or leaves (its end)."""
+    order, _, lo, hi = rows_of(a, gaps)
+    first = np.flatnonzero(np.r_[True, np.diff(_) != 0]) if len(_) else np.zeros(0, np.int64)
+    rk = a[order[first], 2]  # (each run's key; runs come by key, then left to right)
+    xs, xe = (lo - t0) / w_t, (hi - t0) / w_t
+    y = (rk - k0 + 0.5) / h
+    half = 0.5 / h
+    m = len(rk)
+    lift = (rk - k0).astype(float) * 4.0  # (x is 0..1: each key's runs lifted above the ones before)
+    ls, le = xs + lift, xe + lift
+
+    def overlapping(dk):
+        """For each run, the first / last run on key + dk overlapping it (-1 / -2 when none)."""
+        jl = np.searchsorted(le, xs + lift + dk * 4.0, "right")
+        jh = np.searchsorted(ls, xe + lift + dk * 4.0, "left") - 1
+        ok = (jl <= jh) & (jl < m) & (jh >= 0)
+        jl, jh = np.clip(jl, 0, max(0, m - 1)), np.clip(jh, 0, max(0, m - 1))
+        ok &= (rk[jl] == rk + dk) & (rk[jh] == rk + dk)
+        return np.where(ok, jl, -1), np.where(ok, jh, -2)
+
+    up_f, up_l = overlapping(1)
+    dn_f, dn_l = overlapping(-1)
+    ids = np.arange(m)
+    lmatch = (up_f >= 0) & (dn_f[np.maximum(up_f, 0)] == ids)  # (left ends joined upward)
+    rmatch = (up_l >= 0) & (dn_l[np.maximum(up_l, 0)] == ids)
+    lmatched_dn = np.zeros(m, bool)
+    lmatched_dn[up_f[lmatch]] = True
+    rmatched_dn = np.zeros(m, bool)
+    rmatched_dn[up_l[rmatch]] = True
+    ex1, ey1, ex2, ey2, enx, eny = [], [], [], [], [], []
+
+    def add(x1, y1, x2, y2, nx, ny):
+        for lst, v in zip((ex1, ey1, ex2, ey2, enx, eny), (x1, y1, x2, y2, nx, ny)):
+            lst.append(np.broadcast_to(np.asarray(v, float), np.shape(x1)).astype(float))
+
+    i = ids[lmatch]
+    j = up_f[lmatch]
+    add(xs[i], y[i], xs[j], y[j], y[j] - y[i], -(xs[j] - xs[i]))  # (left: inside to the right)
+    i = ids[rmatch]
+    j = up_l[rmatch]
+    add(xe[i], y[i], xe[j], y[j], -(y[j] - y[i]), xs[j] * 0 + (xe[j] - xe[i]))  # (right: inside to the left)
+    for side, x_, nx in (("l", xs, 1.0), ("r", xe, -1.0)):
+        up_free = ~(lmatch if side == "l" else rmatch)
+        dn_free = ~(lmatched_dn if side == "l" else rmatched_dn)
+        add(x_[up_free], y[up_free], x_[up_free], y[up_free] + half, nx, 0.0)
+        add(x_[dn_free], y[dn_free] - half, x_[dn_free], y[dn_free], nx, 0.0)
+    top = up_f < 0
+    add(xs[top], y[top] + half, xe[top], y[top] + half, 0.0, -1.0)
+    bot = dn_f < 0
+    add(xs[bot], y[bot] - half, xe[bot], y[bot] - half, 0.0, 1.0)
+    x1, y1, x2, y2, nx, ny = (np.concatenate(v) for v in (ex1, ey1, ex2, ey2, enx, eny))
+    # each edge's crossings with the strip middles' lines
+    v1, v2 = x1 * s + y1 * c, x2 * s + y2 * c
+    lo_v, hi_v = np.minimum(v1, v2), np.maximum(v1, v2)
+    qa = np.ceil((lo_v - vlo) / w - 0.5).astype(np.int64)
+    qb = np.floor((hi_v - vlo) / w - 0.5).astype(np.int64)
+    qa, qb = np.maximum(qa, 0), np.minimum(qb, nb - 1)
+    flat = np.abs(v2 - v1) < 1e-15  # (an edge along the lines: crossed by none)
+    reps = np.where(flat, 0, np.maximum(qb - qa + 1, 0))
+    e = np.repeat(np.arange(len(x1)), reps)
+    q = qa[e] + (np.arange(len(e)) - np.repeat(np.cumsum(reps) - reps, reps))
+    t = (vlo + (q + 0.5) * w - v1[e]) / (v2[e] - v1[e])
+    px, py = x1[e] + (x2[e] - x1[e]) * t, y1[e] + (y2[e] - y1[e]) * t
+    u = px * c - py * s
+    enter = (c * nx[e] - s * ny[e]) > 0  # (going along +u crosses into the inside)
+    if not len(q):
+        return np.zeros(0), np.zeros(0), np.zeros(0, np.int64)
+    o = np.lexsort((~enter, u, q))  # (by line, along it; at one place entering first)
+    q, u, enter = q[o], u[o], enter[o]
+    if gaps != "each":  # (a line's one row: from its first crossing to its last)
+        newq = np.r_[True, q[1:] != q[:-1]]
+        f_ = np.flatnonzero(newq)
+        return u[f_], np.maximum.reduceat(u, f_), q[f_]
+    d = np.where(enter, 1, -1)
+    newq = np.r_[True, q[1:] != q[:-1]]
+    base = np.repeat(np.cumsum(d)[np.flatnonzero(newq)] - d[np.flatnonzero(newq)],
+                     np.diff(np.r_[np.flatnonzero(newq), len(q)]))
+    depth = np.cumsum(d) - base  # (inside how many runs after each crossing, per line)
+    starts = enter & (depth == 1)
+    ends = ~enter & (depth == 0)
+    si, ei = np.flatnonzero(starts), np.flatnonzero(ends)
+    if len(si) != len(ei) or (len(si) and ((ei < si).any() or (q[si] != q[ei]).any())):  # (crossings that don't
+        newq_i = np.flatnonzero(newq)  # pair up: each line one row)
+        return u[newq_i], np.maximum.reduceat(u, newq_i), q[newq_i]
+    return u[si], u[ei], q[si]
