@@ -71,15 +71,16 @@ def rows_of(a, gaps):
     return order, row, np.minimum.reduceat(a[order, 0], first), np.maximum.reduceat(a[order, 1], first)
 
 
-def apply_wrap(a, cfg, ppq=960, tag=False):
+def apply_wrap(a, cfg, ppq=960, tag=False, outline=None):
     """a: notes as an int64 array of (start, end, key, velocity, ..., colour group) rows (other columns ride along;
     the last one = the colour group, custom.ROUND rounds in it) -> the notes cut into slices and coloured. tag: one
-    more last column, each note's slice (0 = the first; "Each slice becomes its own shape")."""
+    more last column, each note's slice (0 = the first; "Each slice becomes its own shape"). outline: the drawn
+    outline as loops of (tick, key) points (engine.wrap_outline), else the notes' own outline is used."""
     if not len(a) or not cfg:
         return a
     th = math.radians(cfg["angle"])
     if abs(math.sin(th)) > 1e-9:
-        out, k = tilted(a, cfg, th)
+        out, k = tilted(a, cfg, th, outline)
     else:
         out, k = upright(a, cfg)
         if math.cos(th) < 0:  # (180: the same cuts, slices counted from the other end)
@@ -122,7 +123,55 @@ def upright(a, cfg):
     return out[keep], k[keep]
 
 
-def tilted(a, cfg, th):
+def drawn_box(outline, t0, w_t, k0, h):
+    """(first tick, ticks across, lowest key place, keys across) of the drawn outline (loops of (tick, key) points), or
+    None: no outline, or it isn't where the notes are (their box off by more than a key / 3 % of the length)."""
+    if not outline:
+        return None
+    pts = np.concatenate(outline)
+    lo_t, hi_t = float(pts[:, 0].min()), float(pts[:, 0].max())
+    lo_p, hi_p = float(pts[:, 1].min()), float(pts[:, 1].max())
+    room = 0.03 * w_t + 1
+    if (hi_t - lo_t < 1 or hi_p - lo_p < 0.5 or abs(lo_t - t0) > room or abs(hi_t - (t0 + w_t)) > room
+            or abs(lo_p - (k0 - 0.5)) > 1.01 or abs(hi_p - (k0 + h - 0.5)) > 1.01):
+        return None
+    return lo_t, hi_t - lo_t, lo_p, hi_p - lo_p
+
+
+def loop_edges(loops, t0, w_t, p0, ph):
+    """The drawn outline's edges (x1, y1, x2, y2, inside normal x, y; in its box, 0..1): each loop closed; inside =
+    the filled side (a loop inside an odd number of others is a hole)."""
+    polys = []
+    for lp in loops:
+        x, y = (lp[:, 0] - t0) / w_t, (lp[:, 1] - p0) / ph
+        if abs(x[0] - x[-1]) > 1e-12 or abs(y[0] - y[-1]) > 1e-12:
+            x, y = np.r_[x, x[0]], np.r_[y, y[0]]
+        polys.append((x, y))
+
+    def inside_count(px, py, skip):
+        n_ = 0
+        for j, (x, y) in enumerate(polys):
+            if j == skip:
+                continue
+            ya, yb, xa, xb = y[:-1], y[1:], x[:-1], x[1:]
+            cross = (ya > py) != (yb > py)
+            with np.errstate(divide="ignore", invalid="ignore"):
+                xs = xa + (py - ya) * (xb - xa) / (yb - ya)
+            n_ += int((cross & (xs > px)).sum()) % 2
+        return n_
+    out = [[], [], [], [], [], []]
+    for j, (x, y) in enumerate(polys):
+        area = float(np.sum(x[:-1] * y[1:] - x[1:] * y[:-1]))
+        hole = inside_count(x[0], y[0], j) % 2 == 1
+        left = (area > 0) != hole  # (inside on the left of the way the loop goes)
+        dx, dy = np.diff(x), np.diff(y)
+        nx, ny = (-dy, dx) if left else (dy, -dx)
+        for lst, v in zip(out, (x[:-1], y[:-1], x[1:], y[1:], nx, ny)):
+            lst.append(v)
+    return tuple(np.concatenate(v) for v in out)
+
+
+def tilted(a, cfg, th, outline=None):
     """Any other angle -> (the pieces, each one's slice). The notes' box is squeezed to a square (x = time, y = keys,
     0..1 each: a circle drawn as an ellipse is a ball), the rows tilted by th: u = along a row, v = across. Rows =
     lines across v at BINS strip middles; each one's ends = where it crosses the SMOOTH outline through the key
@@ -138,13 +187,19 @@ def tilted(a, cfg, th):
     h = int(key.max()) - k0 + 1
     c, s = math.cos(th), math.sin(th)  # (turned clockwise on screen: v = x s + y c, u = x c - y s)
     c = 0.0 if abs(c) < 1e-9 else c  # (cos 90 is 6e-17, not 0)
-    x0, x1 = (s0 - t0) / w_t, (e0 - t0) / w_t
-    yc = (key - k0 + 0.5) / h
+    drawn = drawn_box(outline, t0, w_t, k0, h)
+    if drawn:  # (the drawing's own box: a drawn ellipse is then exactly a circle, its borders truly straight / mirrored)
+        t0f, w_tf, p0, ph = drawn
+        x0, x1 = (s0 - t0f) / w_tf, (e0 - t0f) / w_tf
+        yc = (key - p0) / ph
+    else:
+        x0, x1 = (s0 - t0) / w_t, (e0 - t0) / w_t
+        yc = (key - k0 + 0.5) / h
     v0, v1 = x0 * s + yc * c, x1 * s + yc * c
     # the outline's corners' v = the lines the row ends are taken on (between two corners the outline is straight,
     # so the row ends there run evenly: blending between them is exact; 512 evenly spaced lines missed the corners by
     # up to half a key: wonky thin outer slices, user 2026-11-23)
-    edges = outline_edges(a, cfg["gaps"], t0, w_t, k0, h)
+    edges = loop_edges(outline, *drawn) if drawn else outline_edges(a, cfg["gaps"], t0, w_t, k0, h)
     ev = [ex * s + ey * c for ex, ey in ((edges[0], edges[1]), (edges[2], edges[3]))]
     knots = np.unique(np.round(np.concatenate(ev), 12))
     nk = len(knots)
@@ -170,9 +225,17 @@ def tilted(a, cfg, th):
     rlo, rhi, rstrip = knot_rows(edges, cfg["gaps"], c, s, knots)
     lifted = rlo + rstrip * 8.0  # (u is within -2..2: each knot's rows lifted above the ones before)
 
+    has = np.unique(rstrip)  # (knots whose line crosses the outline)
+
     def ends_at(q, u):
         """The row ends (lo, hi) on knot q's line for a point at u (the row reaching it there, else the one just
-        before it along the line, else the first); NaN where knot q has no rows."""
+        before it along the line, else the first). A knot past the outline (beyond a ball's point: a row's last
+        ticks can stick out of a drawn outline there) takes the nearest knot that crosses it (taken as the middle of
+        the line, those ticks became bits of the middle slice, user 2026-11-23); NaN when there's none."""
+        if len(has):
+            i = np.clip(np.searchsorted(has, q), 0, len(has) - 1)
+            j = np.clip(i - 1, 0, len(has) - 1)
+            q = np.where(np.abs(has[j] - q) < np.abs(has[i] - q), has[j], has[i])
         rs = np.searchsorted(rstrip, q, "left")
         re = np.searchsorted(rstrip, q, "right")
         pos = np.clip(np.searchsorted(lifted, u + q * 8.0, "right") - 1, rs, np.maximum(re - 1, rs))
@@ -199,8 +262,10 @@ def tilted(a, cfg, th):
 
     # (every cut a hair (TIE of a key) before its place: a row lying right on a border, like the middle row of a ball
     # at 90 degrees, sat on it give or take the notes' rounding and flipped from slice to slice all along: user
-    # 2026-11-23. Moved off it, the whole row is in one slice)
-    tie = TIE / h
+    # 2026-11-23. Moved off it, the whole row is in one slice. A drawn outline has no rounding: a hair is enough, and a
+    # bigger one would put the two halves at 90 degrees out of mirror)
+    tie = 1e-9 if drawn else TIE / h
+    bt0, bw = (drawn[0], drawn[1]) if drawn else (t0, w_t)  # (back to ticks by the same box x was measured in)
 
     def share(x):
         lo_, hi_ = a_lo + b_lo * x, a_hi + b_hi * x
@@ -230,12 +295,21 @@ def tilted(a, cfg, th):
     left = np.minimum(left, right)
     k = np.where(upp, ka[p] + i, kb[p] - i)
     note = idx[p]
-    ta = np.floor(t0 + left * w_t + 0.5).astype(np.int64)
-    tb = np.floor(t0 + right * w_t + 0.5).astype(np.int64)
+    if drawn:  # (a bit of a row sticking out of the drawn outline (past a ball's point, where every slice meets):
+        # it takes the slice of its key's nearest bit inside, user 2026-11-23: middle-slice bits at the row ends)
+        xm = (left + right) / 2
+        lo_m, hi_m = a_lo[p] + b_lo[p] * xm, a_hi[p] + b_hi[p] * xm
+        um_ = c * xm - s * y[p]
+        slack = 0.5 / h  # (half a key: rows end on the outline give or take their rounding)
+        out_ = ~(np.isin(q[p], has) | np.isin(q[p] + 1, has)) | (um_ < lo_m - slack) | (um_ > hi_m + slack)
+        k = inner_slices(k, out_, key[note], np.floor(bt0 + left * bw + 0.5))
+    ta = np.floor(bt0 + left * bw + 0.5).astype(np.int64)
+    tb = np.floor(bt0 + right * bw + 0.5).astype(np.int64)
     ta, tb = np.clip(ta, s0[note], e0[note]), np.clip(tb, s0[note], e0[note])
     keep = tb > ta
     note, k, ta, tb = note[keep], k[keep], ta[keep], tb[keep]
-    k = no_slivers(note, k, ta, tb, key[note], SLIVER * w_t)
+    if not drawn:  # (a drawn outline has no rounding to make slivers; folding there dragged borders near the points)
+        k = no_slivers(note, k, ta, tb, key[note], SLIVER * w_t)
     # touching bits of one note in one slice = one note again
     new = np.ones(len(note), bool)
     new[1:] = (note[1:] != note[:-1]) | (k[1:] != k[:-1])
@@ -244,6 +318,29 @@ def tilted(a, cfg, th):
     out = a[note[first]].copy()
     out[:, 0], out[:, 1] = ta[first], tb[last]
     return out, k[first]
+
+
+def inner_slices(k, out_, key, start):
+    """Pieces' slices with the ones marked out_ (outside the outline) taking the slice of the nearest piece inside on
+    their key (the one before along the key, else the one after; none inside: kept)."""
+    if not out_.any() or out_.all():
+        return k
+    o = np.lexsort((start, key))
+    ko, oo, yo = k[o], out_[o], key[o]
+    pos = np.arange(len(o))
+    before = np.maximum.accumulate(np.where(~oo, pos, -1))
+    after = np.minimum.accumulate(np.where(~oo, pos, len(o))[::-1])[::-1]
+    ok_b = (before >= 0) & (yo[np.maximum(before, 0)] == yo)
+    ok_a = (after < len(o)) & (yo[np.minimum(after, len(o) - 1)] == yo)
+    near_b = np.where(ok_b, pos - before, np.inf)
+    near_a = np.where(ok_a, after - pos, np.inf)
+    src = np.where(near_b <= near_a, before, after)
+    fix = oo & (ok_b | ok_a)
+    ko = ko.copy()
+    ko[fix] = ko[np.clip(src[fix], 0, len(o) - 1)]
+    out = k.copy()
+    out[o] = ko
+    return out
 
 
 def no_slivers(note, k, ta, tb, key, most):

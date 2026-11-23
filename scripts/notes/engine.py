@@ -2671,17 +2671,43 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
                 tracks = np.zeros(len(notes), np.int64)
             if sh.get("_rounds"):  # ("Repeated colours get new channels": each round of the slices its own)
                 step = dict(step, cfg=dict(step["cfg"], rounds=True))
+            loops = wrap_outline(sh, step, ppq)
             if step.get("tag"):  # ("Each slice becomes its own shape": each note's slice rides along as one more
                 # column of the notes, through the steps after it: tagged_notes)
-                got = apply_wrap(np.column_stack([notes, tracks]).astype(np.int64), step["cfg"], ppq, tag=True)
+                got = apply_wrap(np.column_stack([notes, tracks]).astype(np.int64), step["cfg"], ppq, tag=True,
+                                 outline=loops)
                 return np.column_stack([got[:, :-2], got[:, -1]]), got[:, -2]
-            return _after(apply_wrap, notes, tracks, step["cfg"], ppq)
+            return _after(lambda a, cfg, q: apply_wrap(a, cfg, q, outline=loops), notes, tracks, step["cfg"], ppq)
         return _after(apply_trim, notes, tracks, step["cfg"], ppq)
     if tool == "vel":  # (over the shape's time, like its velocity line)
         t = np.concatenate(cached_arrays(sh))[:, 0] * ppq
         return velocities(notes, step["pts"], *line_span(sh, ppq, float(t.min()), float(t.max())),
                           from0_starts(sh, notes, notes[:, 0], ppq)), tracks
     return notes, tracks
+
+
+def wrap_outline(sh, step, ppq):
+    """The drawn outline for a Wrapped slices page (wrap.py), as loops of (tick, key) points, or None (then the slices
+    follow the notes' own outline). Only for a drawn custom shape whose notes are still where the drawing puts them:
+    no flip / turn steps, no page before it that moves or cuts notes (another Wrapped slices page only cuts and
+    colours), not pasted / merged / a sliced piece (user 2026-11-23: a circle's borders must be truly straight and
+    truly mirrored; the notes' stepped outline bent them)."""
+    if sh.get("kind") != "custom" or "notes" in sh or sh.get("_m") or sh.get("cut") or sh.get("cut_of") \
+            or sh.get("merge") or sh.get("text"):
+        return None
+    fx = sh.get("fx") or []
+    if any(st["tool"] in ("flip", "turn") for st in fx):
+        return None
+    plain = {k: v for k, v in step.items() if k not in ("tag", "cfg")}
+    for st in fx:
+        if {k: v for k, v in st.items() if k not in ("tag", "cfg")} == plain and st.get("cfg", {}).get("mode") == "wrap":
+            break
+        if st["tool"] in ("glue", "vel", "colours") or st.get("off") or (
+                st["tool"] == "trim" and (st.get("cfg") or {}).get("mode") == "wrap"):
+            continue
+        return None
+    loops = [np.column_stack([arr[:, 0] * ppq, arr[:, 1]]) for arr in cached_arrays(sh) if len(arr) >= 3]
+    return loops or None
 
 
 def glue_level(sh, n=None):
