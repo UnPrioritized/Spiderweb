@@ -6,6 +6,7 @@ Ramp (R) is in hz_bend.py (quick_ramp)."""
 
 import copy
 import re
+import time
 import tkinter as tk
 from tkinter import ttk
 
@@ -15,6 +16,7 @@ from files.lang import tr
 from files.mathexpr import fmt
 from notes.hzbass import NOTE_BEND_MOST, TUNE, handles, pitch, side_handles
 from roll.roll_shared import CTRL, SHIFT, note_name
+from roll.roll_warp import NUDGE_S
 from window import look
 from window.widgets import REDO_KEYS, UNDO_KEYS, delete_menu, read_number, remember_place
 
@@ -294,6 +296,35 @@ class HzNoteTools:
         d["spread"] = float(round(cents)) if e.state & CTRL else round(cents / DETUNE_STEP) * DETUNE_STEP
         self.detune_show(d)
         self.show_status(e)
+        return True
+
+    def nudge_notes(self, key):
+        """An arrow key with notes selected (nothing held): Left / Right = one tick, Up / Down = one key, no modifier
+        changes the step (user 2026-11-23, like the piano roll). All stop together at the start / the rows' ends; the
+        kept Select box goes along. Presses within NUDGE_S with nothing else on the undo list = one step. True when
+        the key was taken."""
+        if self.drag or not self.sel or self.loudness.held():
+            return False
+        app = self.app
+        dt, dk = {"left": (-1.0 / app.ppq, 0), "right": (1.0 / app.ppq, 0), "up": (0, 1), "down": (0, -1)}[key]
+        picked = [self.tones[i] for i in self.sel if i < len(self.tones)]
+        if not picked:
+            return False
+        if (min(n["t"] for n in picked) + dt < -1e-12 or min(n["key"] for n in picked) + dk < LOWEST
+                or max(n["key"] for n in picked) + dk > HIGHEST):
+            return True
+        stack, now = app.undo_stack, time.perf_counter()
+        last = getattr(self, "hz_nudged", None)
+        again = bool(last and stack and stack[-1] is last[0] and now - last[1] < NUDGE_S)
+        before = copy.deepcopy(self.tones)
+        self.sel_before = (before, self.sel_state())
+        for n in picked:
+            n["t"], n["key"] = max(0.0, round(n["t"] + dt, 9)), n["key"] + dk
+        if self.box_kept is not None:
+            boxes, sels = self.box_kept
+            self.box_kept = ([(b0 + dt, top + dk, b1 + dt, bottom + dk) for b0, top, b1, bottom in boxes], sels)
+        self.commit(tr("hz.step_nudge"), before, push=not again)
+        self.hz_nudged = (stack[-1] if stack else None, now)
         return True
 
     def detune_count(self, step):

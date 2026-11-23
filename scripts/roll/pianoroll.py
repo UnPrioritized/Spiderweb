@@ -43,7 +43,7 @@ from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_centre import CentreDots
 from roll.roll_liquify import LiquifyBrush
-from roll.roll_warp import WarpGrid
+from roll.roll_warp import NUDGE_S, WarpGrid
 from roll.roll_melody import MelodyMarks
 from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT,
@@ -498,6 +498,39 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             if keys[1] is not None:
                 up = max(up, KEYS[1] - 1 - keys[1])
         return left, down, up
+
+    def shape_nudge(self, key):
+        """An arrow key with shapes selected (nothing dragged or drawn): Left / Right = one tick, Up / Down = one key,
+        no modifier changes the step (user 2026-11-23). Each shape stops at beat 0 / the keys' ends on its own, like
+        a drag; with the kept Select box all stop together and the box goes along. Presses within NUDGE_S with
+        nothing else on the undo list = one step. True when the key was taken."""
+        app = self.app
+        if not app.sels or self.drag or self.draft is not None or self.follow or self.holding():
+            return False
+        db, dp = {"left": (-1.0 / app.ppq, 0), "right": (1.0 / app.ppq, 0), "up": (0, 1), "down": (0, -1)}[key]
+        go = {}
+        for j in sorted(app.sels):
+            room = self.move_room(self.as_made(j))
+            left, down, up = room if room else (math.inf, math.inf, math.inf)
+            go[j] = (max(db, -left), min(max(dp, -down), up))
+        if self.box_kept and any(g != (db, dp) for g in go.values()):  # (the box goes along: all stop together)
+            return True
+        go = {j: g for j, g in go.items() if abs(g[0]) > 1e-12 or g[1]}
+        if not go:
+            return True
+        stack, now = app.undo_stack, time.perf_counter()
+        last = getattr(self, "nudged", None)
+        if not (last and stack and stack[-1] is last[0] and now - last[1] < NUDGE_S):
+            app.push_undo(name=tr("pianoroll.nudge"))
+        for j, (bj, pj) in go.items():
+            app.shapes[j]["pts"] = [[round(b + bj, 9) + 0.0, p + pj] for b, p in app.shapes[j]["pts"]]
+        if self.box_kept:
+            boxes, sels = self.box_kept
+            self.box_kept = ([(b0 + db, top, b1 + db, bottom) if top >= RULER_TOP - 0.5 else
+                              (b0 + db, top + dp, b1 + db, bottom + dp) for b0, top, b1, bottom in boxes], sels)
+        self.nudged = (stack[-1] if stack else None, now)
+        app.shape_edited()
+        return True
 
     def as_made(self, j):
         """Shape j, for where its notes reach: a Ctrl+drag copy still waiting for its notes that differs from its
@@ -2742,6 +2775,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.app.delete_selected()
         elif k in ("left", "right", "up", "down") and not e.state & (CTRL | ALT):
             if self.warp_nudge(k, e.state):  # (Warp grid points picked: moved a pixel, Shift 10)
+                return "break"
+            if self.shape_nudge(k):  # (selected shapes: one tick / one key)
                 return "break"
         elif k == "g" and not e.state & CTRL:
             self.app.live.set(not self.app.live.get())

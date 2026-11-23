@@ -155,6 +155,7 @@
  "hz.join_far": "Can't join: the notes are too far apart in pitch for one note's bend.",
  "hz.step_join": "Hz bass: join notes",
  "hz.step_detune": "Hz bass: quick detune",
+ "hz.step_nudge": "Hz bass: nudge notes",
  "hz.detune_held": "Detune: {n} copies, {cents} cents each way (wheel or Up / Down: copies, Ctrl: any cent, Esc: cancel)",
  "hz.detune_hint": "Drag the edge up or down to spread the note into detuned copies (sideways moves it)",
  "hz.step_detune_rail": "Hz bass: quick detune spread",

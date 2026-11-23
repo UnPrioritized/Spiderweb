@@ -2516,6 +2516,7 @@
  "pianoroll.skew": "Skew",
  "pianoroll.resize": "Resize",
  "pianoroll.move": "Move",
+ "pianoroll.nudge": "Nudge",
  "pianoroll.stretch": "Stretch",
  "pianoroll.pick_a_custom_shape_in_the": "Pick a custom shape in the panel first, or draw one with Drawer…",
  "pianoroll.new_funnel_notes": "{text}     new funnel: {notes}",

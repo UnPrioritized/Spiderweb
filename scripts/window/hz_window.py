@@ -27,7 +27,7 @@ from tkinter import ttk
 from files.about import ICONS
 from files.lang import tr, trn
 from files.mathexpr import fmt
-from files.system import MAC, WINDOWS
+from files.system import ALT as ALT_STATE, MAC, WINDOWS
 from notes.engine import CLASH, PORTS, auto_count, slot_ports
 from notes.hz_cc import sharers
 from notes.hzbass import AUTO, FX, HZ_KINDS, all_tones, clean_line, clean_tones, has_cc, left_edge, own_channels
@@ -289,8 +289,12 @@ class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzLfo, 
                        "break" if self.drag or self.loudness.held() else fn() or "break")
         for k in ("<Control-l>", "<Control-L>"):  # (the plugin's LFO… key; plain L stays the Line tool: hz_lfo.py)
             c.bind(k, lambda e: (self.drag or self.loudness.held() or self.open_lfo(), "break")[1])
-        for k, step in (("<Up>", 1), ("<Down>", -1)):  # (a Quick detune pulled: one voice more / fewer)
-            c.bind(k, lambda e, step=step: "break" if self.detune_count(step) else None)
+        for k, step in (("<Up>", 1), ("<Down>", -1)):  # (a Quick detune pulled: one voice more / fewer; else the
+            c.bind(k, lambda e, step=step, k=k: "break" if self.detune_count(step)  # selected notes a key)
+                   or not e.state & (CTRL | ALT_STATE) and self.nudge_notes(k[1:-1].lower()) else None)
+        for k in ("<Left>", "<Right>"):  # (the selected notes a tick sideways)
+            c.bind(k, lambda e, k=k: "break" if not e.state & (CTRL | ALT_STATE)
+                   and self.nudge_notes(k[1:-1].lower()) else None)
         for k in ("Alt_L", "Alt_R"):  # (Sketch: every piece's curve square shown while Alt is held, hz_sketch.py)
             c.bind(f"<KeyPress-{k}>", lambda e: self.sketch_alt_to(True))
             c.bind(f"<KeyRelease-{k}>", lambda e: self.sketch_alt_to(False))
