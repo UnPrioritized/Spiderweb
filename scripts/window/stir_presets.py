@@ -1,34 +1,16 @@
-"""Stir presets (user 2026-11-16; a requester: a stir couldn't be reused in another project): named stirs kept in
-spiderweb/user/stir_presets.json, picked / saved / deleted in a row above the Stir window's tabs (window/
+"""Stir presets (user 2026-11-16; a requester: a stir couldn't be reused in another project): named stirs kept one
+file each in spiderweb/user/presets/Stir/ (window/preset_files.py), picked / saved / deleted in a row above the Stir window's tabs (window/
 stir_window.py). A preset = one stir (the shown tab) or every tab ("Save all tabs"); picking one puts its stirs IN
 PLACE OF the shown tab only (1 tab -> n), the other tabs untouched. Centre / Area numbers are % of the colour box, so
 they carry over to any shape."""
 
-import json
 import math
-import os
-from tkinter import messagebox
 
 import numpy as np
 
-from files.about import USER
 from files.lang import tr
-from files.safefile import write_text
 from notes.recolour import MOST_STIRS, clean_stir, full_stir, one_stir, order_of, stirs_of, with_order
-
-PRESETS_FILE = os.path.join(USER, "stir_presets.json")
-
-
-def read_file():
-    """The file's entries as they are ([] without a file), None when it can't be read (broken)."""
-    if not os.path.exists(PRESETS_FILE):
-        return []
-    try:
-        with open(PRESETS_FILE, encoding="utf-8") as f:
-            items = json.load(f).get("presets", [])
-        return items if isinstance(items, list) else None
-    except (OSError, ValueError, AttributeError):
-        return None
+from window import preset_files
 
 
 def clean_stirs(stirs):
@@ -41,46 +23,23 @@ def clean_stirs(stirs):
 
 
 def load_presets():
-    """The user's presets [{"name", "stirs"}] in the file's order (broken entries left out)."""
-    out = []
-    for p in read_file() or ():
-        if isinstance(p, dict) and str(p.get("name", "")).strip():
-            stirs = clean_stirs(p.get("stirs"))
-            if stirs:
-                out.append({"name": str(p["name"]).strip(), "stirs": stirs})
-    return out
+    """The user's presets [{"name", "stirs"}], newest last (files / entries that can't be read left out)."""
+    def clean(p):
+        stirs = clean_stirs(p.get("stirs"))
+        return stirs and {"name": p["name"].strip(), "stirs": stirs}
+    return preset_files.STIR.entries(clean)
 
 
 def same_name(p, name):
-    """A file entry with this name (capitals or not: one preset)."""
-    return isinstance(p, dict) and str(p.get("name", "")).strip().casefold() == name.casefold()
+    """A preset with this name (capitals or not: one preset)."""
+    return p["name"].strip().casefold() == name.strip().casefold()
 
 
 def change_presets(name, stirs, parent):
-    """The preset `name` replaced by `stirs` (None: deleted; a new one goes last = newest), every other entry kept as
-    it is. A file that can't be read is kept aside first (stir_presets-broken.json, said). False (and said) when the
-    file can't be written."""
-    items = read_file()
-    try:
-        if items is None:
-            broken = os.path.splitext(PRESETS_FILE)[0] + "-broken.json"
-            os.replace(PRESETS_FILE, broken)
-            messagebox.showwarning(tr("stir.preset_save_title"), tr("stir.preset_file_broken", path=broken),
-                                   parent=parent)
-            items = []
-        if stirs is None and any(isinstance(p, dict) and str(p.get("name", "")).strip() == name for p in items):
-            # (deleting: only the entry with exactly this name; a hand-edited twin in other capitals stays)
-            items = [p for p in items if not (isinstance(p, dict) and str(p.get("name", "")).strip() == name)]
-        else:
-            items = [p for p in items if not same_name(p, name)]
-        if stirs is not None:
-            items.append({"name": name, "stirs": stirs})
-        write_text(PRESETS_FILE, json.dumps({"presets": items}, indent=1))
-    except OSError as e:
-        messagebox.showerror(tr("stir.preset_save_title"), tr("stir.preset_save_failed", path=PRESETS_FILE, e=e),
-                             parent=parent)
-        return False
-    return True
+    """The preset `name` saved as `stirs` (the newest now), or None: deleted (only the one with exactly this name when
+    there is one; to the Recycle Bin). What went wrong is said. True when done."""
+    title = tr("stir.preset_save_title" if stirs is not None else "stir.preset_delete_title")
+    return preset_files.change(preset_files.STIR, name, None if stirs is None else {"stirs": stirs}, parent, title)
 
 
 # FLIPPED SHAPES (hunt 11-17): a stir's numbers count where the shape was when its Recolour was set (rc "frame",

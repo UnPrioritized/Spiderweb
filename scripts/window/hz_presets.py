@@ -1,23 +1,20 @@
 """The synth window's presets (window/hz_synth.py; user 2026-10-05: a bar at the top left, like a synth's): the
 preset's name (click it: the list, ours first, then the user's), ◀ ▶ to step through them, Save… and Delete; a *
 after the name once the sound has been changed. A preset is the whole sound: every effect's line and setting
-(HzWindow.fx_settings), not the notes. Picking one = one undo step. The user's are kept in spiderweb/user/hz_presets.json."""
+(HzWindow.fx_settings), not the notes. Picking one = one undo step. The user's are kept one file each in
+spiderweb/user/presets/Hz bass/ (window/preset_files.py)."""
 
 import copy
 import json
-import os
 import types
 import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
-from files.about import USER
 from files.lang import tr
-from files.safefile import write_text
+from window import preset_files
 from window.hz_knobs import adsr_line, pitch_line, sweep_line, vibrato_line
 from window.synth_look import dark_menu
 from window.widgets import Tooltip
-
-PRESETS_FILE = os.path.join(USER, "hz_presets.json")
 
 
 def volume(attack, decay, sustain, release):
@@ -56,26 +53,12 @@ OURS = {  # our own presets: id -> the sound (made as the knobs make it)
 }
 
 
-def read_file():
-    """The file's entries as they are ([] without a file), None when it can't be read (broken)."""
-    if not os.path.exists(PRESETS_FILE):
-        return []
-    try:
-        with open(PRESETS_FILE, encoding="utf-8") as f:
-            items = json.load(f).get("presets", [])
-        return items if isinstance(items, list) else None
-    except (OSError, ValueError, AttributeError):
-        return None
-
-
-def good(p):
-    return isinstance(p, dict) and str(p.get("name", "")).strip() and isinstance(p.get("sound"), dict)
-
-
 def load_presets():
-    """The user's saved presets [{"name", "sound"}] (a broken file or entry: left out; a Note length saved in one
-    before 2026-10-14 too: it's the layer's, not the sound's)."""
-    return [{"name": str(p["name"]), "sound": sound_only(p["sound"])} for p in read_file() or () if good(p)]
+    """The user's saved presets [{"name", "sound"}], newest last (a file or entry that can't be read: left out; a
+    Note length saved in one before 2026-10-14 too: it's the layer's, not the sound's)."""
+    def clean(p):
+        return isinstance(p.get("sound"), dict) and {"name": p["name"].strip(), "sound": sound_only(p["sound"])}
+    return preset_files.HZ_PRESETS.entries(clean)
 
 
 def sound_only(settings):
@@ -88,32 +71,12 @@ def sound_text(settings):
     return json.dumps(sound_only(settings), sort_keys=True)
 
 
-def same_name(p, name):
-    """A file entry with this name (capitals or not: one preset)."""
-    return isinstance(p, dict) and str(p.get("name", "")).strip().casefold() == name.casefold()
-
-
 def change_presets(name, sound, parent):
-    """The user's preset `name` replaced by `sound` (None: deleted), every other entry in the file kept as it is. A
-    file that can't be read is kept aside first (hz_presets-broken.json, said), so nothing in it is lost. False (and
-    said) when the file can't be written."""
-    items = read_file()
-    try:
-        if items is None:
-            broken = os.path.splitext(PRESETS_FILE)[0] + "-broken.json"
-            os.replace(PRESETS_FILE, broken)
-            messagebox.showwarning(tr("hz.preset_save_title"), tr("hz.preset_file_broken", path=broken),
-                                   parent=parent)
-            items = []
-        items = [p for p in items if not same_name(p, name)]
-        if sound is not None:
-            items.append({"name": name, "sound": sound})
-        write_text(PRESETS_FILE, json.dumps({"presets": items}, indent=1))
-    except OSError as e:
-        messagebox.showerror(tr("hz.preset_save_title"), tr("hz.preset_save_failed", path=PRESETS_FILE, e=e),
-                             parent=parent)
-        return False
-    return True
+    """The user's preset `name` saved as `sound` (the newest now), or None: deleted (to the Recycle Bin). What went
+    wrong is said. True when done."""
+    title = tr("hz.preset_save_title" if sound is not None else "hz.preset_delete_title")
+    return preset_files.change(preset_files.HZ_PRESETS, name, None if sound is None else {"sound": sound}, parent,
+                               title)
 
 
 class PresetBar:

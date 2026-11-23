@@ -1,4 +1,4 @@
-"""Warp own bends (QoL K, user 2026-11-23): named Warp grids kept in spiderweb/user/warp_presets.json, at the TOP of
+"""Warp own bends (QoL K, user 2026-11-23): named Warp grids kept one file each in spiderweb/user/presets/Warp/ (window/preset_files.py), at the TOP of
 the Warp window's Preset list under a line, Save… / Delete beside it (like Stir's presets, window/stir_presets.py).
 Saved = the BEND only: grid size, points, curve handles (+ corner points), split lines, a split's inner controls and
 Cells (Smooth / Straight); never Strength / Moves / Show / Colour edges / Folds / At the edges (each shape keeps its
@@ -6,17 +6,11 @@ own). Split lines are places in the box (shares of the shape), so a bend fits an
 turned shape's grid is turned back first (to_seen) and laid onto another the way it looks there (from_seen), with
 Stir presets' moves ("x" mirror sideways, "y" upside down, "swap" across <-> up)."""
 
-import json
-import os
-from tkinter import messagebox
-
-from files.about import USER
 from files.lang import tr
-from files.safefile import write_text
 from notes import warp as wp_
+from window import preset_files
 from window.stir_presets import frame_moves
 
-PRESETS_FILE = os.path.join(USER, "warp_presets.json")
 BEND_KEYS = ("cols", "rows", "pts", "h", "corners", "in", "xs", "ys", "smooth")  # (what an own bend keeps)
 SAME_PLACES = 7  # (two bends are the same when every number agrees to this many places: flips round to DIGITS)
 
@@ -133,56 +127,24 @@ def same(a, b):
     return a is not None and b is not None and key(a) == key(b)
 
 
-def read_file():
-    """The file's entries as they are ([] without a file), None when it can't be read (broken)."""
-    if not os.path.exists(PRESETS_FILE):
-        return []
-    try:
-        with open(PRESETS_FILE, encoding="utf-8") as f:
-            items = json.load(f).get("presets", [])
-        return items if isinstance(items, list) else None
-    except (OSError, ValueError, AttributeError):
-        return None
-
-
 def load_presets():
-    """The user's own bends [{"name", "bend"}] in the file's order (newest last; broken entries left out)."""
-    out = []
-    for p in read_file() or ():
-        if isinstance(p, dict) and str(p.get("name", "")).strip():
-            b = clean_bend(p.get("bend"))
-            if b:
-                out.append({"name": str(p["name"]).strip(), "bend": b})
-    return out
+    """The user's own bends [{"name", "bend"}], newest last (files / entries that can't be read left out)."""
+    def clean(p):
+        b = clean_bend(p.get("bend"))
+        return b and {"name": p["name"].strip(), "bend": b}
+    return preset_files.WARP.entries(clean)
 
 
 def same_name(p, name):
-    return isinstance(p, dict) and str(p.get("name", "")).strip().casefold() == name.casefold()
+    """An own bend with this name (capitals or not: one bend)."""
+    return p["name"].strip().casefold() == name.strip().casefold()
 
 
 def change_presets(name, bend, parent):
-    """The own bend `name` replaced by `bend` (None: deleted; a new one goes last = newest), the other entries kept as
-    they are. A file that can't be read is kept aside first (warp_presets-broken.json, said). False (and said) when
-    the file can't be written."""
-    items = read_file()
-    try:
-        if items is None:
-            broken = os.path.splitext(PRESETS_FILE)[0] + "-broken.json"
-            os.replace(PRESETS_FILE, broken)
-            messagebox.showwarning(tr("warp.own_save_title"), tr("warp.own_file_broken", path=broken), parent=parent)
-            items = []
-        if bend is None and any(isinstance(p, dict) and str(p.get("name", "")).strip() == name for p in items):
-            items = [p for p in items if not (isinstance(p, dict) and str(p.get("name", "")).strip() == name)]
-        else:
-            items = [p for p in items if not same_name(p, name)]
-        if bend is not None:
-            items.append({"name": name, "bend": bend})
-        write_text(PRESETS_FILE, json.dumps({"presets": items}, indent=1))
-    except OSError as e:
-        messagebox.showerror(tr("warp.own_save_title"), tr("warp.own_save_failed", path=PRESETS_FILE, e=e),
-                             parent=parent)
-        return False
-    return True
+    """The own bend `name` saved as `bend` (the newest now), or None: deleted (to the Recycle Bin). What went wrong is
+    said. True when done."""
+    title = tr("warp.own_save_title" if bend is not None else "warp.own_delete_title")
+    return preset_files.change(preset_files.WARP, name, None if bend is None else {"bend": bend}, parent, title)
 
 
 def laid(old_w, bend, frame, base):

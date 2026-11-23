@@ -243,6 +243,24 @@ class Folder:
         return out
 
 
+def change(folder, name, item, parent, title):
+    """A window's Save / Delete: item (a dict without the name) saved as name, or None = deleted (to the Recycle
+    Bin; no bin here = asked "delete for good?"). What went wrong is said (title on the message). True when done."""
+    from tkinter import messagebox
+    from files import system
+    from files.lang import tr
+    try:
+        if item is not None:
+            folder.save({"name": name, **{k: v for k, v in item.items() if k != "name"}})
+            return True
+        return folder.delete(name, lambda: messagebox.askyesno(title, tr("presets.no_bin", name=name), parent=parent))
+    except system.BinError:
+        messagebox.showerror(title, tr("presets.bin_in_use", name=name), parent=parent)
+    except OSError as e:
+        messagebox.showerror(title, tr("presets.save_failed", path=folder.path(), e=e), parent=parent)
+    return False
+
+
 # The lists (folder names are fixed English words: they're never translated, like "shapes" / "palettes")
 HZ_PRESETS = Folder("Hz bass", "hz_presets.json", "presets")
 STIR = Folder("Stir", "stir_presets.json", "presets")

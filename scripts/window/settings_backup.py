@@ -23,12 +23,12 @@ from window import look
 def _sources():
     """(name in the backup, path) of every file / folder holding settings or the user's own presets. Read from each
     module's own path, so tests (which point them elsewhere) back up their own. New saved settings: add them here."""
-    from files import colour_list, shape_defaults
-    from window import chop_window, drawer, hz_presets, hz_trace, palettes, pattern_dialog, stir_presets
-    paths = (settings.SETTINGS_FILE, look.LOOK_FILE, palettes.FOLDER, drawer.LIBRARY, hz_presets.PRESETS_FILE,
-             stir_presets.PRESETS_FILE, shape_defaults.DEFAULTS_FILE,
-             hz_trace.SHAPES_FILE, pattern_dialog.PATTERNS_FILE, pattern_dialog.OLD_CURVES_FILE,
-             chop_window.RHYTHMS_FILE, colour_list.FORMATS_FILE)
+    from files import shape_defaults
+    from window import drawer, palettes, pattern_dialog, preset_files
+    # every saved list's folder (user 2026-11-24: all of user/presets) + the old one-file lists not split yet
+    olds = list(dict.fromkeys(f.old_path() for f in preset_files.LISTS if f.old))
+    paths = [settings.SETTINGS_FILE, look.LOOK_FILE, palettes.FOLDER, drawer.LIBRARY, shape_defaults.DEFAULTS_FILE,
+             preset_files.root(), pattern_dialog.OLD_CURVES_FILE] + olds
     return [(os.path.basename(p), p) for p in paths]
 
 
