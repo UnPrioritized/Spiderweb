@@ -21,6 +21,7 @@ from window import look
 from window.snap_picker import SnapPicker
 from window.tool_window import ORANGE, ToolWindow, page_place_added
 from window.widgets import Scrub, Tooltip, bad, good, read_number, traced
+from window.widgets_tips import greyed_why
 
 RHYTHMS_FILE = os.path.join(USER, "rhythms.json")
 CELLS = (1, 2, 3, 4, 6, 8)  # the strip's grid: cells per step
@@ -229,6 +230,7 @@ class ChopWindow(ToolWindow):
         Tooltip(self.save_button, tr("chop.tip_save"))
         self.delete_button = ttk.Button(row, text=tr("chop.delete"), command=self.delete_rhythm)
         self.delete_button.pack(side="left", padx=(6, 0))
+        greyed_why(self.delete_button, tr("chop.why_delete"))  # (QoL H)
 
         self.rhythm_strip = RhythmStrip(box, s, self.on_strip)
         self.rhythm_strip.grid(row=3, column=0, columnspan=2, pady=(4, 2))

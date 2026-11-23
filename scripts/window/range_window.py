@@ -27,6 +27,7 @@ from window import big_ask, look
 from window.default_pin import DefaultPin
 from window.panel_funnel import GATE_STEPS
 from window.widgets import LocalUndo, PointGraph, Scrub, Tooltip, pair_grip, menu_click, chart_edges, remember_place, unit_word
+from window.widgets_tips import greyed_why
 
 
 def _power(k):
@@ -441,6 +442,17 @@ class RangeGraph(DefaultPin, PointGraph, tk.Toplevel):
                 btn.config(state="normal" if ok else "disabled")
         for btn in self.preset_btns:
             btn.config(state="normal" if on else "disabled")
+        # (QoL H: greyed controls say why)
+        off = tr("range_window.why_off")
+        for w in (*self.gate_boxes.values(), self.dir_box, self.even_box, self.ends_box, *self.preset_btns,
+                  *self.choice_btns["halves"]):
+            greyed_why(w, off)
+        for btn in self.choice_btns["follow"]:
+            greyed_why(btn, off if not on else tr("range_window.why_follow"))
+        greyed_why(self.rows_check, off if not on else tr("range_window.why_even") if self.even
+                   else tr("range_window.why_rows"))
+        greyed_why(self.join_check, off if not on else tr("range_window.why_even") if self.even
+                   else tr("range_window.why_rows") if self.memo[0]["dir"] != "time" else tr("range_window.why_join"))
         self.info.config(text=tr("range_window.info", a=a, b=b) +
                          (trn("range_window.notes", self.count, n=self.count) if self.count else "") +
                          (tr("range_window.no_step") if on and self.memo[0].get("halves") and a != b
@@ -741,6 +753,8 @@ def range_editor(cls):
             super().show_boxes()
             self.gate_boxes["from"].config(state="disabled")
             self.on_tick.state(["disabled"])
+            greyed_why(self.gate_boxes["from"], tr("range_window.why_default_from"))
+            greyed_why(self.on_tick, tr("range_window.why_default_on"))
 
         def ok(self):
             self.take_typing()

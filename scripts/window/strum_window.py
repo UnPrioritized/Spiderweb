@@ -15,6 +15,7 @@ from notes.strum import EDGES, END_KNOB, KEYS_MAX, LIMITS, STRUM_DEFAULTS, TIME_
 from window import look
 from window.tool_window import GREEN, ORANGE, Knob, ToolWindow
 from window.widgets import Scrub, Tooltip, bad, good, read_number
+from window.widgets_tips import greyed_why
 
 TIMES = ("time", "end_time")  # kept in beats, shown in ticks
 TENSIONS = ("tension", "vel_tension", "end_tension")
@@ -239,20 +240,24 @@ class StrumWindow(ToolWindow):
             state = "normal" if ok else "disabled"
             if str(self.entries[key].cget("state")) != state:
                 self.entries[key].config(state=state)
+            greyed_why(self.entries[key], tr("strum.why_" + panel) if not on[panel] else tr("strum.why_tension"))
         for key in ("preserve", "ahead"):
             self.checks[key].state(["!disabled"] if c["start"] else ["disabled"])
+            greyed_why(self.checks[key], tr("strum.why_start"))
         # Keys per step + Edges: greyed while nothing strums (like a tension at strength 0: they'd do nothing)
         moves = c["start"] and (c["time"] or c["vel"]) or c["end"] and c["end_time"]
         state = "normal" if moves else "disabled"
         for key in ("keys", "keys_to"):
             if str(self.entries[key].cget("state")) != state:
                 self.entries[key].config(state=state)
+            greyed_why(self.entries[key], tr("strum.why_nothing"))
         for w in (self.keys_label, self.keys_mid):
             w.state(["!disabled"] if moves else ["disabled"])
         # (Edges: only a Start time moves notes past them; End only shortens notes, Velocity moves none, hunt)
         starts = bool(c["start"] and c["time"])
         self.edges_label.state(["!disabled"] if starts else ["disabled"])
         self.edges_box.state(["!disabled", "readonly"] if starts else ["disabled"])
+        greyed_why(self.edges_box, tr("strum.why_edges"))
 
 
 open_strum = StrumWindow.open

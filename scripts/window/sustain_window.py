@@ -26,6 +26,7 @@ from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.default_pin import DefaultPin
 from window.widgets import LocalUndo, Scrub, Tooltip, remember_place, traced, unit_text
+from window.widgets_tips import greyed_why
 
 
 def target_indices(app):
@@ -677,10 +678,15 @@ class SustainWindow(DefaultPin, tk.Toplevel):
         elif not self.what.winfo_manager():  # (nothing to work on selected: said so, all greyed)
             self.what.pack(anchor="w", before=self.on_tick, pady=(0, 6))
         self.on_tick.state(["!disabled"] if self.idx else ["disabled"])  # (state(): config(state=) drops a half-tick)
+        greyed_why(self.on_tick, tr("sustain.why_none"))
         on = any(self.on) and bool(self.idx)  # (half-ticked = some shapes: their settings can be changed)
 
-        def put(widgets, ok=True):
+        off_why = tr("sustain.why_off" if self.idx else "sustain.why_none")
+
+        def put(widgets, ok=True, why=None):
             for w in widgets:
+                if not isinstance(w, ttk.Label):  # (QoL H: greyed controls say why)
+                    greyed_why(w, off_why if not on else why or off_why)
                 if isinstance(w, ttk.Checkbutton):  # (state(): config(state=) drops a half-tick)
                     w.state(["!disabled"] if on and ok else ["disabled"])
                 else:
@@ -690,9 +696,10 @@ class SustainWindow(DefaultPin, tk.Toplevel):
         put([self.auto_btn, self.own_btn, self.stops_tick, self.add_btn, self.clear_btn, self.past_tick] +
             [r[3] for r in self.rows.values() if r[3]])
         # (a box only while its way is picked / its row ticked, user)
-        put([self.gap_box, self.gap_unit], any(g is not None for g in self.vals["gap"]))
+        put([self.gap_box, self.gap_unit], any(g is not None for g in self.vals["gap"]), tr("sustain.why_gap"))
         for key, r in self.rows.items():  # (some shapes have it: typing sets it on all)
-            put(r[5], any(v is not None for v in self.vals[key if r[0] is not None else "every"]))
+            put(r[5], any(v is not None for v in self.vals[key if r[0] is not None else "every"]),
+                tr("sustain.why_row"))
         self.show_auto()
         stuck = on and any(self.too_many(t) for t in self.tgts)
         if stuck and not self.warn.winfo_manager():

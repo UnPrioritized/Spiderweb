@@ -15,6 +15,7 @@ from notes.steps import COLOURS, FX, cut_needed, hidden_after, upto_view
 from notes.recolour import BY, KEEP, MODES, SET, can_recolour, clean_recolour, colour_sets, edited_step, enough, \
     is_recoloured, new_seed, order_of, ordered, palettes, step_place, turns_of, wanted, without_recolour
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, pack_shown, same_or_blank, show_mixed, unchanged
+from window.widgets_tips import greyed_why
 
 RECOLOUR_CHOICES = [(None, tr("recolour.off"))] + [(m, tr("recolour." + m)) for m in MODES]
 BY_CHOICES = [(b, tr("recolour.by_" + b)) for b in BY]
@@ -373,6 +374,9 @@ class RecolourPanel:
         self.recolour_stir.state(["!disabled" if tgts else "disabled"])
         self.recolour_warp.state(["!disabled" if tgts else "disabled"])
         self.recolour_liquify.state(["!disabled" if tgts else "disabled"])
+        for w in (self.recolour_mode, self.recolour_stir, self.recolour_warp, self.recolour_liquify):  # (QoL H)
+            greyed_why(w, tr("recolour.why_none"))
+        greyed_why(self.recolour_entry, tr("recolour.why_none") if not tgts else tr("recolour.why_amount"))
         shown = bool(live)
         pack_shown(self.recolour_row, shown, anchor="w", padx=(self.cycle_rows_pad, 0), pady=(1, 0))
         pack_shown(self.recolour_again, shown, side="left", after=self.recolour_mode)

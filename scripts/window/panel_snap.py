@@ -14,6 +14,7 @@ from notes.tumour import LINE_KINDS
 from window import look
 from files.snap import DEFAULT_SNAP
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, unchanged, unit_text
+from window.widgets_tips import greyed_why
 
 STEPS = (1, 10, 1)  # quick changes of the step in ticks (widgets.Scrub): step, Shift step, Ctrl step
 
@@ -102,6 +103,12 @@ class SnapPanel:
         off = bool(ons) and all(ons) or thick  # (a thick stroke's band has no last note either)
         for w in self.last_parts:
             w.state(["disabled" if off else "!disabled"])
+        # (QoL H: greyed controls say why)
+        greyed_why(self.by_snap_tick, tr("panel_snap.why_lines") if not tgts else tr("panel_snap.why_thick"))
+        for w in (self.by_snap_entry, self.by_snap_end_box):
+            greyed_why(w, tr("panel_snap.why_off"))
+        for w in self.last_parts:
+            greyed_why(w, tr("panel_snap.why_thick") if thick else tr("panel_snap.why_last"))
 
     def on_by_snap_tick(self):
         if self._loading:

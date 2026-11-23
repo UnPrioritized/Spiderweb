@@ -18,6 +18,7 @@ from window.graph_window import GraphSource, GraphWindow
 from window.panel_custom import GAP_COLOR
 from window.widgets import (LocalUndo, Scrub, Tooltip, bad, fit_screen, good, grid_shown, placed, traced, unchanged,
                             unit_text)
+from window.widgets_tips import greyed_why
 
 SHAPE_CHOICES = [("triangle", tr("tumour_window.triangle")), ("square", tr("tumour_window.square")),
                  ("circle", tr("tumour_window.circle")), ("parabola", tr("tumour_window.parabola"))]
@@ -450,12 +451,18 @@ class TumourWindow(DefaultPin, tk.Toplevel):
         ons = [bool((shown_tumour(t) or {}).get("on")) for t in tgts]
         self.mixed = any(ons) and not all(ons)
         self.on_box.state(["alternate"] if self.mixed else ["!alternate"])
+        greyed_why(self.on_box, tr("tumour_window.why_none"))  # (QoL H: greyed controls say why)
+        off_why = tr("tumour_window.why_none" if not tgts else "tumour_window.why_off")
         for w in self.widgets:
             w.config(state=("readonly" if isinstance(w, ttk.Combobox) else "normal") if on else "disabled")
+            greyed_why(w, off_why)
         self.reroll.config(state="normal" if on and tm["side"] == "random" else "disabled")
+        greyed_why(self.reroll, off_why if not on else tr("tumour_window.why_reroll"))
         square = on and tm["shape"] == "square"
         self.entries["slant"].config(state="normal" if square else "disabled")
         self.graph_btns["slant"].config(state="normal" if square else "disabled")
+        for w in (self.entries["slant"], self.graph_btns["slant"]):
+            greyed_why(w, off_why if not on else tr("tumour_window.why_slant"))
         # Slant only for square bumps, New random only for random sides (greyed while tumours are off, user)
         for w in self.slant_row:
             grid_shown(w, tm["shape"] == "square")
@@ -619,6 +626,7 @@ def tumour_editor(cls):
         def sync(self):
             super().sync()
             self.on_box.state(["disabled"])
+            greyed_why(self.on_box, tr("tumour_window.why_default_on"))
 
         def accept(self):
             if self.graph_window:

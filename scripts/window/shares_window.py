@@ -23,6 +23,7 @@ from window.edit_line import EditLine
 from window.tool_window import Knob
 from window.widgets import Scrub, Tooltip, bad, centre_over, good, open_or_lift, remember_place, show_mixed, \
     wheel_ready
+from window.widgets_tips import greyed_why
 
 COLUMNS = 4
 
@@ -588,6 +589,8 @@ class SharesWindow(DefaultPin, HeldKnobs, tk.Toplevel):
         self.n_shown = n_text
         self.n_tip.text = tr("shares.colours_tip", least=lays[0]["least"] if on else 1, most=most)
         self.even.state(["!disabled" if on and used > 1 else "disabled"])
+        greyed_why(self.n_entry, tr("shares.why_none"))  # (QoL H: greyed controls say why)
+        greyed_why(self.even, tr("shares.why_none") if not on else tr("shares.why_one"))
         rcs = [clean_recolour(t.get("recolour")) for t in tgts]
         areas = bool(rcs) and all(r["mode"] == "clumps" for r in rcs)  # (the shares = area sizes)
         for i, c in enumerate(self.cells):
@@ -614,6 +617,7 @@ class SharesWindow(DefaultPin, HeldKnobs, tk.Toplevel):
                 tip.text = tr("shares.area_tip" if areas else "shares.share_tip") if len(vals) == 1 else \
                     tr("shares.mixed_tip")
             c["entry"].config(state="normal" if used > 1 else "disabled")
+            greyed_why(c["entry"], tr("shares.why_one"))
             pinned = {i in L["pins"] for L in mine}
             c["lock"].show(pinned.pop() if len(pinned) == 1 else None, used > 1)
         self.hint.config(text=tr("shares.hint_clumps" if areas else "shares.hint"))
@@ -657,7 +661,9 @@ class SharesWindow(DefaultPin, HeldKnobs, tk.Toplevel):
         for way, ok in (("up", py < MOST_PUSH), ("down", py > -MOST_PUSH), ("left", px > -MOST_PUSH),
                         ("right", px < MOST_PUSH)):
             self.pushes[way].state(["!disabled" if ok or len(pushes) > 1 else "disabled"])
+            greyed_why(self.pushes[way], tr("shares.why_push_most"))
         self.push_none.state(["!disabled" if pushes != {(0, 0)} else "disabled"])
+        greyed_why(self.push_none, tr("shares.why_push_none"))
         framed = any(r.get("frame") for r in rcs)
         if framed != bool(self.framed.winfo_manager()):
             if framed:
@@ -673,6 +679,7 @@ class SharesWindow(DefaultPin, HeldKnobs, tk.Toplevel):
             b["var"].set(text)
         b["shown"] = text
         b["entry"].config(state="normal" if on else "disabled")
+        greyed_why(b["entry"], tr("shares.why_centre") if name.startswith("centre") else tr("shares.why_tight"))
 
     # ---- changes (each shape on its own list)
 
@@ -887,8 +894,10 @@ def shares_editor(cls):
             self.what.config(text="")
             for b in list(self.pushes.values()) + [self.push_none]:
                 b.state(["disabled"])
+                greyed_why(b, tr("deform.why_default_shape"))
             for k in ("centre0", "centre1"):  # (a dot on the piano roll: never in a default)
                 self.boxes[k]["entry"].config(state="disabled")
+                greyed_why(self.boxes[k]["entry"], tr("deform.why_default_shape"))
 
         def ok(self):
             self.take_typing()

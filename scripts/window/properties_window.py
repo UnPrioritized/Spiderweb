@@ -36,6 +36,7 @@ from window.props_text import (LIKE_KEYS, MADE_BY, channel_text, clumps_hidden, 
                               removed, settle_steps, step_keys, with_number)  # (moved)
 from window.settings_window import ScrollPage
 from window.widgets import ListTip, ShortLabel, Tooltip, bad, good, leave_box, read_number, remember_place, unchanged
+from window.widgets_tips import greyed_why
 
 LIST_CHARS = 22  # the shape list's width in letters (longer names: cut, the whole name in a tip)
 SHORT_CHARS = 32  # a folded basics group's grey line asks this many letters' room (the window a bit wider: user 2026-11-12 OK)
@@ -359,6 +360,7 @@ class PropertiesWindow(tk.Toplevel):
         one = len(self.picked) == 1
         self.like.state(["!disabled" if one else "disabled"])
         self.like_tip.text = tr("props.like_this_tip" if one else "props.like_this_one")
+        self.like_tip.why = tr("props.like_this_one")  # (QoL H: its tip says why while greyed)
 
     def on_pick(self, e=None):
         got = [self.listed[k] for k in self.shape_list.curselection() if k < len(self.listed)]
@@ -424,6 +426,7 @@ class PropertiesWindow(tk.Toplevel):
             else:
                 self.hz_button.pack_forget()
         self.add.state(["!disabled" if sh is not None else "disabled"])
+        greyed_why(self.add, tr("deform.why_select"))  # (QoL H)
 
     def put(self, key, text):
         """A box's text set by the window (not while it is being typed in: that waits for Enter / leaving)."""
@@ -510,6 +513,7 @@ class PropertiesWindow(tk.Toplevel):
             self.put_all(key, [(i, fmt(p[k])) for i, _, p in known])
             ok = [1 for _, sh, _ in known if not (key in ("length", "high") and sh.get("hz"))]
             fr.boxes[0].config(state="normal" if ok else "disabled")
+            greyed_why(fr.boxes[0], tr("props.why_hz"))  # (QoL H)
         from roll.roll_shared import note_name
         for k, fr in ((2, self.low), (3, self.high)):
             names = {note_name(p[k]) for _, _, p in known}
@@ -697,6 +701,7 @@ class PropertiesWindow(tk.Toplevel):
                              "alternate" if any(offs) and not off else "!alternate"])
             r["tick_tip"].text = tr("props.tick_tip" if can_off else "props.tick_never") + (
                 "\n\n" + tr("props.tick_mixed") if any(offs) and not off else "")
+            r["tick_tip"].why = tr("props.tick_never")  # (QoL H)
             some_clumps = any(t in clumps.setdefault(i, clumps_hidden(s)) for i, s, t in holders)
             grey = off or key in hidden or some_clumps
             opens = self.opens(sh, tag)

@@ -14,6 +14,7 @@ from notes.pen import (ENDS, PEN_DEFAULT, PEN_KINDS, TAPER_MAX, THICK_MAX, THICK
                        clean_ink, pen_of)
 from window import look
 from window.widgets import Scrub, Tooltip, bad, good, leave_box, same_or_blank, unchanged, unit_word
+from window.widgets_tips import greyed_why
 
 TIP = tr("panel_freehand.makes_the_freehand_stroke_perfect_0")
 THICK_TIP = tr("panel_freehand.thickness_tip")
@@ -156,6 +157,10 @@ class FreehandPanel:
         self.pen_speed_tick.state(["alternate" if any(speeds) and not all(speeds) else "!alternate"])
         self.pen_speed_tick.state(["!disabled" if wide and timed else "disabled"])
         self.pen_speed_tip.set_text(tr("panel_freehand.speed_tip") if timed else tr("panel_freehand.speed_no_times"))
+        # (QoL H: greyed controls say why)
+        for w in (self.pen_ends_box, self.pen_taper_entry):
+            greyed_why(w, tr("panel_freehand.why_thin"))
+        self.pen_speed_tip.why = tr("panel_freehand.why_thin") if not wide else tr("panel_freehand.speed_no_times")
 
     def on_pen(self, key, left=False):
         """Ends / Taper / Width from speed changed: the selected line shapes / picked stroke (one undo step; Width

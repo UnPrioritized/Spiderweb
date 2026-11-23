@@ -257,7 +257,7 @@ class JoinSplit:
                                    tr("join_split.outline_spam")))
         box.current(0)
         box.pack(side="left", padx=(5, 0))
-        Tooltip(box, LINE_FILL_TIP)
+        Tooltip(box, LINE_FILL_TIP).why = LINE_FILL_TIP  # (always greyed: the tip is the reason; QoL H)
 
     def sync_line_fill(self):
         self._rows["line_fill"] = bool(self.sels) and all(

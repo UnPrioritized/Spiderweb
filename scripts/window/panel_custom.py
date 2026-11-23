@@ -32,6 +32,7 @@ from window.panel_tiles import tiles_on
 from window.range_window import open_range_graph
 from window.widgets import (Scrub, Tooltip, bad, good, leave_box, line_up, name_index, name_list, pack_shown, set_names,
                             unchanged, unit_word)
+from window.widgets_tips import greyed_why
 
 GAP_COLOR = look.WARN  # Fill / Spam on a shape whose outline has one gap (closed with a straight line)
 MISSING_MARK = "✕ "  # in the Shape box: a placed shape whose library shape was renamed or deleted (user, 2026-10-05)
@@ -345,6 +346,7 @@ class CustomPanel:
         self._loading = False
         self.even_tick.state(["alternate" if len(ons) > 1 else "!alternate", "!disabled" if usable else "disabled"])
         self.even_tip.text = tr("panel_custom.even_tip") + ("" if usable else tr("panel_custom.even_needs"))
+        self.even_tip.why = tr("panel_custom.even_needs").strip()  # (QoL H)
         pack_shown(self.even_tick, shown, anchor="w", before=self.vel_row, pady=(0, 3))
         # (on for a selected shape: no Deform row, its bends would break the even steps; user)
         pack_shown(self.deform_box, not any(even_on(self.shapes[i]) for i in self.sels), fill="x", pady=(4, 0),
@@ -533,6 +535,15 @@ class CustomPanel:
         self._loading = False
         self.edge_mode_box.config(state="readonly" if outline and tgts[0].get("edge") else "disabled")
         self.cancel_box.config(state="normal" if fill in ("fill", "spam") and not text else "disabled")
+        # (QoL H: greyed controls say why)
+        spam_why = tr("panel_custom.why_hz") if hz else tr("panel_custom.why_spam")
+        for w in (self.gate_entry, self.ends_box, self.range_btn):
+            greyed_why(w, spam_why)
+        for b in self.align_buttons:
+            greyed_why(b, spam_why if not spam or hz else tr("panel_custom.why_stretch"))
+        greyed_why(self.edge_entry, tr("panel_custom.why_outline"))
+        greyed_why(self.edge_mode_box, tr("panel_custom.why_outline") if not outline else tr("panel_custom.why_edge"))
+        greyed_why(self.cancel_box, tr("panel_custom.why_text") if text else tr("panel_custom.why_cancel"))
         ids = {id(t) for t in tgts}
         self.stale_ok += 1  # (notes made in the background: the last count, never waited for; their take-in syncs again)
         try:
@@ -909,6 +920,8 @@ class CustomPanel:
         merged = placed and any(self.merge_part(t, parts) for t in tgts)
         self.hz_check.config(state="normal" if spam and not new_off and not tool_made and not merged else "disabled")
         self.hz_check_tip.text = tr("panel_custom.hz_tip") + (tr("panel_custom.hz_not_merged") if merged else "")
+        self.hz_check_tip.why = (tr("panel_custom.hz_not_merged").strip() if merged else tr("panel_custom.why_hz_tool")
+                                 if tool_made else tr("panel_custom.why_spam"))  # (QoL H)
         self.hz_stale_on = on and any(t.get("hz") and self.hz_out_of_tune(t) for t in tgts if t is not self.custom_defaults)
         slow = self.hz_slowest(tgts[0]) if on else None
         self.hz_short_on = on and shortest_gate(dict(hz, bpm=slow or hz["bpm"]), self.ppq) < HZ_SHORT

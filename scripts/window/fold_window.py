@@ -21,6 +21,7 @@ from window import look
 from window.history import load_state, undo_state
 from window.join_split import by_owner, without10
 from window.widgets import Scrub, Tooltip, remember_place, unit_word
+from window.widgets_tips import greyed_why
 
 WRAP = 330
 POLL_MS = 30
@@ -241,6 +242,7 @@ class FoldWindow(tk.Toplevel):
         self.how_text["row"].config(text=row)
         self.how_text["loop"].config(text=loop)
         self.ticks["fold.even"].state(["!disabled"] if how == "row" else ["disabled"])
+        greyed_why(self.ticks["fold.even"], tr("fold.why_even"))
 
     def preview(self):
         """The folded notes shown on the piano roll (the shapes as they were, the selected ones swapped for one).
@@ -376,6 +378,7 @@ class FoldWindow(tk.Toplevel):
                 self.app._coming = None
 
     def say(self):
+        greyed_why(self.fold_button, tr("fold.nothing") if not self.tracks else tr("fold.why_same"))  # (QoL H)
         if not self.tracks:
             self.outcome.config(text=tr("fold.nothing"))
             self.fold_button.state(["disabled"])

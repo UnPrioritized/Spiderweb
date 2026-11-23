@@ -13,7 +13,7 @@ from window.widgets_place import (on_screen, placed, fit_screen, _fit_screen, se
                                   centre_over)
 from window.widgets_wheel import (set_glide, _last, took, wheel_widget, can_change, wheel_ready, wheel_turns,  # (moved)
                                   _does_something, click_first, linux_wheel, mac_buttons, wheel_unit)
-from window.widgets_tips import TIP_WIDTH, TALL, Tooltip, ListTip  # (moved)
+from window.widgets_tips import TIP_WIDTH, TALL, Tooltip, ListTip, greyed_why, is_greyed  # (moved)
 
 SHIFT, CTRL = 0x1, 0x4
 DRAG_PX = 4  # pixels of label dragging per step

@@ -8,6 +8,7 @@ from files.mathexpr import calc
 from notes.custom import CYCLE_ALL, CYCLE_MAX, CYCLES, row_restart_ok
 from window.widgets import (Scrub, Tooltip, bad, good, leave_box, pack_shown, same_or_blank, show_mixed, unchanged,
                             unit_word, unit_text)
+from window.widgets_tips import greyed_why
 
 CYCLE_CHOICES = [(None, tr("colours.off"))] + [(v, tr("colours." + v)) for v in CYCLES]
 # "Each key row" (cycle["rows"]): off, counted from each row's first note, back from its last
@@ -169,6 +170,12 @@ class ColoursPanel:
         for e in [self.cycle_n_entry] + self.cycle_entries + self.shift_entries:
             e.config(state="normal" if cy and not mixed else "disabled", style="TEntry")
         self.cycle_rows_box.config(state="readonly" if cy and not mixed and rows_ok else "disabled")
+        # (QoL H: greyed controls say why)
+        greyed_why(self.cycle_box, tr("colours.why_none"))
+        why = tr("colours.why_mixed") if mixed else tr("colours.why_off")
+        for e in [self.cycle_n_entry] + self.cycle_entries + self.shift_entries:
+            greyed_why(e, why)
+        greyed_why(self.cycle_rows_box, why if not cy or mixed else tr("colours.why_rows"))
         if bool(cy) != bool(self.cycle_n_entry.winfo_manager()):
             if cy:
                 self.cycle_n_label.pack(side="left")

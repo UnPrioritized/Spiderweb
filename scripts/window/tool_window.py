@@ -18,7 +18,7 @@ from notes.recolour import clean_recolour, page_added, page_removed
 from notes.sliced import steps_kept
 from window import look
 from window.default_pin import DefaultPin
-from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, fit_screen, placed, wheel_ready, wheel_turns
+from window.widgets import REDO_KEYS, UNDO_KEYS, LocalUndo, Tooltip, fit_screen, greyed_why, placed, wheel_ready, wheel_turns
 
 NEW = "new"  # the "+" tab
 
@@ -427,6 +427,7 @@ class ToolWindow(DefaultPin, tk.Toplevel):
         self.on_box = ttk.Checkbutton(head, text=tr("tool_window.on"), variable=self.on, command=self.on_off)
         self.on_box.pack(side="right")
         Tooltip(self.on_box, tr("tool_window.tip_on"))
+        greyed_why(self.on_box, tr("tool_window.why_on"))  # (the "+" tab: no page to switch yet; QoL H)
         row = ttk.Frame(parent)
         row.pack(fill="x", pady=(6, 0))
         self.strip = ttk.Frame(row)

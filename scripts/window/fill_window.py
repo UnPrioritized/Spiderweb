@@ -9,6 +9,7 @@ from files.lang import tr
 from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.widgets import centre_over, open_or_lift, remember_place
+from window.widgets_tips import greyed_why
 
 
 class FillWindow(tk.Toplevel):
@@ -75,6 +76,7 @@ class FillWindow(tk.Toplevel):
             hint += "\n\n" + problem
         self.hint.config(text=hint)
         self.go.state(["disabled"] if problem else ["!disabled"])
+        greyed_why(self.go, problem or "")  # (QoL H: the same reason as the hint's)
 
     def enter(self, e):
         """Enter: the button that has the keyboard (Tab to Close + Enter = close), else Fill."""

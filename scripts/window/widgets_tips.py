@@ -24,6 +24,7 @@ class Tooltip:
 
     def __init__(self, widget, text, owner=None):
         self.widget, self.text, self.tip, self.job, self.used = widget, text, None, None, False
+        self.why = None  # (greyed_why: while the widget is greyed, why — a text or a function giving one — goes first)
         self.owner = owner or widget  # (the box is made in its window)
         if not widget.bind_class(self.TAG, "<Enter>"):  # (once per Tk)
             for seq, name in (("<Enter>", "enter"), ("<Leave>", "leave"), ("<ButtonPress>", "use"),
@@ -64,16 +65,26 @@ class Tooltip:
         except tk.TclError:
             return False
 
+    def shown_text(self):
+        """The text the box shows: while the widget is greyed, the reason first (QoL H, user 2026-11-23)."""
+        why = greyed_reason(self) if self.why is not None else ""
+        if not why:
+            return self.text
+        from files.lang import tr
+        line = tr("tips.greyed_why", why=why)
+        return line + "\n\n" + self.text if self.text and self.text != why else line
+
     def show(self):
         self.job = None
-        if not self.text or not self.alive():
+        text = self.shown_text() if self.alive() else ""
+        if not text:
             return
         w = self.widget
         self.tip = tk.Toplevel(self.owner)
         self.tip.wm_overrideredirect(True)
         if self.owner is not w:  # (over a dropdown's open list, which stays on top)
             self.tip.attributes("-topmost", True)
-        tk.Label(self.tip, text=self.text, justify="left", background=look.TIP_BG, relief="solid",
+        tk.Label(self.tip, text=text, justify="left", background=look.TIP_BG, relief="solid",
                  borderwidth=1, padx=6, pady=4, wraplength=round(lang_size("size.tooltip_width", TIP_WIDTH) * w.winfo_fpixels("1i") / 96)).pack()
         self.tip.update_idletasks()
         # kept inside the window (the panel sits at its right edge), but never past its left edge or the screen's
@@ -116,6 +127,34 @@ class Tooltip:
         if self.tip:
             self.tip.destroy()
             self.tip = None
+
+
+def is_greyed(widget):
+    """The widget is greyed out (ttk "disabled" state, or a classic widget's state="disabled")."""
+    try:
+        if hasattr(widget, "instate"):
+            return bool(widget.instate(["disabled"]))
+        return str(widget.cget("state")) == "disabled"
+    except tk.TclError:
+        return False
+
+
+def greyed_reason(tip):
+    """tip's reason while its widget is greyed ("" when it isn't greyed or there's none)."""
+    if not is_greyed(tip.widget):
+        return ""
+    why = tip.why() if callable(tip.why) else tip.why
+    return why or ""
+
+
+def greyed_why(widget, why, owner=None):
+    """While widget is greyed, its tip starts with why (a text, or a function giving the reason now; QoL H, user
+    2026-11-23: every greyed control says why). Uses the widget's first tip (a new one with no other text if none).
+    Returns the tip."""
+    tips = getattr(widget, "tooltips", None)
+    tip = tips[0] if tips else Tooltip(widget, "", owner)
+    tip.why = why
+    return tip
 
 
 class ListTip(Tooltip):

@@ -31,6 +31,7 @@ from window.shares_window import AngleKnob, HeldKnobs
 from window.tool_window import Knob, ThinBar
 from window.widgets import (Scrub, ShortLabel, Tooltip, bad, centre_over, good, grid_shown, name_index, name_list,
                             open_or_lift, remember_place, set_names, show_mixed, unhighlight)
+from window.widgets_tips import greyed_why
 
 TWIST_KNOB = 5.0  # turns at the Twist knob's ends (the box goes up to MOST_TIGHT)
 BULGE_KNOB = 200.0  # % at the Bulge knob's ends (the box goes up to MOST_BULGE, user 11-07)
@@ -283,6 +284,11 @@ class StirWindow(DefaultPin, HeldKnobs, tk.Toplevel):
         self.preset_save.state(["!disabled" if on else "disabled"])
         self.preset_tick.state(["!disabled" if on else "disabled"])
         self.preset_del.state(["!disabled" if self.presets and not self.drawing else "disabled"])
+        off = tr("stir.why_drawing") if self.drawing else tr("deform.why_select")  # (QoL H)
+        greyed_why(self.preset_box, off if not on else tr("stir.why_no_presets"))
+        greyed_why(self.preset_save, off)
+        greyed_why(self.preset_tick, off)
+        greyed_why(self.preset_del, off if self.drawing else tr("stir.why_no_presets"))
 
     def show_preset_name(self):
         """The box's text: the preset named (a long name cut with "…", "(n tabs)" kept, the whole name in the tip)."""
@@ -1006,6 +1012,12 @@ class StirWindow(DefaultPin, HeldKnobs, tk.Toplevel):
             if isinstance(w, ttk.Radiobutton):
                 w.state(["!disabled" if on else "disabled"])
         self.tab_add.state(["!disabled" if on and count < MOST_STIRS and not self.fresh else "disabled"])
+        off = tr("stir.why_drawing") if self.drawing else tr("deform.why_select")  # (QoL H)
+        for w in self.tab_buttons.winfo_children():
+            if isinstance(w, ttk.Radiobutton):
+                greyed_why(w, off)
+        greyed_why(self.tab_add, off if not on else tr("stir.why_most") if count >= MOST_STIRS
+                   else tr("stir.why_fresh"))
         shown = self.stirs()
         # (a tab held at its defaults keeps a place in the order: × takes it away)
         self.drop_live = on and (count > 1 or any(s != full_stir(None) for s in shown)
@@ -1318,6 +1330,41 @@ class StirWindow(DefaultPin, HeldKnobs, tk.Toplevel):
             self.hint.config(text=hint)
         self.sync_parts(sts, areas)
         self.reset.state(["!disabled" if on and any(s != full_stir(None) for s in sts) else "disabled"])
+        # (greyed controls say why, QoL H user 2026-11-23: the window waiting first, then a Shape tab, then each
+        # control's own reason, the same conditions as above)
+        off = tr("stir.why_drawing") if self.drawing else tr("deform.why_select")
+
+        def put(w, own, colours_only=False):
+            greyed_why(w, off if not on else tr("stir.why_shape") if shape and colours_only else own)
+        for key, b in self.boxes.items():
+            own = {"reach": "stir.why_area", "spot0": "stir.why_spot", "spot1": "stir.why_spot",
+                   "smooth": "stir.why_smooth", "bend_smooth": "stir.why_bend_smooth", "stretch": "stir.why_area",
+                   "stretch_up": "stir.why_area", "tilt": "stir.why_area", "skew": "stir.why_area",
+                   "ripple_len": "stir.why_second", "kaleido_turn": "stir.why_second",
+                   "wring_angle": "stir.why_second"}.get(key, "stir.why_second")
+            put(b["entry"], tr(own), key in ("bend_smooth", "smooth"))
+        for key, p in self.picks.items():
+            own = {"mirror": "stir.why_mirror", "size_of": "stir.why_area", "flip_by": "stir.why_flip_by",
+                   "flip_of": "stir.why_flip_of", "round_edge": "stir.why_round_edge",
+                   "ripple_kind": "stir.why_ripple", "flip_in": "stir.why_area",
+                   "moves": "deform.why_pictures"}.get(key, "stir.why_shape")
+            put(p["box"], tr(own), key in ("edge", "sets", "flip_of", "flip_in", "mirror", "flip_by"))
+        put(self.area_box, off)
+        put(self.tied_tick, tr("stir.why_area"))
+        for key, (var, tick) in self.rounds.items():
+            put(tick, tr("stir.why_area"))
+        put(self.match, tr("stir.why_match"))
+        put(self.to_shape, tr("stir.why_area"))
+        for key, (var, tick) in self.area_ticks.items():
+            put(tick, tr("stir.why_area"), key in ("reverse", "area_squeeze"))
+        put(self.chop_tick, tr("deform.why_chop"))
+        put(self.bend_colours_tick, tr("deform.why_bend_colours"))
+        put(self.bulge_out_tick, tr("stir.why_bulge_out"))
+        put(self.squeeze_tick, off, True)
+        for _, tick in self.flips.values():
+            put(tick, off, True)
+        put(self.middle, tr("stir.why_middle"))
+        put(self.reset, tr("stir.why_reset"))
         d = self.drawing
         if d and d["pick"] and app.sels:  # (a shape clicked while picking: its outline = the area; a selection
             # from anything else (Ctrl+Z / Ctrl+A / the Shapes list) picks nothing and is let go, hunt 11-04 1)
@@ -1866,8 +1913,10 @@ def stir_editor(cls):
             self.what.config(text="")
             for b in (self.tab_add, self.to_shape, self.match, self.middle):
                 b.state(["disabled"])
+                greyed_why(b, tr("deform.why_default_shape"))
             for k in ("centre0", "centre1", "spot0", "spot1"):  # (placed on the piano roll: never in a default)
                 self.boxes[k]["entry"].config(state="disabled")
+                greyed_why(self.boxes[k]["entry"], tr("deform.why_default_shape"))
             self.warn.pack_forget()  # (Channels / colours: about real shapes)
 
         def ok(self):

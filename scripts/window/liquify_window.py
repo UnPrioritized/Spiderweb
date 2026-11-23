@@ -21,6 +21,7 @@ from window.default_pin import DefaultPin
 from window.edit_line import EditLine
 from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, open_or_lift, remember_place, \
     same_or_blank, unchanged
+from window.widgets_tips import greyed_why
 
 # (Pinch + Bulge and Freeze + Thaw = ONE tool each here, Alt held = the other: user 11-07 "too much options"; the
 # dab maths keep all of them)
@@ -376,6 +377,9 @@ class LiquifyWindow(DefaultPin, tk.Toplevel):
         on = ["!disabled"] if tool == "twirl" else ["disabled"]
         for b in (*self.twirl_buttons, self.twirl_word):
             b.state(on)
+        for b in self.twirl_buttons:  # (QoL H: greyed controls say why)
+            if not getattr(b, "no_why", False):
+                greyed_why(b, tr("liquify.why_twirl"))
 
     def on_escape(self):
         if not self.app.roll.liquify_forget():
@@ -553,6 +557,13 @@ class LiquifyWindow(DefaultPin, tk.Toplevel):
             app._loading = False
         for w in (e, self.shown_tick):
             w.state(["!disabled"] if have else ["disabled"])
+        # (QoL H: greyed controls say why)
+        greyed_why(self.moves_box, tr("deform.why_select") if not tgts else tr("deform.why_pictures"))
+        greyed_why(self.chop_tick, tr("deform.why_chop"))
+        greyed_why(self.bend_colours_tick, tr("deform.why_bend_colours"))
+        greyed_why(self.edge_box, tr("deform.why_edges"))
+        for w in (e, self.shown_tick):
+            greyed_why(w, tr("liquify.why_none_yet"))
         self.sync_tool()
         app.roll.draw_liquify_mask()
         app.roll.draw_liquify_brush()
@@ -611,6 +622,8 @@ def liquify_editor(cls):
             for b in ([self.restore_button, self.show_mask_tick] + self.mask_buttons + self.tool_buttons
                       + self.twirl_buttons + brush):
                 b.state(["disabled"])
+                greyed_why(b, tr("deform.why_default_brush"))
+                b.no_why = True  # (sync_tool keeps this reason)
 
         def ok(self):
             self.save_default()

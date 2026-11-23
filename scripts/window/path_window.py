@@ -34,6 +34,7 @@ from window.speed_graph import SpeedGraph, start_curve
 from window.tool_window import ToolWindow
 from window.widgets import (Scrub, Tooltip, bad, good, grid_shown, pack_shown, name_index, name_list, read_number, set_names,
                             unit_word)
+from window.widgets_tips import greyed_why
 
 LENGTHS = [s for s, _ in SNAP_LIST if s != "off"]  # "one copy every" choices (the snap list's note lengths)
 CHOICES = {"kind": KINDS, "speed": SPEEDS, "colours": COLOURS, "flip": FLIPS, "way": WAYS, "top": TOPS}
@@ -925,6 +926,16 @@ class PathWindow(ToolWindow):
         config(self.key_name, text=name)
         self.show_plain()
         config(self.add_button, state="normal" if n and not self.placing() and n < MOST_POINTS else "disabled")
+        # (QoL H: greyed controls say why)
+        greyed_why(self.ticks["half"][0], tr("path.why_points") if not c["anchor"] else tr("path.why_half"))
+        greyed_why(self.ticks["restart"][0], tr("path.why_points") if not c["anchor"] else tr("path.why_restart"))
+        greyed_why(self.entries["step"], tr("path.why_step"))
+        greyed_why(self.combos["way"], tr("path.why_way"))
+        for key in ("low", "high"):
+            greyed_why(self.entries[key], tr("path.why_inside"))
+        for key in ("bar", "beat", "tick", "key"):
+            greyed_why(self.entries[key], tr("path.why_point"))
+        greyed_why(self.add_button, tr("path.why_most") if n >= MOST_POINTS else tr("path.why_add"))
         multi = self.app.channel_mode.get() == "auto"
         note = "" if c["colours"] == "keep" or multi else tr("path.needs_multi")
         config(self.colour_note, text=note)
@@ -955,6 +966,8 @@ class PathWindow(ToolWindow):
         can = bool(self.targets) and not self.idle and bool(self.cfg.get("pts")) and not self.placing()
         if str(self.custom_button.cget("state")) != ("normal" if can else "disabled"):  # (Custom…: once B is placed)
             self.custom_button.config(state="normal" if can else "disabled")
+        greyed_why(self.plain_button, tr("path.why_plain"))
+        greyed_why(self.custom_button, tr("path.why_custom"))
 
     def on_off(self):
         super().on_off()

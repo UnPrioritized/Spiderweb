@@ -27,6 +27,7 @@ from window.default_pin import DefaultPin
 from window.edit_line import EditLine
 from window.widgets import Scrub, ShortLabel, Tooltip, bad, good, leave_box, open_or_lift, remember_place, \
     same_or_blank, unchanged
+from window.widgets_tips import greyed_why
 
 BENDS = (True, False)  # (Smooth, Straight cells: the Bend dropdown by place)
 CELLS = ("cols", "rows")  # (the Custom boxes: cells across, cells up)
@@ -735,6 +736,11 @@ class WarpWindow(DefaultPin, tk.Toplevel):
         self.moves_box.config(state="readonly" if tgts and not pictures else "disabled")
         for name in ("edges", "folds", "edge"):  # (which colour a note takes: nothing to do with a bent shape)
             self.boxes[name].config(state="disabled" if shape else "readonly")
+            greyed_why(self.boxes[name], tr("deform.why_edges"))
+        # (QoL H: greyed controls say why)
+        greyed_why(self.moves_box, tr("deform.why_select") if not tgts else tr("deform.why_pictures"))
+        greyed_why(self.chop_tick, tr("deform.why_chop"))
+        greyed_why(self.bend_colours_tick, tr("deform.why_bend_colours"))
         if not self.split_mode:
             text = tr("warp.hint_shape" if shape else "warp.hint")
             if self.hint.cget("text") != text:
@@ -806,6 +812,7 @@ class WarpWindow(DefaultPin, tk.Toplevel):
             app._loading = False
         for w in (e, self.shown_tick):
             w.state(["!disabled"] if have else ["disabled"])
+            greyed_why(w, tr("warp.why_none_yet"))
         if show != self.cells_shown:
             self.cells_shown = show
             if show:
@@ -841,8 +848,10 @@ class WarpWindow(DefaultPin, tk.Toplevel):
         finally:
             self.app._loading = False
         e.state(["!disabled"] if live else ["disabled"])
+        greyed_why(e, tr("warp.why_bend"))  # (QoL H: greyed controls say why)
         for w in self.way_buttons:
             w.state(["!disabled"] if live and one not in pr.NO_WAY else ["disabled"])
+            greyed_why(w, tr("warp.why_bend") if not live else tr("warp.why_way"))
 
     def close(self):
         roll = self.app.roll
@@ -908,7 +917,9 @@ def warp_editor(cls):
             self.moves_box.config(state="readonly")  # (greyed with nothing selected in the real window)
             for b in list(self.split_buttons.values()) + [self.reset_button]:
                 b.state(["disabled"])
+                greyed_why(b, tr("deform.why_default_shape"))
             self.boxes["mirror"].state(["disabled"])  # (a drawing aid, never in a default: hunt)
+            greyed_why(self.boxes["mirror"], tr("deform.why_default_brush"))
 
         def sync_preset(self, ws):
             """The preset a shape without a Warp gets: picked, its Bend % and way changeable."""
@@ -923,6 +934,7 @@ def warp_editor(cls):
             self.amount_entry.state(["!disabled"])
             for w in self.way_buttons:
                 w.state(["disabled"] if self.preset in pr.NO_WAY else ["!disabled"])
+                greyed_why(w, tr("warp.why_way"))
 
         def on_amount(self, left=None):
             try:

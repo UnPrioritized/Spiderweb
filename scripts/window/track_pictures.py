@@ -11,6 +11,7 @@ from files.lang import tr
 from roll import roll_loaded as RL
 from window import look
 from window.widgets import Scrub, Tooltip, good, remember_place
+from window.widgets_tips import greyed_why
 
 TILE = 512  # px: a loaded MIDI's rows are read in blocks this wide along the song, kept while the zoom stays, and
 # the next ones read ahead in the background (user 2026-10-24, Shinki: each new picture read every row again,
@@ -170,6 +171,7 @@ def sync_onion(app):
     # (the strip's Show multiple tracks… too: picks belong to a track, hunt 2026-10-26)
     for w in tuple(getattr(app, "onion_parts", ())) + tuple(getattr(app, "strip_parts", ())):
         w.state(["!disabled"] if on else ["disabled"])
+        greyed_why(w, tr("tracks.why_onion"))  # (QoL H: greyed controls say why)
     tl = getattr(app, "track_list", None)
     if tl is not None and tl.picker:
         tl.picker.fill()

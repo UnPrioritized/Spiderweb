@@ -17,6 +17,7 @@ from window.builtin_settings import BuiltinPanel
 from window.drawer import clean_name
 from window.updates import often_box
 from window.widgets import ShortLabel, Tooltip, keep_width, letter_jump, name_list, remember_place, set_names
+from window.widgets_tips import greyed_why
 
 
 def look_box(parent):
@@ -512,6 +513,11 @@ class SettingsWindow(tk.Toplevel):
         room = app.space_keys.get() > 0 or app.space_bars.get() > 0
         self.keep_tick.state(["!disabled"] if room else ["disabled"])
         self.keep_tip.set_text(tr("settings.keep_offrange_tip") if room else tr("settings.keep_offrange_off"))
+        self.keep_tip.why = tr("settings.keep_offrange_off")  # (QoL H: greyed controls say why)
+        why = tr("settings.keep_offrange_off") if not room else tr("settings.why_keep")
+        for w in (self.opacity_box, self.wrap_tick):
+            greyed_why(w, why)
+        greyed_why(self.wrapped_box, why if not (room and app.keep_offrange.get()) else tr("settings.why_wrap"))
         on = room and app.keep_offrange.get()
         self.opacity_box.state(["!disabled"] if on else ["disabled"])
         self.opacity_label.state(["!disabled"] if on else ["disabled"])
@@ -591,6 +597,7 @@ class SettingsWindow(tk.Toplevel):
         b.config(command=link)
         if file_link(PROJECT_EXT, HERE) is None:
             b.state(["disabled"])
+        greyed_why(b, tr("settings.link_windows_only_short"))
         show()
 
     def build_keep_colours(self, f):
@@ -735,6 +742,7 @@ class SettingsWindow(tk.Toplevel):
                 empty.grid()
             for b in (change, reset):
                 b.state(["!disabled"] if got else ["disabled"])
+                greyed_why(b, tr("settings.why_no_defaults"))
             box.after_idle(fit_list)  # (the "none yet" line came / went: the room changed)
         self.fill_defaults = fill
         bind_double(tree, lambda e: (self.open_default(tree.identify_row(e.y)), "break")[1])
@@ -820,9 +828,10 @@ class SettingsWindow(tk.Toplevel):
         f.row(None, self.tick(f.page, "settings.copy_domino", self.app.copy_domino, self.app.schedule_autosave),
               tip=tr("settings.copy_domino_hint"))
         from files.clipboard import RAW  # (Linux: no such clipboard yet, the tick greyed, user 2026-10-20)
-        f.row(None, self.tick(f.page, "settings.copy_notes", self.app.copy_notes, self.app.schedule_autosave,
-                              state="normal" if RAW else "disabled"),
-              tip=tr("settings.copy_notes_hint") + ("" if RAW else tr("settings.copy_notes_windows")))
+        greyed_why(f.row(None, self.tick(f.page, "settings.copy_notes", self.app.copy_notes, self.app.schedule_autosave,
+                                         state="normal" if RAW else "disabled"),
+                         tip=tr("settings.copy_notes_hint") + ("" if RAW else tr("settings.copy_notes_windows"))),
+                   tr("settings.copy_notes_windows").strip())
 
     def build_domino(self, f):
         """(Experimental) Domino 256 keys: Copy / Paste / Export to Domino keep keys above 127 (off: left out)."""
@@ -1059,6 +1068,7 @@ class SettingsWindow(tk.Toplevel):
         style = button_look.shown_style(self.picked_button())
         edge = self.picked_edge()
         self.look_edge_box.config(state="disabled" if style == "system" else "readonly")  # (it can't change those)
+        greyed_why(self.look_edge_box, tr("settings.why_system_edges"))
         target = f"Pv{style.title()}{edge}."
         kinds = ("TButton", "TCheckbutton", "TCombobox", "TSpinbox")
         if target not in self.pv_sizes:  # (made the first time this style is picked; its own paddings kept)
@@ -1250,6 +1260,8 @@ class SettingsWindow(tk.Toplevel):
         own = ["!disabled"] if now != palettes.DEFAULT else ["disabled"]
         self.palette_rename.state(own)
         self.palette_delete.state(own)
+        for b in (self.palette_rename, self.palette_delete):  # (QoL H)
+            greyed_why(b, tr("settings.why_default_palette"))
         c, s = self.swatches, self.swatch_size
         c.delete("all")
         colours = palettes.colours_of(now)

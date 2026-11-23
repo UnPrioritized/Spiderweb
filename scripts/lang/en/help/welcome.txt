@@ -10,4 +10,4 @@ Draw lines, curves and shapes on the piano roll; every key they cross gets notes
 
 Your work is saved on its own (autosave) and comes back next time. File → Save keeps it as a project file.
 
-The first time you use a tool or feature, a small tip explains it. You can turn tips off or show them all again in this Help window (bottom).
+Rest the mouse on any button, box or tick to see what it does. A greyed-out one says first why it's greyed and what to do about it. The first time you use a tool or feature, a small tip explains it. You can turn tips off or show them all again in this Help window (bottom).

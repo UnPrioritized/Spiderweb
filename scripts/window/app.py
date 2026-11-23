@@ -1471,6 +1471,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if locked != box.instate(["disabled"]):
                 box.state(["disabled" if locked else "!disabled"])
             tip.text = tr("load.ppq_locked") if locked else free
+            tip.why = tr("load.ppq_locked")  # (QoL H: greyed controls say why)
 
     def typing_ppq(self, ppq_done=False):
         """A PPQ still being typed in the Project box or the Hz bass Settings… one (taken on Enter / leaving it)."""
@@ -1989,6 +1990,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             if w.instate(["disabled"]) != lanes:
                 w.state(["disabled" if lanes else "!disabled"])
                 tip.text = tr("app.edo31_lanes_grey_tip") if lanes else tr(key)
+            tip.why = tr("app.edo31_lanes_grey_tip")  # (QoL H)
 
     def lanes_after_export(self):
         """An export just ended: a lanes change made while it ran (sync_edo_lanes waited) taken now."""
