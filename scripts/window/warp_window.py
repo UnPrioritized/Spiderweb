@@ -21,6 +21,7 @@ from files.mathexpr import calc, fmt
 from notes import warp as wp_
 from notes import warp_presets as pr
 from notes.recolour import KEEP, STIR_EDGES, clean_recolour, new_seed
+from window.drawer_library import clean_name
 from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window.default_pin import DefaultPin
@@ -651,7 +652,7 @@ class WarpWindow(DefaultPin, tk.Toplevel):
                                           initialvalue=name)
             if not self.winfo_exists() or not name or not name.strip():
                 return
-            name = name.strip()
+            name = clean_name(name)  # (any character; cut to NAME_MAX letters: hunt 11-24)
             if any(name.casefold() == tr(f"warp.preset_{k}").casefold() for k in pr.PRESETS):
                 messagebox.showinfo(tr("warp.own_save_title"), tr("warp.own_built_in", name=name), parent=self)
                 continue

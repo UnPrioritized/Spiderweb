@@ -32,6 +32,7 @@ from notes.pattern import (AROUND, LOOPS_DEFAULT, PATTERN_PRESETS, PRESET_ALONG,
                            shape_slices, span_numbers, t_span)
 from files.clipboard import put_text
 from roll.roll_shared import ALT, grab_while_panning
+from window.drawer_library import clean_name
 from window.widgets import bind_double  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look, preset_files
 from window.formula_host import put_sym, sym_choices, sym_label
@@ -119,6 +120,8 @@ def move_old_curves():
         return  # (a broken patterns.json: leave both alone)
     shapes = data.setdefault(FILE_KEYS["shape"], [])
     names = {str(p.get("name")) for p in shapes if isinstance(p, dict)}
+    # (+ the shapes already split into their folder: a taken name is skipped as before, hunt 11-24)
+    names |= {n for got in preset_files.CURVE_SHAPES._names_there().values() for _, _, n in got}
     for name, text in old:
         y = old_curve_y(text)
         if y and name not in names:
@@ -573,7 +576,7 @@ class FormulaDialog(tk.Toplevel):
         self.mark()
 
     def save(self):
-        name = self.name.get().strip()
+        name = clean_name(self.name.get())  # (cut to NAME_MAX letters: hunt 11-24)
         if not self.ok and not self.pat.get("loop"):
             return messagebox.showerror(tr("pattern_dialog.spiderweb"), tr("pattern_dialog.doesn_t_work_yet"),
                                         parent=self)

@@ -8,8 +8,8 @@ taken), like the shape library.
 - A file that can't be read, or whose item the list can't use (a newer Spiderweb's?), is left out and left alone.
 - The old list file of 1.7.7 and before (user/hz_presets.json {"presets": [...]}) is split into files the first time
   the list is read, then renamed "-old" (hz_presets-old.json; user). An old file that can't be read is renamed
-  "-broken" (nothing lost). Same names: the old file's item is written over the folder's (it is the newer one: an
-  older Spiderweb started it again after the split)."""
+  "-broken" (nothing lost). Same names: the old file's item is written over the folder's when the folder's file is
+  OLDER than the old list (an older Spiderweb started it again after the split), never over a save made since."""
 
 import json
 import os
@@ -21,6 +21,7 @@ from files.safefile import write_text
 BAD_ENTRY = (TypeError, ValueError, KeyError, AttributeError, IndexError)  # (what reading a damaged entry raises)
 SPLIT_STEP_S = 2.0  # seconds between the file times of a split list's items (keeps their order; FAT has 2 s steps)
 LISTS = []  # every Folder made (split_old splits all lists sharing one old file)
+_SPLIT_THIS_RUN = set()  # old list files split this run that couldn't be renamed (held): not split again till restart
 
 
 ROOT = None  # (tests: a folder of their own for the lists ...)
@@ -128,14 +129,19 @@ class Folder:
         return path
 
     def save(self, item):
-        """Writes item (with its "name") as the newest: over the file already holding that name (capitals or not;
-        its file renamed when the name's capitals changed), any other file with the name removed (the old lists
-        kept one item per name). Returns its path. OSError when it can't be written."""
+        """Writes item (with its "name", cut to NAME_MAX letters) as the newest: over the newest file already holding
+        that name (capitals or not; its file renamed when the name's capitals changed); any OTHER file with the name
+        (a copy made in File Explorer) goes to the Recycle Bin (the old lists kept one item per name; hunt 11-24:
+        it was deleted outright). Returns its path. OSError when it can't be written (PathTooLong past Windows'
+        path limit)."""
+        from window.drawer_library import clean_name, long_check
+        item = dict(item, name=clean_name(item["name"]))
         name = item["name"]
         had = self.paths_of(name)
         os.makedirs(self.path(), exist_ok=True)
         keep = had[-1] if had else None
         path = self.free_path(name, keep)
+        long_check(path)
         write_text(path, self.text(item))
         now = time.time()
         try:  # (newest even when the clock / file system rounds: past every other file's time)
@@ -144,55 +150,39 @@ class Folder:
                 os.utime(path, (now, newest + 0.01))
         except OSError:
             pass
+        from files import system
         for p in had:
-            if os.path.normcase(p) != os.path.normcase(path):
-                try:
+            if os.path.normcase(p) == os.path.normcase(path):
+                continue
+            try:
+                if p == keep:  # (the item's own file, renamed for new capitals)
                     os.remove(p)
-                except OSError:
-                    pass
+                elif not system.to_trash(p):
+                    pass  # (no bin here: the copy stays; the newest one is the one listed first)
+            except OSError:
+                pass
         return path
 
-    def rename(self, old, new):
-        """The item named old (exactly) renamed new, its place in the order (file time) kept. False: not there."""
-        had = self.paths_of(old, exact=True) or self.paths_of(old)
-        if not had:
-            return False
-        path = had[-1]
-        item = self.read(path)
-        when = os.path.getmtime(path)
-        item["name"] = new
-        to = self.free_path(new, path)
-        write_text(to, self.text(item))
-        if os.path.normcase(to) != os.path.normcase(path):
-            os.remove(path)
-        try:
-            os.utime(to, (time.time(), when))
-        except OSError:
-            pass
-        return True
-
     def delete(self, name, ask_for_good):
-        """The item named exactly name (else capitals or not) to the Recycle Bin (system.bin_or_delete: no bin here
-        = ask_for_good() first). True = gone, False = kept (cancelled / not there). Raises system.BinError (in use:
-        nothing deleted) / OSError."""
+        """The NEWEST file holding exactly name (else capitals or not) to the Recycle Bin (system.bin_or_delete: no bin
+        here = ask_for_good() first; a copy made in File Explorer stays, hunt 11-24). True = gone (or already gone:
+        deleted outside, hunt 11-24), False = kept (cancelled). Raises system.BinError (in use: nothing deleted) /
+        OSError."""
         from files import system
         had = self.paths_of(name, exact=True) or self.paths_of(name)
         if not had:
-            return False
-        gone = False
-        for p in reversed(had):
-            if not system.bin_or_delete(p, ask_for_good):
-                return gone
-            gone = True
-        return gone
+            return True
+        return bool(system.bin_or_delete(had[-1], ask_for_good))
 
     # ---------------------------------------------------------------- the old list file
 
     def split_old(self):
-        """The 1.7.7 list file split into files once (see the docstring). Never raises; a file that can't be written
-        leaves the old list where it is (tried again next time)."""
+        """The 1.7.7 list file split into files once (see the docstring). Never raises. Hunt 11-24: an item whose file
+        can't be written is SKIPPED (left in the "-old" file), a folder file NEWER than the old list is never written
+        over (a save since), two items differing only in capitals both kept (1.7.7's rhythms / formulas allowed
+        it: the second gets " (2)"), and an old list that can't be renamed is split once per run only."""
         old = self.old_path()
-        if not old or not os.path.exists(old):
+        if not old or old in _SPLIT_THIS_RUN or not os.path.exists(old):
             return
         try:
             with open(old, encoding="utf-8-sig") as f:
@@ -213,33 +203,51 @@ class Folder:
             items = data.get(lst.key)
             items = [p for p in (items if isinstance(items, list) else ())
                      if isinstance(p, dict) and isinstance(p.get("name"), str) and p["name"].strip()]
+            if not items:
+                continue
             try:
-                if items:
-                    os.makedirs(lst.path(), exist_ok=True)
-                n = len(items)
-                for i, item in enumerate(items):
-                    path = lst.free_path(item["name"], next(iter(lst._named(item["name"])), None))
+                os.makedirs(lst.path(), exist_ok=True)
+            except OSError:
+                continue
+            there = lst._names_there()  # (read ONCE: hunt 11-24, 400 items took 6 s re-reading per item)
+            written = set()
+            n = len(items)
+            for i, item in enumerate(items):
+                name = item["name"].strip()
+                low = name.casefold()
+                found = there.get(low, [])
+                exact = [c for c in found if c[2] == name]  # (its own file from an earlier split, else a same-name one)
+                had = exact[-1] if exact else (found[-1] if found and low not in written else None)
+                if had and had[1] > when:  # (saved since the old list was written: keep the save)
+                    continue
+                try:
+                    path = lst.free_path(name, had[0] if had else None)
                     write_text(path, lst.text(item))
                     t = when - (n - 1 - i) * SPLIT_STEP_S
                     os.utime(path, (t, t))
-            except OSError:
-                return
+                except OSError:
+                    continue  # (a name Windows refuses as a file: it stays in the "-old" file)
+                written.add(low)
+                if not had:
+                    there.setdefault(low, []).append((path, t, name))
         _aside(old, "-old")
+        if os.path.exists(old):  # (couldn't be renamed: held by another program; tried again next start)
+            _SPLIT_THIS_RUN.add(old)
 
-    def _named(self, name):
-        """paths_of without splitting (split_old's own lookups)."""
-        low = name.strip().casefold()
+    def _names_there(self):
+        """{name in lower case: [(file, its time, the name as written)] oldest first} of the folder now (split_old's
+        lookups)."""
+        out = {}
         try:
-            names = os.listdir(self.path())
+            with os.scandir(self.path()) as it:
+                found = [(e.stat().st_mtime, e.path) for e in it if e.name.lower().endswith(".json") and e.is_file()]
         except OSError:
-            return []
-        out = []
-        for f in names:
-            p = os.path.join(self.path(), f)
-            if f.lower().endswith(".json"):
-                raw = self.read(p)
-                if raw and raw["name"].strip().casefold() == low:
-                    out.append(p)
+            return out
+        for t, p in sorted(found):
+            raw = self.read(p)
+            if raw:
+                n = raw["name"].strip()
+                out.setdefault(n.casefold(), []).append((p, t, n))
         return out
 
 

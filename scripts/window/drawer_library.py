@@ -23,7 +23,8 @@ BUILT_IN = {
 
 BAD_CHARS = '<>:"/\\|?*'
 NAME_MAX = 100  # (longer names: the file's full path can get too long for Windows)
-DEVICES = {"CON", "PRN", "AUX", "NUL", *(f"{d}{n}" for d in ("COM", "LPT") for n in range(1, 10))}
+DEVICES = {"CON", "PRN", "AUX", "NUL", *(f"{d}{n}" for d in ("COM", "LPT") for n in list(range(1, 10)) + ["¹", "²", "³"])}
+# (COM¹ / LPT² ...: Windows refuses those too, hunt 11-24)
 
 
 # ---------------------------------------------------------------- library

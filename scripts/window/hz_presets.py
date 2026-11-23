@@ -11,6 +11,7 @@ import tkinter as tk
 from tkinter import messagebox, simpledialog, ttk
 
 from files.lang import tr
+from window.drawer_library import clean_name
 from window import preset_files
 from window.hz_knobs import adsr_line, pitch_line, sweep_line, vibrato_line
 from window.synth_look import dark_menu
@@ -177,8 +178,14 @@ class PresetBar:
         """◀ ▶: the preset before / after the one picked (round the list)."""
         items = self.presets()
         keys = [k for k, _, _ in items]
-        i = keys.index(self.preset[0]) if self.preset and self.preset[0] in keys else (-1 if d > 0 else 0)
-        self.pick_preset(*items[(i + d) % len(items)])
+        at = getattr(self, "preset_at", None)  # (the place stepped to last: two presets with one name, a copy made in
+        if self.preset and at is not None and at < len(keys) and keys[at] == self.preset[0]:  # File Explorer, hunt
+            i = at  # 11-24: stepping by name stuck on the second one)
+        else:
+            i = keys.index(self.preset[0]) if self.preset and self.preset[0] in keys else (-1 if d > 0 else 0)
+        i = (i + d) % len(items)
+        self.pick_preset(*items[i])
+        self.preset_at = i
 
     def save_preset(self):
         """The sound kept as a preset of the user's, under a name (asked; one of ours is asked again)."""
@@ -189,7 +196,7 @@ class PresetBar:
             name = simpledialog.askstring(tr("hz.preset_save_title"), prompt, parent=self, initialvalue=name)
             if not name or not name.strip():
                 return
-            name = name.strip()
+            name = clean_name(name)  # (any character; cut to NAME_MAX letters: hunt 11-24)
             if name.casefold() not in ours:
                 break
             prompt = tr("hz.preset_name_taken", name=name)

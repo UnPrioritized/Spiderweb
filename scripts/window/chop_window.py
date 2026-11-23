@@ -14,6 +14,7 @@ from files.snap import SNAPS, snap_beats, snap_text
 from notes.fx import before_page, pages
 from notes.chop import (CHOP_DEFAULTS, MAX_STEPS, RHYTHMS, clean_chop, clean_pieces, rhythm, step_ticks, switched,
                         too_many, top)
+from window.drawer_library import clean_name
 from window import look, preset_files
 from window.snap_picker import SnapPicker
 from window.tool_window import ORANGE, ToolWindow, page_place_added
@@ -308,6 +309,7 @@ class ChopWindow(ToolWindow):
         for name in RHYTHMS:
             m.add_command(label=tr(f"chop.rhythm_{name}"), command=lambda n=name: self.pick(n))
         saved = load_rhythms()
+        self._saved_names = {r["name"] for r in saved}  # (read again: files changed outside show now)
         if saved:
             m.add_separator()
             for r in reversed(saved):  # (newest first, user 2026-10-14)
@@ -338,7 +340,7 @@ class ChopWindow(ToolWindow):
             name = simpledialog.askstring(tr("chop.save_title"), prompt, parent=self, initialvalue=name)
             if not name or not name.strip():
                 return
-            name = name.strip()
+            name = clean_name(name)  # (any character; cut to NAME_MAX letters: hunt 11-24)
             if name.casefold() not in taken:
                 break
             prompt = tr("chop.name_taken", name=name)
@@ -347,6 +349,7 @@ class ChopWindow(ToolWindow):
             return
         if save_rhythm(name, {"name": name, "steps": self.cfg["steps"], "pieces": self.cfg["pieces"],
                               "fixed": self.cfg["fixed"]}, self):
+            self._saved_names = None
             self.put("name", name)
 
     def delete_rhythm(self):
@@ -354,7 +357,15 @@ class ChopWindow(ToolWindow):
                                    icon="warning", default="no", parent=self):
             return
         if save_rhythm(self.cfg["name"], None, self):
+            self._saved_names = None
             self.put("name", "")
+
+    def saved_names(self):
+        """The saved rhythms' names, read when the window opens, the list opens or after Save / Delete (hunt 11-24:
+        read at every drag step, every file each time)."""
+        if getattr(self, "_saved_names", None) is None:
+            self._saved_names = {r["name"] for r in load_rhythms()}
+        return self._saved_names
 
     # ---- the numbers
 
@@ -446,7 +457,7 @@ class ChopWindow(ToolWindow):
         if self.abs.get() != c["abs"]:
             self.abs.set(c["abs"])
         self.rhythm_button.config(text=self.rhythm_name())
-        saved = c["name"] and any(r["name"] == c["name"] for r in load_rhythms())
+        saved = c["name"] and c["name"] in self.saved_names()
         self.delete_button.state(["!disabled"] if saved else ["disabled"])
         if self.mode_box.current() != int(c["fixed"]):
             self.mode_box.current(int(c["fixed"]))

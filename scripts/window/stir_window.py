@@ -21,6 +21,7 @@ from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_ST
                             size_scale, stir_removed, stir_stack, stirs_of, without_recolour)
 from notes.shape_bend import colour_part, shape_tabs
 from roll.roll_live import STROKE_TOOLS
+from window.drawer_library import clean_name
 from window.widgets import help_page  # (THE CONTROL SCHEME)
 from window import look
 from window import stir_presets as sp
@@ -364,7 +365,7 @@ class StirWindow(DefaultPin, HeldKnobs, tk.Toplevel):
                 return
             if not name or not name.strip():
                 return
-            name = name.strip()
+            name = clean_name(name)  # (any character; cut to NAME_MAX letters: hunt 11-24)
             self.presets = sp.load_presets()
             if not any(sp.same_name(p, name) for p in self.presets) or messagebox.askyesno(
                     tr("stir.preset_save_title"), tr("stir.preset_replace", name=name), parent=self):
