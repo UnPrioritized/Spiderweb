@@ -50,6 +50,7 @@ from notes.merge import (LAP as merge_lap, clean_merge, clean_unmerge, recipe_no
 from notes.glue import apply_glue, clean_glue, glue_box
 from notes.strum import apply_strum
 from notes.trim import apply_trim
+from notes.wrap import apply_wrap
 from notes.recolour import (KEEP, PAGE, SPLIT, box_of, can_recolour, clean_recolour, is_recoloured, page_split, recoloured,
                             rule_of, without_recolour)
 from notes.subtract import clean_subtract, is_subtracted, side_used, subtracted
@@ -2665,6 +2666,10 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
             cfg = dict(cfg, rounds=True)  # get new channels": each trip round the block = later rounds, strum.wrapped)
         return with_strum(notes, tracks, cfg, ppq)
     if tool == "trim":
+        if step["cfg"] and step["cfg"].get("mode") == "wrap":  # (Wrapped slices colour: one colour = group 0)
+            if tracks is None:
+                tracks = np.zeros(len(notes), np.int64)
+            return _after(apply_wrap, notes, tracks, step["cfg"], ppq)
         return _after(apply_trim, notes, tracks, step["cfg"], ppq)
     if tool == "vel":  # (over the shape's time, like its velocity line)
         t = np.concatenate(cached_arrays(sh))[:, 0] * ppq

@@ -19,6 +19,10 @@ def clean_trim(c):
     """A trim from a file -> valid trim, or None when there is none or it would change nothing (100 %)."""
     if not isinstance(c, dict):
         return None
+    if c.get("mode") == "wrap":  # (Wrapped slices: wrap.py; keep / side ride along for the row mode's boxes)
+        from notes.wrap import clean_wrap
+        w = clean_wrap(c)
+        return dict(TRIM_DEFAULTS, mode="wrap", **w) if w else None
     try:
         keep = float(c.get("keep", 100.0))
     except (TypeError, ValueError):

@@ -6,7 +6,7 @@ import numpy as np
 from notes.areas import ALL_COLOURS, most_colours
 from notes.engine import CLASH, OWN0, aligned_ch, auto_count, heard_way, keeps_laps, off_part, own_slot, past_edges, pasted_notes, remove_across, render, resolve_overlaps, split_overlaps
 from files.own_tracks import FILE0, into_ids
-from notes.custom import ROUND, capped_colours, has_pattern, tracks_apart
+from notes.custom import ROUND, capped_colours, has_pattern, tracks_apart, wrap_sliced
 from notes.mask import as_used, is_mask, picture_like, pinned_slots, silent, slot_rule
 from notes.between import turns as between_turns
 from notes.hz_cc import cc_spans
@@ -477,7 +477,8 @@ def all_notes(shapes, ppq, keys, mode, split, all16, notes_tracks, quiet=False, 
     note_slots = {i: None for i, (sh, s) in enumerate(zip(shapes, strips)) if s and "cc" in sh}
     # (a sliced piece with Colours: by colour number too, so it keeps the whole's colours, user 2026-11-02: a
     # piece starting on the 3rd colour began again from the 1st)
-    ordered = [bool(sh.get("merge")) or has_pattern(sh) or "notes" in sh
+    # (Wrapped slices: slice 1 = the shape's own colour, the next ones in order, user 2026-11-23)
+    ordered = [bool(sh.get("merge")) or has_pattern(sh) or "notes" in sh or wrap_sliced(sh)
                or bool(sh.get("cut") or sh.get("cut_of")) and has_colours(sh, turns=True) for sh in shapes]
     # (a recoloured shape's colours: each counted as starting where it did before, so they keep their channels)
     backs = [recolour_back(s, notes_tracks, dict(s_as, _rounds=True) if r else s_as, n, t)

@@ -3274,11 +3274,19 @@ def tracks_apart(sh):
 
 
 def path_colours(sh):
-    """A Copy along a path page that changes the copies' colours (copypath.py), on sh or on the whole it was sliced
-    from (its pages made the piece's notes, sliced.py; hunt: the copies all took one channel)."""
+    """A Copy along a path page that changes the copies' colours (copypath.py) or a Wrapped slices page (wrap.py), on
+    sh or on the whole it was sliced from (its pages made the piece's notes, sliced.py; hunt: the copies all took one
+    channel)."""
     whole = (sh.get("cut") or {}).get("whole")
     return any(st["tool"] == "path" and not st.get("off") and (st.get("cfg") or {}).get("colours", "keep") != "keep"
-               for st in sh.get("fx") or ()) or isinstance(whole, dict) and path_colours(whole)
+               for st in sh.get("fx") or ()) or isinstance(whole, dict) and path_colours(whole) or wrap_sliced(sh)
+
+
+def wrap_sliced(sh):
+    """Has sh (or the whole it was sliced from) a Wrapped slices page switched on (wrap.py)?"""
+    whole = (sh.get("cut") or {}).get("whole")
+    return any(st["tool"] == "trim" and not st.get("off") and (st.get("cfg") or {}).get("mode") == "wrap"
+               for st in sh.get("fx") or ()) or isinstance(whole, dict) and wrap_sliced(whole)
 
 
 def capped_colours(groups, most=COLOURS):
