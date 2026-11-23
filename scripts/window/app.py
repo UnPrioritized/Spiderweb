@@ -884,6 +884,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             b.pack(side="left", padx=1)
             if key == "formula":
                 Tooltip(b, tr("app.formula_tip"))
+        ttk.Separator(vbar, orient="vertical").pack(side="left", fill="y", padx=5)
+        from window.velocity_step import VelocitySteps  # (− / +: the selection 1 quieter / louder, QoL G)
+        self.vel_steps = VelocitySteps(self, vbar)
         self.vel_formula_bar = VelocityFormulaBar(vbar, self)  # (shown while Formula is the tool)
         # (one line: beside the Formula boxes it ends in "…", the whole hint in a tip; hunt 2026-10-19: wrapped,
         # it was a thin column and the graph jumped)

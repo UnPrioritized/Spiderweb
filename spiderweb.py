@@ -64,6 +64,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     tk_threads.py    Tk objects let go of on another thread: deleted later on Tk's own (a freeze otherwise)
     sticky.py        the drawer's sticky lines: points stick to other strokes' points, crossings and lines
     velocity.py      the velocity pane under the piano roll
+    velocity_step.py the velocity pane's − / + buttons (selected shapes 1 quieter / louder)
     tempo_pane.py    the Tempo pane (under the velocity pane): tempo points, curves, catch-up lines
     rebar_work.py    Change visual time signature on the project: tempo, signatures + every shape, one step
     rebar_edit.py    its changes kept editable: records, taken back / edited / moved later
