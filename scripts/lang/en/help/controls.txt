@@ -28,4 +28,4 @@ Wheel = scroll, Shift+wheel = sideways, Ctrl+Shift+wheel = zoom time, Alt+wheel 
 • Windows where every change is already its own undo step (Stir, Warp, Liquify, Shares, Properties) have just Close.
 • Enter = the window's main button (OK, Use it, Apply…), except while you type in a box: there Enter takes the box's number.
 • F1 = this window's own Help page.
-• Every control shows a short help when the mouse rests on it.
+• Every control shows a short help when the mouse rests on it. On a greyed control, that help starts with why it's greyed and what to do.

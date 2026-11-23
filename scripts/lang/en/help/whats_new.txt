@@ -30,6 +30,28 @@ What's new:
 
 • Fixed: a double-click followed by one more quick click counted as a second double-click (a Sketch point vanished, quick Pencil clicks in the Hz window deleted the notes they placed); and the click that closed a graph's right-click menu added a point. Sustain stop lines and the Hz Effects pane's points now delete from their right-click menu too, and middle-click puts Stir's Centre point back in the middle.
 
+• Arrow keys move the selected shapes: Left / Right one tick, Up / Down one key (the selected notes in the Hz bass window too). Quick presses in a row are one undo step. Home / End move the play line to the start / the last note, and Settings → Sound → [page:settings#When playback stops|When playback stops] picks where it goes when you stop.
+
+• Files: File → Open Recent lists your last 16 projects and 16 loaded MIDI files. Open and Load MIDI start in the folder you used last. Each Save keeps a backup of the old file (5 per project, 1 GB in all: both in Settings → General), and File → Open a Backup… opens one. Exporting again over a MIDI file Spiderweb wrote no longer asks to replace it. See [page:files|Files].
+
+• The Tools menu lists every tool, with the gate tools in their own Gate tools ▸ part. The Lasso and Slice buttons show which way they work. While the Liquify window is open, [ and ] change its brush size wherever you are. Backspace takes the last point off a polyline or arc you're still drawing (piano roll and drawer).
+
+• The velocity pane has − and + buttons: every selected shape 1 quieter or louder (hold to keep going, one undo step). See [page:velocity|Velocity].
+
+• A greyed control's help now starts with why it's greyed and what to do.
+
+• Shape pictures: while the Shape list is open, a small picture of the highlighted shape shows beside it, and the drawer's shape library shows the shape under the mouse. Ctrl+click or Shift+click picks several shapes in the library to delete them together. The drawer's Save without a name asks for one ("Shape 1" filled in), and Ctrl+A there picks every stroke.
+
+• Drawer: Tracing picture… (beside Deform…) shows a picture faintly under the board to draw over, with its strength and Move / size. It's never saved in the shape. On Windows you can also drop a picture file onto the Image to notes window. See [page:drawer|Drawer].
+
+• Warp: Save… beside Preset keeps a shape's bend as your own preset, at the top of the Preset list, for any shape in any project. See [page:warp|Warp].
+
+• Hz bass window: right-click notes → Move to layer, and Duplicate layer in a layer's menu. The note count in its status line is now exact and updates after every change. See [page:hz_layers|Layers].
+
+• Fixed: an open dropdown list stayed open, and could still be clicked, after you switched to another program.
+
+• The settings backups made when you update now go into the user folder's backups\settings folder (older ones are moved there).
+
 • Before you update: Gate extend's box now reads a plain number as ticks. Type 50% for percent (it used to follow the Ticks / % choice). Projects open with the same notes as before.
 
 ## Version 1.7.7
