@@ -718,6 +718,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 self.bind_all(f"<{k}>", self.hotkey(fn))
         for key, bigger in (("<bracketleft>", False), ("<bracketright>", True)):
             self.bind_all(key, lambda e, b=bigger: self.liquify_size_key(e, b))
+        for key, end in (("<Home>", False), ("<End>", True)):  # (the piano roll answers them itself first)
+            self.bind_all(key, lambda e, end=end: self.home_end_key(e, end))
         self._device_was = self.midi_device.get()
         self.midi_device.trace_add("write", lambda *_: self.midi_device_picked())
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -4129,6 +4131,18 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 refit(sh)
             seen[id(m)] = key
         self._merge_keys = seen
+
+    def home_end_key(self, e, end):
+        """Home / End anywhere in the main window (velocity pane, track list, side panel...; hunt 2026-11-23: only
+        the piano roll had them), like Space; never in a typing box or a dropdown, never another window."""
+        try:
+            if (e.state & 0x4 or isinstance(e.widget, (tk.Entry, ttk.Entry, tk.Text, tk.Listbox))
+                    or e.widget.winfo_toplevel() is not self or self.roll.holding()):
+                return None
+        except (tk.TclError, AttributeError):
+            return None
+        self.playhead_key(end)
+        return "break"
 
     def liquify_size_key(self, e, bigger):
         """[ / ] while the Liquify window is open (its brush circle on the piano roll): the brush Size, whichever

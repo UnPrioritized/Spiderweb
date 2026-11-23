@@ -53,6 +53,15 @@ MOST_PIECES = 2000  # (pieces a whole line at most)
 LIVE_MS = 30  # (every note made again at most this often while dragging when not shown live)
 MOST_GRIDS = 8  # (selected shapes showing a grid at most: more = only the first ones)
 NUDGE_S = 1.0  # (arrow-key nudges this close together = one undo step)
+
+
+def nudged_beat(b, db, ppq):
+    """A beat b moved by db (a whole number of ticks, an arrow nudge): on a tick before = exactly on a tick after
+    (counted in whole ticks: no drift, hunt 2026-11-23); off the ticks (Shift-drawn) = moved as it is."""
+    t = b * ppq
+    if abs(t - round(t)) < 1e-6:
+        return (round(t) + round(db * ppq)) / ppq + 0.0
+    return round(b + db, 9) + 0.0
 NUDGE_REST_MS = 300  # (no arrow press for this long: the notes catch up; a held key on a big shape froze, hunt 11-10)
 
 
@@ -1189,6 +1198,8 @@ class WarpGrid:
             stack = self.app.undo_stack
             if not (last and stack and stack[-1] is last[0] and time.perf_counter() - last[1] < NUDGE_S):
                 self.app.push_undo(name=tr("warp.undo_nudge"))
+            else:
+                self.app.changed_in_step()  # (joined a step a Save may have marked saved: unsaved again, hunt)
             wp = dict(pend["wp"] if pend else g["wp"])
             if wp.get("on") is False:
                 wp["on"] = True

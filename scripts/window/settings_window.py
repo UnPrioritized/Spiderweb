@@ -530,7 +530,7 @@ class SettingsWindow(tk.Toplevel):
         """Backups Save keeps of a project file (QoL E, user 2026-11-23): how many per project (0 = none) and how
         big all of them together may grow (GB). Typed = Enter / leaving the box; dragged / wheel like any number box;
         middle-click = the default."""
-        from files.recent import BACKUP_COUNT, BACKUP_GB, trim
+        from files.recent import BACKUP_COUNT, BACKUP_GB
         from window.widgets import Scrub, bad, good
         app = self.app
         f.head(tr("settings.head_backups"))
@@ -557,12 +557,12 @@ class SettingsWindow(tk.Toplevel):
                 v = int(v) if whole else round(v, 2)
                 text.set(f"{v:g}")
                 good(e)
-                if v != var.get():
-                    var.set(v)
-                    if not whole:  # (a smaller cap: the oldest backups go now, not at the next Save)
-                        trim(v)
+                if v != var.get():  # (a smaller cap takes effect at the next Save, never while the box steps:
+                    var.set(v)      # deleted backups can't come back; hunt 2026-11-23, user)
                     app.schedule_autosave()
             self.backup_take[name] = took  # (tests)
+            self.backup_text = getattr(self, "backup_text", {})
+            self.backup_text[name] = text
             e.bind("<Return>", lambda ev, took=took: (took(), "break")[1])
             e.bind("<FocusOut>", lambda ev, took=took: took(True))
             e.bind("<Button-2>", lambda ev, took=took, text=text, default=default: (text.set(f"{default:g}"), took()))

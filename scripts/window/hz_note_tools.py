@@ -16,7 +16,7 @@ from files.lang import tr
 from files.mathexpr import fmt
 from notes.hzbass import NOTE_BEND_MOST, TUNE, handles, pitch, side_handles
 from roll.roll_shared import CTRL, SHIFT, note_name
-from roll.roll_warp import NUDGE_S
+from roll.roll_warp import NUDGE_S, nudged_beat
 from window import look
 from window.widgets import REDO_KEYS, UNDO_KEYS, delete_menu, read_number, remember_place
 
@@ -310,7 +310,7 @@ class HzNoteTools:
         picked = [self.tones[i] for i in self.sel if i < len(self.tones)]
         if not picked:
             return False
-        if (min(n["t"] for n in picked) + dt < -1e-12 or min(n["key"] for n in picked) + dk < LOWEST
+        if (min(n["t"] for n in picked) + dt < -1e-6 / app.ppq or min(n["key"] for n in picked) + dk < LOWEST
                 or max(n["key"] for n in picked) + dk > HIGHEST):
             return True
         stack, now = app.undo_stack, time.perf_counter()
@@ -318,11 +318,13 @@ class HzNoteTools:
         again = bool(last and stack and stack[-1] is last[0] and now - last[1] < NUDGE_S)
         before = copy.deepcopy(self.tones)
         self.sel_before = (before, self.sel_state())
-        for n in picked:
-            n["t"], n["key"] = max(0.0, round(n["t"] + dt, 9)), n["key"] + dk
+        for n in picked:  # (whole ticks: no drift, hunt 2026-11-23)
+            n["t"], n["key"] = max(0.0, nudged_beat(n["t"], dt, app.ppq)), n["key"] + dk
         if self.box_kept is not None:
             boxes, sels = self.box_kept
             self.box_kept = ([(b0 + dt, top + dk, b1 + dt, bottom + dk) for b0, top, b1, bottom in boxes], sels)
+        if again:
+            app.changed_in_step()  # (joined a step a Save may have marked saved: unsaved again, hunt 11-23)
         self.commit(tr("hz.step_nudge"), before, push=not again)
         self.hz_nudged = (stack[-1] if stack else None, now)
         return True

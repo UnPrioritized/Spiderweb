@@ -693,8 +693,21 @@ def own_velocities(sh, made, frac):
     was = sh["cut"].get("vel")
     if not was or "vel0" not in was:
         return np.clip(np.round(np.round(vals, 6)), 1, 127).astype(np.int64)
-    changed = np.abs(vals - env_values(velocity_env(was), frac)) > 1e-6
-    return np.where(changed, np.clip(np.round(np.round(vals, 6)), 1, 127), made).astype(np.int64)
+    # ("vel_add": the velocity pane's − / + moved the whole line by that much since the cut: every note made from
+    # the whole goes along, its pages' differences kept; hunt 2026-11-23, they all took the plain line's value)
+    add = vel_add(sh["cut"])
+    changed = np.abs(vals - env_values(velocity_env(was), frac) - add) > 1e-6
+    return np.where(changed, np.clip(np.round(np.round(vals, 6)), 1, 127),
+                    np.clip(np.asarray(made) + add, 1, 127)).astype(np.int64)
+
+
+VEL_ADD_MOST = 126  # (− / + steps a piece can be moved by since its cut)
+
+
+def vel_add(cut):
+    """How much a piece's whole line was moved by the velocity pane's − / + since it was cut (whole numbers)."""
+    v = cut.get("vel_add") if isinstance(cut, dict) else None
+    return max(-VEL_ADD_MOST, min(VEL_ADD_MOST, v)) if isinstance(v, int) and not isinstance(v, bool) else 0
 
 
 def piece_notes(sh, ppq, keys, make):
@@ -1946,6 +1959,8 @@ def clean_cut(c):
             return None
     if c.get("own_vel"):
         out["own_vel"] = True
+    if vel_add(c):  # (− / + since the cut: own_velocities)
+        out["vel_add"] = vel_add(c)
     if isinstance(c.get("drawn"), list):  # (velocity lines drawn on it since: drawn_spots)
         try:
             got = [[float(a), float(b)] for a, b in c["drawn"][-DRAWN_MOST:]]

@@ -33,12 +33,21 @@ def step_shape(sh, d):
                 changed = True
     else:
         env = velocity_env(sh)
+        cut = sh.get("cut") if isinstance(sh.get("cut"), dict) else None
+        was = (cut or {}).get("vel")
+        piece = isinstance(was, dict) and "vel0" in was  # (a sliced piece keeping its whole's per-note velocities)
+        if piece and any(not 1 <= round(v) + d <= 127 for _, v in env):
+            return False  # (moved as one: stops when its line reaches 1 / 127, else the offset would drift)
         new = [[u, _moved(v, d)] for u, v in env]
         if new != [[u, float(v)] for u, v in env]:
             if sh.get("vel_env"):
                 sh["vel_env"] = new
             sh["vel0"], sh["vel1"] = int(_moved(sh["vel0"], d)), int(_moved(sh["vel1"], d))
             changed = True
+            if piece:  # (its notes from the whole move along by as much: sliced.own_velocities, hunt 2026-11-23)
+                from notes.sliced import vel_add
+                add = vel_add(cut) + d
+                sh["cut"] = dict(cut, vel_add=add) if add else {k: v for k, v in cut.items() if k != "vel_add"}
     for step in sh.get("fx") or ():  # (velocities drawn after note tool pages)
         if step.get("tool") == "vel":
             pts = [[u, _moved(v, d)] for u, v in step["pts"]]
@@ -54,7 +63,7 @@ class VelocitySteps:
     def __init__(self, app, bar):
         self.app = app
         self.job = None
-        self.held = None  # the undo step this hold made (None = none yet)
+        self.held = None  # the undo step this hold made (None = none yet; not on top any more = the hold stops)
         self.buttons = []
         for text, d, tip in (("−", -1, "velocity.quieter_tip"), ("+", 1, "velocity.louder_tip")):
             b = ttk.Button(bar, text=text, width=2, takefocus=False)
@@ -63,13 +72,17 @@ class VelocitySteps:
             b.bind("<ButtonRelease-1>", lambda e: self.release())
             b.bind("<Destroy>", lambda e: self.release(), add="+")
             Tooltip(b, tr(tip))
-            greyed_why(b, tr("velocity.step_none"))
+            greyed_why(b, self.why)
             self.buttons.append(b)
         self.sync()
 
     def targets(self):
         app = self.app
         return [app.shapes[i] for i in sorted(app.sels) if i < len(app.shapes) and "picture" not in app.shapes[i]]
+
+    def why(self):
+        """The greyed reason: only pictures selected = they keep their own velocities (hunt 2026-11-23)."""
+        return tr("velocity.step_pictures" if self.app.sels else "velocity.step_none")
 
     def sync(self):
         """Greyed while nothing they work on is selected (user 2026-11-23 check-in 2; App.sync_panel)."""
@@ -88,6 +101,10 @@ class VelocitySteps:
         self.job = self.app.after(REPEAT_WAIT_MS, lambda: self.again(d))
 
     def again(self, d):
+        stack = self.app.undo_stack
+        if self.held is not None and not (stack and stack[-1] is self.held):
+            self.release()  # (Ctrl+Z / another change during the hold: the hold stops there; hunt 2026-11-23, user)
+            return
         self.step(d)
         self.job = self.app.after(REPEAT_MS, lambda: self.again(d))
 
@@ -116,7 +133,9 @@ class VelocitySteps:
             return False
         if self.held is None:  # (the hold's first step: one undo step for all of it)
             app.push_undo(name=tr("velocity.quieter" if d < 0 else "velocity.louder"))
-            self.held = True
+            self.held = app.undo_stack[-1] if app.undo_stack else None
+        else:
+            app.changed_in_step()  # (a Save during the hold: unsaved again, hunt 2026-11-23)
         for sh, t, ch in zip(targets, tried, changed):  # (the copies' results taken: worked out once)
             if ch:
                 sh.clear()

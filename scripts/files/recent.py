@@ -148,8 +148,15 @@ def back_up(path, keep, most_gb):
             while os.path.exists(made):  # (two saves in one second)
                 made = os.path.join(own, f"{stem} {time.strftime('%Y-%m-%d %H.%M.%S')} ({n}){ext}")
                 n += 1
-            shutil.copyfile(path, made + ".tmp")  # (a full disk leaves no half copy)
-            os.replace(made + ".tmp", made)
+            try:
+                shutil.copyfile(path, made + ".tmp")  # (a full disk leaves no half copy)
+                os.replace(made + ".tmp", made)
+            except OSError:
+                try:  # (a copy failing partway: its half file goes too, hunt 2026-11-23)
+                    os.remove(made + ".tmp")
+                except OSError:
+                    pass
+                raise
             have = _backups(own)
         for _, _, p in have[:max(0, len(have) - keep)]:
             _remove(p)
