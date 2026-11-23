@@ -2456,6 +2456,7 @@
  "palette.delete_tip": "Delete this palette (notes go back to Default). Default can't be deleted.",
  "palette.delete_title": "Delete palette",
  "palette.delete_ask": "Delete the palette \"{name}\"?\n\nIt goes to the Recycle Bin.",
+ "palette.bin_in_use": "Couldn't move the palette \"{name}\" to the Recycle Bin: its file is in use (open in another program?). Nothing was deleted.",
  "palette.no_bin": "The palette \"{name}\" can't go to the Recycle Bin here.\n\nDelete it for good?",
  "palette.name_ask": "Name of the palette:",
  "palette.name_taken": "There is already a palette called \"{name}\". Pick another name.",

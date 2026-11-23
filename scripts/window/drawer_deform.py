@@ -354,6 +354,7 @@ class DeformWindow(tk.Toplevel):
             self.kind.current(s["kind"])
             self.area.current(s["area"])  # (the dropdown's own place: the divider row counts)
             self.area.set(self.area.get().lstrip(" "))  # (a shape inside a folder: shown without the indent)
+            self.area.shown_at = s["area"]  # (that very row: another row may hold the same name, hunt 2026-11-24)
             self.shape = self._shapes.get(name_index(self.area))
             self.area_line.config(text="")
             self.hard.set(s["hard"])

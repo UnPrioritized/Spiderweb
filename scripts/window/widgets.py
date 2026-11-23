@@ -214,6 +214,7 @@ def fit_dropdown(cb):
 
 JUMP_MS = 1000  # name lists open: letters typed closer together than this make one word (letter_jump)
 DIVIDER = "─" * 12  # name lists: the row between the ready-made names and the saved ones (set_names)
+WHEEL_PICK_S = 0.5  # name lists: a pick this soon after a wheel step there = that step (name_list's picked)
 
 
 def open_list(cb):
@@ -274,7 +275,7 @@ def name_list(cb):
     lb = open_list(cb)
 
     def shown():  # (the list opened, just filled: the divider greyed, the name picked before kept)
-        cb.name_before, cb.list_open = cb.get(), True
+        cb.name_before, cb.list_open, cb.wheel_from = cb.get(), True, None
         if lb is None:
             return
         for k, colour in cb.row_colours.items():  # (rows with a colour of their own, e.g. orange = a warning)
@@ -286,7 +287,8 @@ def name_list(cb):
                 cb.tk.call(lb, "itemconfigure", k, "-foreground", look.HINT, "-selectforeground", look.HINT,
                            "-selectbackground", cb.tk.call(lb, "cget", "-background"))
         k = name_place(cb)
-        if cb.current() < 0 <= k < size:  # (a name shown without its folder indent: its row picked in the list)
+        if 0 <= k < size and k != cb.current():  # (its own row picked in the list: a name shown without its folder
+            # indent, or one whose text another row above has too, e.g. a heading or a ready-made area)
             cb.tk.call(lb, "selection", "clear", 0, "end")
             cb.tk.call(lb, "selection", "set", k)
             cb.tk.call(lb, "activate", k)
@@ -299,22 +301,37 @@ def name_list(cb):
     cb.tk.call("bind", pop, "<Unmap>", "+" + cb.register(hidden))
 
     def picked(e):
-        k, skip = cb.current(), skipped(cb)
-        values = list(cb.cget("values"))
+        # THE ROW ITSELF (hunt 2026-11-24): Tk finds a pick again by its TEXT, so a heading "Hearts" above the
+        # shape "Hearts", or Stir's ready-made "Diamond" above a drawing called Diamond, took the pick. The row is
+        # known here: the wheel's step from the row shown (wheel), else the open list's picked row.
+        skip, values = skipped(cb), list(cb.cget("values"))
+        k, w = None, getattr(cb, "wheel_from", None)
+        cb.wheel_from = None
+        if w is not None and time.perf_counter() - w[2] < WHEEL_PICK_S:
+            start, step = w[0], w[1]
+            j = start + step
+            while 0 <= j < len(values) and j in skip:  # (over the divider / headings, the way it went)
+                j += step
+            k = j if 0 <= j < len(values) else start
+        elif lb is not None:
+            sel = cb.tk.splitlist(cb.tk.call(lb, "curselection"))
+            if sel and int(sel[0]) < len(values) and str(values[int(sel[0])]) == cb.get():
+                k = int(sel[0])
+        if k is None:
+            k = cb.current()
         if k in skip:
             if cb.list_open or not values:  # (a click on the divider / a heading: as before, nothing picked)
                 cb.set(cb.name_before)
                 return "break"
             before = (values.index(cb.name_before) if cb.name_before in values else
                       cb.shown_at if 0 <= getattr(cb, "shown_at", -1) < len(values) else k - 1)
-            step = 1 if before < k else -1  # (the wheel: over it, the way it went; at an end: back)
+            step = 1 if before < k else -1  # (a step from elsewhere landed on it: over it, the way it went)
             j = k
             while 0 <= j < len(values) and j in skip:
                 j += step
-            if not 0 <= j < len(values):
-                j = before
-            cb.current(j)
-            k = j
+            k = j if 0 <= j < len(values) else before
+        if 0 <= k < len(values) and cb.current() != k:
+            cb.current(k)
         cb.shown_at = k
         text = cb.get()
         if text != text.lstrip(" "):  # (a shape inside a folder heading: the box shows its name alone)
@@ -328,9 +345,12 @@ def name_list(cb):
         if not cb.list_open:
             cb.name_before = cb.get()
             k = name_place(cb)
-            if cb.current() < 0 <= k:  # (a name shown without its folder indent: the wheel steps from its row)
-                cb.shown_at = k
-                cb.current(k)
+            if k >= 0:  # (the wheel steps from the row shown, not the first row with its text: picked() does it)
+                if cb.current() != k:  # (so the dropdown's own step starts there; a step it doesn't take, e.g. the
+                    cb.current(k)      # box not clicked first, leaves no folder indent showing)
+                    cb.after_idle(lambda: cb.get() != cb.get().lstrip(" ") and cb.set(cb.get().lstrip(" ")))
+                down =getattr(e, "num", 0) == 5 or (getattr(e, "delta", 0) or 0) < 0
+                cb.wheel_from = (k, 1 if down else -1, time.perf_counter())
     for seq in ("<MouseWheel>", "<Button-4>", "<Button-5>"):  # (before the dropdown's own wheel step)
         cb.bind_class(tag, seq, wheel)
     cb.bindtags((tag,) + cb.bindtags())
@@ -365,14 +385,19 @@ def skipped(cb):
 
 
 def name_place(cb):
-    """The shown name's row: cb.current(), or (a name inside a folder, shown without its indent) the first row
-    holding it indented; -1 when none."""
-    k = cb.current()
-    if k >= 0 or not getattr(cb, "headings", None):
+    """The shown name's row: the row it was picked from (name_list's picked: never a heading or another row with
+    the same text, hunt 2026-11-24) while it still shows that name, else cb.current() when that isn't the divider
+    or a heading, else the first pickable row holding the name (a name inside a folder is shown without its
+    indent); -1 when none."""
+    values, text, skip = cb.cget("values"), cb.get(), skipped(cb)
+    k = getattr(cb, "shown_at", -1)
+    if 0 <= k < len(values) and k not in skip and str(values[k]).lstrip(" ") == text:
         return k
-    text, skip = cb.get(), skipped(cb)
-    for i, v in enumerate(cb.cget("values")):
-        if i not in skip and str(v).lstrip(" ") == text and str(v) != text:
+    k = cb.current()
+    if k >= 0 and k not in skip:
+        return k
+    for i, v in enumerate(values):
+        if i not in skip and str(v).lstrip(" ") == text:
             return i
     return -1
 

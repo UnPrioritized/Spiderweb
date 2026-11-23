@@ -391,27 +391,60 @@ def show_file(path):
     return open_path(os.path.dirname(path))
 
 
+_long_paths = []
+
+
+def long_paths():
+    """Paths past 260 letters work here: not Windows, or Windows' LongPathsEnabled is on (read once)."""
+    if not WINDOWS:
+        return True
+    if not _long_paths:
+        try:
+            import winreg
+            with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, r"SYSTEM\CurrentControlSet\Control\FileSystem") as k:
+                _long_paths.append(winreg.QueryValueEx(k, "LongPathsEnabled")[0] == 1)
+        except OSError:
+            _long_paths.append(False)
+    return _long_paths[0]
+
+
+class BinError(OSError):
+    """to_trash: the Recycle Bin is there but the move failed (the file / folder is in use, no rights...): nothing
+    may be deleted for good then (hunt 2026-11-24: an in-use file got "no Recycle Bin here, delete for good?")."""
+
+
+BIN_RETRY_S = 0.3  # (to_trash: a failed move tried once more after this: another program may let go meanwhile)
+
+
 def to_trash(path):
     """A file / folder moved to the Recycle Bin (Windows; Mac: the Trash; Linux: the desktop's trash folder).
     True = gone; False = no trash for it here (nothing done); None = Windows' own "delete for good?" question (a
-    drive without a Recycle Bin) was cancelled. Mac / Linux untested."""
+    drive without a Recycle Bin) was cancelled. Raises BinError when the move failed (in use...). Mac / Linux
+    untested."""
     import os
+    import time
     path = os.path.abspath(path)
     if WINDOWS:
-        try:
-            class OP(ctypes.Structure):
-                _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT), ("pFrom", wintypes.LPCWSTR),
-                            ("pTo", wintypes.LPCWSTR), ("fFlags", wintypes.WORD), ("aborted", wintypes.BOOL),
-                            ("maps", ctypes.c_void_p), ("title", wintypes.LPCWSTR)]
-            # FO_DELETE; ALLOWUNDO | NOCONFIRMATION | SILENT | NOERRORUI | WANTNUKEWARNING (asks before deleting
-            # for good where there is no Recycle Bin)
-            op = OP(None, 3, path + "\0", None, 0x40 | 0x10 | 0x4 | 0x400 | 0x4000, False, None, None)
-            failed = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
-        except (AttributeError, OSError):
-            return False
-        if not os.path.exists(path):
-            return True
-        return None if op.aborted else False if failed else None
+        failed = 0
+        for attempt in range(2):
+            try:
+                class OP(ctypes.Structure):
+                    _fields_ = [("hwnd", wintypes.HWND), ("wFunc", wintypes.UINT), ("pFrom", wintypes.LPCWSTR),
+                                ("pTo", wintypes.LPCWSTR), ("fFlags", wintypes.WORD), ("aborted", wintypes.BOOL),
+                                ("maps", ctypes.c_void_p), ("title", wintypes.LPCWSTR)]
+                # FO_DELETE; ALLOWUNDO | NOCONFIRMATION | SILENT | NOERRORUI | WANTNUKEWARNING (asks before
+                # deleting for good where there is no Recycle Bin)
+                op = OP(None, 3, path + "\0", None, 0x40 | 0x10 | 0x4 | 0x400 | 0x4000, False, None, None)
+                failed = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+            except (AttributeError, OSError):
+                return False
+            if not os.path.exists(path):
+                return True
+            if op.aborted:
+                return None
+            if not attempt:
+                time.sleep(BIN_RETRY_S)
+        raise BinError(failed, "in use", path)
     import shutil
     if MAC:  # (untested)
         trash = os.path.expanduser("~/.Trash")
@@ -423,8 +456,8 @@ def to_trash(path):
             to, k = os.path.join(trash, f"{base} {k}{ext}"), k + 1
         try:
             shutil.move(path, to)
-        except OSError:
-            return False
+        except OSError as e:
+            raise BinError(e.errno, "in use", path) from e
         return True
     # Linux: the freedesktop trash (files/ + info/<name>.trashinfo), home drive only
     import time
@@ -443,9 +476,14 @@ def to_trash(path):
             f.write(f"[Trash Info]\nPath={quote(path)}\nDeletionDate={time.strftime('%Y-%m-%dT%H:%M:%S')}\n")
         try:
             os.rename(path, os.path.join(trash, "files", name))  # (another drive: fails, no trash for it)
-        except OSError:
+        except OSError as e:
             os.remove(info)
-            return False
+            import errno
+            if e.errno == errno.EXDEV:
+                return False
+            raise BinError(e.errno, "in use", path) from e
+    except BinError:
+        raise
     except OSError:
         return False
     return True

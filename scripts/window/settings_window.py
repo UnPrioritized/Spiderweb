@@ -7,7 +7,7 @@ import os
 import tkinter as tk
 from tkinter import colorchooser, font as tkfont, messagebox, ttk
 
-from files import lang, settings
+from files import lang, settings, system
 from files.lang import tr, trn
 from files.playback import AHEAD, BUILTIN, KESTREL, MAESTRO, devices
 from files.system import WINDOWS, open_path, work_area
@@ -1379,6 +1379,8 @@ class SettingsWindow(tk.Toplevel):
                     parent=self)):
                 return
             palettes.apply(palettes.colours_of(palettes.DEFAULT), self.app)
+        except system.BinError:  # (in use: nothing deleted, hunt 2026-11-24)
+            messagebox.showerror(tr("palette.title"), tr("palette.bin_in_use", name=now), parent=self)
         except OSError as e:
             messagebox.showerror(tr("palette.title"), tr("palette.not_saved", e=e), parent=self)
         self.show_palettes()

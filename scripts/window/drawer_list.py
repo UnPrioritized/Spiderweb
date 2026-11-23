@@ -11,6 +11,7 @@ from window import look
 from window.drawer_library import BAD_CHARS, BUILT_IN, library_entries, library_folders, shape_folder
 
 INDENT = "    "  # (one folder level deeper)
+CATCH_UP_S = 0.5  # (catch_up: the library looked at again at most this often while the keyboard moves around)
 OPEN, SHUT = "▾ ", "▸ "
 
 
@@ -52,6 +53,16 @@ def list_rows(open_folders):
 
     fill("", 0)
     return rows
+
+
+def delete_error(e):
+    """The message for a delete that failed: in use (the Recycle Bin move failed: nothing deleted) or another
+    error."""
+    import os
+    from files.system import BinError
+    if isinstance(e, BinError):
+        return tr("drawer.bin_in_use", name=os.path.basename(str(e.filename or "")))
+    return tr("drawer.couldn_t_delete", e=e)
 
 
 def row_text(row, open_folders):
@@ -118,6 +129,26 @@ class LibraryList:
                     seen = True
         self.sync_library()
 
+    def catch_up(self, e=None):
+        """The drawer has the keyboard again (hunt 2026-11-24: folders deleted / renamed in File Explorer kept their
+        rows, opening one failed, saving into one made it again): the list made again when the library changed on
+        disk, the same rows picked where they still are. At most every CATCH_UP_S."""
+        import time
+        now = time.perf_counter()
+        if now - getattr(self, "_caught", 0.0) < CATCH_UP_S or self.renaming or getattr(self, "_drag", None):
+            return
+        self._caught = now
+        if not hasattr(self, "rows"):
+            return
+        mark = lambda rs: [(r["kind"], r["folder"], r["path"], r["name"], r["same"]) for r in rs]
+        if mark(list_rows(self.open_folders)) == mark(self.rows):
+            return
+        picked = {(r["kind"], r["folder"], r["path"]) for r in self.picked_rows()}
+        top = self.listbox.yview()[0]
+        self.fill_rows(lambda r: (r["kind"], r["folder"], r["path"]) in picked)
+        self.listbox.yview_moveto(top)
+        self.app.refresh_custom_names()
+
     def row_tip(self, i):
         """A marked row's tip: another shape has its name (rename one)."""
         r = self.rows[i] if 0 <= i < len(getattr(self, "rows", ())) else None
@@ -149,8 +180,12 @@ class LibraryList:
     def save_folder(self):
         """Where a NEW shape is saved (user 2026-11-24): the picked folder, or the folder of the picked shape;
         nothing picked (or rows in different folders) = the top."""
-        got = {r["folder"] for r in self.picked_rows()}
-        return got.pop() if len(got) == 1 else ""
+        import os
+        from window.drawer_library import folder_path
+        # (a row shown in a built-in's place at the top = the top, like a drop there: hunt 2026-11-24)
+        got = {r["folder"] if r["kind"] == "folder" or r["depth"] else "" for r in self.picked_rows()}
+        f = got.pop() if len(got) == 1 else ""
+        return f if not f or os.path.isdir(folder_path(f)) else ""  # (gone since: never made again, hunt)
 
     def sync_library(self):
         """Open / Rename greyed while several shapes are picked (their tips say why)."""
@@ -170,7 +205,9 @@ class LibraryList:
         top = self.listbox.yview()[0]
         self.fill_rows(lambda r: r["kind"] == "folder" and r["folder"] == f)
         self.listbox.yview_moveto(top)
-        self.listbox.see(next(i for i, r in enumerate(self.rows) if r["kind"] == "folder" and r["folder"] == f))
+        at = next((i for i, r in enumerate(self.rows) if r["kind"] == "folder" and r["folder"] == f), None)
+        if at is not None:  # (gone from the disk since the list was made: the list is simply up to date now)
+            self.listbox.see(at)
 
     def on_arrow(self, i, x):
         """True when x (in the list) is on folder row i's ▸ / ▾."""
@@ -198,12 +235,36 @@ class LibraryList:
         self.listbox.focus_set()
 
     def keep_fresh(self, do):
-        """do() moves files (a folder renamed / moved): the drawing open here stays "saved" when it was."""
-        from window.drawer_library import shape_stamp
-        fresh = bool(self.saved_name) and not self.changed_elsewhere()
-        got = do()
+        """do(moves) moves files / folders, adding each (old path, new path) to moves. The drawing open here stays
+        "saved" only when its name still finds ITS OWN file, moved (hunt 2026-11-24: a second file holding the name
+        moved first in the order, and Save went over that other drawing without asking). A name that now finds
+        another file is said on the status line."""
+        import os
+        from window.drawer_library import _saved, folder_of, shape_stamp
+        before = {k: p for k, (_, p) in _saved().items()}
+        name = self.saved_name
+        fresh = bool(name) and not self.changed_elsewhere()
+        moves = []
+        got = do(moves)
+        after = _saved()
+
+        def moved(p):
+            for old, new in moves:
+                if os.path.normcase(p) == os.path.normcase(old):
+                    return new
+                if os.path.normcase(p).startswith(os.path.normcase(old) + os.sep):
+                    return new + p[len(old):]
+            return p
+        same = lambda a, b: os.path.normcase(a) == os.path.normcase(b)
         if fresh:
-            self.saved_stamp = shape_stamp(self.saved_name)
+            now = after.get(name.lower())
+            if now and same(now[1], moved(before.get(name.lower(), ""))):
+                self.saved_stamp = shape_stamp(name)
+        switched = [(n, p) for k, (n, p) in after.items() if k in before and not same(moved(before[k]), p)]
+        if switched:
+            n, p = switched[0]
+            self.app.status.config(text=tr("drawer.name_switched", name=n,
+                                            folder=folder_of(p) or tr("drawer.top_folder")))
         return got
 
     def folder_moved(self, old, new):
@@ -236,7 +297,7 @@ class LibraryList:
     def finish_folder_rename(self, row, typed, keep):
         """The rename box on a folder row closed: renamed. A name Windows refuses is REFUSED with the reason and the
         box opens again with what was typed (user 2026-11-24)."""
-        from window.drawer_library import folder_problem, rename_folder
+        from window.drawer_library import folder_path, folder_problem, rename_folder
         new = typed.strip()
         if not keep or not new or new == row["name"]:
             return
@@ -244,7 +305,11 @@ class LibraryList:
         try:
             if problem:
                 raise ValueError(problem)
-            got = self.keep_fresh(lambda: rename_folder(row["folder"], new))
+            def do(moves):
+                rel = rename_folder(row["folder"], new)
+                moves.append((folder_path(row["folder"]), folder_path(rel)))
+                return rel
+            got = self.keep_fresh(do)
         except ValueError as e:
             why = tr(f"drawer.folder_{e}", name=new, chars=" ".join(BAD_CHARS))
         except FileExistsError:
@@ -297,7 +362,7 @@ class LibraryList:
         for name in names:
             self.shape_gone(name)
         if failed:
-            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_delete", e=failed), parent=self)
+            messagebox.showerror(tr("drawer.spiderweb"), delete_error(failed), parent=self)
         self.app.sync_custom()
         self.save_open_folders()
         self.refresh_list()
@@ -315,6 +380,8 @@ class LibraryList:
         picked first if it isn't; Open / Rename / Delete / New folder."""
         from window.widgets import popup_menu
         lb = self.listbox
+        if self.drag_cancel():  # (right-click while dragging rows: the drag is off, no menu)
+            return "break"
         self.end_rename(True)
         i = lb.nearest(e.y)
         box = lb.bbox(i) if i >= 0 else None
@@ -430,20 +497,34 @@ class LibraryList:
         self.move_rows(d["rows"], d["folder"])
         return "break"
 
+    def drag_cancel(self):
+        """A row drag called off (Esc / Delete / right-click while dragging, hunt 2026-11-24): nothing moves, the
+        lit row and the pointer go back. True when there was one."""
+        d = getattr(self, "_drag", None)
+        if not d or not d.get("on") or d.get("dead"):
+            return False
+        self._drag = {"dead": True}  # (until the let go: the rest of the drag picks nothing either)
+        lb = self.listbox
+        lb.config(cursor="")
+        if d.get("target") is not None and d["target"] < lb.size():
+            lb.itemconfig(d["target"], background="")
+        return True
+
     def move_rows(self, rows, into):
         """The rows' shapes and folders moved into the folder `into` ("" = the top). Folders inside a moved folder
         go along; a folder can't go inside itself; built-ins stay. The moved rows are picked after, shown."""
-        from window.drawer_library import move_folder, move_shape
+        from window.drawer_library import folder_path, move_folder, move_shape
         folders = [r["folder"] for r in rows if r["kind"] == "folder"]
         folders = [f for f in folders if not any(f.startswith(o + "/") for o in folders)]
         inside = lambda f: any(f == o or f.startswith(o + "/") for o in folders)
         shapes = [r for r in rows if r["kind"] == "shape" and not inside(r["folder"]) and r["folder"] != into]
         new_paths, new_folders, failed = set(), set(), []
 
-        def do():
+        def do(moves):
             for f in folders:
                 try:
                     got = move_folder(f, into)
+                    moves.append((folder_path(f), folder_path(got)))
                 except ValueError:  # (into itself / its own sub folder)
                     failed.append(tr("drawer.move_inside", name=f.rpartition("/")[2]))
                     continue
@@ -458,7 +539,9 @@ class LibraryList:
                 new_folders.add(got)
             for r in shapes:
                 try:
-                    new_paths.add(move_shape(r["path"], into))
+                    to = move_shape(r["path"], into)
+                    moves.append((r["path"], to))
+                    new_paths.add(to)
                 except OSError as e:
                     failed.append(str(e))
         self.keep_fresh(do)
@@ -509,7 +592,9 @@ class LibraryList:
         elif way < 0 and r["depth"] > 0:
             f = r["folder"] if r["kind"] != "folder" else parent_of(r["folder"])
             lb = self.listbox
-            i = next(i for i, q in enumerate(self.rows) if q["kind"] == "folder" and q["folder"] == f)
+            i = next((i for i, q in enumerate(self.rows) if q["kind"] == "folder" and q["folder"] == f), None)
+            if i is None:
+                return
             lb.selection_clear(0, "end")
             lb.selection_set(i)
             lb.activate(i)

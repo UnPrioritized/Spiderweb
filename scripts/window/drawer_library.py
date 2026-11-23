@@ -82,6 +82,8 @@ def _scan():
     """([(name, path, folder, (modified time, size))] of every saved shape in the order above, [every folder]).
     Names come from _names (read again only when a file's stamp changed)."""
     files, folders, seen = [], [], set()
+    been = {os.path.normcase(os.path.realpath(LIBRARY))}  # (each real folder read once: two links back into the
+    #                                                        library doubled the work every level, hunt 2026-11-24)
 
     def visit(full, rel, depth):
         try:
@@ -105,6 +107,10 @@ def _scan():
             except OSError:
                 pass
         for e in subs:
+            real = os.path.normcase(os.path.realpath(e.path))
+            if real in been:  # (a link to a folder read already, e.g. back to the library: left out)
+                continue
+            been.add(real)
             sub = f"{rel}/{e.name}" if rel else e.name
             folders.append(sub)
             if depth < FOLDER_DEPTH:
@@ -248,8 +254,9 @@ def load_layers(name, path=None):
     strokes, areas = None, []
     if path:
         try:
-            with open(path, encoding="utf-8-sig") as f:
-                got = json.load(f)
+            with open(path, encoding="utf-8-sig") as f:  # (read whole, then let go: a big file held open while
+                text = f.read()                            # decoded blocked moving it, hunt 2026-11-24)
+            got = json.loads(text)
             strokes, areas = clean_strokes(got.get("strokes")) or None, clean_areas(got.get("areas"))
         except (OSError, ValueError, AttributeError):
             pass
@@ -294,7 +301,10 @@ def shape_text(name, strokes, areas=()):
 def save_shape(name, strokes, areas=(), folder=""):
     """Saves a library shape: over the one with that name if any (in ITS folder), else a new file in `folder`.
     Returns its file."""
-    path = shape_path(name) or free_path(name, folder=folder)
+    path = shape_path(name)
+    if not path:
+        path = free_path(name, folder=folder)
+        long_check(path)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     write_text(path, shape_text(name, strokes, areas))
     return path
@@ -308,6 +318,7 @@ def rename_shape(old, new, path=None):
     if not path or strokes is None:
         raise ValueError(old)
     to = _free_file(os.path.dirname(path), file_stem(new), keep=path)
+    long_check(to)
     write_text(to, shape_text(new, strokes, areas))
     if os.path.normcase(to) != os.path.normcase(path):
         os.remove(path)
@@ -322,8 +333,49 @@ def move_shape(path, folder):
     if not os.path.isdir(where):
         raise FileNotFoundError(where)
     to = _free_file(where, os.path.basename(path)[:-5])
-    os.rename(path, to)  # (never over a file: _free_file found a free name)
+    long_check(to)
+    _retried(os.rename, path, to)  # (never over a file: _free_file found a free name)
     return to
+
+
+IN_USE_RETRY_S = 0.3  # (a file another program holds for a moment, e.g. a shape picture being read: tried again)
+
+
+def _retried(fn, *args):
+    """fn(*args), once more after IN_USE_RETRY_S when Windows says the file is in use."""
+    try:
+        return fn(*args)
+    except PermissionError:
+        import time
+        time.sleep(IN_USE_RETRY_S)
+        return fn(*args)
+
+
+PATH_MOST = 259  # (Windows' path limit without its long-path setting: 260 with the ending)
+
+
+class PathTooLong(OSError):
+    """A new / renamed / moved file or folder would pass Windows' path limit (its text says so)."""
+
+    def __str__(self):
+        return tr("drawer.path_too_long")
+
+
+def long_check(path, inside=0):
+    """Raises PathTooLong when `path` (plus the longest path `inside` it adds) passes Windows' limit and long
+    paths aren't on (hunt 2026-11-24: deeper folders were skipped silently, their shapes gone from every list)."""
+    from files import system
+    if len(os.path.abspath(path)) + inside > PATH_MOST and not system.long_paths():
+        raise PathTooLong(path)
+
+
+def _inside_most(path):
+    """The longest path under a folder, counted from the folder itself (0: empty / not there)."""
+    most = 0
+    for root, dirs, files in os.walk(path):
+        for f in files + dirs:
+            most = max(most, len(os.path.join(root, f)) - len(path))
+    return most
 
 
 # ---------------------------------------------------------------- folders
@@ -359,6 +411,7 @@ def make_folder(name, parent=""):
     (folder_problem's word), FileExistsError (one with that name is there), OSError."""
     name = _check_name(name)
     rel = f"{parent}/{name}" if parent else name
+    long_check(folder_path(rel))
     os.makedirs(folder_path(parent), exist_ok=True)
     os.mkdir(folder_path(rel))
     return rel
@@ -373,7 +426,8 @@ def rename_folder(folder, name):
     src, dst = folder_path(folder), folder_path(rel)
     if os.path.exists(dst) and os.path.normcase(dst) != os.path.normcase(src):
         raise FileExistsError(dst)
-    os.rename(src, dst)
+    long_check(dst, _inside_most(src))
+    _retried(os.rename, src, dst)
     return rel
 
 
@@ -388,7 +442,8 @@ def move_folder(folder, into):
     rel = f"{into}/{name}" if into else name
     if os.path.exists(folder_path(rel)):
         raise FileExistsError(folder_path(rel))
-    os.rename(folder_path(folder), folder_path(rel))
+    long_check(folder_path(rel), _inside_most(folder_path(folder)))
+    _retried(os.rename, folder_path(folder), folder_path(rel))
     return rel
 
 

@@ -44,7 +44,7 @@ from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Tooltip, long_line, m
 from window.widgets_tips import greyed_why
 from window.shape_picture import peek_listbox
 from tkinter import font as tkfont
-from window.drawer_list import INDENT, OPEN, LibraryList
+from window.drawer_list import INDENT, OPEN, LibraryList, delete_error
 
 GRIDS = ["4", "8", "12", "16", "24", "32", "48", "64"]
 TOOLS = [("select", tr("drawer.select"), "v"), ("slice", tr("drawer.slice"), "k"), ("lasso", tr("drawer.lasso"), "j"),
@@ -217,13 +217,15 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
         bind_double(lb, lambda e: (self.stop_slow_click(), self.open_selected()), lambda e: self.stop_slow_click())
         # Keys while the list has the keyboard work on the list (the drawing's own keys: click the board). Blue =
         # the list has the keyboard, grey = the board has it (user, like Windows' file lists).
-        lb.bind("<Delete>", lambda e: (self.delete_selected(), "break")[1])
+        lb.bind("<Delete>", lambda e: (self.drag_cancel() or self.delete_selected(), "break")[1])  # (mid drag: off)
+        lb.bind("<Escape>", lambda e: "break" if self.drag_cancel() else None)
         lb.bind("<BackSpace>", lambda e: "break")
         lb.bind("<Return>", lambda e: (self.open_selected(), "break")[1])
         lb.bind("<F2>", lambda e: (self.start_rename(), "break")[1])
         lb.bind("<Right>", lambda e: (self.list_key_side(1), "break")[1])  # (folders: open / shut, like File Explorer)
         lb.bind("<Left>", lambda e: (self.list_key_side(-1), "break")[1])
         lb.bind("<ButtonPress-3>", self.list_menu)  # (THE CONTROL SCHEME: right-click = a menu)
+        self.bind("<FocusIn>", self.catch_up, add="+")  # (back from File Explorer: the list as the disk is now)
         lb.bind("<B1-Motion>", self.drag_motion, add="+")
         lb.bind("<ButtonRelease-1>", self.drag_release, add="+")  # (after ListTip's own let go)
         lb.bind("<FocusIn>", lambda e: lb.config(selectbackground=look.LIST_HERE,
@@ -1401,7 +1403,7 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
             deleted.append(name)
             self.shape_gone(name)
         if failed:
-            messagebox.showerror(tr("drawer.spiderweb"), tr("drawer.couldn_t_delete", e=failed), parent=self)
+            messagebox.showerror(tr("drawer.spiderweb"), delete_error(failed), parent=self)
         if deleted:
             app.sync_custom()  # (a placed shape's "not in the library" mark, hunt 10-27)
         self.refresh_list()
