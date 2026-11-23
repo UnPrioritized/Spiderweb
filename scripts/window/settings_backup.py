@@ -1,6 +1,7 @@
 """Settings backup on update (user 2026-11-08): the first start of a new version (not the very first start) packs
 the old version's app settings and the user's own saved presets into ONE compressed zip,
-user/backups/<old version>-<its commit>.zip (user 2026-11-14; was a copied folder), before this version saves
+user/backups/settings/<old version>-<its commit>.zip (user 2026-11-14; was a copied folder; settings/ since
+2026-11-23, older ones moved there by move_old), before this version saves
 anything over them, and says so in a small window of its own (then What's new opens). Projects, autosaves, logs and
 saved MIDI indexes are left alone. Every backup is kept (user's pick: never deleted). Read only, nothing is moved.
 A file that can't be read is logged; with nothing packed, nothing is said."""
@@ -32,8 +33,28 @@ def _sources():
 
 
 def folder():
-    """user/backups (next to settings.ini)."""
-    return os.path.join(os.path.dirname(settings.SETTINGS_FILE), "backups")
+    """user/backups/settings (next to settings.ini; user 2026-11-23: its own folder beside backups/project)."""
+    return os.path.join(os.path.dirname(settings.SETTINGS_FILE), "backups", "settings")
+
+
+OLD_NAME = re.compile(r"^\d+\.\d+")  # (a backup made before they had their own folder: "1.7.2-5ec9217(.zip)")
+
+
+def move_old():
+    """Settings backups left in user/backups itself (older versions) moved into its settings folder, once; one that
+    can't be moved stays where it is."""
+    top = os.path.dirname(folder())
+    try:
+        names = [n for n in os.listdir(top) if OLD_NAME.match(n)]
+    except OSError:
+        return
+    for n in names:
+        try:
+            os.makedirs(folder(), exist_ok=True)
+            if not os.path.exists(os.path.join(folder(), n)):
+                os.replace(os.path.join(top, n), os.path.join(folder(), n))
+        except OSError:
+            pass
 
 
 def label(version, build=""):
@@ -60,6 +81,7 @@ def _files(name, path):
 def make(version, build=""):
     """Packs them into one compressed zip (user 2026-11-14; " (2)" ... when the name is taken, by an older backup
     folder too). Returns the zip, None when nothing was packed (nothing there, or every read failed: logged)."""
+    move_old()
     base = os.path.join(folder(), label(version, build))
     target, n = base, 1
     while os.path.exists(target) or os.path.exists(target + ".zip"):
@@ -89,8 +111,8 @@ def make(version, build=""):
 
 
 def shown_path(path):
-    """The backup as the user knows it: from the user folder on ("user/backups/1.7.2-5ec9217.zip")."""
-    user = os.path.dirname(os.path.dirname(path))
+    """The backup as the user knows it: from the user folder on ("user/backups/settings/1.7.2-5ec9217.zip")."""
+    user = os.path.dirname(os.path.dirname(os.path.dirname(path)))
     try:
         return os.path.relpath(path, os.path.dirname(user))
     except ValueError:  # (another drive)

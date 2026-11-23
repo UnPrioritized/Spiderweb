@@ -65,6 +65,8 @@ class Updates:
     def start(self):
         """At start: What's new (a new version's first start, not the very first start), then the question or a
         check if it's time."""
+        from window.settings_backup import move_old
+        move_old()  # (older settings backups into user/backups/settings at every start, not only an update's; user)
         if self.old_user and self.seen_version != VERSION:
             from window.help import open_help
             news = lambda: open_help(self.app, "whats_new")  # noqa: E731

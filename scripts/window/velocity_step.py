@@ -10,6 +10,7 @@ from files.lang import tr
 from notes.custom import pack_notes, unpack_notes
 from notes.envelope import velocity_env
 from window.widgets import Tooltip
+from window.widgets_tips import greyed_why
 
 REPEAT_WAIT_MS = 350  # held this long, the button repeats ...
 REPEAT_MS = 70  # ... every this long
@@ -62,9 +63,26 @@ class VelocitySteps:
             b.bind("<ButtonRelease-1>", lambda e: self.release())
             b.bind("<Destroy>", lambda e: self.release(), add="+")
             Tooltip(b, tr(tip))
+            greyed_why(b, tr("velocity.step_none"))
             self.buttons.append(b)
+        self.sync()
+
+    def targets(self):
+        app = self.app
+        return [app.shapes[i] for i in sorted(app.sels) if i < len(app.shapes) and "picture" not in app.shapes[i]]
+
+    def sync(self):
+        """Greyed while nothing they work on is selected (user 2026-11-23 check-in 2; App.sync_panel)."""
+        on = bool(self.targets())
+        for b in self.buttons:
+            if b.instate(["disabled"]) == on:
+                b.state(["!disabled" if on else "disabled"])
+        if not on:
+            self.release()
 
     def press(self, d):
+        if self.buttons[0].instate(["disabled"]):
+            return
         self.held = None
         self.step(d)
         self.job = self.app.after(REPEAT_WAIT_MS, lambda: self.again(d))
@@ -81,8 +99,7 @@ class VelocitySteps:
 
     def step(self, d):
         app = self.app
-        targets = [app.shapes[i] for i in sorted(app.sels) if i < len(app.shapes)
-                   and "picture" not in app.shapes[i]]
+        targets = self.targets()
         if not targets:
             app.status.config(text=tr("velocity.step_none"))
             return False

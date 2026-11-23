@@ -70,9 +70,8 @@ class Tooltip:
         why = greyed_reason(self) if self.why is not None else ""
         if not why:
             return self.text
-        from files.lang import tr
-        line = tr("tips.greyed_why", why=why)
-        return line + "\n\n" + self.text if self.text and self.text != why else line
+        # (no label, user 2026-11-23 check-in 2: the reason on top, an empty line, then what it does)
+        return why + "\n\n" + self.text if self.text and self.text != why else why
 
     def show(self):
         self.job = None

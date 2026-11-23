@@ -150,7 +150,16 @@ class Drawer(DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, DrawerDeform, 
             b = ttk.Radiobutton(bar, text=f"{label} ({hot.upper()})", value=key, variable=self.tool,
                                 style="Toolbutton")
             b.pack(side="left", padx=1)
-            Tooltip(b, BY_ID[DRAWER_TOOL_TOPICS[key]]["tip"])
+            tip = Tooltip(b, BY_ID[DRAWER_TOOL_TOPICS[key]]["tip"])
+            if key == "lasso":  # (the button names the ▾ mode picked, like the main toolbar's; user 2026-11-23)
+                base = tip.text
+
+                def named(*_, b=b, tip=tip, hot=hot, base=base):
+                    name = tr("app.lasso_now_" + self.lasso_kind.get())
+                    b.config(text=f"{name} ({hot.upper()})")
+                    tip.set_text(tr("app.mode_now", name=name) + "\n" + base)
+                self.lasso_kind.trace_add("write", named)
+                named()
             if key == "lasso":  # (its ▾: Lasso / Polygonal; picking one picks the tool too)
                 from window.tool_picker import arrow_picture
                 self._lasso_arrow = arrow_picture(self.scale)

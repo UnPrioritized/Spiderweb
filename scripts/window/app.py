@@ -716,6 +716,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                          ("Control-comma", lambda: open_settings(self))):  # (File → Settings…, user 2026-11-12)
             for k in keys.split():
                 self.bind_all(f"<{k}>", self.hotkey(fn))
+        for key, bigger in (("<bracketleft>", False), ("<bracketright>", True)):
+            self.bind_all(key, lambda e, b=bigger: self.liquify_size_key(e, b))
         self._device_was = self.midi_device.get()
         self.midi_device.trace_add("write", lambda *_: self.midi_device_picked())
         self.protocol("WM_DELETE_WINDOW", self.on_close)
@@ -1482,6 +1484,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         sh = self.selected()
         self.sync_title()
         self.sync_ppq_lock()
+        if hasattr(self, "vel_steps"):
+            self.vel_steps.sync()  # (velocity − / + greyed while nothing is selected)
         self.sync_edo_loaded()  # (a MIDI loaded / gone)
         self._loading = True
         for key, var in self.fvars.items():
@@ -4125,6 +4129,20 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 refit(sh)
             seen[id(m)] = key
         self._merge_keys = seen
+
+    def liquify_size_key(self, e, bigger):
+        """[ / ] while the Liquify window is open (its brush circle on the piano roll): the brush Size, whichever
+        part of the main window or the Liquify window has the keyboard (user 2026-11-23: it needed a click on the
+        window first), never inside a typing box or another window."""
+        lq = getattr(self, "liquify_window", None)
+        try:
+            if (lq is None or not lq.winfo_exists() or e.state & 0x4 or isinstance(e.widget, (tk.Entry, ttk.Entry, tk.Text))
+                    or e.widget.winfo_toplevel() not in (self, lq)):
+                return None
+        except (tk.TclError, AttributeError):
+            return None
+        lq.size_step(bigger)
+        return "break"
 
     def note_tool_sels(self):
         """The selected shapes that take note tools (claw, strum, chop, glue): not pictures (user)."""

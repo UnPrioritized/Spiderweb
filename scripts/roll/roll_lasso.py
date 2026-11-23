@@ -492,6 +492,14 @@ class LassoDrawing:
             self.draw_lasso()
 
     def draw_lasso(self):
+        """The loop (+ a Magnetic one's Width circle), kept UNDER the piano roll's keyboard + ruler (user 2026-11-23:
+        it showed over them; like the Liquify brush, liquify_under_frame). The drawer's board has no frame."""
+        self._draw_lasso()
+        c = self.lasso_canvas()
+        if not self.__dict__.get("_redrawing") and c.find_withtag("frame") and c.find_withtag("lasso"):
+            c.tag_lower("lasso", "frame")
+
+    def _draw_lasso(self):
         """The loop: dashed in the cut colour; a waiting one with its points and handles."""
         c = self.lasso_canvas()
         c.delete("lasso")
