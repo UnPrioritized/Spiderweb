@@ -84,6 +84,11 @@ class _Realtime(ctypes.Structure):  # (maestro.realtime/1, the header's order)
                 ("show_settings", _CALL(_R, _H))]
 
 
+# (a name, not a literal in the call: the exe builder copies any library named in a find_library call into the
+# exe, and Maestro's library must never be shipped)
+_LIB_NAME = "maestro"
+
+
 def lib_path():
     """Where Maestro's API library is, or None (Maestro not installed)."""
     if WINDOWS:
@@ -100,7 +105,7 @@ def lib_path():
         return path if os.path.isfile(path) else None
     if not _found:  # (the search starts other programs: done once)
         import ctypes.util
-        _found.append(ctypes.util.find_library("maestro"))
+        _found.append(ctypes.util.find_library(_LIB_NAME))
     return _found[0]
 
 
