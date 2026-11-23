@@ -490,6 +490,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._autosave_failed = False  # (told once until it works again: ProjectFiles.autosave)
         self._saved_shapes = None  # the shapes as last saved in / opened from a project file (json)
         self.project_file = None  # the project file Save writes into (None: asks), shown in the title
+        self.save_name = None  # the name Save suggests with no project file (a backup opened: its project's, QoL hunt)
         self._saved_mark = None  # (the newest undo step, file_key()) when last saved / opened; None = unsaved
         self._title = None
         self.big_skip = set()  # big_ask actions ticked "Don't ask again until Spiderweb is closed"
@@ -3663,6 +3664,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.track_list.forget()
         self.shapes.clear()
         self.project_file = None  # (Save asks for a name again)
+        self.save_name = None  # (no name to suggest: Open a Backup's goes)
+        self.written_files.clear()  # (another project: exporting over the old one's MIDI asks again; hunt 11-23)
         self.tempo = empty_tempo()
         self.own_tracks, self.own_next = [], 0
         self.start_track = True  # (one empty Track 1, nothing highlighted: user 2026-10-26)

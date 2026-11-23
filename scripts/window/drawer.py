@@ -333,6 +333,9 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
                 return "break"
             if isinstance(e.widget, (tk.Entry, ttk.Entry)):
                 return None
+            if e.widget is self.listbox and fn == self.pick_all:  # (the library list's own Ctrl+A: its rows only,
+                self.sync_library()                               # the tool / a half-drawn line stay; hunt 11-23)
+                return "break"
             if (self.knife or self.erasing()) and fn not in (self.undo, self.redo):  # (flip / turn / copy / paste
                 return "break"  # wait while a Slice line / eraser box is held; undo / redo drop it)
             if (self.holding() or self.lasso_holding()) and fn not in (self.undo, self.redo, self.cut):  # (strokes held: flip / turn / copy /

@@ -5,6 +5,7 @@ file changes (shape_stamp), then drawn on Tk's side."""
 import threading
 import tkinter as tk
 
+from files import system
 from window import look
 from window.drawer_library import load_drawing, shape_stamp
 
@@ -102,8 +103,9 @@ PICTURES = Pictures()
 class ShapePeek:
     """The picture's little window beside a list (on top of a dropdown's open list too)."""
 
-    def __init__(self, owner, scale=1.0):
+    def __init__(self, owner, scale=1.0, topmost=False):
         self.owner, self.size = owner, max(48, round(SIZE * scale))
+        self.topmost = topmost  # (a dropdown's: over its open list, which stays on top; the drawer's: not)
         self.win = None
         self.name = None  # the shape shown / asked for
 
@@ -131,7 +133,8 @@ class ShapePeek:
         if self.win is None:
             self.win = tk.Toplevel(self.owner)
             self.win.wm_overrideredirect(True)
-            self.win.attributes("-topmost", True)  # (over a dropdown's open list, which stays on top)
+            if self.topmost:  # (over a dropdown's open list, which stays on top; never over other programs:
+                self.win.attributes("-topmost", True)  # the drawer's one isn't, hunt 2026-11-23)
             self.canvas = tk.Canvas(self.win, width=s, height=s, background=look.BOARD, highlightthickness=1,
                                     highlightbackground=look.BOARD_EDGE)
             self.canvas.pack()
@@ -152,6 +155,7 @@ class ShapePeek:
         y = max(top, min(row_y, bottom - s - 2))
         self.win.wm_geometry(f"+{max(left, x)}+{y}")
         self.win.deiconify()
+        self.win.lift()
 
     def hide(self, keep=False):
         """keep: the name stays (a shape with no picture: not asked again until another row)."""
@@ -193,7 +197,8 @@ def peek_dropdown(cb, scale=1.0):
     pop = cb.tk.call("ttk::combobox::PopdownWindow", cb)
     lb = tk.Listbox.__new__(tk.Listbox)  # (a Python handle on Tk's own list, like ListTip.dropdown)
     lb.tk, lb._w, lb.master, lb.children, lb._tclCommands = cb.tk, path, cb, {}, None
-    peek = ShapePeek(cb, scale)
+    peek = ShapePeek(cb, scale, topmost=True)
+    front = {"seen": False}  # (Spiderweb was in front while the list was open: lists_close_away's rule)
     job = {"id": None}
 
     def look_at():
@@ -205,6 +210,10 @@ def peek_dropdown(cb, scale=1.0):
             i = cur[0] if cur else None
             name = lb.get(i) if i is not None and i != getattr(cb, "divider_at", None) else None
             box = lb.bbox(i) if name else None
+            here = system.program_in_front()
+            front["seen"] = front["seen"] or here is True
+            if here is False and front["seen"]:  # (another program in front: the list sinks, so the picture goes;
+                name = None                          # hunt 2026-11-23)
             if name and box:
                 peek.show(name, lb, lb.winfo_rooty() + box[1])
             else:
@@ -214,6 +223,7 @@ def peek_dropdown(cb, scale=1.0):
             pass
 
     def opened():
+        front["seen"] = False
         if job["id"] is None:
             job["id"] = cb.after(LIST_WATCH_MS, look_at)
 

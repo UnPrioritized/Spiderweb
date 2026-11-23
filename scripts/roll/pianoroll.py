@@ -43,7 +43,7 @@ from roll.roll_live import BOX_TOOLS, LiveDrawing
 from roll.roll_menu import ShapeMenu
 from roll.roll_centre import CentreDots
 from roll.roll_liquify import LiquifyBrush
-from roll.roll_warp import NUDGE_S, WarpGrid, nudged_beat
+from roll.roll_warp import NUDGE_REST_MS, NUDGE_S, WarpGrid, nudged_beat
 from roll.roll_melody import MelodyMarks
 from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT,
@@ -510,8 +510,19 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         ppq = app.ppq
         db, dp = {"left": (-1.0 / ppq, 0), "right": (1.0 / ppq, 0), "up": (0, 1), "down": (0, -1)}[key]
         go = {}
+        # (the room is worked out at a run's first press, then carried along by what moved, like a drag's at its
+        # press: each press made the shape's notes for it, a held key on a big shape piled up; hunt 2026-11-23)
+        stack, now = app.undo_stack, time.perf_counter()
+        last = getattr(self, "nudged", None)
+        going = bool(last and stack and stack[-1] is last[0] and now - last[1] < NUDGE_S)
+        key_now = tuple(id(app.shapes[j]) for j in sorted(app.sels))
+        rooms = getattr(self, "nudge_rooms", None)
+        if not (going and rooms and rooms[0] == key_now):
+            rooms = self.nudge_rooms = (key_now, {})
         for j in sorted(app.sels):
-            room = self.move_room(self.as_made(j))
+            if j not in rooms[1]:
+                rooms[1][j] = self.move_room(self.as_made(j))
+            room = rooms[1][j]
             left, down, up = room if room else (math.inf, math.inf, math.inf)
             # (whole keys only, like a drag: half a key of room at the lowest key moved it between rows; a hair
             # under a whole tick of room = the tick, else float noise left it stuck a tick from beat 0; hunt 11-23)
@@ -524,21 +535,40 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         go = {j: g for j, g in go.items() if abs(g[0]) > 1e-12 or g[1]}
         if not go:
             return True
-        stack, now = app.undo_stack, time.perf_counter()
-        last = getattr(self, "nudged", None)
-        if not (last and stack and stack[-1] is last[0] and now - last[1] < NUDGE_S):
+        if not going:
             app.push_undo(name=tr("pianoroll.nudge"))
         else:
             app.changed_in_step()  # (joined the step a Save may have marked saved: unsaved again, hunt 11-23)
         for j, (bj, pj) in go.items():
             app.shapes[j]["pts"] = [[nudged_beat(b, bj, ppq), p + pj] for b, p in app.shapes[j]["pts"]]
+            r = rooms[1].get(j)
+            if r:  # (the room left after this move)
+                rooms[1][j] = (r[0] + bj, r[1] + pj, r[2] - pj)
         if self.box_kept:
             boxes, sels = self.box_kept
             self.box_kept = ([(b0 + db, top, b1 + db, bottom) if top >= RULER_TOP - 0.5 else
                               (b0 + db, top + dp, b1 + db, bottom + dp) for b0, top, b1, bottom in boxes], sels)
         self.nudged = (stack[-1] if stack else None, now)
-        app.shape_edited()
+        # (a held key on a huge shape: notes remade at every press made the presses pile up, the shape went on
+        # moving after the key was let go; slow notes now wait till the presses pause, like the Warp point nudge;
+        # quick shapes are made at once as before. Hunt 2026-11-23)
+        if not app.scrubbing:
+            app.scrubbing = "nudge"
+        app.shape_edited(moving=True)  # (a move: big shapes' old notes slide along as a picture meanwhile)
+        if app.scrubbing == "nudge" and app._late_notes and app.notes_late:  # (the pause is ours, not a mouse rest)
+            app.after_cancel(app._late_notes)
+            app._late_notes = None
+        if getattr(self, "nudge_job", None):
+            self.after_cancel(self.nudge_job)
+        self.nudge_job = self.after(NUDGE_REST_MS, self.nudge_rest)
         return True
+
+    def nudge_rest(self):
+        """No arrow press for NUDGE_REST_MS: the notes the presses left for later are made."""
+        self.nudge_job = None
+        if self.app.scrubbing == "nudge":
+            self.app.scrubbing = False
+            self.app.catch_up_notes()
 
     def as_made(self, j):
         """Shape j, for where its notes reach: a Ctrl+drag copy still waiting for its notes that differs from its

@@ -20,6 +20,26 @@ def _moved(v, d):
     return float(max(1, min(127, round(v) + d)))
 
 
+def _hz_lines_moved(sh, d):
+    """Every Hz note's own loudness line (tone["vel"], every layer) d louder, each point stopping at 1 / 127; sh["hz"]
+    replaced by a new one (never changed in place: tried on shallow copies first). True when one moved."""
+    from notes.hzbass import layers_of, with_layers
+    hz = sh["hz"]
+    every, moved = [], False
+    for layer in layers_of(hz):
+        tones = []
+        for n in layer.get("tones") or ():
+            if n.get("vel"):
+                line = [[p[0], _moved(p[1], d)] + list(p[2:]) for p in n["vel"]]
+                if line != n["vel"]:
+                    n, moved = dict(n, vel=line), True
+            tones.append(n)
+        every.append(dict(layer, tones=tones) if layer.get("tones") else layer)
+    if moved:
+        sh["hz"] = with_layers(hz, every)
+    return moved
+
+
 def step_shape(sh, d):
     """sh's velocities d (+1 / -1) louder. True when anything changed."""
     changed = False
@@ -48,6 +68,8 @@ def step_shape(sh, d):
                 from notes.sliced import vel_add
                 add = vel_add(cut) + d
                 sh["cut"] = dict(cut, vel_add=add) if add else {k: v for k, v in cut.items() if k != "vel_add"}
+    if sh.get("hz") and _hz_lines_moved(sh, d):  # (Hz notes with their own loudness line: it wins over the shape's
+        changed = True                           # velocity, so it moves too; hunt 2026-11-23, user took A)
     for step in sh.get("fx") or ():  # (velocities drawn after note tool pages)
         if step.get("tool") == "vel":
             pts = [[u, _moved(v, d)] for u, v in step["pts"]]

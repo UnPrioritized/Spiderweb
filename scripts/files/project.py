@@ -1197,6 +1197,9 @@ class ProjectFiles:
         if self.load_file(path, mine=False):
             self._saved_shapes = self.saved_key()
             self.project_file = None if self.own_file(path) or backup else os.path.normpath(path)
+            stem = recent.backed_up_name(path) if backup else None  # (Save then suggests the original name: hunt
+            self.save_name = stem + PROJECT_EXT if stem else None  # 2026-11-23, user took my pick)
+            self.written_files.clear()  # (another project: exporting over a file the last one wrote asks again)
             if self.project_file:
                 recent.add("projects", path)
             self.mark_saved()
@@ -1415,7 +1418,8 @@ class ProjectFiles:
             path = filedialog.asksaveasfilename(title=tr("project.save_project"),
                                                 initialdir=os.path.dirname(path) if path else
                                                 recent.folder("projects", OUTPUT_DIR),
-                                                initialfile=os.path.basename(as_packed_name(path)) if path else "",
+                                                initialfile=os.path.basename(as_packed_name(path)) if path else
+                                                getattr(self, "save_name", None) or "",
                                                 defaultextension=PROJECT_EXT, filetypes=save_types())
         if not path:
             return False

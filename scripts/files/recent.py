@@ -99,6 +99,16 @@ def folder(kind, fallback):
     return there if there and os.path.isdir(there) else fallback
 
 
+def backed_up_name(path):
+    """The project file name a backup came from ("song" for a backup in the folder "song (1a2b3c)"), or None (not in a
+    project's backups folder)."""
+    folder = os.path.basename(os.path.dirname(os.path.abspath(path)))
+    stem, _, mark = folder.rpartition(" (")
+    if not stem or len(mark) != 7 or not mark.endswith(")") or any(c not in "0123456789abcdef" for c in mark[:6]):
+        return None
+    return stem
+
+
 def backup_folder(path):
     """This project's own backups folder: its name + a short mark of where it lives (two "song.spwb" in different
     folders keep apart)."""
