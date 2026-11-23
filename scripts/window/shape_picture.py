@@ -11,65 +11,128 @@ from window.drawer_library import load_drawing, shape_stamp
 
 SIZE = 96  # the picture's side, px at 100 % size
 EDGE = 6  # px of room round the drawing inside it
-ROUGH = 600  # most points per picture (rough: long strokes keep every n-th point)
+NEAR = 0.004  # (share of the drawing's size, ~1/3 px at 100 %) a point this near the last one kept is left out:
+#              every corner stays (stage P, user 2026-11-24: keeping every n-th point cut corners = stray lines)
 WAIT_MS = 30  # how often Tk's side looks for a picture made in the background
 KEEP_MOST = 256  # pictures kept (all forgotten past it)
 LIST_WATCH_MS = 100  # an open dropdown list: how often its highlighted row is looked at
 
 
-def shape_lines(name):
-    """A library shape's lines as [[(x, y), ...], ...] in a 0..1 square (proportions kept, centred, y DOWN), at
-    most ROUGH points; None when it can't be read. Runs in the background: plain data only."""
+def thinned(ln):
+    """A line without the points closer than NEAR to the last one kept (its ends always kept)."""
+    out = [ln[0]]
+    lx, ly = ln[0]
+    for x, y in ln[1:-1]:
+        if abs(x - lx) + abs(y - ly) >= NEAR:
+            out.append((x, y))
+            lx, ly = x, y
+    if len(ln) > 1:
+        out.append(ln[-1])
+    return out
+
+
+def shape_lines(name, size=SIZE):
+    """A library shape's picture: (lines as [[(x, y), ...], ...] in a 0..1 square (proportions kept, centred,
+    y DOWN), the area colours painted by hand as a size x size RGB array or None); None when it can't be read.
+    Runs in the background: plain data only."""
+    got = picture_lines(name)
+    if got is None:
+        return None
+    lines, strokes, areas, box = got
+    return lines, (area_colours(strokes, areas, box, size) if areas else None)
+
+
+def picture_lines(name):
+    """shape_lines' quick part: (lines, the strokes, areas painted by hand, the box laid out) or None. The colours
+    (area_colours, 10-40x slower: stage P, measured on the user's library) come after, as a second step."""
     from notes.custom import stroke_points
-    strokes, _ = load_drawing(name)
+    strokes, areas = load_drawing(name)
     if not strokes:
         return None
     lines = [stroke_points(st) for st in strokes]
     lines = [ln for ln in lines if ln]
-    total = sum(len(ln) for ln in lines)
-    if not total:
+    if not lines:
         return None
-    step = max(1, -(-total // ROUGH))
-    lines = [ln[::step] + ([ln[-1]] if (len(ln) - 1) % step else []) for ln in lines]
     us = [u for ln in lines for u, _ in ln]
     vs = [v for ln in lines for _, v in ln]
     u0, v0 = min(us), min(vs)
     w, h = max(us) - u0, max(vs) - v0
     k = 1 / max(w, h, 1e-9)
     du, dv = (1 - w * k) / 2, (1 - h * k) / 2
-    return [[(du + (u - u0) * k, 1 - (dv + (v - v0) * k)) for u, v in ln] for ln in lines]
+    lines = [thinned([(du + (u - u0) * k, 1 - (dv + (v - v0) * k)) for u, v in ln]) for ln in lines]
+    return lines, strokes, areas, (u0, v0, k, du, dv)
+
+
+def area_colours(strokes, areas, box, size):
+    """The areas coloured by hand as the drawer shows them (drawer_areas.area_image, its colours), size x size
+    RGB, laid like shape_lines' lines (box = their u0, v0, scale, margins); None: no areas found."""
+    import numpy as np
+    from files.colours import rgb
+    from notes.custom import DRAWN_FRAME, area_paint, filled_spots, shape_areas
+    from window.drawer_areas import AREA_EMPTY, AREA_NORMAL, area_color
+    from notes.areas import ALL_COLOURS
+    sh = {"kind": "custom", "strokes": strokes, "pts": DRAWN_FRAME, "fill": "fill"}
+    amap = shape_areas(sh)
+    if amap is None:
+        return None
+    fc, area, x, y, g = amap.exact()
+    filled = np.zeros(len(area), bool)
+    filled[g] = filled_spots(sh, x, y)
+    u0, v0, k, du, dv = box
+    room = size - 2 * EDGE
+    at = (np.arange(size) + 0.5 - EDGE) / room
+    u, v = u0 + (at - du) / k, v0 + (1 - at - dv) / k
+    face = fc.area_grid(u, v)
+    paint = area_paint({"areas": areas}, amap)[area]
+    lut = np.zeros((len(area), 3), np.uint8)
+    tint = np.zeros(len(area), bool)
+    normal = filled & (paint < 0)
+    lut[normal], tint[normal] = rgb(AREA_NORMAL), True
+    lut[paint == 0], tint[paint == 0] = rgb(AREA_EMPTY), True
+    for c in range(1, ALL_COLOURS + 1):
+        lut[paint == c], tint[paint == c] = rgb(area_color(c)), True
+    img = np.empty((size, size, 3), np.uint8)
+    img[:] = rgb(look.BOARD)
+    return np.where(tint[face][..., None], lut[face], img).astype(np.uint8)
 
 
 class Pictures:
     """The lines of shapes asked for, made one at a time in the background (only the LAST asked matters)."""
 
     def __init__(self):
-        self.kept = {}  # {name in lower case: (shape_stamp, lines or None)}
-        self.want = None  # (name, stamp) still to make
+        self.kept = {}  # {(name in lower case, size): (shape_stamp, shape_lines' answer or None)}
+        self.want = None  # (name, stamp, size) still to make
         self.busy = False
 
-    def fresh(self, name, stamp):
-        got = self.kept.get(name.lower())
+    def fresh(self, name, stamp, size):
+        got = self.kept.get((name.lower(), size))
         return got if got and got[0] == stamp else None
 
-    def ask(self, name, widget, done):
-        """done(lines) on Tk's side once the picture is ready (at once when kept); not called when another
-        shape is asked for first."""
+    def ask(self, name, widget, done, size=SIZE):
+        """done(shape_lines' answer) on Tk's side once the picture is ready (at once when kept); a shape with
+        painted areas calls it twice: its lines first, then with the colours (stage P: lines stay as quick as
+        before). Not called when another shape is asked for first."""
         stamp = shape_stamp(name)
-        got = self.fresh(name, stamp)
+        got = self.fresh(name, stamp, size)
         if got:
-            return done(got[1])
-        self.want = (name, stamp)
+            done(got[1])
+            if got[2]:
+                return
+        self.want = (name, stamp, size)
         if not self.busy:
             self.busy = True
             threading.Thread(target=self.work, daemon=True, name="shape pictures").start()
+        shown = [got[1] if got else False]
 
         def wait():
             if self.want and self.want[0] != name:
                 return  # (another asked since)
-            got = self.fresh(name, stamp)
-            if got:
-                return done(got[1])
+            got = self.fresh(name, stamp, size)
+            if got and got[1] is not shown[0]:
+                shown[0] = got[1]
+                done(got[1])
+            if got and got[2]:
+                return
             try:
                 widget.after(WAIT_MS, wait)
             except tk.TclError:  # (the list's window closed)
@@ -85,14 +148,22 @@ class Pictures:
                     return
                 self.busy = True
                 continue
-            name, stamp = job
+            name, stamp, size = job
+            key = (name.lower(), size)
             try:
-                lines = shape_lines(name)
+                got = picture_lines(name)
             except Exception:  # (a broken file: no picture, never a crash)
-                lines = None
+                got = None
             if len(self.kept) >= KEEP_MOST:
                 self.kept.clear()
-            self.kept[name.lower()] = (stamp, lines)
+            # (kept: stamp, (lines, colours), complete; the colours only while this shape is still the one asked)
+            self.kept[key] = (stamp, got and (got[0], None), not (got and got[2]))
+            if got and got[2] and self.want == job:
+                try:
+                    colours = area_colours(got[1], got[2], got[3], size)
+                except Exception:  # (areas that can't be worked out: the lines alone)
+                    colours = None
+                self.kept[key] = (stamp, (got[0], colours), True)
             if self.want == job:
                 self.want = None
 
@@ -117,9 +188,10 @@ class ShapePeek:
         self.name = name
         if not name:
             return self.hide()
-        PICTURES.ask(name, self.owner, lambda lines: self.draw(name, lines, beside, row_y))
+        PICTURES.ask(name, self.owner, lambda got: self.draw(name, got, beside, row_y), self.size)
 
-    def draw(self, name, lines, beside, row_y):
+    def draw(self, name, got, beside, row_y):
+        lines, colours = got or (None, None)
         if self.name != name:
             return
         try:
@@ -147,6 +219,12 @@ class ShapePeek:
         self.caption.config(text=name)
         c = self.canvas
         c.delete("all")
+        if colours is not None:  # (the areas coloured by hand, under the lines)
+            from files.speed import Photo
+            if getattr(self, "pic", None) is None:
+                self.pic = Photo(self.win, s, s)
+            self.pic.put(colours)
+            c.create_image(0, 0, image=self.pic.photo, anchor="nw")
         room = s - 2 * EDGE
         for ln in lines:
             xy = [v for x, y in ln for v in (EDGE + x * room, EDGE + y * room)]
