@@ -43,6 +43,40 @@ def fit_dropdowns(root):
     root.bind_class("TCombobox", "<<ComboboxSelected>>", lambda e: unhighlight(e.widget), add="+")
 
 
+LIST_WATCH_MS = 150  # an open dropdown list: how often it checks that Spiderweb is still the program in front
+
+
+def lists_close_away(root):
+    """An open dropdown list closes once another program comes to the front (user 2026-11-23: after Alt+Tab it
+    stayed open on top of everything, still clickable). Tk's own list waits for the keyboard leaving it, which
+    Windows never tells it while the list holds the mouse; so while a list is open it checks what's in front. Only
+    after Spiderweb WAS in front while it was open (test windows sit behind others: their lists stay). Every
+    dropdown in every window (Tk's list class, once at start); Linux / Mac: Tk's own closing only."""
+    from files import system
+    if not system.WINDOWS:
+        return
+
+    def watch(pop, seen):
+        try:
+            if not int(root.tk.call("winfo", "ismapped", pop)):
+                return
+            front = system.program_in_front()
+            if front is False and seen:
+                root.tk.call("ttk::combobox::Unpost", root.tk.call("winfo", "parent", pop))
+                return
+            root.after(LIST_WATCH_MS, watch, pop, seen or front is True)
+        except tk.TclError:  # (the dropdown's window closed meanwhile)
+            pass
+    try:
+        cb = ttk.Combobox(root)  # (Tk's list code loaded before adding to its binding)
+        root.tk.call("ttk::combobox::PopdownWindow", cb)
+        cb.destroy()
+        cmd = root.register(lambda pop: watch(pop, False))
+        root.tk.call("bind", "ComboboxPopdown", "<Map>", "+" + cmd + " %W")
+    except tk.TclError:
+        pass
+
+
 TEXT_DRAG_PX = 4  # dragging text past a text box's edge: one more letter a step for every this many pixels past it
 
 

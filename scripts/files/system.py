@@ -146,6 +146,27 @@ def double_click_ms():
     return 500
 
 
+def program_in_front():
+    """True when the window in front (the one taking the keyboard) is one of this program's own, False when another
+    program's is (Alt+Tab, a click elsewhere), None when it can't be told (Linux / Mac: their Tk closes open lists
+    by itself)."""
+    if not WINDOWS:
+        return None
+    try:
+        import os
+        user32 = ctypes.windll.user32
+        user32.GetForegroundWindow.restype = wintypes.HWND
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        hwnd = user32.GetForegroundWindow()
+        if not hwnd:  # (nothing in front, e.g. while Windows switches windows: can't tell yet)
+            return None
+        pid = wintypes.DWORD(0)
+        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid))
+        return pid.value == os.getpid()
+    except (AttributeError, OSError):
+        return None
+
+
 class _MonitorInfo(ctypes.Structure):
     _fields_ = [("cbSize", wintypes.DWORD), ("rcMonitor", wintypes.RECT), ("rcWork", wintypes.RECT),
                 ("dwFlags", wintypes.DWORD)]

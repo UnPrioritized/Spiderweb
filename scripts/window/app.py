@@ -139,7 +139,7 @@ from window.velocity import VelocityPane
 from window.velocity_formula import VelocityFormulaBar
 from window.side_panel import ScrollingSide
 from window.widgets import (REDO_KEYS, UNDO_KEYS, ListTip, Scrub, StatusLine, Tooltip, bad, click_first,
-                            fit_dropdowns, faster_text_drag, good, grid_shown, mac_buttons, no_focus, pack_shown, set_glide, label_column,
+                            fit_dropdowns, faster_text_drag, lists_close_away, good, grid_shown, mac_buttons, no_focus, pack_shown, set_glide, label_column,
                             read_number,
                             remember_good, watch_bad, ShortLabel, WrapRow)
 
@@ -1074,6 +1074,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         click_first(self)  # (dropdowns, spin boxes, sliders: the wheel only after a click)
         fit_dropdowns(self)
         faster_text_drag(self)
+        lists_close_away(self)  # (an open dropdown list closes when another program comes to the front)
         return side
 
     def wheel_gliding(self, e):
