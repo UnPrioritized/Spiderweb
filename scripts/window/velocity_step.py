@@ -87,14 +87,23 @@ class VelocitySteps:
             app.status.config(text=tr("velocity.step_none"))
             return False
         app.commit_typing()
-        if not any([step_shape(copy.deepcopy(sh), d) for sh in targets]):  # (tried on copies: no empty undo step)
+        tried = [copy.copy(sh) for sh in targets]  # (done on copies first: no empty undo step; shallow, the
+        for t in tried:                             # changed values are new objects, so the shapes stay as they were)
+            if isinstance(t.get("vel_env"), list):
+                t["vel_env"] = [list(p) for p in t["vel_env"]]
+            if t.get("fx"):
+                t["fx"] = [dict(s) for s in t["fx"]]
+        changed = [step_shape(t, d) for t in tried]
+        if not any(changed):
             app.status.config(text=tr("velocity.step_end_low" if d < 0 else "velocity.step_end_high"))
             return False
         if self.held is None:  # (the hold's first step: one undo step for all of it)
             app.push_undo(name=tr("velocity.quieter" if d < 0 else "velocity.louder"))
             self.held = True
-        for sh in targets:
-            step_shape(sh, d)
+        for sh, t, ch in zip(targets, tried, changed):  # (the copies' results taken: worked out once)
+            if ch:
+                sh.clear()
+                sh.update(t)
         app.shapes_changed()
         app.sync_panel()
         return True
