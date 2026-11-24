@@ -20,7 +20,7 @@ Area limits the bends to part of the drawing, like Stir's area: a Circle, Square
 
 On the board, drag inside the area to move it. Its green box sizes it: a corner or side handle stretches it, Ctrl on a corner makes it bigger or smaller and keeps its shape. Drag just outside a corner to turn it (15° steps, Shift = free), or just outside a side's middle to slant it. A small area has no box: drag its line to size it. Size, Position, Stretch, Angle and Slant can also be typed in the window. Position is where the area's middle is, in % of the board: 50 across and 50 up puts it in the board's middle.
 
-Cut off outside the area cuts away whatever the bend pushes past the area's line, so a turned line stays inside it. Put the area over your outline (a Square over a drawn square, for example), tick Hard edge for the full bend right up to the line, then turn. Only the strokes Deform bends are cut (copies too); the others stay whole, even past the line. Cut pieces become plain lines, a stroke wholly outside goes, and the pieces come out selected. It can't be used while Mirror is on.
+Cut off outside the area cuts away whatever the bend pushes past the area's line, so a turned line stays inside it. Put the area over your outline (a Square over a drawn square, for example), tick Hard edge for the full bend right up to the line, then turn. Only the strokes Deform bends are cut (copies too); the others stay whole, even past the line. A stroke lying on the line counts as inside, and a stroke the area never reaches stays whole. Cut pieces become plain lines and come out selected. It can't be used while Mirror is on.
 
 ## What happens to the strokes
 
