@@ -23,8 +23,11 @@ MOST = 2000  # (at most: more corners than that are spread evenly)
 SAME = 1e-9
 
 # a custom shape's keys that are its drawing / made from it, not settings to blend
+# (also every setting that REMAKES the drawing when read: a Polygon-tool end made the first half of the steps that
+# polygon, hunt 2026-11-25; and the track places line steps never take either: "into"...)
 DRAWING_KEYS = ("kind", "pts", "strokes", "areas", "round", "fit", "name", "between", "even_free", "from", "notes",
-                "text", "patterns_kept", "range_kept", "team")
+                "text", "patterns_kept", "range_kept", "team", "polygon", "merge", "hz", "picture", "into",
+                "into_new", "into_rest_ch", "into_rest_home", "slots10", "from_paste")
 # the keys Pair.at sets on any step (velocity, pages, colours...): left to it
 SHARED_KEYS = ("vel0", "vel1", "vel_env", "end_dot", "glue", "fx", "cycle", "sustain", "subtract", "extend",
                "recolour", "order", "off")
@@ -331,6 +334,7 @@ class DrawPair:
             allp = np.concatenate([g[0] for g in got]) if got else self.fa
             lo, hi = allp.min(axis=0), allp.max(axis=0)
             fr = np.asarray(box_frame(lo[0], lo[1], max(hi[0], lo[0] + 1e-6), max(hi[1], lo[1] + 1e-6)), float)
+        travelling = fr  # (the step's box as it travels, before fitting: areas ride along in it)
         if got:  # (the box fitted round the drawing at once, its turn / slant kept: custom.refit's work, in NumPy)
             to_uv = frame_to_uv(fr.tolist())
             assert to_uv is not None  # (frame() never gives a flat box, the fallback box isn't flat)
@@ -361,8 +365,9 @@ class DrawPair:
         nd = near if drawn(near) else far  # (a line end has no fill settings: the drawn one's)
         out = {"kind": "custom", "pts": fr.tolist(), "strokes": strokes}
         out.update(_settings(self.a, self.b, f, nd))
-        if drawn(nd):  # (areas + centre points: where they are on the roll at that end)
-            to_bp = frame_to_bp(nd["pts"])
+        if drawn(nd):  # (areas + centre points: at the same spot in the step's travelling box as in the end's box;
+            # where they were on the roll left them outside steps far from the end, hunt 2026-11-25)
+            to_bp = frame_to_bp(travelling.tolist())
 
             def fn(u, v):
                 return tuple(float(x) for x in to_uv(*to_bp(u, v)))

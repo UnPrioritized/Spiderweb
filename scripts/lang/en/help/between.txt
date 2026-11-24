@@ -1,4 +1,4 @@
-Select two shapes: open lines (lines, polylines, freehand lines, curves or arcs; a joined curve only when its pieces all touch) or drawn shapes ([page:custom|custom shapes], a drawn shape with a line works too). Right-click one of them: Add between…. Shapes appear between them that change step by step from the first shape (the one that starts earlier) into the second, and a window opens. Text, pasted notes, pictures and Hz bass shapes can't be used: the menu shows the item greyed.
+Select two shapes: open lines (lines, polylines, freehand lines, curves or arcs; a joined curve only when its pieces all touch) or drawn shapes ([page:custom|custom shapes]; a drawn shape with a line, open or closed, works too). Right-click one of them: Add between…. Shapes appear between them that change step by step from the first shape (the one that starts earlier) into the second, and a window opens. Text, pasted notes, pictures and Hz bass shapes can't be used: the menu shows the item greyed.
 
 In the window:
 
@@ -31,7 +31,7 @@ Each piece of the first drawing turns into the nearest piece of the second (wher
 
 • The steps are drawn shapes too. Fill, Spam and their numbers change step by step when both shapes use the same kind; a choice that differs switches at the middle step. Areas coloured by hand and the middle points of Nested, Tiles and Ripples come from the nearer shape. A stroke's Thickness changes step by step, its own colour comes from the nearer shape.
 
-• Turn by: how far the steps turn the shape on the way (+ = clockwise). When the second shape is a moved, resized or turned copy of the first, the angle is found by itself, so the steps turn instead of melting through each other. Type another angle, add 360 for one more spin; middle-click = back to the angle found by itself. Greyed for lines and for groups with key shapes.
+• Turn by: how far the steps turn the shape on the way (+ = clockwise). When the second shape is a moved, resized or turned copy of the first, the angle is found by itself, so the steps turn instead of melting through each other. Type another angle, add 360 for one more spin; middle-click = back to the angle found by itself. With key shapes, each part between them turns its share of the angle. Greyed for lines.
 
 • Reverse is greyed (the pieces find their own way round), and the picture has no points to drag for a drawn shape: change it on the piano roll.
 

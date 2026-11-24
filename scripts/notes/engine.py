@@ -348,7 +348,8 @@ def clean_shape(sh):
             out["by_snap_name"] = name
         if sh.get("by_snap_end") in SNAP_ENDS[1:]:  # ("Line's end": missing = the last step cut short)
             out["by_snap_end"] = sh["by_snap_end"]
-    bt = clean_between(sh.get("between")) if out["kind"] in BETWEEN_KINDS else None
+    # (drawn shapes too since 2026-11-25: their groups came apart on every open, hunt)
+    bt = clean_between(sh.get("between")) if out["kind"] in BETWEEN_KINDS + ("custom",) else None
     if bt:  # one of an Add between group (between.py)
         out["between"] = bt
     tm = sh.get("team")

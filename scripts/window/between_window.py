@@ -342,13 +342,16 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
         found, can = between.found_turn(self.app.shapes, self.gid)
         turn = self.set.get("turn")
         shown = turn if turn is not None and can else found
-        self.turn_var.set("" if shown is None else f"{shown:g}")
+        self.turn_shown = "" if shown is None else f"{shown:g}"  # (on_turn: this text untouched = nothing typed)
+        self.turn_var.set(self.turn_shown)
         self.turn_box.config(state="normal" if can else "disabled")
         self.turn_label.config(foreground="" if can else look.HINT)
 
     def on_turn(self):
         if self.closed or str(self.turn_box.cget("state")) == "disabled":
             return
+        if self.turn_var.get().strip() == getattr(self, "turn_shown", None):  # (the box as the window wrote it:
+            return  # OK / leaving it froze a found 33.690068 as a typed 33.6901, hunt 2026-11-25)
         try:
             n = float(calc(self.turn_var.get()))
             if not -between.MOST_TURN <= n <= between.MOST_TURN:
@@ -551,15 +554,17 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
         """The number of the first shape / key / last shape whose line is under the mouse (the nearest), or None."""
         best = None
         for j, sh in enumerate(self.anchors()):
-            a = np.asarray(self.px_line(sh), float).reshape(-1, 2)
-            if len(a) < 2:
-                continue
-            p, q = a[:-1], a[1:]
-            d = q - p
-            t = np.clip(((x - p[:, 0]) * d[:, 0] + (y - p[:, 1]) * d[:, 1]) / np.maximum((d * d).sum(1), 1e-12), 0, 1)
-            dist = float(np.hypot(p[:, 0] + t * d[:, 0] - x, p[:, 1] + t * d[:, 1] - y).min())
-            if dist <= 6 * self.s and (best is None or dist < best[0]):
-                best = (dist, j)
+            for xy in self.px_lines(sh):  # (each stroke on its own: the gaps between a drawn shape's strokes
+                a = np.asarray(xy, float).reshape(-1, 2)  # aren't its line, hunt 2026-11-25)
+                if len(a) < 2:
+                    continue
+                p, q = a[:-1], a[1:]
+                d = q - p
+                t = np.clip(((x - p[:, 0]) * d[:, 0] + (y - p[:, 1]) * d[:, 1]) / np.maximum((d * d).sum(1), 1e-12),
+                            0, 1)
+                dist = float(np.hypot(p[:, 0] + t * d[:, 0] - x, p[:, 1] + t * d[:, 1] - y).min())
+                if dist <= 6 * self.s and (best is None or dist < best[0]):
+                    best = (dist, j)
         return None if best is None else best[1]
 
     def pick_push(self, j):
@@ -899,7 +904,13 @@ class BetweenGroups:
     def between_pair(self):
         """The two selected shapes Add between can start from, or None."""
         sels = sorted(i for i in self.sels if i < len(self.shapes))
-        if len(sels) == 2 and all(between.usable(self.shapes[i]) for i in sels):
+        if len(sels) != 2:
+            return None
+        if all(between.usable(self.shapes[i]) for i in sels):
+            return sels
+        from notes.between_draw import morphable  # (a closed line with a drawn shape: it's one closed piece, hunt
+        pair = [self.shapes[i] for i in sels]      # 2026-11-25)
+        if any(morphable(sh) for sh in pair) and all(between.usable(sh) or between.closed_line(sh) for sh in pair):
             return sels
         return None
 

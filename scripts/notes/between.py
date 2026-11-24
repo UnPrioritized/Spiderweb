@@ -150,6 +150,12 @@ def usable(sh):
     return sh["kind"] in KINDS and not sh.get("gaps") and not closed(sh) and len(sh["pts"]) >= 2
 
 
+def closed_line(sh):
+    """A closed line shape not in a group: usable only with a drawn shape at the other end (one closed piece)."""
+    return (sh["kind"] in KINDS and closed(sh) and not sh.get("gaps") and "between" not in sh
+            and len(sh["pts"]) >= 2)
+
+
 def group_of(sh):
     return (sh.get("between") or {}).get("id")
 
@@ -883,12 +889,24 @@ class Steps:
         # (a key runs the way the first shape does, like the steps it was made from: Reverse pairs the last shape
         # the other way round with the first shape AND with a key)
         k = (id(a), id(b), rev)
-        if k not in self.keys:  # (Turn by: the typed angle only for a group without keys, else found by itself)
-            turn = self.s.get("turn") if len(self.marks) == 2 else None
-            self.keys[k] = json.dumps([_plain(a), _plain(b), bool(rev), turn], sort_keys=True)
         graph = self.s["graph"]
         dy = change_at(graph, u1) - change_at(graph, u0)
+        if k not in self.keys:  # (Turn by: the group's turn; with keys each part turns its share of it, by how much
+            turn = self.s.get("turn")  # of the change it holds: a key stopped the turning, hunt 2026-11-25)
+            if len(self.marks) > 2:
+                total = turn if turn is not None else self._found()
+                turn = total * dy if total else None
+            self.keys[k] = json.dumps([_plain(a), _plain(b), bool(rev), turn], sort_keys=True)
         return self.keys[k], (dy if abs(dy) > 1e-12 else u1 - u0)
+
+    def _found(self):
+        """The angle Turn by finds by itself between the group's first and last shape (0 for lines)."""
+        if not hasattr(self, "_found_at"):
+            a, b = self.marks[0][1], self.marks[-1][1]
+            self._found_at = 0.0
+            if a["kind"] == "custom" or b["kind"] == "custom":
+                self._found_at = _pair(json.dumps([_plain(a), _plain(b), False, None], sort_keys=True)).draw.found
+        return self._found_at
 
     def _bends(self):
         """Each part's (extra speed leaving its first anchor, extra speed arriving at its last) as [x, y], or None
@@ -954,13 +972,13 @@ def _pair(key):
 
 def found_turn(shapes, gid):
     """(the angle Turn by finds by itself for the group's first and last shape, can it be typed): (None, False) when
-    neither end is drawn or the group has keys (Turn by greyed)."""
+    neither end is drawn (Turn by greyed). With keys each part turns its share (Steps._part)."""
     marks = anchors(shapes, gid)
     a, b = marks[0][1], marks[-1][1]
     if a["kind"] != "custom" and b["kind"] != "custom":
         return None, False
     key = json.dumps([_plain(a), _plain(b), False, None], sort_keys=True)
-    return _pair(key).draw.found, len(marks) == 2
+    return _pair(key).draw.found, True
 
 
 def made(key, f):
