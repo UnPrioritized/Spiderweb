@@ -478,22 +478,34 @@ class ShapeMenu:
              bool(app.clipboard) or app.shared_clip() is not None or app.domino_newer(),
              keys=curve_keys and app.clip_kind != "stroke")
         m.add_separator()
+        # Flip ▸ and Turn ▸ (user 2026-11-24: the flips had grown to four or five lines)
+        flips, turns = tk.Menu(m, tearoff=0), tk.Menu(m, tearoff=0)
+
+        def sub_item(menu, label, key, fn, on=True, keys=True):
+            menu.add_command(label=label, accelerator=key if keys else "", command=fn,
+                             state="normal" if on else "disabled")
         gf = app.gate_flip_state()
         if gf:  # (above the normal flips, ticked while on; greyed saying why in a few words, user)
             self._gate_flip_var = tk.BooleanVar(value=gf[1])  # (kept: the tick shows)
-            m.add_checkbutton(label=tr("roll_menu.gate_flip_" + gf[2]) if gf[2] else tr("roll_menu.gate_flip"),
-                              variable=self._gate_flip_var, command=app.gate_flip,
-                              state="normal" if gf[0] else "disabled")
-        item(tr("roll_menu.flip_sideways"), tr("roll_menu.ctrl_h"), lambda: app.flip(True, whole=True),
-             keys=curve_keys and whole)
-        item(tr("roll_menu.flip_upside_down"), tr("roll_menu.ctrl_j"), lambda: app.flip(False, whole=True),
-             keys=curve_keys and whole)
+            flips.add_checkbutton(label=tr("roll_menu.gate_flip_" + gf[2]) if gf[2] else tr("roll_menu.gate_flip"),
+                                  variable=self._gate_flip_var, command=app.gate_flip,
+                                  state="normal" if gf[0] else "disabled")
+        sub_item(flips, tr("roll_menu.flip_sideways"), tr("roll_menu.ctrl_h"), lambda: app.flip(True, whole=True),
+                 keys=curve_keys and whole)
+        sub_item(flips, tr("roll_menu.flip_upside_down"), tr("roll_menu.ctrl_j"), lambda: app.flip(False, whole=True),
+                 keys=curve_keys and whole)
         if app.line_targets():  # (each line inside its own place: lines_window.py, notes/lines.py)
-            item(tr("lines.menu_sideways"), "", lambda: open_lines(app, "sideways"))
-            item(tr("lines.menu_upside"), "", lambda: open_lines(app, "upside"))
-        item(tr("roll_menu.turn_90_left"), tr("roll_menu.ctrl_left"), lambda: app.rotate(False, whole=True), keys=whole)
-        item(tr("roll_menu.turn_90_right"), tr("roll_menu.ctrl_right"), lambda: app.rotate(True, whole=True),
-             keys=whole)
+            flips.add_separator()
+            sub_item(flips, tr("lines.menu_sideways"), "", lambda: open_lines(app, "sideways"))
+            sub_item(flips, tr("lines.menu_upside"), "", lambda: open_lines(app, "upside"))
+        m.add_cascade(label=tr("roll_menu.flip_menu"), menu=flips)
+        sub_item(turns, tr("roll_menu.turn_90_left"), tr("roll_menu.ctrl_left"), lambda: app.rotate(False, whole=True),
+                 keys=whole)
+        sub_item(turns, tr("roll_menu.turn_90_right"), tr("roll_menu.ctrl_right"),
+                 lambda: app.rotate(True, whole=True), keys=whole)
+        turns.add_separator()
+        sub_item(turns, tr("roll_menu.turn_by"), "", app.turn_by, app.can_turn_by())
+        m.add_cascade(label=tr("roll_menu.turn_menu"), menu=turns)
 
     def formula_menu(self, m, host=None):
         """"Formula ▸" for the selected curves (host: formula_host.py, default the piano roll's curves). The dots

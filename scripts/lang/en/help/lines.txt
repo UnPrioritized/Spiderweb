@@ -1,4 +1,4 @@
-Select one or more shapes, then right-click one: Flip each line sideways…, Flip each line upside down… (under the normal flips) or Split into pieces… (under [page:strips|Channel per strip]). They work on pasted notes, merged shapes and any shape that makes notes, not on Hz bass, images or masks.
+Select one or more shapes, then right-click one: Flip → Flip each line sideways… or Flip each line upside down… (under the normal flips), or Split into pieces… (under [page:strips|Channel per strip]). They work on pasted notes, merged shapes and any shape that makes notes, not on Hz bass, images or masks.
 
 ## What a line is
 

@@ -54,6 +54,8 @@ What's new:
 
 • Drawer: Deform… has Copies under Turn. At 2 or more, the selected strokes stay and turned copies are added, each turned a bit more: one line with Turn 22.5 and Copies 16 becomes the spokes of a wheel. The drawer's Select tool also uses the piano roll's Select pointer now. See [page:drawer_deform|Deform].
 
+• Right-click → Turn → Turn by… turns shapes by a typed angle (80, 22.5, decimals too), live as you type. The right-click menus now keep their flips under Flip and their turns under Turn, on the piano roll and in the drawer (where Turn by… opens Deform). See [page:custom_edit].
+
 • Warp: Save… beside Preset keeps a shape's bend as your own preset, at the top of the Preset list, for any shape in any project. See [page:warp|Warp].
 
 • Hz bass window: right-click notes → Move to layer, and Duplicate layer in a layer's menu. The note count in its status line is now exact and updates after every change. See [page:hz_layers|Layers].

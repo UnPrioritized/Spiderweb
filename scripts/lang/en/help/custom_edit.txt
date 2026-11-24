@@ -12,6 +12,8 @@ One side: drag a side (or its middle square) to move just that side.
 Turn: drag from just outside a corner. It turns around its middle in 15° steps; Shift = any angle.
 [clip:custom_edit-turn]
 
+For an exact angle, right-click → Turn → Turn by… and type it (80, 22.5, decimals too): plus turns right (clockwise), minus turns left. The shape turns as you type; OK keeps it, Esc puts it back. Several selected shapes turn together around their middle. It works for shapes with a box (drawn shapes, text, pasted notes, pictures); lines turn only 90° at a time.
+
 Skew: drag from just outside a side's middle. That side slides along itself in grid steps (Shift = free) while the opposite side stays.
 [clip:custom_edit-skew]
 

@@ -883,15 +883,21 @@ class DrawerMouse:
             m.grab_release()
 
     def add_flip_turn(self, m):
+        """Flip ▸ and Turn ▸ (user 2026-11-24, like the piano roll's); Turn by… = Deform… with its Turn box ready."""
         m.add_separator()
-        m.add_command(label=tr("drawer.flip_sideways"), accelerator=tr("drawer.ctrl_h"),
-                      command=lambda: self.flip(True))
-        m.add_command(label=tr("drawer.flip_upside_down"), accelerator=tr("drawer.ctrl_j"),
-                      command=lambda: self.flip(False))
-        m.add_command(label=tr("drawer.turn_90_left"), accelerator=tr("drawer.ctrl_left"),
-                      command=lambda: self.turn(False))
-        m.add_command(label=tr("drawer.turn_90_right"), accelerator=tr("drawer.ctrl_right"),
-                      command=lambda: self.turn(True))
+        flips, turns = tk.Menu(m, tearoff=0), tk.Menu(m, tearoff=0)
+        flips.add_command(label=tr("drawer.flip_sideways"), accelerator=tr("drawer.ctrl_h"),
+                          command=lambda: self.flip(True))
+        flips.add_command(label=tr("drawer.flip_upside_down"), accelerator=tr("drawer.ctrl_j"),
+                          command=lambda: self.flip(False))
+        turns.add_command(label=tr("drawer.turn_90_left"), accelerator=tr("drawer.ctrl_left"),
+                          command=lambda: self.turn(False))
+        turns.add_command(label=tr("drawer.turn_90_right"), accelerator=tr("drawer.ctrl_right"),
+                          command=lambda: self.turn(True))
+        turns.add_separator()
+        turns.add_command(label=tr("drawer.turn_by"), command=self.open_deform)
+        m.add_cascade(label=tr("drawer.flip_menu"), menu=flips)
+        m.add_cascade(label=tr("drawer.turn_menu"), menu=turns)
 
     def show_menu(self, e, i):
         st = self.strokes[i]

@@ -147,6 +147,16 @@ class AppTransform:
         self.shapes_changed()  # (first: notes made in the background, the panel's Recolour row waits for them)
         self.sync_panel()
 
+    def can_turn_by(self):
+        from window.turn_by import can_turn
+        return can_turn(self)
+
+    def turn_by(self):
+        """Turn ▸ Turn by…: the selected drawn shapes turned by a typed angle (window/turn_by.py)."""
+        from window.turn_by import TurnBy
+        if self.can_turn_by():
+            TurnBy(self)
+
     @staticmethod
     def stretched(sh, ab, kx, ap, ky):
         """A copy of shape sh stretched kx times sideways from beat ab and ky times up / down from pitch ap (a

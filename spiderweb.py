@@ -26,6 +26,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     formula_paste.py the Paste formula... window (a pasted block of text read into a shape's / pattern's formula)
     formula_host.py  where formulas go (piano roll curves, drawer strokes, funnel curves) + the Formula menu
     tumour_window.py the tumour window: the tumour settings (bumps along lines)
+    turn_by.py       the Turn by... window (right-click → Turn: selected shapes turned by a typed angle)
     history.py       undo / redo and the History list (named undo steps; docked in the side panel or its own window)
     graph_window.py  a number's graph (the number changing along the line): tumour settings, pattern numbers
     pattern_graphs.py the graph window on a pattern's numbers (side panel + Custom…; Loops = how crowded)
