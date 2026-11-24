@@ -1623,6 +1623,19 @@ def shape_tabs_done(sh, ppq, keys, get):
     from notes.recolour import colour_box
     box, own = colour_box(notes, rule, free_box(base, notes, get, keys))
     benders = benders_of(tabs, wp, rule, box, own, ppq, lq)
+    # (AT THE EDGES on Shape tabs, PLAN.md "Never escape": Fit inside / Cut off set on each tab's bender; the last
+    # step's Cut / Fit trims the finished notes to the box (fin); a Cut with steps after it = the pulled way)
+    from notes.shape_bend import clip_box, edge_rect, edge_samples, last_edge, set_edges
+    last, mid_cut = last_edge(tabs, wp, lq)
+    edges = None
+    if any(st.get("shape_edge", "escape") != "escape" for st in tabs):
+        edges = (edge_samples(notes, ppq), edge_rect(tabs[0], rule, box, own, ppq))
+        set_edges(benders, tabs, *edges)
+
+    def fin(made, tracks):
+        if last in ("cut", "fit") and edges is not None:
+            return clip_box(made, tracks, edges[1])
+        return made, tracks
 
     def look(t, k):  # (the last tab first: tab 2 bent what tab 1 left; the Warp last)
         for b in reversed(benders):
@@ -1649,16 +1662,18 @@ def shape_tabs_done(sh, ppq, keys, get):
     # worth of ticks and lost its top row). The Warp grid / Liquify brush stay on the box as drawn)
     cell = (box[0], box[1], box[2] - 0.5, box[3] + 0.5), (own[0], own[1], own[2] - 0.5, own[3] + 0.5)
     note_benders = [_cell_stir(st, rule, box, own, cell, ppq) for st in tabs] + benders[len(tabs):]
-    if as_notes or first == 0:
+    if edges is not None:
+        set_edges(note_benders, tabs, *edges)
+    if as_notes or first == 0 or mid_cut:  # (a Cut off with steps after it: pulled, exact to the tick)
         got = AS_NOTES
         benders = note_benders  # (look / within / bend_tk below read it)
     elif first is None:
-        got = bent_shape(out, tabs, rule, box, own, ppq, wp, lq)
+        got = bent_shape(out, tabs, rule, box, own, ppq, wp, lq, edges)
     else:
         lead_tabs = tabs[:first]
         lead_wp = wp if first > len(tabs) else None  # (the Liquify runs last: never before a ticked step)
         lead_lq = None
-        got = bent_shape(out, lead_tabs, rule, box, own, ppq, lead_wp, lead_lq)
+        got = bent_shape(out, lead_tabs, rule, box, own, ppq, lead_wp, lead_lq, edges)
         if got is None or got == PULL:  # (the outline can't take the steps before: every step cuts)
             got = AS_NOTES
             benders = note_benders
@@ -1666,7 +1681,7 @@ def shape_tabs_done(sh, ppq, keys, get):
             return _chopped_after(got, base, notes, before, benders[:first], note_benders[first:], box, ppq, keys, get,
                                   any(st["bend_colours"] for st in lead_tabs)
                                   or (lead_wp is not None and lead_wp.get("bend_colours", True))
-                                  or (lead_lq is not None and lead_lq.get("bend_colours", True)), out, sh)
+                                  or (lead_lq is not None and lead_lq.get("bend_colours", True)), out, sh, fin)
     if got is None:
         return out
     # (COLOURS BEND TOO, user 2026-11-17, a tick per tab, on by default: each note of the bent shape takes the
@@ -1688,7 +1703,7 @@ def shape_tabs_done(sh, ppq, keys, get):
                 p = b.bend2(p)
             return p[:, 0], p[:, 1]
         try:
-            if got == PULL or any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
+            if got == PULL or mid_cut or any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
                 raise Folded
             if not as_notes and first is not None:  # (a drawn shape cut where bent: its edge from the bent outline)
                 made, tracks, full = note_boxes_bent(made, tracks, bend_tk, ppq, look, lengths=True, raw=True,
@@ -1710,16 +1725,19 @@ def shape_tabs_done(sh, ppq, keys, get):
                 tracks = laid(base, made[:, :3], ppq) if len(made) else np.zeros(0, np.int64)
             else:
                 made, tracks = pulled(made, tracks, look, box, ppq, joined=got == PULL, within=within)
-        return dict(out, _bent=bent_token(*_on_keys(made, tracks, keys)))
-    if not bend or before is None or not len(before):
+        return dict(out, _bent=bent_token(*fin(*_on_keys(made, tracks, keys))))
+    carried = bend and before is not None and len(before)
+    if not carried and last not in ("cut", "fit"):
         return got
     from notes.recolour import nearest
-    made, _ = get(_steps_off(without_recolour(got)))
-    tracks = None
-    if len(made):
-        t, k = look((made[:, 0] + made[:, 1]) / 2, made[:, 2].astype(np.float64))
-        tracks = np.asarray(before)[nearest(notes, t, k, own=False)]
-    return dict(got, _bent=bent_token(made, tracks))
+    made, tracks = get(_steps_off(without_recolour(got)))
+    made = np.asarray(made, np.int64)
+    if carried:
+        tracks = None
+        if len(made):
+            t, k = look((made[:, 0] + made[:, 1]) / 2, made[:, 2].astype(np.float64))
+            tracks = np.asarray(before)[nearest(notes, t, k, own=False)]
+    return dict(got, _bent=bent_token(*fin(made, tracks)))
 
 
 def _cell_stir(st, rule, box, own, cell, ppq):
@@ -1738,7 +1756,7 @@ def _cell_stir(st, rule, box, own, cell, ppq):
     return StirBend(dict(st, **moved), rule, cell[0], cell[1], ppq) if moved else grown
 
 
-def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, bend, out, sh):
+def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, bend, out, sh, fin=None):
     """shape_tabs_done when a later Shape step cuts notes and the ones before it don't: got = the shape with its
     outline bent by the steps before (benders lead), its notes made (colours carried back through lead when bend),
     then bent + cut by the rest (benders rest) like pasted notes. Returns out with its "_bent" notes."""
@@ -1778,7 +1796,8 @@ def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, be
         made, tracks = _outline_edge(sh, ppq, keys, get, made, tracks, full)
     except Folded:
         made, tracks = pulled(made, tracks, look, box, ppq, joined=False, within=within)
-    return dict(out, _bent=bent_token(*_on_keys(made, tracks, keys)))
+    made, tracks = _on_keys(made, tracks, keys)
+    return dict(out, _bent=bent_token(*(fin(made, tracks) if fin else (made, tracks))))
 
 
 NESTED_SOLID = True  # (_outline_edge's solid rows skip a Nested fill with no empty step: same rows)

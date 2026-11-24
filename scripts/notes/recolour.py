@@ -105,7 +105,13 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
                  "polar": 0.0, "ripple": 0.0, "ripple_len": 10.0, "ripple_kind": "side", "kaleido": 0,
                  "kaleido_turn": 0.0, "wring": 0.0, "wring_angle": 0.0, "round_edge": "cut", "area_polar": True,
                  "area_ripple": True, "area_kaleido": True, "area_wring": True, "moves": "colours",
-                 "bulge_out": None, "bend_colours": True, "chop": True}
+                 "bulge_out": None, "bend_colours": True, "chop": True, "shape_edge": "escape", "fit_way": "keep"}
+# ("shape_edge" = a Shape tab's At the edges (PLAN.md "Never escape", user 2026-11-24; its own key: a Colours tab's
+# "edge" left on a tab switched to Shape must not start cutting): "escape" (as before) / "cut" = notes past the box cut
+# exactly at its sides / "fit" = the bent shape shrunk back inside the box ("fit_way": "keep" proportions / "stretch"
+# each way on its own); each tab's choice right after its own bend (user). notes/shape_bend.py set_edges)
+SHAPE_EDGES = ("escape", "cut", "fit")
+FIT_WAYS = ("keep", "stretch")
 # ("chop" = Cut notes where bent (Shape tabs only; user 2026-11-17, default ON): a drawn shape's notes are made
 # unbent, then bent + cut like pasted notes (engine.shape_tabs_done); off = the outline bent, notes laid again in it)
 # ("bend_colours" = Colours bend too (Shape tabs only; user 2026-11-17, default ON): the bent shape's notes take the
@@ -129,7 +135,7 @@ MOST_SLICES = 32
 MOST_RIPPLE, MOST_RIPPLE_LEN, LEAST_RIPPLE_LEN = 100.0, 200.0, 0.5
 MOST_WRING = 50.0
 SETTINGS_ONLY = {"smooth", "bend_smooth", "ripple_len", "ripple_kind", "kaleido_turn", "wring_angle", "bulge_out",
-                 "bend_colours", "chop"}  # (alone: no
+                 "bend_colours", "chop", "shape_edge", "fit_way"}  # (alone: no
 # stir; "moves" alone IS kept: a tab just set to Shape keeps that choice, it bends nothing yet)
 # ("bulge" = Bulge %, BMC tester 11-07 (their "local expansion / collapse", op art's bulging grid): + = the colours
 # swell out from the middle like a lens, packed tight at the edge; - = pinched in. Never adds or loses a colour inside
@@ -810,6 +816,10 @@ def one_stir(s):
         out["bend_colours"] = False
     if s.get("chop") is False:
         out["chop"] = False
+    if s.get("shape_edge") in SHAPE_EDGES[1:]:
+        out["shape_edge"] = s["shape_edge"]
+    if s.get("fit_way") in FIT_WAYS[1:]:
+        out["fit_way"] = s["fit_way"]
     c = s.get("centre")
     if isinstance(c, list) and len(c) == 2 and all(number(x) and SPOT_LEAST <= x <= SPOT_MOST for x in c) and \
             [round(x, 3) for x in c] != [50, 50]:

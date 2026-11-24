@@ -335,6 +335,7 @@ class StirBend:
     """One Shape tab, forwards: points (tick, key) -> where the bend puts them (floats).
     st: the tab (filled in); r: the Recolour (its frame / ppq); box, own: recolour.colour_box's, of the notes before
     the bend."""
+    fit = cut = None  # (At the edges: set_edges; the Warp / Liquify benders built on this class never have them)
 
     def __init__(self, st, r, box, own, ppq):
         self.st = st
@@ -351,6 +352,10 @@ class StirBend:
         self._seed = None
         self.worst = 0.0
         self._numbers = {}  # (id(stir) -> (it, stir_numbers) for the compiled look)
+        # (the tab's At the edges, PLAN.md "Never escape": set_edges fills them in. fit = (scale t, scale k, middle t,
+        # middle k, shift t, shift k): after the bend p -> middle + scale (p - middle) + shift; cut = the box (t0, t1,
+        # k0, k1): spots past it come from nowhere (look_tk NaN))
+        self.fit = self.cut = None
 
     # -- the colour box both ways (a flipped shape's colours count mirrored back: recolour.places_of)
     def to_unit(self, t, k):
@@ -365,6 +370,7 @@ class StirBend:
         """Which spots (tick, key) a pulled bend may put notes on: inside the circle round the Centre point through
         the box's farthest corner (as Turn / Twist measure it: everything a turn sweeps), a ripple's height wider.
         Past it a bend like Twist along a line keeps finding the shape again (its ribbon edge-on): no notes there."""
+        t, k = self.unfitted(t, k)
         x, y = self.to_unit(t, k)
         (cx, cy), (rx, ry) = self.c, self.rr
         far = max(math.hypot((X - cx) * rx, (Y - cy) * ry) for X in (0, 1) for Y in (0, 1))
@@ -372,10 +378,32 @@ class StirBend:
         return np.hypot((x - cx) * rx, (y - cy) * ry) <= far * (1 + 1e-9) + grow + 1e-9
 
     def look_tk(self, t, k):
-        """Spots (tick, key) -> where the bend brings them from (floats), Kaleidoscope too (pulled())."""
+        """Spots (tick, key) -> where the bend brings them from (floats), Kaleidoscope too (pulled()); with Cut off,
+        spots past the box come from nowhere (NaN)."""
+        t, k = np.asarray(t, np.float64), np.asarray(k, np.float64)
+        if self.cut is not None:
+            t0, t1, k0, k1 = self.cut
+            out = (t < t0 - 1e-6) | (t > t1 + 1e-6) | (k < k0 - 1e-6) | (k > k1 + 1e-6)
+            if out.any():
+                t, k = np.where(out, np.nan, t), np.where(out, np.nan, k)
+        t, k = self.unfitted(t, k)
         x, y = self.to_unit(t, k)
         x, y = self.look(x, y, self.st)
         return self.from_unit(x, y)
+
+    def fitted(self, t, k):
+        """Fit inside: bent spots (tick, key) shrunk into the box."""
+        if self.fit is None:
+            return t, k
+        st, sk, mt, mk, dt, dk = self.fit
+        return mt + st * (t - mt) + dt, mk + sk * (k - mk) + dk
+
+    def unfitted(self, t, k):
+        """fitted's way back."""
+        if self.fit is None:
+            return t, k
+        st, sk, mt, mk, dt, dk = self.fit
+        return mt + (np.asarray(t, np.float64) - dt - mt) / st, mk + (np.asarray(k, np.float64) - dk - mk) / sk
 
     # -- Stir's own maths, backwards (stir_from without At the edges / Squeeze)
     def look(self, x, y, st=None):
@@ -485,8 +513,143 @@ class StirBend:
             return p.copy()
         x, y = self.to_unit(p[:, 0], p[:, 1])
         x, y = self.forward_unit(x, y)
-        t, k = self.from_unit(x, y)
+        t, k = self.fitted(*self.from_unit(x, y))
         return np.column_stack((t, k))
+
+    def bend2_loose(self, p):
+        """bend2 without the fold check and without Fit inside (set_edges measures the bent shape with it: a fold
+        still has a place for each point, just not one way back)."""
+        p = np.asarray(p, np.float64).reshape(-1, 2)
+        if not len(p):
+            return p.copy()
+        x, y = self.to_unit(p[:, 0], p[:, 1])
+        qx, qy = x, y
+        gx, gy = self.guess(qx, qy)
+        if self._seed is None:
+            self._seed = searcher(self.look)
+        x, y = solve(self.look, qx, qy, gx, gy, self._seed)
+        return np.column_stack(self.from_unit(x, y))
+
+
+# AT THE EDGES ON SHAPE TABS (PLAN.md "Never escape", user 2026-11-24): each Stir tab set to Shape may cut off what its
+# bend pushed past the box (exactly at the sides, user) or shrink it back inside (Keep proportions / Stretch, user),
+# right after ITS OWN bend (user: each tab on its own). Fit = a straight scale + shift after the bend, so every way of
+# making notes (outline, cut notes, pulled) bends through it. Cut on the LAST step = the finished notes trimmed to the
+# box (clip_box); a cut with steps after it = the pulled way (look_tk gives NaN past the box: exact to the tick).
+EDGE_SAMPLES = 20000  # (points of the notes bent to find how far a bend reaches: at most this many)
+
+
+def edge_rect(st0, r, box, own, ppq):
+    """The box (t0, t1, k0, k1) in ticks / keys the tabs measure in (as drawn, flips / turns taken in)."""
+    b = StirBend(st0, r, box, own, ppq)
+    t, k = b.from_unit(np.array([0.0, 1.0]), np.array([0.0, 1.0]))
+    return float(min(t)), float(max(t)), float(min(k)), float(max(k))
+
+
+def edge_samples(notes, ppq):
+    """Points (tick, key) along notes (start, end, key, ...) a bend's reach is measured on: every note's ends, long
+    notes every 1/8 of the box's width; thinned evenly past EDGE_SAMPLES, each key row's first start and last end and
+    each time slice's lowest / highest key always kept (the outline: where a bent shape reaches farthest)."""
+    n = np.asarray(notes, np.int64)
+    if not len(n):
+        return np.zeros((0, 2))
+    n = n.reshape(len(n), -1)[:, :3]
+    s, e, k = n[:, 0].astype(np.float64), n[:, 1].astype(np.float64), n[:, 2].astype(np.float64)
+    width = max(float(e.max() - s.min()), 1.0)
+    step = width / 8
+    pts = [np.column_stack((s, k)), np.column_stack((e, k))]
+    long_ = np.nonzero(e - s > step)[0]
+    if len(long_):
+        cnt = np.minimum(np.ceil((e[long_] - s[long_]) / step).astype(np.int64), 64)
+        idx = np.repeat(long_, cnt)
+        f = (np.arange(len(idx)) - np.repeat(np.cumsum(cnt) - cnt, cnt) + 0.5) / np.repeat(cnt, cnt)
+        pts.append(np.column_stack((s[idx] + f * (e[idx] - s[idx]), k[idx])))
+    p = np.vstack(pts)
+    if len(p) <= EDGE_SAMPLES:
+        return p
+    keep = [p[np.linspace(0, len(p) - 1, EDGE_SAMPLES // 2).astype(np.int64)]]
+    order = np.lexsort((s, k))  # (each key row's first start / last end)
+    ks = k[order]
+    first = np.r_[True, ks[1:] != ks[:-1]]
+    last = np.r_[ks[1:] != ks[:-1], True]
+    keep += [np.column_stack((s[order][first], ks[first])), np.column_stack((e[order][last], ks[last]))]
+    bins = np.minimum(((s + e) / 2 - s.min()) / width * 256, 255).astype(np.int64)  # (time slices: lowest / highest)
+    for fn in (np.argmin, np.argmax):
+        o = np.lexsort((k if fn is np.argmin else -k, bins))
+        b = bins[o]
+        head = np.r_[True, b[1:] != b[:-1]]
+        j = o[head]
+        keep.append(np.column_stack(((s[j] + e[j]) / 2, k[j])))
+    return np.vstack(keep)
+
+
+def set_edges(benders, tabs, samples, rect):
+    """Fill in Fit inside / Cut off on the benders of the Stir tabs (benders[i] is tabs[i]'s; a Warp / Liquify after
+    them has none): Fit measures how far the bend so far takes samples (tick, key) and shrinks that into rect; Cut
+    marks rect. Returns the benders."""
+    p = np.asarray(samples, np.float64).reshape(-1, 2)
+    t0, t1, k0, k1 = rect
+    for i, b in enumerate(benders):
+        tab = i < len(tabs)
+        edge = tabs[i].get("shape_edge", "escape") if tab else "escape"
+        if tab:
+            b.fit = b.cut = None
+        if not len(p):
+            continue
+        q = b.bend2_loose(p) if tab else b.bend2(p)  # (the Warp / Liquify after the tabs: never folded)
+        if edge == "fit":
+            ok = np.isfinite(q).all(1)
+            b.fit = fit_of(q[ok], rect, tabs[i].get("fit_way", "keep")) if ok.any() else None
+            q = np.column_stack(b.fitted(q[:, 0], q[:, 1]))
+        elif edge == "cut":
+            b.cut = rect
+            q = q[(q[:, 0] >= t0) & (q[:, 0] <= t1) & (q[:, 1] >= k0) & (q[:, 1] <= k1)]
+        p = q
+    return benders
+
+
+def fit_of(q, rect, way):
+    """Fit inside's numbers for bent points q into rect (t0, t1, k0, k1), or None when they're inside already:
+    shrunk round their own middle (keep = the same share both ways, stretch = each way its own, never grown),
+    then moved the least that brings them in."""
+    t0, t1, k0, k1 = rect
+    lo, hi = q.min(0), q.max(0)
+    if lo[0] >= t0 - 1e-6 and hi[0] <= t1 + 1e-6 and lo[1] >= k0 - 1e-6 and hi[1] <= k1 + 1e-6:
+        return None
+    wt, wk = max(hi[0] - lo[0], 1e-9), max(hi[1] - lo[1], 1e-9)
+    st, sk = min(1.0, (t1 - t0) / wt), min(1.0, (k1 - k0) / wk)
+    if way != "stretch":
+        st = sk = min(st, sk)
+    mt, mk = (lo[0] + hi[0]) / 2, (lo[1] + hi[1]) / 2
+    a, b = mt + st * (lo[0] - mt), mt + st * (hi[0] - mt)
+    c, d = mk + sk * (lo[1] - mk), mk + sk * (hi[1] - mk)
+    dt = t0 - a if a < t0 else t1 - b if b > t1 else 0.0
+    dk = k0 - c if c < k0 else k1 - d if d > k1 else 0.0
+    return float(st), float(sk), float(mt), float(mk), float(dt), float(dk)
+
+
+def clip_box(made, tracks, rect):
+    """Notes (start, end, key, ...) cut to rect (t0, t1, k0, k1) exactly at its sides (user): rows past it gone,
+    starts / ends past it moved onto it, pieces left under a tick gone."""
+    made = np.asarray(made, np.int64)
+    if not len(made):
+        return made, tracks
+    t0, t1, k0, k1 = rect
+    m = made.copy()
+    m[:, 0] = np.maximum(m[:, 0], int(math.ceil(t0 - 1e-6)))
+    m[:, 1] = np.minimum(m[:, 1], int(math.floor(t1 + 1e-6)))
+    ok = (m[:, 1] > m[:, 0]) & (m[:, 2] >= k0 - 1e-6) & (m[:, 2] <= k1 + 1e-6)
+    return m[ok], (None if tracks is None else np.asarray(tracks)[ok])
+
+
+def last_edge(tabs, wp, lq):
+    """The At the edges of the very last Shape step ("escape" when a Warp / Liquify comes after the tabs), and
+    whether a Cut off comes before other steps (those need the pulled way)."""
+    edges = [st.get("shape_edge", "escape") for st in tabs]
+    after = wp is not None or lq is not None
+    last = "escape" if after or not edges else edges[-1]
+    mid = any(e == "cut" for e in (edges if after else edges[:-1]))
+    return last, mid
 
 
 class WarpBend(StirBend):
@@ -837,7 +1000,7 @@ AS_NOTES = "notes"  # (bent_shape: lines this way can't be bent (funnel, Glissan
 # Last note per dot): its notes bent like pasted notes, hunt 2026-11-17)
 
 
-def bent_shape(sh, tabs, r, box, own, ppq, wp=None, lq=None):
+def bent_shape(sh, tabs, r, box, own, ppq, wp=None, lq=None, edges=None):
     """sh (its Recolour already without the Shape tabs) with its lines bent by Stir tabs (filled in, Shape, in tab
     order), then the Warp wp and the Liquify lq set to Shape (clean, or None), None when it can't be bent this way
     (left as it is), or PULL when a step folds the shape (Straight to round, Kaleidoscope, or a point found with no
@@ -847,7 +1010,7 @@ def bent_shape(sh, tabs, r, box, own, ppq, wp=None, lq=None):
     if any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
         return PULL
     try:
-        return _bent_shape(sh, tabs, r, box, own, ppq, wp, lq)
+        return _bent_shape(sh, tabs, r, box, own, ppq, wp, lq, edges)
     except Folded:
         return PULL
 
@@ -862,9 +1025,11 @@ def benders_of(tabs, wp, r, box, own, ppq, lq=None):
     return out
 
 
-def _bent_shape(sh, tabs, r, box, own, ppq, wp=None, lq=None):
+def _bent_shape(sh, tabs, r, box, own, ppq, wp=None, lq=None, edges=None):
     from notes import deform
     benders = benders_of(tabs, wp, r, box, own, ppq, lq)
+    if edges is not None:  # (Fit inside on the tabs: the outline bent through it too; edges = (samples, box))
+        set_edges(benders, tabs, *edges)
     waves = [st["ripple_len"] / 100 for st in tabs if st["ripple"]]
     if wp is not None:  # (lines looked at finer than a grid cell: deform cuts them where the bend curves them)
         waves.append(0.5 / max(wp["cols"], wp["rows"]))

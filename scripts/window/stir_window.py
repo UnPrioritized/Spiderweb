@@ -15,7 +15,7 @@ from files.lang import tr
 from files.mathexpr import calc, fmt
 from notes.recolour import (DRAWN, KEEP, LEAST_REACH, LEAST_RIPPLE_LEN, LEAST_STRETCH, MAKE_SHAPE_POINTS, MOST_BULGE,
                             MOST_RIPPLE, MOST_RIPPLE_LEN, MOST_SKEW, MOST_SLICES, MOST_STIRS, MOST_WRING, RIPPLE_KINDS,
-                            ROUND_EDGES, STIR_MOVES, bends, flip_of_matters, order_of,
+                            ROUND_EDGES, STIR_MOVES, FIT_WAYS, SHAPE_EDGES, bends, flip_of_matters, order_of,
                             MOST_REACH_INSIDE, MOST_SMOOTH, MOST_STRETCH, MOST_TIGHT, MOST_TURN, NEW_SMOOTH, FLIP_BY, FLIP_IN, FLIP_OF, MIRROR, SIZE_OF, SPOT_LEAST, SPOT_MOST, STIR_AREAS, STIR_EDGES, STIR_SETS, area_from_box,
                             centre_at, clean_area_shape, clean_recolour, full_stir, most_reach, new_seed, one_stir,
                             size_scale, stir_removed, stir_stack, stirs_of, without_recolour)
@@ -503,10 +503,35 @@ class StirWindow(DefaultPin, HeldKnobs, tk.Toplevel):
         cell.pack(side="left", anchor="n")
         self._pick(cell, "edge", STIR_EDGES, ttk.Label(cell, text=tr("stir.edge"))).pack(anchor="w", pady=(4, 0))
         self.picks["edge"]["word"].pack(anchor="w", before=self.picks["edge"]["box"])
+        # (a Shape tab's own At the edges in the same spot, PLAN.md "Never escape" (user 2026-11-24): shown instead
+        # of the colours' list on Shape tabs, sync swaps them; both as wide so nothing moves)
+        self._pick(cell, "shape_edge", SHAPE_EDGES, None)
+        self.picks["shape_edge"]["word"] = self.picks["edge"]["word"]
+        wide = max(int(self.picks[k]["box"].cget("width")) for k in ("edge", "shape_edge"))
+        for k in ("edge", "shape_edge"):
+            self.picks[k]["box"].config(width=wide)
         # (Bend with the outline's Smooth corners, under its dropdown: live only with Bend, Chinese tester 11-05)
-        self._cell(cell, "bend_smooth", 0, MOST_SMOOTH, "stir.bend_smooth", "stir.bend_smooth_tip",
-                   "%").pack(anchor="w", pady=(4, 0))
+        self.bend_smooth_cell = self._cell(cell, "bend_smooth", 0, MOST_SMOOTH, "stir.bend_smooth",
+                                           "stir.bend_smooth_tip", "%")
+        self.bend_smooth_cell.pack(anchor="w", pady=(4, 0))
+        # (Fit inside's way, in Smooth corners' spot on Shape tabs (user: Keep proportions by default))
+        self.fit_cell = ttk.Frame(cell)
+        word = ttk.Label(self.fit_cell, text=tr("stir.fit_way"))
+        word.pack(side="left")
+        self._pick(self.fit_cell, "fit_way", FIT_WAYS, word).pack(side="left", padx=(6, 0))
+        self.edge_cell = cell
         self._put(None, (1, knobs, 4), pady=8)
+
+    def show_shape_edges(self, shape):
+        """A Shape tab shows its own At the edges + Fit way, a Colours tab the colours' list + Smooth corners."""
+        if getattr(self, "_shape_edges", None) == shape:
+            return
+        self._shape_edges = shape
+        old, new = ("edge", "shape_edge") if shape else ("shape_edge", "edge")
+        self.picks[old]["box"].pack_forget()
+        self.picks[new]["box"].pack(anchor="w", in_=self.edge_cell, after=self.picks["edge"]["word"])
+        (self.bend_smooth_cell if shape else self.fit_cell).pack_forget()
+        (self.fit_cell if shape else self.bend_smooth_cell).pack(anchor="w", pady=(4, 0), in_=self.edge_cell)
 
     def _build_centre(self, form):
         """The Centre point row (+ Middle), the squeeze tick and the Colour sets row."""
@@ -1315,6 +1340,10 @@ class StirWindow(DefaultPin, HeldKnobs, tk.Toplevel):
                 grid_shown(w, many)
         # (a Shape tab, user 2026-11-16: the settings that only change colours do nothing there: greyed)
         shape = bool(sts) and all(s["moves"] == "shape" for s in sts)
+        self.show_shape_edges(shape)
+        # (Fit way: live only while a tab fits inside)
+        self.picks["fit_way"]["box"].config(
+            state="readonly" if on and any(s["shape_edge"] == "fit" for s in sts) else "disabled")
         if shape:
             for key in ("edge", "sets", "flip_of", "flip_in", "mirror", "flip_by"):
                 self.picks[key]["box"].config(state="disabled")
@@ -1348,7 +1377,7 @@ class StirWindow(DefaultPin, HeldKnobs, tk.Toplevel):
         for key, p in self.picks.items():
             own = {"mirror": "stir.why_mirror", "size_of": "stir.why_area", "flip_by": "stir.why_flip_by",
                    "flip_of": "stir.why_flip_of", "round_edge": "stir.why_round_edge",
-                   "ripple_kind": "stir.why_ripple", "flip_in": "stir.why_area",
+                   "ripple_kind": "stir.why_ripple", "flip_in": "stir.why_area", "fit_way": "stir.why_fit_way",
                    "moves": "deform.why_pictures"}.get(key, "stir.why_shape")
             put(p["box"], tr(own), key in ("edge", "sets", "flip_of", "flip_in", "mirror", "flip_by"))
         put(self.area_box, off)
