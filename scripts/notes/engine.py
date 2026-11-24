@@ -2741,20 +2741,19 @@ def remade_copy(rest, ppq, get, keys=128):
     group's box's middle, beats / keys), "box" (its ticks / rows), "ppq", "flip" (a way, or None)}: the drawing
     flipped within the group's box first, then grown, then turned round the grown box's middle."""
     def fn(s, at, key, dt, dk, fk=0.5, rows=None, turn=None):
-        q = remade_shape(rest, ppq, s, at, key, dt, dk, fk, rows, turn)
-        # (made straight away, not through get: each copy is a shape of its own, so keying it (its whole drawing
-        # as text) only cost time; the steps inside still go through get)
-        if q is None:
-            return None
-        strokes = q.get("strokes") if q.get("strokes") is rest.get("strokes") else None
-        if strokes is None:
-            return fx_notes(q, ppq, keys, get)
-        if not shared:
-            shared.append((strokes, strokes_text(strokes)))
+        # (rest's strokes keyed once for every copy: remade_shape's reach look-up keyed rest by its whole drawing as
+        # text each copy too. Only shapes holding those very strokes find it)
+        strokes = rest.get("strokes")
         was = getattr(_shared_strokes, "map", None)
-        _shared_strokes.map = {id(strokes): shared[0]}
+        if isinstance(strokes, list):
+            if not shared:
+                shared.append((strokes, strokes_text(strokes)))
+            _shared_strokes.map = {id(strokes): shared[0]}
         try:
-            return fx_notes(q, ppq, keys, get)
+            q = remade_shape(rest, ppq, s, at, key, dt, dk, fk, rows, turn)
+            # (made straight away, not through get: each copy is a shape of its own, so keying it (its whole
+            # drawing as text) only cost time; the steps inside still go through get)
+            return None if q is None else fx_notes(q, ppq, keys, get)
         finally:
             _shared_strokes.map = was
     shared = []  # (rest's strokes and their JSON, once)

@@ -97,6 +97,8 @@ py_loops! {
     row_gaps(notes: Nd<i64, 2>, order: &[i64], gap: &mut [i64], dup: &mut [u8]) => crate::pages::row_gaps;
     run_mirror(notes: Nd<i64, 2>, order: &[i64], gap: &[i64], dup: &[u8], usual: i64, carry: bool, out: NdMut<i64, 2>)
                => crate::pages::run_mirror;
+    // ---- custom shape outlines like lines (outline.rs; NumPy-twin: custom.paths_outline's own way)
+    outline_notes(pts: &[f64], offs: &[i64], closed: &[u8], ppq: f64) -> arrays => crate::outline::outline_notes;
     // ---- pasted notes in a stretched box (block.rs)
     block_count(rows: Nd<i64, 2>, g: &[f64], cnt: &mut [i64], many: bool) => crate::block::block_count;
     block_fill(rows: Nd<i64, 2>, g: &[f64], offs: &[i64], out: NdMut<i64, 2>, many: bool) => crate::block::block_fill;

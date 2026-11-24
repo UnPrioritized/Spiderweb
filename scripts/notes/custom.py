@@ -4,6 +4,7 @@ import base64
 import bisect
 import functools
 import heapq
+import itertools
 import json
 import math
 import zlib
@@ -1301,6 +1302,9 @@ def outline_notes(sh, ppq, only=None, paths=None):
 
 def paths_outline(paths, ppq):
     """(start, end, pitch) notes along these (joined) paths, like lines."""
+    got = _outline_compiled(paths, ppq)
+    if got is not None:
+        return keep_longest(got)
     raw = []
     for path in paths:
         closed = path_closed(path)
@@ -1317,6 +1321,25 @@ def paths_outline(paths, ppq):
             path = stretch_ends(path)
         raw.append(line_notes(path * [ppq, 1]))
     return keep_longest(np.concatenate(raw) if raw else np.zeros((0, 3), np.int64))
+
+
+def _outline_compiled(paths, ppq):
+    """paths_outline's notes before keep_longest from the compiled loop (outline.rs: every path in one call), or
+    None = the NumPy way above (its twin: the same notes in the same order)."""
+    from files.speed import loops
+    fast = loops()
+    if not paths or getattr(fast, "outline_notes", None) is None:
+        return None
+    sizes = [len(p) for p in paths]
+    try:
+        pts = np.array(list(itertools.chain.from_iterable(paths)), float)
+    except (TypeError, ValueError):
+        return None
+    if pts.shape != (sum(sizes), 2):
+        return None
+    offs = np.zeros(len(sizes) + 1, np.int64)
+    np.cumsum(sizes, out=offs[1:])
+    return fast.outline_notes(pts, offs, np.array([path_closed(p) for p in paths], bool), ppq)
 
 
 def poly_edges(polys):

@@ -6,6 +6,8 @@ What's new:
 
 • Copy along a path can turn the copies: the new Turn boxes under Size set the first and the last copy's angle, and the ones between turn step by step (0 → 360 spins them once along the path). Bigger, smaller and turned copies are now made again from your drawing, so their edges stay clean instead of being stretched into steps. See [page:path|Copy along a path].
 
+• Faster: the outline of any drawn shape makes its notes much faster, so Copy along a path's grown and turned copies of a drawing are made about twice as fast.
+
 • Fixed: in Copy along a path, a grown copy could reach a key row or two past the point it should end on, and copies past the top key or before bar 1 weren't kept with Keep notes made there on.
 
 • Fixed: a funnel whose wall comes before its line start in time (flipped sideways, or turned past upright) lost pieces where a key row crosses it twice: holes, horns floating apart or missing. Such funnels in older projects get those pieces back.

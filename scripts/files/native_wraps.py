@@ -381,6 +381,16 @@ class Wraps:
                               np.ascontiguousarray(vk, f), int(vmode), float(keep), float(cycle), out)
         return got if got >= 0 else None
 
+    def outline_notes(self, pts, offs, closed, ppq):
+        """custom.paths_outline's notes before keep_longest ((n, 3) rows), or None = not run (its NumPy way, the
+        same notes). Not in NEEDS (NumPy's way is the twin)."""
+        if not hasattr(self.x, "outline_notes"):
+            return None
+        got = self._tuple("outline_notes", (np.ascontiguousarray(pts, np.float64).reshape(-1),
+                                            np.ascontiguousarray(offs, np.int64),
+                                            np.ascontiguousarray(closed, bool).view(np.uint8), float(ppq)))
+        return None if got is None else got[0].reshape(-1, 3)
+
     def row_gaps(self, notes, order):
         """sustain.row_order's gaps (+ gateflip's exact copies: 1 = same start, end, key as the note before in
         order), or None = not run (the NumPy way)."""

@@ -73,6 +73,7 @@ mod midi_index;
 mod midi_scan;
 mod misc;
 mod order;
+mod outline;
 mod pages;
 mod pen;
 mod piece;
