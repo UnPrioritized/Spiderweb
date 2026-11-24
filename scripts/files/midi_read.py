@@ -19,7 +19,8 @@ from files.midi_scan import (AFTER_EOT, BAD, C_SIZE, CUT, NO_EOT, ST_AFTER, ST_E
 
 PIECE = 16 << 20  # bytes read at a time
 BIGGEST_EVENT = 1 << 30  # one meta / sysex event bigger than this = the track can't be read
-SCAN_WORKERS = 8  # tracks read side by side
+SCAN_WORKERS = max(1, min(8, (os.cpu_count() or 2) // 2))  # tracks read side by side: half the threads, 8 at most
+# (the synths' rule: a 4-core / 8-thread PC used all 8 and other programs stalled)
 JOB_BYTES = 4 << 20  # small tracks read together in jobs of about this many bytes
 JOB_TRACK = 4096  # what one track costs on top of its bytes (when grouping)
 # file-level marks (MidiFile.marks)
