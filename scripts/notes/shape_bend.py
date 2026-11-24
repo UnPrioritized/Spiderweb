@@ -550,21 +550,32 @@ def edge_rect(st0, r, box, own, ppq):
     return float(min(t)), float(max(t)), float(min(k)), float(max(k))
 
 
-def edge_samples(notes, ppq):
+def cell_samples(samples, wave_keys=None):
+    """edge_samples over each note's whole key: each point also half a key above and below its row (a note is a box
+    a key tall: its corners reach farther under short Ripples / Straight to round, hunt 2026-11-24), and between
+    them every eighth of the shortest ripple wave when that is shorter (wave_keys: its length in keys)."""
+    p = np.asarray(samples, np.float64).reshape(-1, 2)
+    m = 3 if not wave_keys else max(3, min(17, int(math.ceil(8 / max(wave_keys, 1e-3))) + 1))
+    return np.vstack([p + [0, d] for d in np.linspace(-0.5, 0.5, m)])
+
+
+def edge_samples(notes, ppq, wave=None):
     """Points (tick, key) along notes (start, end, key, ...) a bend's reach is measured on: every note's ends, long
-    notes every 1/8 of the box's width; thinned evenly past EDGE_SAMPLES, each key row's first start and last end and
-    each time slice's lowest / highest key always kept (the outline: where a bent shape reaches farthest)."""
+    notes every 1/64 of the box's width (an eighth of the shortest ripple wave, wave = its share of the box, when
+    shorter; hunt 2026-11-24: 1/8 missed short ripples' and Straight to round's peaks); thinned evenly past
+    EDGE_SAMPLES, each key row's first start and last end and each time slice's lowest / highest key always kept
+    (the outline: where a bent shape reaches farthest)."""
     n = np.asarray(notes, np.int64)
     if not len(n):
         return np.zeros((0, 2))
     n = n.reshape(len(n), -1)[:, :3]
     s, e, k = n[:, 0].astype(np.float64), n[:, 1].astype(np.float64), n[:, 2].astype(np.float64)
     width = max(float(e.max() - s.min()), 1.0)
-    step = width / 8
+    step = width * min(1 / 64, (wave or 1.0) / 8)
     pts = [np.column_stack((s, k)), np.column_stack((e, k))]
     long_ = np.nonzero(e - s > step)[0]
     if len(long_):
-        cnt = np.minimum(np.ceil((e[long_] - s[long_]) / step).astype(np.int64), 64)
+        cnt = np.minimum(np.ceil((e[long_] - s[long_]) / step).astype(np.int64), 1024)
         idx = np.repeat(long_, cnt)
         f = (np.arange(len(idx)) - np.repeat(np.cumsum(cnt) - cnt, cnt) + 0.5) / np.repeat(cnt, cnt)
         pts.append(np.column_stack((s[idx] + f * (e[idx] - s[idx]), k[idx])))
@@ -587,7 +598,7 @@ def edge_samples(notes, ppq):
     return np.vstack(keep)
 
 
-def set_edges(benders, tabs, samples, rect):
+def set_edges(benders, tabs, samples, rect, fit_rect=None):
     """Fill in Fit inside / Cut off on the benders of the Stir tabs (benders[i] is tabs[i]'s; a Warp / Liquify after
     them has none): Fit measures how far the bend so far takes samples (tick, key) and shrinks that into rect; Cut
     marks rect. Returns the benders."""
@@ -605,7 +616,7 @@ def set_edges(benders, tabs, samples, rect):
         q = b.bend2_loose(p) if tab else b.bend2(p)  # (the Warp / Liquify after the tabs: never folded)
         if edge == "fit":
             ok = np.isfinite(q).all(1)
-            b.fit = fit_of(q[ok], rect, tabs[i].get("fit_way", "keep")) if ok.any() else None
+            b.fit = fit_of(q[ok], fit_rect or rect, tabs[i].get("fit_way", "keep")) if ok.any() else None
             q = np.column_stack(b.fitted(q[:, 0], q[:, 1]))
         elif edge == "cut":
             b.cut = rect

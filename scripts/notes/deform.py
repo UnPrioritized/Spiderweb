@@ -714,6 +714,37 @@ def cut_outside(st, area):
     return cut_many([st], area)[0]
 
 
+ON_LINE = 1e-4  # (a point this share of the way from the area's middle to its line, or nearer the line, counts as
+# on it = inside: a stroke drawn on the area's line stays, hunt 2026-11-24)
+
+
+def in_area(x, y, area):
+    """Which points are inside the area for Cut off: inside, or on its line (within ON_LINE of it, measured towards
+    the area's middle)."""
+    mx, my = area["middle"]
+    x, y = np.asarray(x, np.float64), np.asarray(y, np.float64)
+    return area_q(mx + (x - mx) * (1 - ON_LINE), my + (y - my) * (1 - ON_LINE), area) < 1
+
+
+def reached(sts, area):
+    """Which strokes the area reaches (a point inside it or on its line): Cut off only cuts those (hunt 2026-11-24,
+    user took it: with nothing picked, strokes the area never touches stay whole)."""
+    from notes.custom import stroke_points
+    pts, who = [], []
+    for i, st in enumerate(sts):
+        p = np.asarray(stroke_points(st), np.float64).reshape(-1, 2)
+        if len(p) >= 2:
+            p = _dense(st, {"ripple": 0}, 0.004)
+        pts.append(p)
+        who.append(np.full(len(p), i))
+    if not pts or not sum(len(p) for p in pts):
+        return [False] * len(sts)
+    P, W = np.vstack(pts), np.concatenate(who)
+    hit = np.zeros(len(sts), bool)
+    hit[W[in_area(P[:, 0], P[:, 1], area)]] = True  # (asked once for every stroke's points)
+    return hit.tolist()
+
+
 def cut_many(sts, area):
     """cut_outside for many strokes at once: the area asked once for all their points and once per halving for all
     their crossings (one stroke at a time asked it ~25 times each: 0.75 ms a stroke, Deform's Copies make hundreds)."""
@@ -732,7 +763,7 @@ def cut_many(sts, area):
         return out
     P = np.vstack(dense) if dense else np.zeros((0, 2))
     who = np.concatenate(owner) if owner else np.zeros(0, np.int64)
-    inside = area_q(P[:, 0], P[:, 1], area) < 1 if len(P) else np.zeros(0, bool)
+    inside = in_area(P[:, 0], P[:, 1], area) if len(P) else np.zeros(0, bool)
     starts = np.cumsum([0] + [len(p) for p in dense])
     # (crossings: between two points of one stroke, one in and one out; all halved together)
     flips = np.nonzero((inside[1:] != inside[:-1]) & (who[1:] == who[:-1]))[0] if len(P) > 1 else np.zeros(0, np.int64)
@@ -743,7 +774,7 @@ def cut_many(sts, area):
         for _ in range(24):  # (halving: lo stays on a's side, hi on b's)
             mid = (lo + hi) / 2
             m = a + (b - a) * mid[:, None]
-            same = (area_q(m[:, 0], m[:, 1], area) < 1) == ina
+            same = in_area(m[:, 0], m[:, 1], area) == ina
             lo, hi = np.where(same, mid, lo), np.where(same, hi, mid)
     cross = a + (b - a) * ((lo + hi) / 2)[:, None]
     cut_at = np.searchsorted(flips, starts)  # (each stroke's crossings: flips[cut_at[i]:cut_at[i + 1]])

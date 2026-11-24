@@ -1630,7 +1630,19 @@ def shape_tabs_done(sh, ppq, keys, get):
     folds_mid = mid_fold(tabs, wp, lq)  # (a Bounce / Wrap with steps after it: notes bent + folded as they go)
     edges = None
     if any(st.get("shape_edge", "escape") != "escape" for st in tabs):
-        edges = (edge_samples(notes, ppq), edge_rect(tabs[0], rule, box, own, ppq))
+        # (measured on whole-key note boxes (a row's notes / a Fill row's outline reach half a key up and down) and
+        # finely enough for the shortest ripple; Fit sizes them into the box's rows grown half a key, so no box
+        # corner reaches a row past it: hunt 2026-11-24)
+        from notes.shape_bend import cell_samples
+        waves = [st["ripple_len"] / 100 for st in tabs if st.get("ripple")]
+        r0 = edge_rect(tabs[0], rule, box, own, ppq)
+        wave = min(waves) if waves else None
+        rows = edge_samples(notes, ppq, wave)
+        cells = (cell_samples(rows, wave * (r0[3] - r0[2] + 1) if wave else None), r0,
+                 (r0[0], r0[1], r0[2] - 0.5 + 1e-3, r0[3] + 0.5 - 1e-3))  # (cut notes: whole-key boxes)
+        # (the outline way lays rows at their middles; a short ripple swings within one row's height, so then the
+        # whole key counts there too)
+        edges = cells if wave else (rows, r0)
         set_edges(benders, tabs, *edges)
 
     def fin(made, tracks):
@@ -1668,7 +1680,7 @@ def shape_tabs_done(sh, ppq, keys, get):
     cell = (box[0], box[1], box[2] - 0.5, box[3] + 0.5), (own[0], own[1], own[2] - 0.5, own[3] + 0.5)
     note_benders = [_cell_stir(st, rule, box, own, cell, ppq) for st in tabs] + benders[len(tabs):]
     if edges is not None:
-        set_edges(note_benders, tabs, *edges)
+        set_edges(note_benders, tabs, *cells)
     if as_notes or first == 0 or mid_cut or folds_mid:  # (a Cut off with steps after it: pulled, exact to the tick)
         got = AS_NOTES
         benders = note_benders  # (look / within / bend_tk below read it)
@@ -1710,6 +1722,11 @@ def shape_tabs_done(sh, ppq, keys, get):
         try:
             if got == PULL or mid_cut or any(st["polar"] or st["kaleido"] >= 2 for st in tabs):
                 raise Folded
+            if folds_mid:  # (a Bounce / Wrap with steps after it, hunt 2026-11-24: bent up to it, folded exactly
+                # like the last step's, then the later steps bend those notes; bending one piece across a Wrap
+                # seam stretched it over the whole box)
+                made, tracks = _folded_parts(made, tracks, benders, ppq, edges[1], look)
+                return dict(out, _bent=bent_token(*fin(*_on_keys(made, tracks, keys))))
             if not as_notes and first is not None:  # (a drawn shape cut where bent: its edge from the bent outline)
                 made, tracks, full = note_boxes_bent(made, tracks, bend_tk, ppq, look, lengths=True, raw=True,
                                                      kept=lone_lq)
@@ -1743,6 +1760,43 @@ def shape_tabs_done(sh, ppq, keys, get):
             t, k = look((made[:, 0] + made[:, 1]) / 2, made[:, 2].astype(np.float64))
             tracks = np.asarray(before)[nearest(notes, t, k, own=False)]
     return dict(got, _bent=bent_token(*fin(made, tracks)))
+
+
+def _folded_parts(made, tracks, benders, ppq, rect, look):
+    """Notes bent through benders in parts, split at each Bounce / Wrap (a bender's .fold): each part bent like pasted
+    notes, then folded into rect exactly (shape_bend.fold_notes: pieces cut at the box's sides)."""
+    from notes.shape_bend import fold_notes, note_boxes_bent
+    made = np.asarray(made, np.int64)
+    part = []
+    for b in list(benders) + [None]:
+        if b is not None:
+            part.append(b)
+            if b.fold is None:
+                continue
+        if part and len(made):
+            kind = part[-1].fold[0] if part[-1].fold is not None else None
+            saved = [x.fold for x in part]
+            for x in part:  # (the fold done on the notes below, not on the bent points)
+                x.fold = None
+            try:
+                def bend_tk(t, k, part=part):
+                    p = np.column_stack((t, k))
+                    for x in part:
+                        p = x.bend2(p)
+                    return p[:, 0], p[:, 1]
+
+                def back(t, k, part=part):
+                    for x in reversed(part):
+                        t, k = x.look_tk(t, k)
+                    return t, k
+                made, tracks = note_boxes_bent(made, tracks, bend_tk, ppq, back)
+            finally:
+                for x, f in zip(part, saved):
+                    x.fold = f
+            if kind is not None:
+                made, tracks = fold_notes(made, tracks, kind, rect)
+        part = []
+    return made, tracks
 
 
 def _cell_stir(st, rule, box, own, cell, ppq):

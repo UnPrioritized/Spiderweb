@@ -87,8 +87,7 @@ class DrawerDeform:
         if e.keysym == "Escape" and win:
             win.cancel()
         elif win and e.state & 0x0004 and e.keysym.lower() in ("z", "y") and win.steps:
-            redo = e.keysym.lower() == "y" or bool(e.state & 0x0001)
-            win.steps.press_key(1 if redo else -1)
+            win.undo_key(e.keysym.lower() == "y" or bool(e.state & 0x0001))
         return "break"
 
     def deforming(self):
@@ -138,8 +137,13 @@ class DeformWindow(tk.Toplevel):
         self._gesture = None  # (a board drag: its changes are one step)
         self._shapes = {}  # (area dropdown place -> the library drawing it lent, for undo)
         self.newpos = None  # (Cut off outside the area: stroke places before -> after, cut_strokes)
+        self._dead, self._pressed = False, None  # (a board drag called off by Ctrl+Z: undo_key)
         self._build()
         self.steps = LocalUndo(self, self.state_text, self.put_state)
+        from window.widgets import REDO_KEYS, UNDO_KEYS
+        for keys, redo in ((UNDO_KEYS, False), (REDO_KEYS, True)):  # (the window's own keys too: a drag held on the
+            for k in keys:  # board is called off, never undone under the mouse; undo_key)
+                self.bind(k, lambda e, r=redo: (self.undo_key(r), "break")[1])
         self.block(True)
         self.protocol("WM_DELETE_WINDOW", self.cancel)
         self.bind("<Escape>", lambda e: self.cancel())
@@ -544,7 +548,10 @@ class DeformWindow(tk.Toplevel):
                 self.dr.picks = set(picks)
             return strokes
         n = len(self.base_strokes)
-        bent = set(self.bend_idx)
+        # (only strokes the area reaches, as drawn before the bend (hunt 2026-11-24, user took it): with nothing
+        # picked, strokes far from the area stay whole instead of being cut away; copies always count)
+        idx = list(self.bend_idx)
+        bent = {i for i, yes in zip(idx, deform.reached([self.base_strokes[i] for i in idx], d["area"])) if yes}
         out, newpos = [], {}
         which = [j for j in range(len(strokes)) if j in bent or j >= n]
         cut = dict(zip(which, deform.cut_many([strokes[j] for j in which], d["area"])))  # (all at once: fast)
@@ -778,11 +785,25 @@ class DeformWindow(tk.Toplevel):
         if str(self.dr.canvas.cget("cursor")) != cursor:
             self.dr.canvas.config(cursor=cursor)
 
+    def undo_key(self, redo):
+        """Ctrl+Z / Ctrl+Y from the drawer. While the board holds something (hunt 2026-11-24, user took A): Ctrl+Z calls
+        the drag off (back to where the press found it, the press dead until let go, like a number box drag),
+        Ctrl+Y does nothing."""
+        if self.grab is not None or self._dead:
+            if not redo and not self._dead:
+                self.grab, self._dead = None, True
+                if self.state_text() != self._pressed:
+                    self.steps.press_key(-1)
+            return
+        self.steps.press_key(1 if redo else -1)
+
     def board_press(self, e):
         h = self.hit(e)
         self.grab = None
+        self._dead = False
         if h is None:
             return
+        self._pressed = self.state_text()  # (how it was at the press: a Ctrl+Z mid drag goes back here)
         self._gesture = "board"  # (the whole drag = one step of the window's own undo)
         a = self.area_now()
         at = self.dr.from_screen(e.x, e.y)
@@ -875,6 +896,7 @@ class DeformWindow(tk.Toplevel):
 
     def board_release(self, e):
         self.grab = None
+        self._dead = False
         if self._gesture:
             self.step_done(self._gesture)
             self._gesture = None
