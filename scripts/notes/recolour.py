@@ -110,7 +110,8 @@ STIR_DEFAULTS = {"turn": 0.0, "twist": 0.0, "centre": [50.0, 50.0], "sets": "sta
 # "edge" left on a tab switched to Shape must not start cutting): "escape" (as before) / "cut" = notes past the box cut
 # exactly at its sides / "fit" = the bent shape shrunk back inside the box ("fit_way": "keep" proportions / "stretch"
 # each way on its own); each tab's choice right after its own bend (user). notes/shape_bend.py set_edges)
-SHAPE_EDGES = ("escape", "cut", "fit")
+SHAPE_EDGES = ("escape", "cut", "fit", "bounce", "bounce2", "wrap")  # (stage B, user: Bounce back (+ edge twice) /
+# Wrap around too: what goes past a side folds back in like a mirror / comes in again from the other side)
 FIT_WAYS = ("keep", "stretch")
 # ("chop" = Cut notes where bent (Shape tabs only; user 2026-11-17, default ON): a drawn shape's notes are made
 # unbent, then bent + cut like pasted notes (engine.shape_tabs_done); off = the outline bent, notes laid again in it)

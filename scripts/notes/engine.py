@@ -1625,16 +1625,21 @@ def shape_tabs_done(sh, ppq, keys, get):
     benders = benders_of(tabs, wp, rule, box, own, ppq, lq)
     # (AT THE EDGES on Shape tabs, PLAN.md "Never escape": Fit inside / Cut off set on each tab's bender; the last
     # step's Cut / Fit trims the finished notes to the box (fin); a Cut with steps after it = the pulled way)
-    from notes.shape_bend import clip_box, edge_rect, edge_samples, last_edge, set_edges
+    from notes.shape_bend import FOLDS, clip_box, edge_rect, edge_samples, fold_notes, last_edge, mid_fold, set_edges
     last, mid_cut = last_edge(tabs, wp, lq)
+    folds_mid = mid_fold(tabs, wp, lq)  # (a Bounce / Wrap with steps after it: notes bent + folded as they go)
     edges = None
     if any(st.get("shape_edge", "escape") != "escape" for st in tabs):
         edges = (edge_samples(notes, ppq), edge_rect(tabs[0], rule, box, own, ppq))
         set_edges(benders, tabs, *edges)
 
     def fin(made, tracks):
-        if last in ("cut", "fit") and edges is not None:
+        if edges is None:
+            return made, tracks
+        if last in ("cut", "fit"):
             return clip_box(made, tracks, edges[1])
+        if last in FOLDS:  # (the last step's Bounce / Wrap: the finished notes folded in exactly)
+            return fold_notes(made, tracks, last, edges[1])
         return made, tracks
 
     def look(t, k):  # (the last tab first: tab 2 bent what tab 1 left; the Warp last)
@@ -1664,7 +1669,7 @@ def shape_tabs_done(sh, ppq, keys, get):
     note_benders = [_cell_stir(st, rule, box, own, cell, ppq) for st in tabs] + benders[len(tabs):]
     if edges is not None:
         set_edges(note_benders, tabs, *edges)
-    if as_notes or first == 0 or mid_cut:  # (a Cut off with steps after it: pulled, exact to the tick)
+    if as_notes or first == 0 or mid_cut or folds_mid:  # (a Cut off with steps after it: pulled, exact to the tick)
         got = AS_NOTES
         benders = note_benders  # (look / within / bend_tk below read it)
     elif first is None:
@@ -1727,7 +1732,7 @@ def shape_tabs_done(sh, ppq, keys, get):
                 made, tracks = pulled(made, tracks, look, box, ppq, joined=got == PULL, within=within)
         return dict(out, _bent=bent_token(*fin(*_on_keys(made, tracks, keys))))
     carried = bend and before is not None and len(before)
-    if not carried and last not in ("cut", "fit"):
+    if not carried and (edges is None or last == "escape"):
         return got
     from notes.recolour import nearest
     made, tracks = get(_steps_off(without_recolour(got)))

@@ -335,7 +335,8 @@ class StirBend:
     """One Shape tab, forwards: points (tick, key) -> where the bend puts them (floats).
     st: the tab (filled in); r: the Recolour (its frame / ppq); box, own: recolour.colour_box's, of the notes before
     the bend."""
-    fit = cut = None  # (At the edges: set_edges; the Warp / Liquify benders built on this class never have them)
+    fit = cut = fold = None  # (At the edges: set_edges; the Warp / Liquify benders built on this class never have
+    # them. fold = (kind, box) for Bounce / Wrap on a tab with steps after it: points folded back in as bent)
 
     def __init__(self, st, r, box, own, ppq):
         self.st = st
@@ -381,8 +382,9 @@ class StirBend:
         """Spots (tick, key) -> where the bend brings them from (floats), Kaleidoscope too (pulled()); with Cut off,
         spots past the box come from nowhere (NaN)."""
         t, k = np.asarray(t, np.float64), np.asarray(k, np.float64)
-        if self.cut is not None:
-            t0, t1, k0, k1 = self.cut
+        box = self.cut if self.cut is not None else self.fold[1] if self.fold is not None else None
+        if box is not None:  # (Bounce / Wrap looking back: only the part that stayed in is found, my pick)
+            t0, t1, k0, k1 = box
             out = (t < t0 - 1e-6) | (t > t1 + 1e-6) | (k < k0 - 1e-6) | (k > k1 + 1e-6)
             if out.any():
                 t, k = np.where(out, np.nan, t), np.where(out, np.nan, k)
@@ -514,6 +516,8 @@ class StirBend:
         x, y = self.to_unit(p[:, 0], p[:, 1])
         x, y = self.forward_unit(x, y)
         t, k = self.fitted(*self.from_unit(x, y))
+        if self.fold is not None:
+            t, k = fold_points(t, k, *self.fold)
         return np.column_stack((t, k))
 
     def bend2_loose(self, p):
@@ -593,7 +597,9 @@ def set_edges(benders, tabs, samples, rect):
         tab = i < len(tabs)
         edge = tabs[i].get("shape_edge", "escape") if tab else "escape"
         if tab:
-            b.fit = b.cut = None
+            b.fit = b.cut = b.fold = None
+            if edge in FOLDS and i < len(benders) - 1:  # (the last step's fold is done on the finished notes: fin)
+                b.fold = (edge, rect)
         if not len(p):
             continue
         q = b.bend2_loose(p) if tab else b.bend2(p)  # (the Warp / Liquify after the tabs: never folded)
@@ -604,8 +610,80 @@ def set_edges(benders, tabs, samples, rect):
         elif edge == "cut":
             b.cut = rect
             q = q[(q[:, 0] >= t0) & (q[:, 0] <= t1) & (q[:, 1] >= k0) & (q[:, 1] <= k1)]
+        elif edge in FOLDS:
+            q = np.column_stack(fold_points(q[:, 0], q[:, 1], edge, rect))
         p = q
     return benders
+
+
+FOLDS = ("bounce", "bounce2", "wrap")
+
+
+def _fold_1d(x, lo, size, kind):
+    """Places x folded into lo .. lo + size: bounce = mirrored back at each side (a triangle wave), wrap = from
+    the other side again."""
+    if size <= 0:
+        return np.full(np.shape(x), float(lo))
+    u = np.mod(np.asarray(x, np.float64) - lo, 2 * size if kind != "wrap" else size)
+    if kind != "wrap":
+        u = np.where(u > size, 2 * size - u, u)
+    return lo + u
+
+
+def fold_points(t, k, kind, rect):
+    """Bent points (tick, key) folded back into the box rect (t0, t1, k0, k1): Bounce back = mirrored at its sides,
+    "edge twice" = keys mirrored half a key past the edge rows (the edge row comes twice, like the colours' 1 2 3 3 2 1),
+    Wrap around = coming in from the other side (keys: the box's rows round and round)."""
+    t0, t1, k0, k1 = rect
+    t = np.asarray(t, np.float64)
+    k = np.asarray(k, np.float64)
+    ok = np.isfinite(t) & np.isfinite(k)
+    ft = _fold_1d(np.where(ok, t, t0), t0, t1 - t0, "wrap" if kind == "wrap" else "bounce")
+    if kind == "bounce":
+        fk = _fold_1d(np.where(ok, k, k0), k0, k1 - k0, "bounce")
+    else:  # (rows k0 - 1/2 .. k1 + 1/2: the edge rows count whole)
+        fk = _fold_1d(np.where(ok, k, k0), k0 - 0.5, k1 - k0 + 1, kind if kind == "wrap" else "bounce")
+    return np.where(ok, ft, t), np.where(ok, fk, k)
+
+
+def fold_notes(made, tracks, kind, rect):
+    """Finished notes (start, end, key, ...) folded into rect exactly (the last step's Bounce / Wrap): each note cut
+    where it crosses a side's place (every box width along), each piece mirrored back / moved in; keys folded row by
+    row (Bounce: mirrored at the edge rows, edge twice: the edge row comes twice, Wrap: round the box's rows)."""
+    made = np.asarray(made, np.int64)
+    if not len(made):
+        return made, tracks
+    t0, t1, k0, k1 = (int(round(v)) for v in rect)
+    W, N = max(t1 - t0, 1), k1 - k0 + 1
+    s, e = made[:, 0], made[:, 1]
+    m0 = np.floor_divide(s - t0, W)
+    m1 = np.floor_divide(e - 1 - t0, W)
+    cnt = np.maximum(m1 - m0 + 1, 1)
+    idx = np.repeat(np.arange(len(made)), cnt)
+    m = np.repeat(m0, cnt) + (np.arange(len(idx)) - np.repeat(np.cumsum(cnt) - cnt, cnt))
+    base = t0 + m * W
+    a = np.maximum(s[idx], base) - base
+    b = np.minimum(e[idx], base + W) - base
+    if kind == "wrap":
+        ns, ne = t0 + a, t0 + b
+    else:
+        flip = (m % 2) != 0
+        ns = np.where(flip, t1 - b, t0 + a)
+        ne = np.where(flip, t1 - a, t0 + b)
+    key = made[idx, 2] - k0
+    if kind == "wrap":
+        key = np.mod(key, N)
+    elif kind == "bounce2":
+        key = np.mod(key, 2 * N)
+        key = np.where(key >= N, 2 * N - 1 - key, key)
+    else:
+        P = max(2 * (N - 1), 1)
+        key = np.mod(key, P) if N > 1 else np.zeros_like(key)
+        key = np.where(key > N - 1, P - key, key)
+    out = made[idx].copy()
+    out[:, 0], out[:, 1], out[:, 2] = ns, ne, k0 + key
+    ok = out[:, 1] > out[:, 0]
+    return out[ok], (None if tracks is None else np.asarray(tracks)[idx][ok])
 
 
 def fit_of(q, rect, way):
@@ -650,6 +728,14 @@ def last_edge(tabs, wp, lq):
     last = "escape" if after or not edges else edges[-1]
     mid = any(e == "cut" for e in (edges if after else edges[:-1]))
     return last, mid
+
+
+def mid_fold(tabs, wp, lq):
+    """Whether a Bounce / Wrap comes before other steps: those steps bend notes folded as they go (the cut-notes way:
+    lines can't jump to the other side)."""
+    edges = [st.get("shape_edge", "escape") for st in tabs]
+    after = wp is not None or lq is not None
+    return any(e in FOLDS for e in (edges if after else edges[:-1]))
 
 
 class WarpBend(StirBend):
