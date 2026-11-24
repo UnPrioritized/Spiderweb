@@ -60,6 +60,10 @@ What's new:
 
 • Drawer: Deform… has Copies, in its own box under Bends. At 2 or more, the selected strokes stay and turned copies are added, each turned a bit more: one line with Turn 22.5 and Copies 16 becomes the spokes of a wheel. The area has Position boxes, so you can type where its middle goes (50 / 50 = the board's middle). The drawer's Select tool also uses the piano roll's Select pointer now. See [page:drawer_deform|Deform].
 
+• Stir tabs set to Shape have their own At the edges: Cut off (notes past the box cut off at its sides), Fit inside (the bent shape shrunk back into its box, keeping its proportions or each way on its own), Bounce back and Wrap around. Each tab does it right after its own bend. See [page:deform|Deform shapes].
+
+• Drawer: Deform… has Cut off outside the area: whatever the bend pushes past the area's line is cut away, so a line turned inside a square stays inside it. The area, its handles and the Centre now snap to the grid while dragged (Shift = free), and Ctrl+Z / Ctrl+Y work in the drawer while Deform is open. See [page:drawer_deform|Deform].
+
 • Fixed: drawings with many lines meeting in one spot (like the spokes of a wheel) made the drawer and custom shapes slow, up to many seconds per change.
 
 • Right-click → Turn → Turn by… turns shapes by a typed angle (80, 22.5, decimals too), live as you type. The right-click menus now keep their flips under Flip and their turns under Turn, on the piano roll and in the drawer (where Turn by… opens Deform). See [page:custom_edit].

@@ -11,7 +11,19 @@ The Deform row in the side panel (under Recolour) holds [page:stir|Stir…], [pa
 
 The two ways give slightly different edges even on a plain Fill, since one cuts bent notes and the other fills the bent outline row by row.
 
-The shape's box and its handles stay where they are, and the bent notes may go past the box. A step set to Shape shows ◇ after its name (in Stir's tabs and in Properties). Settings that only choose colours (At the edges, Squeeze, Colour sets, flips, Colour edges, Folds) are greyed for Shape.
+The shape's box and its handles stay where they are, and the bent notes may go past the box. A step set to Shape shows ◇ after its name (in Stir's tabs and in Properties). Settings that only choose colours (Squeeze, Colour sets, flips, Colour edges, Folds) are greyed for Shape.
+
+## At the edges (Stir tabs set to Shape)
+
+In a Stir tab set to Shape, At the edges picks what happens to whatever the tab's bend pushes past the shape's box:
+
+• Escape (the start): it stays where the bend put it, past the box.
+• Cut off: notes past the box are cut off exactly at its sides.
+• Fit inside: the bent shape is shrunk back until it fits in the box. Shrink picks how: Keep proportions (the same amount both ways, so it keeps its look) or Each way on its own (across and up shrink separately). A bend that already stays inside is left as it is.
+• Bounce back: what goes past a side folds back in like a mirror. "Edge twice" repeats the edge row once, like the colours' Bounce back, edge twice.
+• Wrap around: what goes past a side comes back in from the other side.
+
+Each tab does this right after its own bend, so with two tabs the second one bends what the first left, and can go past the box again unless it has its own choice. A Bounce or Wrap with more steps after it always cuts the notes where bent (an outline can't jump to the other side).
 
 A Liquify set to Shape can also reach past the box: brush outside it and the shape is pushed out there too.
 
