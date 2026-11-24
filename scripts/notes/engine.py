@@ -767,8 +767,17 @@ def _cached(sh):
 STROKES_MARK = "\0strokes:"  # (a text's strokes in a key: their fingerprint, text.strokes_token)
 
 
+_shared_strokes = threading.local()  # .map = {id(strokes): (strokes, their JSON)}: remade_copy's copies, which all share
+# their shape's strokes (only their frame differs), while one copy is made: written out once, not once per copy
+
+
 def strokes_text(strokes):
     """A shape's strokes in a key: a text's still-true fingerprint (text.Strokes), else their JSON."""
+    known = getattr(_shared_strokes, "map", None)
+    if known:
+        got = known.get(id(strokes))
+        if got is not None and got[0] is strokes:
+            return got[1]
     tok = strokes_token(strokes)
     return STROKES_MARK + tok if tok else json.dumps(strokes)
 
@@ -2049,7 +2058,7 @@ def fx_notes(sh, ppq, keys, get):
         if last["tool"] in RUNNER:
             return run_step(notes, tracks, last, rest, ppq, get)
         if last["tool"] == "path":  # (copies at another size made again from the drawing: sharp, not stretched)
-            return fx_step(notes, tracks, last, sh, ppq, keys, remade_copy(rest, ppq, get))
+            return fx_step(notes, tracks, last, sh, ppq, keys, remade_copy(rest, ppq, get, keys))
         return fx_step(notes, tracks, last, sh, ppq, keys)
     if sh.get("_m"):
         if sh.get("cut"):  # (a sliced piece: its notes as it was, before the flips; sliced.steps_kept)
@@ -2645,7 +2654,7 @@ def bare_of(sh):
     return {k: v for k, v in sh.items() if k not in ("fx", "_m")}
 
 
-def remade_copy(rest, ppq, get):
+def remade_copy(rest, ppq, get, keys=128):
     """For a Copy along a path page on top of rest (the shape as the page's notes are made): fn(s, at, key, dt, dk)
     -> (notes, tracks) of rest's drawing made s times as big round (tick at, key) and moved dt ticks, dk keys, with
     every step before the page run on it again (user 2026-11-24: copies stay sharp, the earlier tools work on each
@@ -2696,11 +2705,41 @@ def remade_copy(rest, ppq, get):
                 return [b0 + (b - b0) * s + dt / ppq, key + (k - key) * s + dk]
             L = np.eye(2) * s
         try:
-            q = mapped_part(rest, f, L) if rest.get("kind") != "funnel" else mapped_funnel(rest, f, L)
+            kind = rest.get("kind")
+            q = mapped_funnel(rest, f, L) if kind == "funnel" else mapped_custom(rest, f, L) if kind == "custom" \
+                else mapped_part(rest, f, L)
         except (KeyError, TypeError, ValueError):
             return None
-        return None if q is None else get(q)
+        # (made straight away, not through get: each copy is a shape of its own, so keying it (its whole drawing
+        # as text) only cost time; the steps inside still go through get)
+        if q is None:
+            return None
+        strokes = q.get("strokes") if q.get("strokes") is rest.get("strokes") else None
+        if strokes is None:
+            return fx_notes(q, ppq, keys, get)
+        if not shared:
+            shared.append((strokes, strokes_text(strokes)))
+        was = getattr(_shared_strokes, "map", None)
+        _shared_strokes.map = {id(strokes): shared[0]}
+        try:
+            return fx_notes(q, ppq, keys, get)
+        finally:
+            _shared_strokes.map = was
+    shared = []  # (rest's strokes and their JSON, once)
     return fn
+
+
+def mapped_custom(sh, f, L):
+    """merge.mapped_part for a custom shape, quicker: only its 3 frame points change, so its strokes (thousands of
+    points on a big drawing; copying them was most of a remade copy's time) are shared, not copied. None as
+    mapped_part (pasted notes, text, Hz bass, merged, a sliced piece, glue boxes fixed in the song)."""
+    from notes.merge import flipped_settings
+    if sh.get("cut") or isinstance(sh.get("glue"), list) or "notes" in sh or sh.get("text") or sh.get("hz") \
+            or sh.get("merge"):
+        return None
+    q = {k: v if k == "strokes" else copy.deepcopy(v) for k, v in sh.items()}
+    q["pts"] = [f(b, k) for b, k in sh["pts"]]
+    return flipped_settings(q, L)
 
 
 def mapped_funnel(sh, f, L):
