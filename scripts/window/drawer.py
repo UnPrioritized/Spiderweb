@@ -137,6 +137,7 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
 
     def on_tool(self):
         self.hover = None
+        self.set_board_cursor(self.board_cursor())  # (a tool key pressed over the board: its pointer at once)
         if self.tool.get() != "select":
             self.last_tool = self.tool.get()
         if self.tool.get() != "lasso":

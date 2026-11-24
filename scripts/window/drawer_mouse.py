@@ -17,7 +17,7 @@ from notes.bezier import (add_anchor, add_anchor_pair, can_delete, delete_point,
 from notes.custom import ROLES, carried_spots, carry_areas, role_of, stroke_points, takes_formula
 from notes.pattern import moved_formulas
 from notes.slice import is_closed
-from roll.roll_shared import BOX_STILL, line_touches_box, mouse_trail, shown_points
+from roll.roll_shared import BOX_STILL, SELECT_CURSOR, line_touches_box, mouse_trail, shown_points
 from window.drawer_areas import AREA_FRAME
 from window.formula_host import DrawerHost, formula_menu
 from window.layers import pasted
@@ -678,6 +678,18 @@ class DrawerMouse:
         else:
             self.on_press(e)
 
+    def board_cursor(self):
+        """The board's pointer for the tool: Select = the piano roll's Select pointer, the rest a cross."""
+        return SELECT_CURSOR if self.tool.get() == "select" else "crosshair"
+
+    def set_board_cursor(self, name):
+        """The board's pointer, set only when it changes; the Select pointer's file can't be read (Linux) = an arrow."""
+        if str(self.canvas.cget("cursor")) not in (name, name.strip("{}")):
+            try:
+                self.canvas.config(cursor=name)
+            except tk.TclError:
+                self.canvas.config(cursor="arrow")
+
     def on_motion(self, e):
         self.show_position(e)
         if self.tool.get() == "lasso":  # (a Polygonal loop's next line follows the mouse; where it'd stick: the mark)
@@ -691,10 +703,8 @@ class DrawerMouse:
             if self.stuck != was:  # (where a click would stick: the mark follows, hunt 10-23)
                 self.redraw()
             return
-        cursor = "fleur" if self.draft is None and (self.curve_handle_at(e.x, e.y) is not None or (
-            self.chosen() and self.in_boxes(e.x, e.y))) else "crosshair"
-        if str(self.canvas.cget("cursor")) != cursor:
-            self.canvas.config(cursor=cursor)
+        self.set_board_cursor("fleur" if self.draft is None and (self.curve_handle_at(e.x, e.y) is not None or (
+            self.chosen() and self.in_boxes(e.x, e.y))) else self.board_cursor())
         if self.follow:  # a stroke started with a click follows the mouse
             self.drag, self.follow = self.follow, None
             self.on_drag(e)

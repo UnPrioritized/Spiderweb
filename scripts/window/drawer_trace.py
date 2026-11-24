@@ -156,7 +156,7 @@ class DrawerTrace:
         if c is not None and self.trace_adjust.get():
             c.config(cursor="fleur")
         elif c is not None and str(c.cget("cursor")) == "fleur":
-            c.config(cursor="crosshair")
+            self.set_board_cursor(self.board_cursor())
 
     # ------------------------------------------------------------ drawing it
 

@@ -756,7 +756,7 @@ class DeformWindow(tk.Toplevel):
         dr.areas_wait = False
         if dr.winfo_exists():
             self.block(False)
-            dr.canvas.config(cursor="crosshair")
+            dr.set_board_cursor(dr.board_cursor())
             dr.canvas.focus_set()
         dr.deform_win = None
         self.destroy()
