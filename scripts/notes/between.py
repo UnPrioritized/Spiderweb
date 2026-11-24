@@ -468,6 +468,14 @@ class Pair:
             out["recolour"] = got
         from notes.steps import carried
         carried(out, a if f < 0.5 else b)  # (its steps' order + ones switched off: the nearer end's for now, steps.py)
+        if self.draw is not None and len(out.get("strokes") or ()) > 1:
+            # (a drawn step's strokes are made clean already (polylines of floats, looks from clean strokes): only
+            # the rest checked, a quarter of the time with big drawings)
+            strokes = out["strokes"]
+            got = clean_shape(dict(out, strokes=strokes[:1]))
+            if got is not None:
+                got["strokes"] = strokes
+            return got
         return clean_shape(out)
 
 

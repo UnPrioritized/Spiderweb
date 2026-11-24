@@ -220,8 +220,8 @@ class DrawPair:
             for i, x in enumerate(X):
                 if i in used:
                     continue
-                n = max(POINTS, min(MOST, len(x.v)))
-                p = _along(x.v, n, x.closed)
+                p = x.v  # (only shrinking / growing: its own points are enough; 200 each made 16 lines' fill ~6x
+                # slower, user 2026-11-25 "quite laggy")
                 # (the dot = its middle's place in the OTHER shape's box, so it travels with the steps; at its own
                 # spot, the end shape's extra lines grew in a pile where the last shape is: user 2026-11-25)
                 own, other = (self.fa_turned, self.fb) if first else (self.fb, self.fa_turned)
