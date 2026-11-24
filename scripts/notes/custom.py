@@ -2627,7 +2627,13 @@ def merged_rows(spans):
     return np.column_stack([ss, es, ks]).astype(np.int64).reshape(-1, 3)
 
 
-def box_drawn(sh):
+def library_lower():
+    """The shape library's names in lower case (box_drawn's names=: read once for many shapes; a disk scan)."""
+    from window.drawer_library import library_names  # (late: the library lives with the drawer)
+    return {n.lower() for n in library_names()}
+
+
+def box_drawn(sh, names=None):
     """A custom shape drawn as a box (Circle, Polygon, a library shape placed), not a live drawing: such boxes go on
     the lines between keys (PLAN "Custom shapes on the lines between keys"). Live drawings: their own name, or the
     strokes Turn into live shape gave them ("src"; it keeps the first shape's name)."""
@@ -2640,8 +2646,51 @@ def box_drawn(sh):
         return False
     if name == "Circle":
         return True
-    from window.drawer_library import library_names  # (late: the library lives with the drawer)
-    return name.lower() in {n.lower() for n in library_names()}
+    return name.lower() in (library_lower() if names is None else names)
+
+
+def row_edges_can(sh, names=None):
+    """Properties' "Top and bottom" works on it: a straight box shape (box_drawn, not turned / skewed), not Even
+    steps (its box hugs the drawing; its flat sides go on the lines anyway). User 2026-11-24. names: library_lower()
+    read once for many shapes."""
+    return (sh.get("kind") == "custom" and frame_upright(box_pts(sh)) and not even_on(sh)
+            and box_drawn(sh, names))
+
+
+def row_edges_of(sh):
+    """Where a box shape's top and bottom sit: "lines" (between keys), "middles" (on key middles), or None (off
+    both, e.g. Shift-moved)."""
+    ps = sorted({p for _, p in box_pts(sh)})
+    if len(ps) != 2:
+        return None
+    if all(abs(p - math.floor(p) - 0.5) < 1e-9 for p in ps):
+        return "lines"
+    if all(abs(p - round(p)) < 1e-9 for p in ps):
+        return "middles"
+    return None
+
+
+def with_row_edges(sh, to):
+    """sh's frame points with its box's top and bottom on the lines between keys (to "lines") or on key middles
+    ("middles"): from the other one, half a key out / in each way (the same keys' notes, those rows whole / half);
+    from anywhere else, each edge to the nearest one. None: it stays as it is (already there / would go flat)."""
+    box = box_pts(sh)
+    lo, hi = sorted({p for _, p in box})
+    now = row_edges_of(sh)
+    if now == to:
+        return None
+    if now is not None:
+        d = 0.5 if to == "middles" else -0.5
+        nlo, nhi = lo + d, hi - d
+    elif to == "lines":
+        nlo, nhi = round(lo - 0.5) + 0.5, round(hi - 0.5) + 0.5
+    else:
+        nlo, nhi = float(round(lo)), float(round(hi))
+    if nhi - nlo < 1 - 1e-9:
+        return None
+    new = [[b, nlo if abs(p - lo) < 1e-9 else nhi] for b, p in box]
+    inside = frame_in_box(sh)
+    return frame_from_box(new, inside) if inside else new
 
 
 def custom_note_count(sh, ppq):

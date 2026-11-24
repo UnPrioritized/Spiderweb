@@ -24,7 +24,8 @@ import numpy as np
 from files.lang import tr, trn
 from files.mathexpr import calc, fmt
 from notes import steps as S
-from notes.custom import ROUND, SPAM_FILLS, gate_ticks, pack_notes, unpack_notes
+from notes.custom import (ROUND, SPAM_FILLS, gate_ticks, library_lower, pack_notes, row_edges_can, row_edges_of,
+                          unpack_notes, with_row_edges)
 from notes.fx import is_page, pages
 from notes.recolour import (KEEP, MODES, PAGE, clean_recolour, edited_step, new_seed, ordered, order_of as rc_order,
                             page_removed, shape_order, shape_step_removed, stirs_of, tags_of as rc_tags, turned_map)
@@ -35,7 +36,8 @@ from window.props_text import (LIKE_KEYS, MADE_BY, channel_text, clumps_hidden, 
                               glue_part_removed, is_custom, kind_text, made_like, made_text, number_of, place_in,
                               removed, settle_steps, step_keys, with_number)  # (moved)
 from window.settings_window import ScrollPage
-from window.widgets import ListTip, ShortLabel, Tooltip, bad, good, leave_box, read_number, remember_place, unchanged
+from window.widgets import (ListTip, ShortLabel, Tooltip, bad, good, leave_box, read_number, remember_place, unchanged,
+                            unhighlight)
 from window.widgets_tips import greyed_why
 
 LIST_CHARS = 22  # the shape list's width in letters (longer names: cut, the whole name in a tip)
@@ -51,6 +53,7 @@ PAGE_WINDOWS = {"claw": ("window.claw_window", "open_claw", "claw_window"),
                 "trim": ("window.trim_window", "open_trim", "trim_window"),
                 "path": ("window.path_window", "open_path", "path_window")}
 ADD_TOOLS = ("claw", "strum", "chop", "trim", "path")
+EDGE_KEYS = {"lines": "props.edges_lines", "middles": "props.edges_middles"}  # ("Top and bottom:" choices)
 NUDGE_SHAPES = 16  # Length / Highest key typed for at most this many shapes: nudged until the notes land (sized)
 NUDGE_TRIES = 10  # notes made at most this many times a shape while nudging
 # (a step's main number in its box: (unit word key, lowest, highest); None = it has none: the click opens it)
@@ -250,6 +253,11 @@ class PropertiesWindow(tk.Toplevel):
         # (Highest key above Lowest, like the keyboard: high keys on top, user 2026-11-20)
         self.high = number("high", "props.high", None, "props.high_tip", self.on_place)
         self.low = number("low", "props.low", None, "props.low_tip", self.on_place)
+        # (a straight box shape's top and bottom on the lines between keys / key middles, user 2026-11-24)
+        self.edges = row("edges", "props.edges", ttk.Combobox(
+            f, state="readonly", width=max(len(tr(k)) for k in EDGE_KEYS.values()) + 2,
+            values=[tr(k) for k in EDGE_KEYS.values()]), "props.edges_tip")
+        self.edges.bind("<<ComboboxSelected>>", lambda e: self.on_edges())
         self.heads["gate"] = head("props.head_gate", "gate")
         self.inside = value("inside", "props.inside", "props.inside_tip")
         self.gate = number("gate", "props.gate", "unit.ticks", "props.gate_tip", self.on_gate)
@@ -518,7 +526,18 @@ class PropertiesWindow(tk.Toplevel):
         for k, fr in ((2, self.low), (3, self.high)):
             names = {note_name(p[k]) for _, _, p in known}
             fr.word.config(text=names.pop() if len(names) == 1 else "")
-        custom = [(i, sh) for i, sh in picks if is_custom(sh)]
+        lib = library_lower() if any(sh.get("kind") == "custom" for _, sh in picks) else set()
+        boxed = [(i, sh) for i, sh in picks if row_edges_can(sh, lib)]
+        self.show_part("edges", bool(boxed))
+        if boxed:
+            now = {row_edges_of(sh) for _, sh in boxed}
+            self.edges.set(tr(EDGE_KEYS[now.pop()]) if len(now) == 1 and None not in now else "")
+            pairs = [(i, tr(EDGE_KEYS[w]) if w else tr("props.edges_neither")) for i, sh in boxed
+                     for w in (row_edges_of(sh),)]
+            self.tip_for("edges", pairs)
+            if now == {None}:  # (all off both: blank, the tip says why)
+                self.tips["edges"].text = tr("props.edges_neither") + "\n\n" + self.tip_base["edges"]
+        custom =[(i, sh) for i, sh in picks if is_custom(sh)]
         self.show_part("inside", bool(custom))
         if custom:
             self.show_value("inside", self.inside, [(i, fill_text(sh)) for i, sh in custom])
@@ -1217,6 +1236,26 @@ class PropertiesWindow(tk.Toplevel):
         good(self.entries[key])
         self.sync(follow=False)
         return True
+
+    def on_edges(self):
+        """"Top and bottom:" picked: every shown straight box shape's top and bottom moved onto the lines between keys
+        / key middles (half a key out / in; off both = to the nearest), one undo step (user 2026-11-24)."""
+        unhighlight(self.edges)
+        app = self.app
+        if app._loading or self.busy:
+            return
+        text = self.edges.get()
+        to = next((w for w, k in EDGE_KEYS.items() if tr(k) == text), None)
+        lib = library_lower()
+        news = [(sh, with_row_edges(sh, to)) for _, sh in self.picks() if to and row_edges_can(sh, lib)]
+        news = [(sh, pts) for sh, pts in news if pts is not None]
+        if not news:
+            return self.sync(follow=False)
+        self.begin(tr("props.undo_edges"))
+        for sh, pts in news:
+            sh["pts"] = pts
+        app.roll.box_kept = None  # (a kept Select box was round the old place)
+        self.done()
 
     def on_gate(self, key, left=None):
         app = self.app
