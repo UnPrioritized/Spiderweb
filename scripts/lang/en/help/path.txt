@@ -33,6 +33,10 @@ Speed: Even, Speed up (close together at A, further apart towards the end), Slow
 Size: how big the first and the last copy are, in %; the ones between grow or shrink step by step. Below: 100 % to 100 % (left) and 100 % to 250 % (right).
 [clip:path-size]
 
+A bigger or smaller copy is made again from your drawing at its own size, so its edges stay as clean as the shape's. Pasted notes have no drawing to make again: their copies are stretched like a picture.
+
+Turn: how far the first and the last copy are turned, in degrees; the ones between turn a bit more each step. Plus turns clockwise, minus the other way, as the piano roll shows it. 0 → 360 spins the copies once along the path. Each copy turns round its own middle (several shapes on one path turn together, round the middle of all of them), and it works with Size and Flip: a flipped copy is flipped first, then turned. Turned copies are made again from your drawing too; pasted notes are turned note by note, so their edges come out rougher.
+
 Colours: Keep, Shift all channels, Turn within own colours, or One per copy, each Step channels on from the one before. Needs Multi channel. Below, on a shape with three colours: Keep and Shift all channels (top), Turn within own colours and One per copy (bottom).
 [clip:path-colours]
 
