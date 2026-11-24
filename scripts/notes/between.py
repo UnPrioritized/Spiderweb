@@ -23,6 +23,7 @@ only on or off switch at the middle step."""
 
 import hashlib
 import json
+import marshal
 import math
 import uuid
 
@@ -678,6 +679,23 @@ def fingerprint(sh):
     return hashlib.md5(json.dumps(_plain(sh), sort_keys=True).encode()).hexdigest()[:16]
 
 
+_PRINTS = {}  # id(step) -> (step, marshal bytes of it, its fingerprint): the steps of the last sync_groups
+
+
+def step_print(sh, kept):
+    """fingerprint(sh) of a step in the shape list, known by its bytes when nothing in it changed since the last
+    sync_groups (marshal: exact, any change in place too; a 500-step drawn group wrote ~2.4 M points out as JSON at
+    every edit). kept: this pass's own memory (the next one's _PRINTS)."""
+    try:
+        now = marshal.dumps(sh)
+    except ValueError:
+        return fingerprint(sh)
+    got = _PRINTS.get(id(sh))
+    sig = got[2] if got is not None and got[0] is sh and got[1] == now else fingerprint(sh)
+    kept[id(sh)] = (sh, now, sig)
+    return sig
+
+
 VEL_KEYS = ("vel0", "vel1", "vel_env")
 
 
@@ -1006,8 +1024,9 @@ def sync_groups(shapes):
     """Every group's steps remade from its first / last shape and keys, in place (the shapes keep their numbers). A
     step changed by hand becomes a key (only its velocity changed: it keeps that velocity and stays a step); a
     group missing its first or last shape is unlinked. True if anything changed."""
+    global _PRINTS
     changed = False
-    gids = []
+    gids, kept = [], {}
     for sh in shapes:
         g = group_of(sh)
         if g and g not in gids:
@@ -1021,7 +1040,7 @@ def sync_groups(shapes):
         s = settings_of(shapes, gid)
         steps = [shapes[i] for i in ordered(shapes, gid) if shapes[i]["between"]["role"] == "step"]
         now = Steps(shapes, gid, s)
-        prints = [fingerprint(sh) for sh in steps]
+        prints = [step_print(sh, kept) for sh in steps]
         keyed = False
         for sh, sig in zip(steps, prints):  # changed by hand since it was made (not by moving the whole group)
             b = sh["between"]
@@ -1080,6 +1099,7 @@ def sync_groups(shapes):
                                  **({"vel": b["vel"]} if b.get("vel") else {}),
                                  **{m: b[m] for m in OWN_MARKS if m in b})
             changed = True
+    _PRINTS = kept
     return changed
 
 

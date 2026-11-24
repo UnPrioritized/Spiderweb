@@ -1140,7 +1140,43 @@ def one_voice(sh):
 BIG_TEXT = 100_000  # characters: a text this long (pasted / image notes, packed) is kept apart by shape_key
 
 
+_KEY_MEMO = {}  # id(drawn shape) -> (shape, marshal bytes of it, its shape_key): known_key
+
+
+def known_key(sh):
+    """True when sh is worth remembering its key by its bytes (known_key): a drawn shape (no text: its strokes have
+    their own fingerprint; no pasted notes: big texts stay out of the key's work)."""
+    return (type(sh) is dict and sh.get("kind") == "custom" and type(sh.get("strokes")) is list and "text" not in sh
+            and "notes" not in sh)
+
+
+def forget_keys(shapes):
+    """The remembered keys of shapes no longer in shapes forgotten (only once there are many: App.shapes_changed)."""
+    global _KEY_MEMO
+    if len(_KEY_MEMO) > 2 * len(shapes) + 200:
+        live = {id(sh): sh for sh in shapes}
+        _KEY_MEMO = {k: v for k, v in _KEY_MEMO.items() if live.get(k) is v[0]}
+
+
 def shape_key(sh):
+    """shape_key_made(sh), remembered for a drawn shape by its bytes (marshal: exact, ~20x quicker than its JSON:
+    a 500-step Add between group of 8 circles wrote ~2.4 M points out at every edit, ~4 s; planned-features
+    "ONLY CHANGED SHAPES"). Any change at all, in place too, gives other bytes = the key made again."""
+    if not known_key(sh):
+        return shape_key_made(sh)
+    try:
+        now = marshal.dumps(sh)
+    except ValueError:  # (something marshal can't write: the JSON way)
+        return shape_key_made(sh)
+    got = _KEY_MEMO.get(id(sh))
+    if got is not None and got[0] is sh and got[1] == now:
+        return got[2]
+    key = shape_key_made(sh)
+    _KEY_MEMO[id(sh)] = (sh, now, key)
+    return key
+
+
+def shape_key_made(sh):
     """A shape as a key of the notes it makes (equal for exactly the same shape): its JSON text, with big texts
     (pasted / image notes, many MB) kept as the strings themselves, so they're never written out again: comparing
     the same string is instant (App.notes_key is asked at every rest of a drag). A Hz bass with another layer

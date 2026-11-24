@@ -31,7 +31,7 @@ from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from window.track_channels import tidy_tracks
 from notes.steps import after_change as steps_after_change, signature as steps_signature
-from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, fx_notes, merges_unmade, point_names,
+from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, forget_keys, from_key, fx_notes,merges_unmade, point_names,
                           one_voice, own_slot, remove_across, render, resolve_overlaps, shape_key, slot_track_channel,
                           split_overlaps, heard_way, keeps_laps,
                           track_ids,
@@ -2360,6 +2360,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return
         self.notes_late = self._bg_notes = False
         self._made_shapes = list(self.shapes)
+        forget_keys(self.shapes)  # (drawn shapes' remembered keys: only the shapes still here)
         if not self.roll.drag:
             self.remake_pictures()
         self.rendered_pts = [list(sh["pts"][0]) for sh in self.shapes]  # (where each shape is in these notes)
