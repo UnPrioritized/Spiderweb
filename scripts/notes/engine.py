@@ -1141,28 +1141,34 @@ BIG_TEXT = 100_000  # characters: a text this long (pasted / image notes, packed
 
 
 _KEY_MEMO = {}  # id(drawn shape) -> (shape, marshal bytes of it, its shape_key): known_key
+_LIVE = {}  # id -> the project's own shapes (live_shapes): the only ones remembered
 
 
 def known_key(sh):
     """True when sh is worth remembering its key by its bytes (known_key): a drawn shape (no text: its strokes have
-    their own fingerprint; no pasted notes: big texts stay out of the key's work)."""
+    their own fingerprint; no pasted notes: big texts stay out of the key's work; no cut piece: its key holds its
+    whole's fingerprint, which must be worked out again each time (whole_token: from_key looks it up), and its bytes
+    would hold the whole drawing once per piece: hunt 2026-11-25)."""
     return (type(sh) is dict and sh.get("kind") == "custom" and type(sh.get("strokes")) is list and "text" not in sh
-            and "notes" not in sh)
+            and "notes" not in sh and "cut" not in sh)
 
 
-def forget_keys(shapes):
-    """The remembered keys of shapes no longer in shapes forgotten (only once there are many: App.shapes_changed)."""
-    global _KEY_MEMO
-    if len(_KEY_MEMO) > 2 * len(shapes) + 200:
-        live = {id(sh): sh for sh in shapes}
-        _KEY_MEMO = {k: v for k, v in _KEY_MEMO.items() if live.get(k) is v[0]}
+def live_shapes(shapes):
+    """The project's shapes now (App.shapes_changed): only their keys are remembered (the background job's copies,
+    a Recolour's copy outside Multi, page copies... are keyed the JSON way, nothing kept: hunt 2026-11-25, a
+    500-step drawn group kept ~0.5 GB of dead copies); the others forgotten."""
+    global _KEY_MEMO, _LIVE
+    _LIVE = {id(sh): sh for sh in shapes}
+    if len(_KEY_MEMO) > len(_LIVE):
+        _KEY_MEMO = {k: v for k, v in _KEY_MEMO.items() if _LIVE.get(k) is v[0]}
 
 
 def shape_key(sh):
-    """shape_key_made(sh), remembered for a drawn shape by its bytes (marshal: exact, ~20x quicker than its JSON:
-    a 500-step Add between group of 8 circles wrote ~2.4 M points out at every edit, ~4 s; planned-features
-    "ONLY CHANGED SHAPES"). Any change at all, in place too, gives other bytes = the key made again."""
-    if not known_key(sh):
+    """shape_key_made(sh), remembered for a drawn shape of the project (live_shapes) by its bytes (marshal: exact,
+    ~20x quicker than its JSON: a 500-step Add between group of 8 circles wrote ~2.4 M points out at every edit,
+    ~4 s; planned-features "ONLY CHANGED SHAPES"). Any change at all, in place too, gives other bytes = the key made
+    again."""
+    if not known_key(sh) or _LIVE.get(id(sh)) is not sh:
         return shape_key_made(sh)
     try:
         now = marshal.dumps(sh)

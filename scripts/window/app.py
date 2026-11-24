@@ -31,7 +31,7 @@ from window.updates import Updates
 from window.help_texts import BY_ID, TOOL_TOPICS
 from window.track_channels import tidy_tracks
 from notes.steps import after_change as steps_after_change, signature as steps_signature
-from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, forget_keys, from_key, fx_notes,merges_unmade, point_names,
+from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES, OWN0, SHAPE_DEFAULTS, as_made, cached_arrays, from_key, live_shapes, whole_token, fx_notes, merges_unmade, point_names,
                           one_voice, own_slot, remove_across, render, resolve_overlaps, shape_key, slot_track_channel,
                           split_overlaps, heard_way, keeps_laps,
                           track_ids,
@@ -2290,6 +2290,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         if now and now != "late":
             self._bg_notes = False  # (being made now: what's read on the way is read as it is, not waited for)
         self.shapes_gen += 1
+        live_shapes(self.shapes)  # (only these drawn shapes' keys are remembered by their bytes: engine.shape_key)
         self.rebar_watch()  # (an edit inside an editable time signature change: asked once it's done)
         if self._late_notes:
             self.after_cancel(self._late_notes)
@@ -2360,7 +2361,6 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             return
         self.notes_late = self._bg_notes = False
         self._made_shapes = list(self.shapes)
-        forget_keys(self.shapes)  # (drawn shapes' remembered keys: only the shapes still here)
         if not self.roll.drag:
             self.remake_pictures()
         self.rendered_pts = [list(sh["pts"][0]) for sh in self.shapes]  # (where each shape is in these notes)
@@ -2976,6 +2976,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
     def thread_shapes(self, key):
         """A background job's own copy of the shapes in notes_key key (the drag goes on with the real ones)."""
+        for sh in self.edit_shapes():  # (cut pieces' wholes known again: whole_token's list empties itself at 512 and
+            cut = sh.get("cut")        # from_key would find them gone, an error at every edit: hunt 2026-11-25)
+            if isinstance(cut, dict) and isinstance(cut.get("whole"), dict):
+                whole_token(cut["whole"])
         shapes = [from_key(s) for s in key[0]]
         for sh, st in zip(shapes, key[10]):
             if st != "null":  # (Channel per strip, left out of shape_key)
