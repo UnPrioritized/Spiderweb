@@ -248,7 +248,7 @@
  "deform.turn": "Turn (°)",
  "deform.turn_tip": "Turns the strokes around the Centre mark by this much (minus = clockwise). With an area, it fades out towards the area's edge, so the strokes bend instead of turning whole.\nMiddle-click the slider: back to 0. Its number box also takes Up / Down, the mouse wheel once clicked, or a drag sideways (Shift = big steps, Ctrl = fine).",
  "deform.copies": "Copies",
- "deform.copies_tip": "1 = Turn turns the strokes, as usual.\n2 or more: the strokes stay where they are and turned copies are added, each turned by Turn more than the one before (Turn 22.5 with 16 copies = a full circle). The other bends work on every copy.",
+ "deform.copies_tip": "1 = Turn turns the strokes, as usual.\n2 or more: the strokes stay where they are and turned copies are added, each turned by Turn more than the one before (Turn 22.5 with 16 copies = a full circle). The other bends work on every copy. A copy that would lie exactly on a stroke already there is left out.",
  "deform.why_copies_mirror": "Mirror is on: copies of mirrored strokes can't be made here. Set Mirror to Off first.",
  "deform.twist": "Twist (turns)",
  "deform.twist_tip": "Winds the strokes into a swirl around the Centre mark: how many times they turn at the edge (minus = the other way). Nothing turns right at the Centre mark.\nMiddle-click the slider: back to 0. Its number box also takes Up / Down, the mouse wheel once clicked, or a drag sideways (Shift = big steps, Ctrl = fine).",

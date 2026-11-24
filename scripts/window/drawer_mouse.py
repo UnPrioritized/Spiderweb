@@ -46,6 +46,7 @@ def colour_menu(parent, var, pick, most=COLOURS):
 
 
 class DrawerMouse:
+    unreadable = set()  # (pointer files that couldn't be read here: the arrow instead, not tried again)
     """Mixed into Drawer."""
 
     def on_press(self, e):
@@ -683,12 +684,21 @@ class DrawerMouse:
         return SELECT_CURSOR if self.tool.get() == "select" else "crosshair"
 
     def set_board_cursor(self, name):
-        """The board's pointer, set only when it changes; the Select pointer's file can't be read (Linux) = an arrow."""
-        if str(self.canvas.cget("cursor")) not in (name, name.strip("{}")):
+        """The board's pointer, set only when it changes; the Select pointer's file can't be read (Linux) = an arrow,
+        tried once (hunt 2026-11-24: it was read again at every mouse move). While the middle button pans (closed
+        hand: roll_shared.grab_while_panning) the hand stays and this is the pointer it gives back at the let go."""
+        c = self.canvas
+        if name in DrawerMouse.unreadable:
+            name = "arrow"
+        if getattr(c, "_before_grab", None) is not None:  # (a tool key mid-pan: the right one after it, hunt)
+            c._before_grab = name
+            return
+        if str(c.cget("cursor")) not in (name, name.strip("{}")):
             try:
-                self.canvas.config(cursor=name)
+                c.config(cursor=name)
             except tk.TclError:
-                self.canvas.config(cursor="arrow")
+                DrawerMouse.unreadable.add(name)
+                c.config(cursor="arrow")
 
     def on_motion(self, e):
         self.show_position(e)

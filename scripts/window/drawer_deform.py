@@ -282,7 +282,7 @@ class DeformWindow(tk.Toplevel):
         lo, hi, _ = SLIDERS[key][3:] if key in SLIDERS else BOXES[key]
         v = min(max(float(v), lo), hi)
         if key == "copies":
-            v = float(round(v))
+            v = float(math.floor(v + 0.5))
         e = self.boxes[key]
         e.value = v
         self.vars[key].set(fmt(round(v, 3)))
@@ -303,7 +303,12 @@ class DeformWindow(tk.Toplevel):
     def typed(self, key):
         lo, hi, _ = SLIDERS[key][3:] if key in SLIDERS else BOXES[key]
         e = self.boxes[key]
-        v = read_number(self.vars[key].get(), lo, hi)
+        if key == "copies":  # (halves round up, then the range: 2.5 = 3, 0.6 = 1; hunt 2026-11-24)
+            v = read_number(self.vars[key].get())
+            v = None if v is None else math.floor(v + 0.5)
+            v = v if v is not None and lo <= v <= hi else None
+        else:
+            v = read_number(self.vars[key].get(), lo, hi)
         if v is None:
             return bad(e)
         if v != e.value:
@@ -434,9 +439,10 @@ class DeformWindow(tk.Toplevel):
         strokes = list(self.base_strokes)
         # (Turn alone, no area: each copy is the first copy turned further, its points turned: no bending again)
         rigid = len(sets) > 1 and d["area"] is None and not (d["twist"] or d["bulge"] or d["ripple"])
-        first = None
+        first = on_top = None
+        copied = [i for i in self.bend_idx if not dr.is_hidden(i)]  # (hidden strokes bend but get no copies, hunt)
         for k, dk in enumerate(sets):
-            if not deform.moves(dk):  # (a copy turned whole turns would only lie on the strokes: left out)
+            if not deform.moves(dk) or k and not copied:  # (a copy turned whole turns would only lie on the strokes)
                 continue
             if rigid and first is not None and all("pts" in st for st in first.values()):
                 turn = deform.clean({"turn": (k - 1) * d["turn"], "centre": d["centre"]})
@@ -449,7 +455,13 @@ class DeformWindow(tk.Toplevel):
                 for i, st in new.items():
                     strokes[i] = st
             else:  # (copies go on top, out of any group, like pasted ones)
-                strokes += [pasted(new[i]) for i in self.bend_idx]
+                if on_top is None:
+                    on_top = deform.OnTop(strokes)
+                for i in copied:  # (a copy lying exactly on a stroke already there is left out: a circle turned
+                    st = new[i]  # round its middle, angles past a whole turn, strokes an area leaves alone; hunt)
+                    if not on_top.covered(st):
+                        on_top.add(st)
+                        strokes.append(pasted(st))
         dr.strokes = strokes
         dr.mirror_from(self.leads)
         dr.areas = self.moved_areas(sets[0])
@@ -532,9 +544,18 @@ class DeformWindow(tk.Toplevel):
             # (middle drag still moves the view: "<Motion>" above would catch it; a middle click without a drag
             # adds no curve point while bending)
             c.bind_class(BLOCK, "<B2-Motion>", lambda e: None)
-            c.bind_class(BLOCK, "<ButtonRelease-2>", lambda e: (setattr(dr, "_pan", None), "break")[1])
+            c.bind_class(BLOCK, "<ButtonRelease-2>", lambda e: (setattr(dr, "_pan", None), self.pan_done(), "break")[2])
             tags.insert(0, BLOCK)
         c.bindtags(tuple(tags))
+
+    def pan_done(self):
+        """The middle button let go while open: the closed hand gives back the pointer it had (the board's own let go,
+        roll_shared.grab_while_panning, never runs behind the block: the hand stayed; hunt 2026-11-24)."""
+        c = self.dr.canvas
+        was = getattr(c, "_before_grab", None)
+        if was is not None:
+            c._before_grab = None
+            c.config(cursor=was)
 
     # ------------------------------------------------------------ Centre mark + area on the board (stage D)
 

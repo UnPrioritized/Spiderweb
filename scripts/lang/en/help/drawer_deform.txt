@@ -6,7 +6,7 @@ With strokes picked ([page:drawer_select|Select tool]), only those bend; otherwi
 
 Turn turns the strokes round the Centre. Twist turns them more the farther they are from the Centre, like a whirlpool. Bulge / Pinch swells the middle out or pulls it in. Ripple makes waves: Ripple moves picks whether points move sideways, up and down, or in and out in rings round the Centre; Wave length sets how far apart the waves are.
 
-Copies (under Turn) makes turned copies in one go. At 1, Turn turns the strokes as usual. At 2 or more, the strokes stay where they are and copies are added, each turned by Turn more than the one before: one line with Turn 22.5 and Copies 16 becomes the 16 spokes of a wheel (a line straight across the circle needs only 8, turned 22.5 each). Select only what should be copied: a circle copied round its own middle would lie on itself. The copies come out selected with the strokes. Copies can't be used while Mirror is on.
+Copies (under Turn) makes turned copies in one go. At 1, Turn turns the strokes as usual. At 2 or more, the strokes stay where they are and copies are added, each turned by Turn more than the one before: one line with Turn 22.5 and Copies 16 becomes the 16 spokes of a wheel (a line straight across the circle needs only 8, turned 22.5 each). A copy that would lie exactly on a stroke already there is left out, so a circle round the Centre isn't stacked on itself and turning past a full circle adds nothing twice. Hidden strokes bend but aren't copied. The copies come out selected with the strokes. Copies can't be used while Mirror is on.
 
 All the bends work together and show live on the board. Apply keeps them; Cancel, Esc or the window's X puts everything back.
 

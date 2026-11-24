@@ -616,6 +616,60 @@ def keep_touching(new, touched, d):
     return new
 
 
+SAME_TOL = 0.0015  # (board share: a stroke within this of another all along, both ways, looks the same as it; above
+#                     a circle's 64 pieces (0.0006 off at the board's size) + the preview's thinning)
+
+
+def lies_on(p, q, tol=SAME_TOL):
+    """Every point of p (n, 2) within tol of the line through q's points (m, 2)."""
+    if not len(q):
+        return False
+    if len(q) < 2:
+        return bool((np.hypot(*(p - q[0]).T) <= tol).all())
+    s0, e = q[:-1], q[1:] - q[:-1]
+    ee = np.maximum((e * e).sum(1), 1e-300)
+    step = max(1, 2_000_000 // len(s0))  # (points x pieces per go: memory stays small)
+    spread = lambda n: p[np.unique(np.linspace(0, len(p) - 1, min(len(p), n)).astype(np.int64))]
+    few, p = spread(16), spread(256)  # (256 spread points tell strokes apart: a sampled curve has ~240 a piece)
+    for part in [few] + [p[c:c + step] for c in range(0, len(p), step)]:  # (a few spread points first: strokes
+        w = part[:, None, :] - s0[None]  # that differ fail at once; hunt speed check 2026-11-24)
+        t = np.clip((w * e[None]).sum(2) / ee[None], 0, 1)
+        if (np.hypot(*(w - t[..., None] * e[None]).transpose(2, 0, 1)).min(1) > tol).any():
+            return False
+    return True
+
+
+class OnTop:
+    """The strokes of a drawing, to ask whether another stroke would lie exactly on one of them (Deform's Copies: a
+    copy landing on a stroke already there is left out)."""
+
+    def __init__(self, strokes):
+        self.lines, self.boxes = [], []
+        for st in strokes:
+            self.add(st)
+
+    @staticmethod
+    def _line(st):
+        from notes.custom import stroke_points
+        q = np.asarray(stroke_points(st), np.float64).reshape(-1, 2)
+        # (a curve's ~240 sampled points a piece thinned within a quarter of SAME_TOL; lines are already lean)
+        return _thin(q, SAME_TOL / 4) if st["kind"] == "curve" and len(q) > 64 else q
+
+    def add(self, st):
+        q = self._line(st)
+        self.lines.append(q)
+        self.boxes.append(np.r_[q.min(0), q.max(0)] if len(q) else np.full(4, np.inf))
+
+    def covered(self, st):
+        """st looks the same as a stroke already there: each lies along the other all the way."""
+        p = self._line(st)
+        if not len(p) or not self.lines:
+            return False
+        box = np.r_[p.min(0), p.max(0)]
+        near = np.nonzero((np.abs(np.asarray(self.boxes) - box) <= 2 * SAME_TOL).all(1))[0]
+        return any(lies_on(p, self.lines[k]) and lies_on(self.lines[k], p) for k in near)
+
+
 PREVIEW_TOL = 0.0003  # (the live look: a third of a pixel on a 1000 px board)
 
 
