@@ -1,6 +1,7 @@
 """Custom shapes: drawings from the drawer placed on the roll, as outlines or filled with notes."""
 
 import base64
+import bisect
 import functools
 import heapq
 import json
@@ -394,41 +395,62 @@ def join_paths(paths):
     # then from the top again): ends kept in a grid of MEET cells, lines that meet one in a queue by number, only the
     # lines near a join looked at again (from the top every time was lines x lines per join: a sliced drawing's
     # 1,000 strokes ~19 s, speed hunt 2026-10-29; same joins: dev/scratch/join_paths_new.py)
-    grid = {}
+    grid = {}  # (cell, which end) -> the numbers of the lines with that end there, SORTED (the first one meeting
+    # found without looking at all: many ends in one spot, e.g. 700 spokes meeting in the middle, Deform Copies)
 
     def cell(p):
         return math.floor(p[0] / MEET), math.floor(p[1] / MEET)
 
     def put(n, on):
         for end, p in ((0, lines[n][0]), (1, lines[n][-1])):
-            got = grid.setdefault(cell(p), set())
-            (got.add if on else got.discard)((n, end))
+            got = grid.setdefault((cell(p), end), [])
+            if on:
+                bisect.insort(got, n)
+            else:
+                del got[bisect.bisect_left(got, n)]
 
-    def near(p, end):
+    def cells(p):
         cu, cv = cell(p)
-        for du in (-1, 0, 1):
-            for dv in (-1, 0, 1):
-                for m, e in grid.get((cu + du, cv + dv), ()):
-                    if e == end:
-                        yield m
+        return [(cu + du, cv + dv) for du in (-1, 0, 1) for dv in (-1, 0, 1)]
+
+    def near(p):
+        """Every line with an end in the cells round p."""
+        for c in cells(p):
+            for end in (0, 1):
+                yield from grid.get((c, end), ())
+
+    def first(n, p, end, best):
+        """The lowest-numbered line (below best) other than n whose end (0 = start) meets p."""
+        for c in cells(p):
+            for m in grid.get((c, end), ()):
+                if m >= best:
+                    break
+                if m != n and meet(p, lines[m][-end]):
+                    best = m
+                    break
+        return best
 
     def partner(n):
         """The first line n meets (as n's turn checked them: its end on their start or end, its start on theirs)."""
         a = lines[n]
-        found = [m for m in near(a[-1], 0) if m != n and meet(a[-1], lines[m][0])]
-        found += [m for m in near(a[-1], 1) if m != n and meet(a[-1], lines[m][-1])]
-        found += [m for m in near(a[0], 0) if m != n and meet(a[0], lines[m][0])]
-        return min(found) if found else None
+        best = first(n, a[-1], 0, math.inf)
+        best = first(n, a[-1], 1, best)
+        best = first(n, a[0], 0, best)
+        return None if best == math.inf else best
 
     for n in lines:
         put(n, True)
     queue = [n for n in lines if partner(n) is not None]
     heapq.heapify(queue)
+    # (lines go in the queue once, asked for their partner only at their turn: asking each one near a join at every
+    # join was ends-in-one-spot cubed, ~75 s for 700 spokes meeting in the middle; Deform Copies, 2026-11-24)
+    queued = set(queue)
     while queue:
         i = queue[0]
         j = partner(i) if i in lines else None
         if j is None:
             heapq.heappop(queue)
+            queued.discard(i)
             continue
         a, b = lines[i], lines[j]
         if meet(a[-1], b[0]):
@@ -437,18 +459,19 @@ def join_paths(paths):
             new = a + b[-2::-1]
         else:
             new = a[::-1] + b[1:]
-        ends = [a[0], a[-1], b[0], b[-1]]
         put(i, False)
         put(j, False)
         del lines[j]
         lines[i] = new
         put(i, True)
+        # (only lines near the joined line's two ends can find a NEW partner (it); the others can only lose one,
+        # found at their turn: the joined spot itself isn't looked at again)
         again = {i}
-        for p in ends:
-            again.update(near(p, 0))
-            again.update(near(p, 1))
+        again.update(near(new[0]))
+        again.update(near(new[-1]))
         for m in again:
-            if m in lines and partner(m) is not None:
+            if m in lines and m not in queued:
+                queued.add(m)
                 heapq.heappush(queue, m)
     return done + [lines[n] for n in sorted(lines)]
 

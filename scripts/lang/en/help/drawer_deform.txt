@@ -6,7 +6,7 @@ With strokes picked ([page:drawer_select|Select tool]), only those bend; otherwi
 
 Turn turns the strokes round the Centre. Twist turns them more the farther they are from the Centre, like a whirlpool. Bulge / Pinch swells the middle out or pulls it in. Ripple makes waves: Ripple moves picks whether points move sideways, up and down, or in and out in rings round the Centre; Wave length sets how far apart the waves are.
 
-Copies (under Turn) makes turned copies in one go. At 1, Turn turns the strokes as usual. At 2 or more, the strokes stay where they are and copies are added, each turned by Turn more than the one before: one line with Turn 22.5 and Copies 16 becomes the 16 spokes of a wheel (a line straight across the circle needs only 8, turned 22.5 each). A copy that would lie exactly on a stroke already there is left out, so a circle round the Centre isn't stacked on itself and turning past a full circle adds nothing twice. Hidden strokes bend but aren't copied. The copies come out selected with the strokes. Copies can't be used while Mirror is on.
+Copies (its own box under Bends) makes turned copies in one go. At 1, Turn turns the strokes as usual. At 2 or more, the strokes stay where they are and copies are added, each turned by Turn more than the one before: one line with Turn 22.5 and Copies 16 becomes the 16 spokes of a wheel (a line straight across the circle needs only 8, turned 22.5 each). A copy that would lie exactly on a stroke already there is left out, so a circle round the Centre isn't stacked on itself and turning past a full circle adds nothing twice. Hidden strokes bend but aren't copied. The copies come out selected with the strokes. Copies can't be used while Mirror is on.
 
 All the bends work together and show live on the board. Apply keeps them; Cancel, Esc or the window's X puts everything back.
 
@@ -18,7 +18,7 @@ The Centre is the green ring on the board. It starts in the middle of the stroke
 
 Area limits the bends to part of the drawing, like Stir's area: a Circle, Square or Diamond, or any drawing from your library (its inside counts). Its dashed line shows where the bending stops; inside it fades out softly toward the line, or stops sharp with Hard edge. Points outside the area stay exactly where they are. Bulge inside an area swells round the area's own middle.
 
-On the board, drag inside the area to move it. Its green box sizes it: a corner or side handle stretches it, Ctrl on a corner makes it bigger or smaller and keeps its shape. Drag just outside a corner to turn it (15° steps, Shift = free), or just outside a side's middle to slant it. A small area has no box: drag its line to size it. Size, Stretch, Angle and Slant can also be typed in the window.
+On the board, drag inside the area to move it. Its green box sizes it: a corner or side handle stretches it, Ctrl on a corner makes it bigger or smaller and keeps its shape. Drag just outside a corner to turn it (15° steps, Shift = free), or just outside a side's middle to slant it. A small area has no box: drag its line to size it. Size, Position, Stretch, Angle and Slant can also be typed in the window. Position is where the area's middle is, in % of the board: 50 across and 50 up puts it in the board's middle.
 
 ## What happens to the strokes
 

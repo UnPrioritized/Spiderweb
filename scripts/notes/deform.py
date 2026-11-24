@@ -679,6 +679,16 @@ PREVIEW_TOL = 0.0003  # (the live look: a third of a pixel on a 1000 px board)
 def preview_points(st, d, step=0.004, thin=PREVIEW_TOL):
     """A stroke's look bent by d, quickly (the live preview: no fitting): its drawn points, each piece cut to at
     most step long (shorter for short ripples), all bent, then only those needed to stay within thin of it."""
+    p = _dense(st, d, step)
+    if len(p) < 2:
+        return p
+    # (only the points the look needs: hundreds of tiny pieces drew 1 px jogs on straight runs, and the area colours
+    # worked out on 28,000 preview points took 8 s on a busy drawing)
+    return _thin(_bend2(p, d), thin)
+
+
+def _dense(st, d, step=0.004):
+    """A stroke's drawn points, each piece cut to at most step long (shorter for short ripples)."""
     from notes.custom import stroke_points
     p = np.asarray(stroke_points(st), np.float64)
     if len(p) < 2:
@@ -690,6 +700,13 @@ def preview_points(st, d, step=0.004, thin=PREVIEW_TOL):
         idx = np.repeat(np.arange(len(n)), n)
         f = np.arange(len(idx)) - np.repeat(np.cumsum(n) - n, n)
         p = np.vstack((p[:-1][idx] + (p[1:] - p[:-1])[idx] * (f / n[idx])[:, None], p[-1:]))
-    # (only the points the look needs: hundreds of tiny pieces drew 1 px jogs on straight runs, and the area colours
-    # worked out on 28,000 preview points took 8 s on a busy drawing)
-    return _thin(_bend2(p, d), thin)
+    return p
+
+
+def left_alone(st, d):
+    """Whether bending by d leaves the stroke where it is: an area that doesn't reach any of it, no Bulge (Deform's
+    Copies: a copy of it would only lie on itself, so it isn't bent again for each copy)."""
+    if d["area"] is None or d["bulge"]:
+        return False
+    p = _dense(st, d).reshape(-1, 2)
+    return bool(len(p)) and not (weight(p[:, 0], p[:, 1], d["area"]) > 0).any()

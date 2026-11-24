@@ -35,9 +35,10 @@ SLIDERS = {"turn": ("deform.turn", -360.0, 360.0, -rc.MOST_TURN, rc.MOST_TURN, 0
 MOST_COPIES = 360  # (Copies: one a degree at most)
 BOXES = {"stretch": (rc.LEAST_STRETCH, rc.MOST_STRETCH, 100.0), "stretch_up": (rc.LEAST_STRETCH, rc.MOST_STRETCH, 100.0),
          "tilt": (-360.0, 360.0, 0.0), "slant": (-100 * rc.MOST_SKEW, 100 * rc.MOST_SKEW, 0.0),
-         "copies": (1.0, float(MOST_COPIES), 1.0)}
+         "copies": (1.0, float(MOST_COPIES), 1.0), "pos_u": (-100.0, 200.0, 50.0), "pos_v": (-100.0, 200.0, 50.0)}
+POS = {"pos_u": 0, "pos_v": 1}  # (the area's middle in % of the board, user 2026-11-24: couldn't centre it by hand)
 # a number box's steps (Up / Down, wheel, a drag): (step, Shift step, Ctrl step)
-STEPS = {"copies": (1, 4, 1), "turn": (1, 15, 0.1), "twist": (0.05, 0.5, 0.01), "bulge": (1, 10, 0.1), "ripple": (0.1, 1, 0.01),
+STEPS = {"copies": (1, 4, 1), "pos_u": (1, 10, 0.1), "pos_v": (1, 10, 0.1),"turn": (1, 15, 0.1), "twist": (0.05, 0.5, 0.01), "bulge": (1, 10, 0.1), "ripple": (0.1, 1, 0.01),
          "ripple_len": (0.5, 5, 0.1), "size": (1, 10, 0.1), "stretch": (1, 10, 0.1), "stretch_up": (1, 10, 0.1),
          "tilt": (1, 15, 0.1), "slant": (1, 10, 0.1)}
 STICKY = ("turn", "twist", "bulge")  # (a slider's knob dragged near 0 stays there, user 2026-11-16)
@@ -156,25 +157,30 @@ class DeformWindow(tk.Toplevel):
         self.what = ttk.Label(top, text=what, justify="left", wraplength=wrap)
         bends = ttk.LabelFrame(top, text=tr("deform.bends"), padding=(int(6 * s), int(2 * s), int(6 * s), int(4 * s)))
         bends.pack(fill="x")
-        for row, key in enumerate(("turn", "copies", "twist", "bulge", "ripple", "ripple_len")):
-            if key == "copies":  # (user 2026-11-24: turned copies in one go, e.g. the spokes of a wheel)
-                lab = ttk.Label(bends, text=tr("deform.copies"))
-                lab.grid(row=row, column=0, sticky="w")
-                Tooltip(lab, tr("deform.copies_tip"))
-                box = self.number_box(bends, "copies", grid=(row, 2), label=lab)
-                Tooltip(box, tr("deform.copies_tip"))
-                if self.dr.mirror_mode() != "off":  # (copies of linked Mirror strokes: not worked out, greyed)
-                    box.state(["disabled"])
-                    greyed_why(box, tr("deform.why_copies_mirror"))
-                continue
+        for row, key in enumerate(("turn", "twist", "bulge", "ripple", "ripple_len")):
             self.slider_row(bends, row, key)
-        ttk.Label(bends, text=tr("deform.ripple_kind")).grid(row=6, column=0, sticky="w", pady=(2, 0))
+        ttk.Label(bends, text=tr("deform.ripple_kind")).grid(row=5, column=0, sticky="w", pady=(2, 0))
         names = [tr("deform.ripple_" + k) for k in deform.RIPPLE_KINDS]
         self.kind = ttk.Combobox(bends, values=names, state="readonly", width=max(map(len, names)) + 1)
         self.kind.current(0)
-        self.kind.grid(row=6, column=1, columnspan=2, sticky="w", padx=(int(6 * s), 0), pady=(2, 0))
+        self.kind.grid(row=5, column=1, columnspan=2, sticky="w", padx=(int(6 * s), 0), pady=(2, 0))
         self.kind.bind("<<ComboboxSelected>>", lambda e: self.changed())
         Tooltip(self.kind, tr("deform.ripple_kind_tip"))
+
+        # Copies (user 2026-11-24: turned copies in one go, e.g. the spokes of a wheel; its own box under Bends)
+        copies = ttk.LabelFrame(top, text=tr("deform.copies_box"),
+                                padding=(int(6 * s), int(2 * s), int(6 * s), int(4 * s)))
+        copies.pack(fill="x", pady=(int(8 * s), 0))
+        lab = ttk.Label(copies, text=tr("deform.copies"))
+        lab.grid(row=0, column=0, sticky="w")
+        Tooltip(lab, tr("deform.copies_tip"))
+        box = self.number_box(copies, "copies", grid=(0, 1), label=lab)
+        box.grid_configure(padx=(int(6 * s), int(6 * s)))
+        Tooltip(box, tr("deform.copies_tip"))
+        ttk.Label(copies, text=tr("deform.copies_hint"), foreground=look.HINT).grid(row=0, column=2, sticky="w")
+        if self.dr.mirror_mode() != "off":  # (copies of linked Mirror strokes: not worked out, greyed)
+            box.state(["disabled"])
+            greyed_why(box, tr("deform.why_copies_mirror"))
 
         area = ttk.LabelFrame(top, text=tr("deform.area_box"), padding=(int(6 * s), int(2 * s), int(6 * s), int(4 * s)))
         area.pack(fill="x", pady=(int(8 * s), 0))
@@ -186,17 +192,22 @@ class DeformWindow(tk.Toplevel):
         self.area.bind("<<ComboboxSelected>>", lambda e: self.area_picked(), add="+")
         Tooltip(self.area, tr("deform.area_tip"))
         self.area_parts = [self.slider_row(area, 1, "size")]
+        for row, (text, keys) in enumerate((("deform.position", ("pos_u", "pos_v")),
+                                            ("deform.stretch", ("stretch", "stretch_up"))), 2):
+            r = ttk.Frame(area)
+            r.grid(row=row, column=0, columnspan=3, sticky="w", pady=(2, 0))
+            lab = ttk.Label(r, text=tr(text))
+            lab.pack(side="left")
+            Tooltip(lab, tr(text + "_tip"))
+            for key, word in zip(keys, ("deform.stretch_across", "deform.stretch_up")):
+                w = ttk.Label(r, text=tr(word))
+                w.pack(side="left", padx=(int(8 * s), int(3 * s)))
+                self.area_parts.append(self.number_box(r, key, label=w))
+        for key, j in POS.items():  # (they start where the area starts: the strokes' middle)
+            self.boxes[key].value = round(self.area_middle[j] * 100, 3)
+            self.vars[key].set(fmt(self.boxes[key].value))
         r = ttk.Frame(area)
-        r.grid(row=2, column=0, columnspan=3, sticky="w", pady=(2, 0))
-        lab = ttk.Label(r, text=tr("deform.stretch"))
-        lab.pack(side="left")
-        Tooltip(lab, tr("deform.stretch_tip"))
-        for key, word in (("stretch", "deform.stretch_across"), ("stretch_up", "deform.stretch_up")):
-            w = ttk.Label(r, text=tr(word))
-            w.pack(side="left", padx=(int(8 * s), int(3 * s)))
-            self.area_parts.append(self.number_box(r, key, label=w))
-        r = ttk.Frame(area)
-        r.grid(row=3, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        r.grid(row=4, column=0, columnspan=3, sticky="w", pady=(2, 0))
         for key, label in (("tilt", "deform.angle"), ("slant", "deform.slant")):
             lab = ttk.Label(r, text=tr(label))
             lab.pack(side="left", padx=(0 if key == "tilt" else int(12 * s), int(3 * s)))
@@ -204,11 +215,11 @@ class DeformWindow(tk.Toplevel):
             self.area_parts.append(self.number_box(r, key, label=lab))
         self.hard = tk.BooleanVar(value=False)
         b = ttk.Checkbutton(area, text=tr("deform.hard"), variable=self.hard, command=self.changed)
-        b.grid(row=4, column=0, columnspan=3, sticky="w", pady=(4, 0))
+        b.grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 0))
         Tooltip(b, tr("deform.hard_tip"))
         self.area_parts.append(b)
         self.area_line = ttk.Label(area, text="", foreground=look.WARN_DARK, justify="left", wraplength=wrap)
-        self.area_line.grid(row=5, column=0, columnspan=3, sticky="we")
+        self.area_line.grid(row=6, column=0, columnspan=3, sticky="we")
         self.show_area_parts()
 
         self.what.pack(fill="x", pady=(int(8 * s), 0))
@@ -289,7 +300,19 @@ class DeformWindow(tk.Toplevel):
         good(e)
         if key in self.scales:
             self.scales[key][1].set(v)
+        if key in POS:
+            self.area_middle[POS[key]] = round(v / 100, 5)
         self.changed(key)
+
+    def show_middle(self):
+        """The Position boxes say where the area's middle is now (a board drag moves it too)."""
+        for key, j in POS.items():
+            v = round(self.area_middle[j] * 100, 3)
+            e = self.boxes[key]
+            if v != e.value:
+                e.value = v
+                self.vars[key].set(fmt(v))
+                good(e)
 
     def slid(self, key, v):
         if self.holding == key and key in STICKY:  # (dragged near 0: stays at 0, like a centre detent)
@@ -365,14 +388,17 @@ class DeformWindow(tk.Toplevel):
             return [d]
         return [deform.clean(dict(d, turn=k * d["turn"])) for k in range(n)]
 
-    def bent(self, d, final, first):
+    def bent(self, d, final, first, skip=()):
         """{stroke: bent by d} of the strokes bent: for real (final; first = the curves kept by bent_curves) or quickly
-        as fine lines (the live look); points stuck on lines put back exactly on them."""
+        as fine lines (the live look); points stuck on lines put back exactly on them. skip: strokes d leaves where
+        they are (deform.left_alone), given back as they were."""
         done = self.bent_curves(d) if final and first else {}
         new = {}
         for i in self.bend_idx:
             st = self.base_strokes[i]
-            if i in done:
+            if i in skip:
+                new[i] = st
+            elif i in done:
                 new[i] = done[i]
             elif final:
                 new[i] = deform.bent_stroke(st, d)
@@ -394,7 +420,8 @@ class DeformWindow(tk.Toplevel):
     # ---- the window's own undo (LocalUndo): the settings as a text, put back
 
     def state_text(self):
-        return json.dumps({"v": {k: self.boxes[k].value for k in self.boxes}, "kind": self.kind.current(),
+        # (not the Position boxes: "middle" is where the area is, the boxes catch up in show_middle)
+        return json.dumps({"v": {k: self.boxes[k].value for k in self.boxes if k not in POS}, "kind": self.kind.current(),
                            "area": name_place(self.area), "hard": self.hard.get(), "centre": self.centre,
                            "middle": self.area_middle})
 
@@ -434,13 +461,17 @@ class DeformWindow(tk.Toplevel):
         """The drawing bent by the window's settings, from the drawing as it was. final: bent for real
         (deform.bent_stroke), else quickly as fine lines (deform.preview_points)."""
         self._job = None
+        self.show_middle()
         dr, d = self.dr, self.settings()
         sets = self.copy_settings(d)
         strokes = list(self.base_strokes)
-        # (Turn alone, no area: each copy is the first copy turned further, its points turned: no bending again)
-        rigid = len(sets) > 1 and d["area"] is None and not (d["twist"] or d["bulge"] or d["ripple"])
+        # (Turn and Twist, no area: each copy is the first copy turned further, its points turned: no bending again;
+        # Twist only goes by the distance from the Centre, so turning after it = turning before it)
+        rigid = len(sets) > 1 and d["area"] is None and not (d["bulge"] or d["ripple"])
         first = on_top = None
         copied = [i for i in self.bend_idx if not dr.is_hidden(i)]  # (hidden strokes bend but get no copies, hunt)
+        # (strokes the area doesn't reach: their copies would only lie on them, left out without bending each one)
+        alone = {i for i in copied if deform.left_alone(self.base_strokes[i], d)} if len(sets) > 1 else set()
         for k, dk in enumerate(sets):
             if not deform.moves(dk) or k and not copied:  # (a copy turned whole turns would only lie on the strokes)
                 continue
@@ -448,7 +479,7 @@ class DeformWindow(tk.Toplevel):
                 turn = deform.clean({"turn": (k - 1) * d["turn"], "centre": d["centre"]})
                 new = {i: self.turned_copy(st, turn) for i, st in first.items()}
             else:
-                new = self.bent(dk, final, k == 0)
+                new = self.bent(dk, final, k == 0, skip=alone if k else ())
                 if k == 1:
                     first = new
             if k == 0:
@@ -458,7 +489,9 @@ class DeformWindow(tk.Toplevel):
                 if on_top is None:
                     on_top = deform.OnTop(strokes)
                 for i in copied:  # (a copy lying exactly on a stroke already there is left out: a circle turned
-                    st = new[i]  # round its middle, angles past a whole turn, strokes an area leaves alone; hunt)
+                    if i in alone:  # round its middle, angles past a whole turn, strokes an area leaves alone; hunt)
+                        continue
+                    st = new[i]
                     if not on_top.covered(st):
                         on_top.add(st)
                         strokes.append(pasted(st))
