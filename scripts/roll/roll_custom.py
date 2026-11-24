@@ -150,8 +150,9 @@ class CustomBox:
     def row_lines(self, sh, orig):
         """(box, on lines) for a resize starting: an upright custom shape box whose top and bottom lie on the lines
         between keys keeps them there (resize_point); an older Circle / Polygon / library shape with them on key
-        middles is moved onto the lines first, half a key out each way (user 2026-11-20: "whole box at first edit").
-        Live drawings, text, pasted notes, Hz bass: as they are."""
+        middles is moved onto the lines first, half a key out each way (user 2026-11-20: "whole box at first edit");
+        one Shift-moved off them: the dragged side still goes onto a line (user 2026-11-24). Live drawings, text,
+        pasted notes, Hz bass: as they are."""
         if (not sh or sh.get("kind") != "custom" or sh.get("text") or "notes" in sh or sh.get("hz")
                 or not self.grid_aligned(orig)):
             return orig, False
@@ -161,10 +162,12 @@ class CustomBox:
         if all(abs(p - math.floor(p) - 0.5) < 1e-9 for p in ps) or even_on(sh):
             return orig, True  # (Even steps: its flat sides go on the lines anyway; its box hugs the drawing a
             # millionth of a key inside them, or at a tip: the dragged edge on a line still, hunt 2026-11-20)
-        if all(float(p).is_integer() for p in ps) and box_drawn(sh):
+        if not box_drawn(sh):
+            return orig, False
+        if all(float(p).is_integer() for p in ps):
             lo, hi = ps
             return [[b, lo - 0.5 if p == lo else hi + 0.5] for b, p in orig], True
-        return orig, False
+        return orig, True  # (Shift-moved off the lines: the dragged side snaps onto one, the other stays, user 11-24)
 
     def keep_rows(self, orig, k, box):
         """A Ctrl corner resize (box = resize_custom's, proportions kept) of a box on the lines between keys: the
