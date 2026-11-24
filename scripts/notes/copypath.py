@@ -865,6 +865,15 @@ def apply_path(a, cfg, ppq, keys=256, tag=False, remake=None):
         if got is None:
             x[:, :2] += d[i, 0]
             x[:, 2] += d[i, 1]
+            if turned[i] and len(x):  # (pasted notes, text...: no drawing to make again, so the notes themselves
+                # are turned within their own box, round its middle, as a Turn step turns them; user 2026-11-24:
+                # jagged, but it turns)
+                from notes.fx import turn_notes
+                # (room both ways, so rows turned past the keys aren't squeezed onto the edge rows: cut below)
+                room = int((x[:, 1].max() - x[:, 0].min()) / (cfg["k"] * ppq) + x[:, 2].max() - x[:, 2].min()) + 2
+                x[:, 2] += room
+                x = turn_notes(x, float(deg[i]), cfg["k"] * ppq, int(x[:, 2].max()) + room + 1)[0]
+                x[:, 2] -= room
         if not np.isnan(cut[i, 0]):  # (a half copy: only what's on the near side of the point)
             c, k = box[0] + round(cut[i, 0] * ppq), box[2] + round(cut[i, 2])
             if cut[i, 1] > 0:
