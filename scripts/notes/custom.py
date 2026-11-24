@@ -487,15 +487,69 @@ def open_paths(strokes):
     hi = np.maximum(seg[:, :2], seg[:, 2:]) + tol
     lox, loy, hix, hiy = (np.ascontiguousarray(a) for a in (lo[:, 0], lo[:, 1], hi[:, 0], hi[:, 1]))
 
+    grid = _SegGrid(seg, tol) if len(paths) * len(seg) > GRID_FROM else None
+    filed = {}  # (grid: strokes' first / last pieces filed by where their start / end is: looked up, not searched)
+    if grid is not None:
+        for k in np.flatnonzero(loose):
+            for p, piece in ((starts[k], first[k]), (ends[k], first[k + 1] - 1)):
+                filed.setdefault((math.floor(p[0] / 1e-8), math.floor(p[1] / 1e-8)), []).append((p, piece))
+
     def lands(end):  # (the segment a stroke's own end is on doesn't count)
         e = np.asarray(end, float)
         x, y = end
+        if grid is not None:
+            fx, fy = math.floor(x / 1e-8), math.floor(y / 1e-8)
+            own = [piece for i in (-1, 0, 1) for j in (-1, 0, 1) for p, piece in filed.get((fx + i, fy + j), ())
+                   if math.hypot(p[0] - x, p[1] - y) < 1e-9]
+            return grid.near(e, np.asarray(own, np.int64)) <= tol
+        own = np.r_[first[:-1][loose & (np.hypot(*(starts - e).T) < 1e-9)],
+                    first[1:][loose & (np.hypot(*(ends - e).T) < 1e-9)] - 1]
         near = (lox <= x) & (hix >= x) & (loy <= y) & (hiy >= y)
-        near[first[:-1][loose & (np.hypot(*(starts - e).T) < 1e-9)]] = False
-        near[first[1:][loose & (np.hypot(*(ends - e).T) < 1e-9)] - 1] = False
+        near[own] = False
         return nearest_on(end, seg[near], (1.0, 1.0))[0] <= tol
 
     return [path for path in paths if not (lands(path[0]) and lands(path[-1]))]
+
+
+GRID_FROM = 200_000  # (open ends x line pieces past this: open_paths looks only near each end, _SegGrid. Below it, the
+#                      plain all-pieces check: many copied spokes (Deform's Copies) grew with the square, hunt 11-24)
+
+
+class _SegGrid:
+    """A drawing's line pieces ((m, 4) ax, ay, bx, by) cut into short bits filed in a grid, so the distance from a
+    point to the nearest piece looks only at bits near it (the same answer as nearest_on over all of them)."""
+
+    def __init__(self, seg, tol):
+        a, b = seg[:, :2], seg[:, 2:]
+        size = max(float(np.ptp(seg[:, [0, 2]])), float(np.ptp(seg[:, [1, 3]])), 1e-12)
+        g = int(min(max(math.sqrt(len(seg)), 1), 256))
+        bit = size / g  # (bits at most this long)
+        n = np.maximum(np.ceil(np.hypot(*(b - a).T) / bit), 1).astype(np.int64)
+        owner = np.repeat(np.arange(len(seg)), n)
+        k = np.arange(int(n.sum())) - np.repeat(np.cumsum(n) - n, n)
+        d = (b - a)[owner]
+        t0, t1 = (k / n[owner])[:, None], ((k + 1) / n[owner])[:, None]
+        p0, p1 = a[owner] + t0 * d, a[owner] + t1 * d
+        p0[k == 0], p1[k == n[owner] - 1] = a[owner][k == 0], b[owner][k == n[owner] - 1]  # (ends exact)
+        self.cell = bit / 2 + tol  # (a point within tol of a bit is this near its middle along each axis)
+        self.lo = np.minimum(seg[:, :2], seg[:, 2:]).min(0)
+        key = self._key((p0 + p1) / 2)
+        order = np.argsort(key, kind="stable")
+        self.keys, self.bits, self.owner = key[order], np.column_stack([p0, p1])[order], owner[order]
+
+    def _key(self, p):
+        c = np.floor((np.asarray(p, float) - self.lo) / self.cell).astype(np.int64)
+        return c[..., 0] * 1_000_003 + c[..., 1]
+
+    def near(self, p, own):
+        """How far p is from the nearest piece not in own (pieces' places)."""
+        cx, cy = np.floor((p - self.lo) / self.cell).astype(np.int64)
+        want = np.array([(cx + i) * 1_000_003 + cy + j for i in (-1, 0, 1) for j in (-1, 0, 1)], np.int64)
+        lo, hi = np.searchsorted(self.keys, want), np.searchsorted(self.keys, want, side="right")
+        idx = np.concatenate([np.arange(s, e) for s, e in zip(lo, hi)]) if (hi > lo).any() else np.zeros(0, np.int64)
+        if len(own) and len(idx):
+            idx = idx[~np.isin(self.owner[idx], own)]
+        return nearest_on(p, self.bits[idx], (1.0, 1.0))[0] if len(idx) else math.inf
 
 
 def nearest_on(p, seg, scale):

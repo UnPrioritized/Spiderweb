@@ -644,8 +644,8 @@ class OnTop:
     copy landing on a stroke already there is left out)."""
 
     def __init__(self, strokes):
-        self.lines, self.boxes = [], []
-        for st in strokes:
+        self.lines, self.boxes = [], np.empty((max(len(strokes), 16) * 2, 4))  # (boxes: rows 0..len(lines),
+        for st in strokes:  # grown by doubling: rebuilding them for every copy grew with the square)
             self.add(st)
 
     @staticmethod
@@ -657,8 +657,11 @@ class OnTop:
 
     def add(self, st):
         q = self._line(st)
+        n = len(self.lines)
+        if n == len(self.boxes):
+            self.boxes = np.concatenate([self.boxes, np.empty_like(self.boxes)])
+        self.boxes[n] = np.r_[q.min(0), q.max(0)] if len(q) else np.full(4, np.inf)
         self.lines.append(q)
-        self.boxes.append(np.r_[q.min(0), q.max(0)] if len(q) else np.full(4, np.inf))
 
     def covered(self, st):
         """st looks the same as a stroke already there: each lies along the other all the way."""
@@ -666,7 +669,7 @@ class OnTop:
         if not len(p) or not self.lines:
             return False
         box = np.r_[p.min(0), p.max(0)]
-        near = np.nonzero((np.abs(np.asarray(self.boxes) - box) <= 2 * SAME_TOL).all(1))[0]
+        near = np.nonzero((np.abs(self.boxes[:len(self.lines)] - box) <= 2 * SAME_TOL).all(1))[0]
         return any(lies_on(p, self.lines[k]) and lies_on(self.lines[k], p) for k in near)
 
 
