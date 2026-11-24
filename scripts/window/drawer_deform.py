@@ -20,6 +20,8 @@ from notes.custom import stroke_points
 from window.widgets import enter_presses  # (THE CONTROL SCHEME)
 from window import look
 from window.drawer_mirror import mirror_fns
+from window.layers import pasted
+from window.widgets_tips import greyed_why
 from window.widgets import (LocalUndo, Scrub, Tooltip, bad, good, name_index, name_list, name_place, read_number,
                             remember_place, set_names)
 
@@ -30,10 +32,12 @@ SLIDERS = {"turn": ("deform.turn", -360.0, 360.0, -rc.MOST_TURN, rc.MOST_TURN, 0
            "ripple": ("deform.ripple", 0.0, 20.0, 0.0, rc.MOST_RIPPLE, 0.0),
            "ripple_len": ("deform.ripple_len", 1.0, 50.0, rc.LEAST_RIPPLE_LEN, rc.MOST_RIPPLE_LEN, 10.0),
            "size": ("deform.size", 1.0, 200.0, rc.LEAST_REACH, rc.MOST_REACH, 50.0)}
+MOST_COPIES = 360  # (Copies: one a degree at most)
 BOXES = {"stretch": (rc.LEAST_STRETCH, rc.MOST_STRETCH, 100.0), "stretch_up": (rc.LEAST_STRETCH, rc.MOST_STRETCH, 100.0),
-         "tilt": (-360.0, 360.0, 0.0), "slant": (-100 * rc.MOST_SKEW, 100 * rc.MOST_SKEW, 0.0)}
+         "tilt": (-360.0, 360.0, 0.0), "slant": (-100 * rc.MOST_SKEW, 100 * rc.MOST_SKEW, 0.0),
+         "copies": (1.0, float(MOST_COPIES), 1.0)}
 # a number box's steps (Up / Down, wheel, a drag): (step, Shift step, Ctrl step)
-STEPS = {"turn": (1, 15, 0.1), "twist": (0.05, 0.5, 0.01), "bulge": (1, 10, 0.1), "ripple": (0.1, 1, 0.01),
+STEPS = {"copies": (1, 4, 1), "turn": (1, 15, 0.1), "twist": (0.05, 0.5, 0.01), "bulge": (1, 10, 0.1), "ripple": (0.1, 1, 0.01),
          "ripple_len": (0.5, 5, 0.1), "size": (1, 10, 0.1), "stretch": (1, 10, 0.1), "stretch_up": (1, 10, 0.1),
          "tilt": (1, 15, 0.1), "slant": (1, 10, 0.1)}
 STICKY = ("turn", "twist", "bulge")  # (a slider's knob dragged near 0 stays there, user 2026-11-16)
@@ -152,13 +156,23 @@ class DeformWindow(tk.Toplevel):
         self.what = ttk.Label(top, text=what, justify="left", wraplength=wrap)
         bends = ttk.LabelFrame(top, text=tr("deform.bends"), padding=(int(6 * s), int(2 * s), int(6 * s), int(4 * s)))
         bends.pack(fill="x")
-        for row, key in enumerate(("turn", "twist", "bulge", "ripple", "ripple_len")):
+        for row, key in enumerate(("turn", "copies", "twist", "bulge", "ripple", "ripple_len")):
+            if key == "copies":  # (user 2026-11-24: turned copies in one go, e.g. the spokes of a wheel)
+                lab = ttk.Label(bends, text=tr("deform.copies"))
+                lab.grid(row=row, column=0, sticky="w")
+                Tooltip(lab, tr("deform.copies_tip"))
+                box = self.number_box(bends, "copies", grid=(row, 2), label=lab)
+                Tooltip(box, tr("deform.copies_tip"))
+                if self.dr.mirror_mode() != "off":  # (copies of linked Mirror strokes: not worked out, greyed)
+                    box.state(["disabled"])
+                    greyed_why(box, tr("deform.why_copies_mirror"))
+                continue
             self.slider_row(bends, row, key)
-        ttk.Label(bends, text=tr("deform.ripple_kind")).grid(row=5, column=0, sticky="w", pady=(2, 0))
+        ttk.Label(bends, text=tr("deform.ripple_kind")).grid(row=6, column=0, sticky="w", pady=(2, 0))
         names = [tr("deform.ripple_" + k) for k in deform.RIPPLE_KINDS]
         self.kind = ttk.Combobox(bends, values=names, state="readonly", width=max(map(len, names)) + 1)
         self.kind.current(0)
-        self.kind.grid(row=5, column=1, columnspan=2, sticky="w", padx=(int(6 * s), 0), pady=(2, 0))
+        self.kind.grid(row=6, column=1, columnspan=2, sticky="w", padx=(int(6 * s), 0), pady=(2, 0))
         self.kind.bind("<<ComboboxSelected>>", lambda e: self.changed())
         Tooltip(self.kind, tr("deform.ripple_kind_tip"))
 
@@ -267,6 +281,8 @@ class DeformWindow(tk.Toplevel):
         """A number set (slider / box / double-click): shown in both, the board updated."""
         lo, hi, _ = SLIDERS[key][3:] if key in SLIDERS else BOXES[key]
         v = min(max(float(v), lo), hi)
+        if key == "copies":
+            v = float(round(v))
         e = self.boxes[key]
         e.value = v
         self.vars[key].set(fmt(round(v, 3)))
@@ -336,6 +352,38 @@ class DeformWindow(tk.Toplevel):
                          "tilt": self.value("tilt"), "skew": self.value("slant") / 100, "hard": self.hard.get()}
         return deform.clean(d)
 
+    def copy_settings(self, d):
+        """The settings each copy is bent by: Copies 1 = just d; 2 or more = the strokes themselves with Turn 0 (the
+        other bends still work), then each copy turned by Turn more than the one before."""
+        n = 1 if self.dr.mirror_mode() != "off" else int(self.value("copies"))
+        if n <= 1:
+            return [d]
+        return [deform.clean(dict(d, turn=k * d["turn"])) for k in range(n)]
+
+    def bent(self, d, final, first):
+        """{stroke: bent by d} of the strokes bent: for real (final; first = the curves kept by bent_curves) or quickly
+        as fine lines (the live look); points stuck on lines put back exactly on them."""
+        done = self.bent_curves(d) if final and first else {}
+        new = {}
+        for i in self.bend_idx:
+            st = self.base_strokes[i]
+            if i in done:
+                new[i] = done[i]
+            elif final:
+                new[i] = deform.bent_stroke(st, d)
+            else:
+                new[i] = {k: st[k] for k in deform.PLAIN_KEEP if k in st}
+                new[i].update(kind="poly", pts=deform.preview_points(st, d).tolist())
+        # (points stuck on lines put back exactly on them, live too: no new red dots / closing lines, user)
+        return deform.keep_touching(new, self.touched(), d)
+
+    @staticmethod
+    def turned_copy(st, d):
+        """A bent stroke (points only: bent_stroke makes circles / arcs / formulas points) turned by d, exactly."""
+        p = np.asarray(st["pts"], np.float64).reshape(-1, 2)
+        x, y = deform.bend(p[:, 0], p[:, 1], d)
+        return dict(st, pts=np.column_stack((x, y)).tolist())
+
     # ------------------------------------------------------------ the board
 
     # ---- the window's own undo (LocalUndo): the settings as a text, put back
@@ -382,26 +430,29 @@ class DeformWindow(tk.Toplevel):
         (deform.bent_stroke), else quickly as fine lines (deform.preview_points)."""
         self._job = None
         dr, d = self.dr, self.settings()
+        sets = self.copy_settings(d)
         strokes = list(self.base_strokes)
-        if deform.moves(d):
-            done = self.bent_curves(d) if final else {}
-            new = {}
-            for i in self.bend_idx:
-                st = self.base_strokes[i]
-                if i in done:
-                    new[i] = done[i]
-                elif final:
-                    new[i] = deform.bent_stroke(st, d)
-                else:
-                    new[i] = {k: st[k] for k in deform.PLAIN_KEEP if k in st}
-                    new[i].update(kind="poly", pts=deform.preview_points(st, d).tolist())
-            # (points stuck on lines put back exactly on them, live too: no new red dots / closing lines, user)
-            new = deform.keep_touching(new, self.touched(), d)
-            for i, st in new.items():
-                strokes[i] = st
+        # (Turn alone, no area: each copy is the first copy turned further, its points turned: no bending again)
+        rigid = len(sets) > 1 and d["area"] is None and not (d["twist"] or d["bulge"] or d["ripple"])
+        first = None
+        for k, dk in enumerate(sets):
+            if not deform.moves(dk):  # (a copy turned whole turns would only lie on the strokes: left out)
+                continue
+            if rigid and first is not None and all("pts" in st for st in first.values()):
+                turn = deform.clean({"turn": (k - 1) * d["turn"], "centre": d["centre"]})
+                new = {i: self.turned_copy(st, turn) for i, st in first.items()}
+            else:
+                new = self.bent(dk, final, k == 0)
+                if k == 1:
+                    first = new
+            if k == 0:
+                for i, st in new.items():
+                    strokes[i] = st
+            else:  # (copies go on top, out of any group, like pasted ones)
+                strokes += [pasted(new[i]) for i in self.bend_idx]
         dr.strokes = strokes
         dr.mirror_from(self.leads)
-        dr.areas = self.moved_areas(d)
+        dr.areas = self.moved_areas(sets[0])
         if final:  # (Apply: changed() draws it once)
             return
         if self._rest is not None:
@@ -416,7 +467,7 @@ class DeformWindow(tk.Toplevel):
         self._rest = None
         dr = self.dr
         dr.areas_wait = False
-        d = self.settings()
+        d = self.copy_settings(self.settings())[0]
         done = self.bent_curves(d) if deform.moves(d) else {}
         n = sum(1 for i, st in done.items() if st["kind"] != "curve")
         self.heavy.config(text=trn("deform.heavy", n, n=n) if n else "")
@@ -723,11 +774,14 @@ class DeformWindow(tk.Toplevel):
         for key in self.boxes:  # (a number typed without Enter counts)
             if str(self.focus_get()) == str(self.boxes[key]):
                 self.typed(key)
-        d = self.settings()
-        if not deform.moves(d):
+        if not any(deform.moves(d) for d in self.copy_settings(self.settings())):
             return self.cancel()
         self.show(final=True)
         dr = self.dr
+        n = len(self.base_strokes)
+        if len(dr.strokes) > n and not self.whole:  # (the copies picked with the strokes: they move on together)
+            dr.picks, dr.boxes = set(self.idx) | set(range(n, len(dr.strokes))), []
+            dr.sel = len(dr.strokes) - 1
         dr.push_undo(before=self.base_snap)
         self.applied = True
         self.finish()

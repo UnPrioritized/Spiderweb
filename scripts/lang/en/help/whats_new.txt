@@ -52,6 +52,8 @@ What's new:
 
 • Drawer: Tracing picture… (beside Deform…) shows a picture faintly under the board to draw over, with its strength and Move / size. It's never saved in the shape. On Windows you can also drop a picture file onto the Image to notes window. See [page:drawer|Drawer].
 
+• Drawer: Deform… has Copies under Turn. At 2 or more, the selected strokes stay and turned copies are added, each turned a bit more: one line with Turn 22.5 and Copies 16 becomes the spokes of a wheel. The drawer's Select tool also uses the piano roll's Select pointer now. See [page:drawer_deform|Deform].
+
 • Warp: Save… beside Preset keeps a shape's bend as your own preset, at the top of the Preset list, for any shape in any project. See [page:warp|Warp].
 
 • Hz bass window: right-click notes → Move to layer, and Duplicate layer in a layer's menu. The note count in its status line is now exact and updates after every change. See [page:hz_layers|Layers].
