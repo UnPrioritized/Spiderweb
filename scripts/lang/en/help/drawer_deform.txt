@@ -14,7 +14,7 @@ Each slider has a number box beside it for exact numbers, also past the slider's
 
 ## The Centre and the area
 
-The Centre is the green ring on the board. It starts in the middle of the strokes. Drag it to move it; right-click it to put it back.
+The Centre is the green ring on the board. It starts in the middle of the strokes. Drag it to move it; right-click it to put it back. The Centre, the area and its handles snap to the grid while you drag them (hold Shift to place them freely), and Ctrl+Z works in the drawer too while Deform is open.
 
 Area limits the bends to part of the drawing, like Stir's area: a Circle, Square or Diamond, or any drawing from your library (its inside counts). Its dashed line shows where the bending stops; inside it fades out softly toward the line, or stops sharp with Hard edge. Points outside the area stay exactly where they are. Bulge inside an area swells round the area's own middle.
 

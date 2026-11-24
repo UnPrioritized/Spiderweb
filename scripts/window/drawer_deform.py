@@ -81,9 +81,14 @@ class DrawerDeform:
         self.deform_win = DeformWindow(self)
 
     def deform_key(self, e):
-        """A key pressed in the drawer while Deform… is open: Esc cancels it, the rest wait."""
-        if e.keysym == "Escape" and self.deform_win:
-            self.deform_win.cancel()
+        """A key pressed in the drawer while Deform… is open: Esc cancels it, Ctrl+Z / Ctrl+Y step the window's own
+        undo (user 2026-11-24: they did nothing unless the window was in front), the rest wait."""
+        win = self.deform_win
+        if e.keysym == "Escape" and win:
+            win.cancel()
+        elif win and e.state & 0x0004 and e.keysym.lower() in ("z", "y") and win.steps:
+            redo = e.keysym.lower() == "y" or bool(e.state & 0x0001)
+            win.steps.press_key(1 if redo else -1)
         return "break"
 
     def deforming(self):
@@ -755,6 +760,14 @@ class DeformWindow(tk.Toplevel):
         xs = a[:, 0] + (y - a[:, 1]) * (b[:, 0] - a[:, 0]) / (b[:, 1] - a[:, 1])
         return bool((xs > x).sum() % 2)
 
+    def on_grid(self, u, v, e):
+        """A board spot snapped to the drawer's grid points (user 2026-11-24: the area wasn't snapped; Shift = free,
+        like drawing)."""
+        if e.state & 0x0001:
+            return round(u, 5), round(v, 5)
+        n = int(self.dr.grid_n.get())
+        return round(round(u * n) / n, 5), round(round(v * n) / n, 5)
+
     def board_hover(self, e):
         h = self.hit(e)
         cursor = "crosshair"
@@ -787,7 +800,7 @@ class DeformWindow(tk.Toplevel):
         u, v = self.dr.from_screen(e.x, e.y)
         if h[0] in ("centre", "move"):
             off = self.grab[1]
-            spot = [round(u - off[0], 5), round(v - off[1], 5)]
+            spot = list(self.on_grid(u - off[0], v - off[1], e))  # (the middle / Centre mark on a grid point)
             if h[0] == "centre":
                 self.centre = spot
             else:
@@ -795,6 +808,8 @@ class DeformWindow(tk.Toplevel):
             return self.changed()
         at, a, c = self.grab[1:]
         m = a["middle"]
+        if h[0] != "turn":  # (a held corner / side / line lands on the grid; turning keeps its 15° steps)
+            u, v = self.on_grid(u, v, e)
         if h[0] == "size":  # (the line of a small area: Size grows with the mouse's distance from its middle)
             d0 = math.hypot(at[0] - m[0], at[1] - m[1])
             if d0 > 1e-9:

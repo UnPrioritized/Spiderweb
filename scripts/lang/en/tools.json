@@ -297,7 +297,7 @@
  "deform.what_some": "Bends the {n} selected strokes.",
  "deform.what_some_one": "Bends the selected stroke.",
  "deform.what_mirror": "Their Mirror copies bend as mirror images.",
- "deform.board_hint": "On the board: drag the green ring to move the Centre (right-click it to put it back). Drag inside the area to move it; drag its box's handles to size it, just outside a corner to turn it, just outside a side to slant it.",
+ "deform.board_hint": "On the board: drag the green ring to move the Centre (right-click it to put it back). Drag inside the area to move it; drag its box's handles to size it, just outside a corner to turn it, just outside a side to slant it. They snap to the grid (Shift = free).",
  "deform.heavy":"{n} curves are bent too much to stay curves: Apply makes them fine lines.",
  "deform.heavy_one": "1 curve is bent too much to stay a curve: Apply makes it a fine line.",
  "deform.apply": "Apply",

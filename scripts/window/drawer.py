@@ -344,8 +344,8 @@ class Drawer(DrawerTrace, DrawerAreas, DrawerMouse, DrawerLasso, DrawerLayers, D
     def hotkey(self, fn):
         """A drawer shortcut that leaves text boxes alone (the name box, a layer being renamed)."""
         def handler(e):
-            if self.deform_win:  # (Deform… open: undo / copy / paste / flips wait, hunt 2026-11-16)
-                return "break"
+            if self.deform_win:  # (Deform… open: copy / paste / flips wait, hunt 2026-11-16; Ctrl+Z / Ctrl+Y step
+                return self.deform_key(e)  # the window's own undo, user 2026-11-24)
             if isinstance(e.widget, (tk.Entry, ttk.Entry)):
                 return None
             if e.widget is self.listbox and fn == self.pick_all:  # (the library list's own Ctrl+A: its rows only,
