@@ -2663,53 +2663,7 @@ def remade_copy(rest, ppq, get, keys=128):
     group's box's middle, beats / keys), "box" (its ticks / rows), "ppq", "flip" (a way, or None)}: the drawing
     flipped within the group's box first, then grown, then turned round the grown box's middle."""
     def fn(s, at, key, dt, dk, fk=0.5, rows=None, turn=None):
-        from notes.merge import mapped_part
-        b0 = at / ppq
-        flip = turn and turn.get("flip")
-        r = cached_reach(rest) if rows else None
-        if r is not None and abs(r[1] - rows[0]) <= 0.5 + 1e-6 and abs(r[2] - rows[1]) <= 0.5 + 1e-6:
-            # (round the drawing's own bottom / top at that corner, not its row's middle: the top copy's top row stays
-            # on B's key; user 2026-11-24, "one or two key rows too high". Notes made by earlier pages reaching other
-            # rows: the row's middle)
-            lo, hi = float(r[1]) - rows[0], float(r[2]) - rows[1]
-            if flip in ("keys", "both"):  # (upside down: its top is the bottom now)
-                lo, hi = -hi, -lo
-            key += (1 - fk) * lo + fk * hi
-            edge = math.floor(key) + 0.5
-            if abs(key - edge) < 1e-3:  # (a drawing ON a row edge reads a hair inside it (the reach): round the
-                key = edge  # edge itself, so the grown copy's edge lands on it again, not a hair past it)
-        F = np.eye(2)
-        if turn:
-            box = turn["box"]
-            span_t, span_k = (box[0] + box[1]) / ppq, box[2] + box[3]  # (mirrored within the group's box)
-            if flip in ("time", "both"):
-                F[0, 0] = -1.0
-            if flip in ("keys", "both"):
-                F[1, 1] = -1.0
-            th = math.radians(turn["deg"])
-            c, si, rk = math.cos(-th), math.sin(-th), turn["k"]  # (as fx.turn_pts: on screen, rk beats a key)
-            R = np.array([[c, -si * rk], [si / rk, c]])
-            mb, mk = turn["middle"]
-            mb, mk = b0 + (mb - b0) * s, key + (mk - key) * s  # (the grown box's middle)
-
-            def f(b, k):
-                if F[0, 0] < 0:
-                    b = span_t - b
-                if F[1, 1] < 0:
-                    k = span_k - k
-                b, k = b0 + (b - b0) * s - mb, key + (k - key) * s - mk
-                return [mb + R[0, 0] * b + R[0, 1] * k + dt / ppq, mk + R[1, 0] * b + R[1, 1] * k + dk]
-            L = R @ F * s
-        else:
-            def f(b, k):
-                return [b0 + (b - b0) * s + dt / ppq, key + (k - key) * s + dk]
-            L = np.eye(2) * s
-        try:
-            kind = rest.get("kind")
-            q = mapped_funnel(rest, f, L) if kind == "funnel" else mapped_custom(rest, f, L) if kind == "custom" \
-                else mapped_part(rest, f, L)
-        except (KeyError, TypeError, ValueError):
-            return None
+        q = remade_shape(rest, ppq, s, at, key, dt, dk, fk, rows, turn)
         # (made straight away, not through get: each copy is a shape of its own, so keying it (its whole drawing
         # as text) only cost time; the steps inside still go through get)
         if q is None:
@@ -2727,6 +2681,77 @@ def remade_copy(rest, ppq, get, keys=128):
             _shared_strokes.map = was
     shared = []  # (rest's strokes and their JSON, once)
     return fn
+
+
+def remade_shape(rest, ppq, s, at, key, dt, dk, fk=0.5, rows=None, turn=None):
+    """remade_copy's drawing: rest grown / turned / moved as that copy (the same arguments), or None when it can't
+    be made again so. Also Turn into plain shapes' first copy (path_window: the shape itself, turned / sized)."""
+    from notes.merge import mapped_part
+    b0 = at / ppq
+    flip = turn and turn.get("flip")
+    r = cached_reach(rest) if rows else None
+    if r is not None and abs(r[1] - rows[0]) <= 0.5 + 1e-6 and abs(r[2] - rows[1]) <= 0.5 + 1e-6:
+        # (round the drawing's own bottom / top at that corner, not its row's middle: the top copy's top row stays
+        # on B's key; user 2026-11-24, "one or two key rows too high". Notes made by earlier pages reaching other
+        # rows: the row's middle)
+        lo, hi = float(r[1]) - rows[0], float(r[2]) - rows[1]
+        if flip in ("keys", "both"):  # (upside down: its top is the bottom now)
+            lo, hi = -hi, -lo
+        key += (1 - fk) * lo + fk * hi
+        edge = math.floor(key) + 0.5
+        if abs(key - edge) < 1e-3:  # (a drawing ON a row edge reads a hair inside it (the reach): round the
+            key = edge  # edge itself, so the grown copy's edge lands on it again, not a hair past it)
+    F = np.eye(2)
+    if turn:
+        box = turn["box"]
+        span_t, span_k = (box[0] + box[1]) / ppq, box[2] + box[3]  # (mirrored within the group's box)
+        if flip in ("time", "both"):
+            F[0, 0] = -1.0
+        if flip in ("keys", "both"):
+            F[1, 1] = -1.0
+        th = math.radians(turn["deg"])
+        c, si, rk = math.cos(-th), math.sin(-th), turn["k"]  # (as fx.turn_pts: on screen, rk beats a key)
+        R = np.array([[c, -si * rk], [si / rk, c]])
+        mb, mk = turn["middle"]
+        mb, mk = b0 + (mb - b0) * s, key + (mk - key) * s  # (the grown box's middle)
+
+        def f(b, k):
+            if F[0, 0] < 0:
+                b = span_t - b
+            if F[1, 1] < 0:
+                k = span_k - k
+            b, k = b0 + (b - b0) * s - mb, key + (k - key) * s - mk
+            return [mb + R[0, 0] * b + R[0, 1] * k + dt / ppq, mk + R[1, 0] * b + R[1, 1] * k + dk]
+        # (the settings a turn changes (gate Range, Recolour's frame...) follow only whole quarter / half turns,
+        # like Turn by and the corner drag: a slanted copy keeps them as they are (hunt 2026-11-24: any turn
+        # past ~14° counted as a quarter turn, the Range jumped round); flips always)
+        quarter = round(turn["deg"] / 90)
+        if abs(turn["deg"] - quarter * 90) < 1e-9:
+            cq, sq = round(math.cos(-quarter * math.pi / 2)), round(math.sin(-quarter * math.pi / 2))
+            L = np.array([[cq, -sq * rk], [sq / rk, cq]]) @ F * s
+        else:
+            L = F * s
+    else:
+        def f(b, k):
+            return [b0 + (b - b0) * s + dt / ppq, key + (k - key) * s + dk]
+        L = np.eye(2) * s
+    try:
+        kind = rest.get("kind")
+        q = mapped_funnel(rest, f, L) if kind == "funnel" else mapped_custom(rest, f, L) if kind == "custom" \
+            else mapped_part(rest, f, L)
+    except (KeyError, TypeError, ValueError):
+        return None
+    if q is not None and flip in ("keys", "both") and (q.get("cycle") or {}).get("shift"):  # (Colours' Diagonal
+        # slants the other way upside down, as fx.flip_shape does; hunt 2026-11-24: a turned Flip each copy kept it)
+        q["cycle"] = dict(q["cycle"], shift=[-q["cycle"]["shift"][0], q["cycle"]["shift"][1]])
+    if q is not None and abs(s - 1) > 1e-9:  # (a wide pen's width grows / shrinks with the copy, as a stretched copy's
+        # band did: hunt 2026-11-24, user picked it; a 25 % copy of a thick line was a blob)
+        if q.get("thick"):
+            q["thick"] = q["thick"] * s
+        if any(isinstance(st, dict) and st.get("thick") for st in q.get("strokes") or ()):
+            q["strokes"] = [dict(st, thick=st["thick"] * s) if isinstance(st, dict) and st.get("thick") else st
+                            for st in q["strokes"]]
+    return q
 
 
 def mapped_custom(sh, f, L):
@@ -2750,7 +2775,11 @@ def mapped_funnel(sh, f, L):
         return None
     q = json.loads(json.dumps(sh))
     q["pts"] = [f(b, k) for b, k in sh["pts"]]
-    return flipped_settings(q, L)
+    q = flipped_settings(q, L)
+    for k in ("range", "range_kept"):  # (a funnel's Range always runs line start -> wall: flips / turns leave it,
+        if k in sh:  # as fx.flip_shape / turn_shape do; hunt 2026-11-24: turned copies' Range ran backwards)
+            q[k] = copy.deepcopy(sh[k])
+    return q
 
 
 def fx_step(notes, tracks, step, sh, ppq, keys=256, remake=None):

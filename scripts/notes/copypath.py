@@ -586,7 +586,8 @@ def pages_reach(sh, r):
         except (KeyError, TypeError, ValueError, IndexError):
             continue
         m = 0.0  # (turned copies reach past the corners: up to half the grown box's diagonal round its middle)
-        if any(abs((t + 180) % 360 - 180) > 1e-9 for t in cfg.get("turn") or ()):
+        t = cfg.get("turn") or (0.0, 0.0)  # (any copy turned: 0 -> 360 turns the ones between, hunt 2026-11-24)
+        if abs(t[1] - t[0]) > 1e-9 or abs((t[0] + 180) % 360 - 180) > 1e-9:
             m = 0.5 * max(cfg["size"]) / 100 * math.hypot(size[0] / cfg["k"], size[1] + 1)
         r = (min(r[0], b0 + float(p[:, 0].min()) - m * cfg["k"]), min(r[1], k0 + float(p[:, 1].min()) - 0.5 - m),
              max(r[2], k0 + float(p[:, 1].max()) + 0.5 + m), max(r[3], b0 + float(p[:, 0].max()) + m * cfg["k"]))
@@ -784,6 +785,31 @@ def covered(parts, wide):
         g = np.sort(g)  # (top first again)
         out.append(parts[g[0]] if len(g) == 1 else on_top([parts[k] for k in g], wide)[0])
     return np.concatenate(out)
+
+
+def first_copy(a, cfg, ppq):
+    """The first copy (the shape itself) as apply_path shows it, for Turn into plain shapes: the arguments
+    engine.remade_shape makes its drawing with ((s, at, key, dt, dk, fk, rows, turn), worked out as apply_path does
+    for copy 0), or None when it shows as the shape is (100 %, not turned, not flipped). a = the notes before the
+    page; cfg its settings (with "grp")."""
+    if not len(a) or not cfg:
+        return None
+    box = group_box(a, cfg, ppq)
+    _, corner, down, _ = places(cfg, box_size(box, ppq))
+    s = cfg["size"][0] / 100
+    deg = (cfg.get("turn") or (0.0, 0.0))[0]
+    turned = abs((deg + 180) % 360 - 180) > 1e-9
+    flip = bool(down[0]) and cfg["flip"] == "each"
+    if abs(s - 1) <= 1e-9 and not turned and not flip:
+        return None
+    at, key = box[0] + corner[0, 0] * ppq, box[2] + corner[0, 1]
+    h = box[3] - box[2]
+    fk = corner[0, 1] / h if h > 0 else 0.5
+    rows = (int(a[:, 2].min()), int(a[:, 2].max()))
+    turn = {"deg": float(deg) if turned else 0.0, "k": cfg["k"], "box": box, "ppq": ppq,
+            "middle": ((box[0] + box[1]) / 2 / ppq, (box[2] + box[3]) / 2),
+            "flip": cfg["way"] if flip else None} if turned or flip else None
+    return float(s), float(at), float(key), 0, 0, float(fk), rows, turn
 
 
 def apply_path(a, cfg, ppq, keys=256, tag=False, remake=None):

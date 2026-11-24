@@ -8,6 +8,8 @@ What's new:
 
 • Fixed: in Copy along a path, a grown copy could reach a key row or two past the point it should end on, and copies past the top key or before bar 1 weren't kept with Keep notes made there on.
 
+• Fixed: a funnel whose wall comes before its line start in time (flipped sideways, or turned past upright) lost pieces where a key row crosses it twice: holes, horns floating apart or missing. Such funnels in older projects get those pieces back.
+
 • Gate trim is now called Trim shape, and it has a second mode: Wrapped slices. It cuts a shape's notes into curved slices as if the shape were wrapped round a ball, each slice its own colour, so a circle becomes a striped beach ball. Pick the number of slices and colours, the angle (top and bottom, sideways or slanted), and how round the slices look. Any shape works, and each slice can become a shape of its own. See [page:trim|Trim shape].
 
 • Draw on Domino: while a shape waits on Domino (before it goes in), your drawing tool works like Select on it. Drag its line or inside to move it, drag its points or a curve's handles, drag its box corners and sides to resize it, or just outside a corner to turn it. Press anywhere else to draw a new shape; hold Ctrl to draw even on top of it. The pointer shows the move arrows where a press changes the shape. See [page:companion|Draw on Domino].

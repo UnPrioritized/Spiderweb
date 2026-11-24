@@ -386,7 +386,10 @@ def funnel_curves(sh, short=False):
     for k, st in enumerate(sh.get("starts", ())):
         for end, c in enumerate(st["ends"]):
             box = curve_box(sh, st["at"], end, st.get("line", 0)) if c else None
-            if box and short and abs(box[2][1]) > 2 * EDGE:
+            # (a nearly flat wall, flatter than a beat a key (only a turned copy along a path makes one): not pulled
+            # back, half a key along it is a long way in time, the curve stopped well short of the wall end and its
+            # notes there stood apart; hunt 2026-11-24. Drawn walls, even leaning ones, stay as they were)
+            if box and short and abs(box[2][1]) > 2 * EDGE and abs(box[2][0]) <= abs(box[2][1]):
                 s_, u_, v_ = box
                 k_ = 1 - EDGE / abs(v_[1])
                 box = s_, u_, (v_[0] * k_, v_[1] * k_)
@@ -637,7 +640,10 @@ def funnel_layout(sh, ppq, main=True):
     def dist(beat):
         return sign * (beat * ppq - t0)
 
-    dspans = {q: [sorted((dist(a), dist(b))) for a, b in s] for q, s in spans.items()}
+    # (each key's stretches in GRID order: a reverse funnel's grid runs back in time, so beat order was backwards and
+    # funnel_cells' merge swallowed a row's second stretch: holes, horns cut off; hunt 2026-11-24, copies along a
+    # path turned past ~95°, slanted funnels flipped sideways)
+    dspans = {q: sorted(sorted((dist(a), dist(b))) for a, b in s) for q, s in spans.items()}
     walls = {}
     if len(sh["pts"]) >= 4:
         w0, w1 = (tuple(p) for p in sh["pts"][2:4])

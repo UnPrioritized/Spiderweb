@@ -20,7 +20,8 @@ from files.snap import SNAP_LIST, snap_beats, snap_text
 from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KEY_LIMITS, KINDS, LETTERS, MOST_POINTS,
                             PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, TURN_LIMITS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path,
                             peak, shifts, speed_of, track)
-from notes.engine import tagged_notes
+from notes.copypath import first_copy
+from notes.engine import remade_shape, tagged_notes
 from notes.fx import before_page
 from notes.meter import bar_beat_tick, from_bar_beat_tick, sigs_of
 from notes.pattern import MAX_LOOPS, PATTERN_PRESETS, loop_points, new_pattern, pattern_name
@@ -368,7 +369,7 @@ class PathWindow(ToolWindow):
             app.shapes_changed(now=True)
         # (outside Multi channel each copy keeps its Multi channel colours too, like Turn into plain notes: hunt)
         use10, shown = app.multi_rendered()
-        made = {}
+        made, firsts = {}, {}
         for i in self.targets:
             sh = app.shapes[i]
             fx, k = sh.get("fx") or [], self.at.get(i)
@@ -384,11 +385,25 @@ class PathWindow(ToolWindow):
                          if tracks is not None else np.zeros(len(notes), np.int64))
             else:
                 slots = self.shown_slots(notes, tag, tracks, i, shown)
+            # (the first copy is the shape itself: shown turned / sized / flipped (hunt 2026-11-24: it jumped back to
+            # the drawing as it was), its drawing gets the same (engine.remade_shape, still editable), its other
+            # steps kept; a shape with no drawing to change (pasted notes, text...): its notes as shown instead)
+            args = first_copy(np.asarray(self.before_notes(i), np.int64), clean_path(fx[k].get("cfg")), ppq)
+            if args is not None:
+                q = remade_shape(before_page(sh, k), ppq, *args)
+                if q is not None:  # (its steps: the ones before the page (made again with it) + the ones after)
+                    steps = list(q.get("fx") or []) + list(fx[k + 1:])
+                    q = {key: v for key, v in q.items() if key != "fx"}
+                    if steps:
+                        q["fx"] = steps
+                    firsts[i] = q
+                else:
+                    firsts[i] = "notes"
             order = np.argsort(tag, kind="stable")  # (each copy's notes cut out once: one scan per copy was slow)
             cuts = np.flatnonzero(np.diff(tag[order])) + 1
             news = []
             for x in np.split(order, cuts):
-                if not len(x) or tag[x[0]] == 0:
+                if not len(x) or tag[x[0]] == 0 and firsts.get(i) != "notes":
                     continue
                 rows = np.column_stack([notes[x, :4], slots[x], np.full(len(x), i)])
                 # (like Apply mask: the colours as they show, user; channel 10 kept in use only if a note is on it,
@@ -402,6 +417,10 @@ class PathWindow(ToolWindow):
                     new["into"] = into_ids(sh)
                     if "slots10" in sh:  # (its automatic tracks' channel rule)
                         new["slots10"] = sh["slots10"]
+                if tag[x[0]] == 0:  # (the shape itself, as shown: keeps its name, takes its place)
+                    new["name"] = app.shape_label(sh)
+                    firsts[i] = new
+                    continue
                 news.append(new)
             made[i] = news
         total = sum(len(v) for v in made.values())
@@ -423,7 +442,11 @@ class PathWindow(ToolWindow):
             if i not in made:
                 out.append(sh)
                 continue
-            self.put_fx(sh, [st for j, st in enumerate(sh.get("fx") or []) if j != self.at[i]])
+            first = firsts.get(i)
+            if isinstance(first, dict):  # (shown turned / sized / flipped: as shown, hunt 2026-11-24)
+                sh = first
+            else:
+                self.put_fx(sh, [st for j, st in enumerate(sh.get("fx") or []) if j != self.at[i]])
             picked += range(len(out), len(out) + 1 + len(made[i]))  # (the shape and its copies, selected)
             out += [sh] + made[i]
         self.close()
