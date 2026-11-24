@@ -866,13 +866,18 @@ def apply_path(a, cfg, ppq, keys=256, tag=False, remake=None):
             x[:, :2] += d[i, 0]
             x[:, 2] += d[i, 1]
             if turned[i] and len(x):  # (pasted notes, text...: no drawing to make again, so the notes themselves
-                # are turned within their own box, round its middle, as a Turn step turns them; user 2026-11-24:
-                # jagged, but it turns)
+                # are turned as a Turn step turns them, round the group's box's middle as this copy has it (grown,
+                # moved: several shapes turn together); user 2026-11-24: jagged, but it turns)
                 from notes.fx import turn_notes
+                s = size[i]
+                mt = at[i] + ((box[0] + box[1]) / 2 - at[i]) * s + d[i, 0]
+                mk = key[i] + ((box[2] + box[3]) / 2 - key[i]) * s + d[i, 1]
                 # (room both ways, so rows turned past the keys aren't squeezed onto the edge rows: cut below)
-                room = int((x[:, 1].max() - x[:, 0].min()) / (cfg["k"] * ppq) + x[:, 2].max() - x[:, 2].min()) + 2
+                room = int((x[:, 1].max() - x[:, 0].min()) / (cfg["k"] * ppq) + x[:, 2].max() - x[:, 2].min()
+                           + abs(mk - (x[:, 2].min() + x[:, 2].max()) / 2)) + 2
                 x[:, 2] += room
-                x = turn_notes(x, float(deg[i]), cfg["k"] * ppq, int(x[:, 2].max()) + room + 1)[0]
+                x = turn_notes(x, float(deg[i]), cfg["k"] * ppq, int(x[:, 2].max()) + room + 1,
+                               mid=(mt, mk + room))[0]
                 x[:, 2] -= room
         if not np.isnan(cut[i, 0]):  # (a half copy: only what's on the near side of the point)
             c, k = box[0] + round(cut[i, 0] * ppq), box[2] + round(cut[i, 2])

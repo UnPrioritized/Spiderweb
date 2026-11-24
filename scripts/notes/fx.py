@@ -401,8 +401,9 @@ def swapped(axes):
     return sorted({"keys" if a == "time" else "time" for a in axes or ()})
 
 
-def turn_notes(a, deg, ticks, keys, same=None):
-    """Notes a (start, end, key, then any columns riding along) turned deg degrees within their own box, clockwise as
+def turn_notes(a, deg, ticks, keys, same=None, mid=None):
+    """Notes a (start, end, key, then any columns riding along) turned deg degrees within their own box (mid: round
+    that (tick, key) instead of the box's middle), clockwise as
     seen on screen; ticks = ticks per key on screen. Each note (a bar one key tall) becomes one note per key row whose
     middle it then crosses (at least one), as long as it is on that row's middle line. Pieces that touch on a row
     and came from notes on different keys join (a filled area stays filled: user, 2026-10-06; notes that followed
@@ -414,7 +415,7 @@ def turn_notes(a, deg, ticks, keys, same=None):
     if abs(deg / 90 - round(deg / 90)) < 1e-12:
         c, s = round(c), round(s)  # (a quarter turn: exact)
     x0, x1, k = a[:, 0] / ticks, a[:, 1] / ticks, a[:, 2].astype(float)
-    xc, kc = (x0.min() + x1.max()) / 2, (k.min() + k.max()) / 2
+    xc, kc = ((x0.min() + x1.max()) / 2, (k.min() + k.max()) / 2) if mid is None else (mid[0] / ticks, mid[1])
     mx, my = (x0 + x1) / 2 - xc, k - kc
     cx, cy = xc + mx * c - my * s, kc + mx * s + my * c  # each note's middle, turned
     h = (x1 - x0) / 2

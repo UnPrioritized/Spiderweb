@@ -2696,11 +2696,22 @@ def remade_copy(rest, ppq, get):
                 return [b0 + (b - b0) * s + dt / ppq, key + (k - key) * s + dk]
             L = np.eye(2) * s
         try:
-            q = mapped_part(rest, f, L)
+            q = mapped_part(rest, f, L) if rest.get("kind") != "funnel" else mapped_funnel(rest, f, L)
         except (KeyError, TypeError, ValueError):
             return None
         return None if q is None else get(q)
     return fn
+
+
+def mapped_funnel(sh, f, L):
+    """A funnel with its four points (line ends, walls) through f (merge.mapped_part's way for line kinds), or None
+    (notes from a whole it was cut from, glue boxes fixed in the song)."""
+    from notes.merge import flipped_settings
+    if sh.get("cut") or isinstance(sh.get("glue"), list) or "notes" in sh:
+        return None
+    q = json.loads(json.dumps(sh))
+    q["pts"] = [f(b, k) for b, k in sh["pts"]]
+    return flipped_settings(q, L)
 
 
 def fx_step(notes, tracks, step, sh, ppq, keys=256, remake=None):
