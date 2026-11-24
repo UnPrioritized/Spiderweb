@@ -132,6 +132,7 @@ class DeformWindow(tk.Toplevel):
         self._restoring = False
         self._gesture = None  # (a board drag: its changes are one step)
         self._shapes = {}  # (area dropdown place -> the library drawing it lent, for undo)
+        self.newpos = None  # (Cut off outside the area: stroke places before -> after, cut_strokes)
         self._build()
         self.steps = LocalUndo(self, self.state_text, self.put_state)
         self.block(True)
@@ -218,8 +219,16 @@ class DeformWindow(tk.Toplevel):
         b.grid(row=5, column=0, columnspan=3, sticky="w", pady=(4, 0))
         Tooltip(b, tr("deform.hard_tip"))
         self.area_parts.append(b)
+        # (Cut off outside the area, PLAN.md "Never escape" stage C, user 2026-11-24: the area's own line is the
+        # boundary, only the strokes Deform bends are cut; greyed while Mirror is on, like Copies)
+        self.cut_off = tk.BooleanVar(value=False)
+        b = self.cut_tick = ttk.Checkbutton(area, text=tr("deform.cut_off"), variable=self.cut_off,
+                                            command=lambda: self.changed("cut_off"))
+        b.grid(row=6, column=0, columnspan=3, sticky="w", pady=(2, 0))
+        Tooltip(b, tr("deform.cut_off_tip"))
+        self.area_parts.append(b)
         self.area_line = ttk.Label(area, text="", foreground=look.WARN_DARK, justify="left", wraplength=wrap)
-        self.area_line.grid(row=6, column=0, columnspan=3, sticky="we")
+        self.area_line.grid(row=7, column=0, columnspan=3, sticky="we")
         self.show_area_parts()
 
         self.what.pack(fill="x", pady=(int(8 * s), 0))
@@ -365,6 +374,11 @@ class DeformWindow(tk.Toplevel):
         on = self.area_kind() != "whole"
         for w in self.area_parts:
             w.state(["!disabled"] if on else ["disabled"])
+        if self.dr.mirror_mode() != "off":  # (cut pieces of linked Mirror strokes: not worked out, greyed)
+            self.cut_tick.state(["disabled"])
+            greyed_why(self.cut_tick, tr("deform.why_cut_mirror"))
+        else:
+            greyed_why(self.cut_tick, tr("deform.why_cut_area"))
         scale = self.scales["size"][0]
         scale.state(["!disabled"] if on else ["disabled"])
 
@@ -422,7 +436,8 @@ class DeformWindow(tk.Toplevel):
     def state_text(self):
         # (not the Position boxes: "middle" is where the area is, the boxes catch up in show_middle)
         return json.dumps({"v": {k: self.boxes[k].value for k in self.boxes if k not in POS}, "kind": self.kind.current(),
-                           "area": name_place(self.area), "hard": self.hard.get(), "centre": self.centre,
+                           "area": name_place(self.area), "hard": self.hard.get(), "cut": self.cut_off.get(),
+                           "centre": self.centre,
                            "middle": self.area_middle})
 
     def put_state(self, text):
@@ -438,6 +453,7 @@ class DeformWindow(tk.Toplevel):
             self.shape = self._shapes.get(name_index(self.area))
             self.area_line.config(text="")
             self.hard.set(s["hard"])
+            self.cut_off.set(s.get("cut", False))
             self.centre, self.area_middle = list(s["centre"]), list(s["middle"])
             self.show_area_parts()
         finally:
@@ -469,7 +485,9 @@ class DeformWindow(tk.Toplevel):
         # Twist only goes by the distance from the Centre, so turning after it = turning before it)
         rigid = len(sets) > 1 and d["area"] is None and not (d["bulge"] or d["ripple"])
         first = on_top = None
-        copied = [i for i in self.bend_idx if not dr.is_hidden(i)]  # (hidden strokes bend but get no copies, hunt)
+        # (hidden strokes bend but get no copies, hunt; asked of the drawing as it was: a cut preview's pieces renumber
+        # the drawer's own list)
+        copied = [i for i in self.bend_idx if not (self.base_strokes[i].get("layer") or {}).get("hidden")]
         # (strokes the area doesn't reach: their copies would only lie on them, left out without bending each one)
         alone = {i for i in copied if deform.left_alone(self.base_strokes[i], d)} if len(sets) > 1 else set()
         for k, dk in enumerate(sets):
@@ -495,6 +513,7 @@ class DeformWindow(tk.Toplevel):
                     if not on_top.covered(st):
                         on_top.add(st)
                         strokes.append(pasted(st))
+        strokes = self.cut_strokes(strokes, d)
         dr.strokes = strokes
         dr.mirror_from(self.leads)
         dr.areas = self.moved_areas(sets[0])
@@ -505,6 +524,35 @@ class DeformWindow(tk.Toplevel):
         self._rest = self.after(REST_MS, self.rested)
         dr.areas_wait = True
         dr.redraw()
+
+    def cutting(self, d):
+        return (self.cut_off.get() and d["area"] is not None and self.dr.mirror_mode() == "off"
+                and str(self.cut_tick.cget("state")) != "disabled")
+
+    def cut_strokes(self, strokes, d):
+        """Cut off outside the area: the strokes Deform bent (and every copy) cut at the area's line, pieces in their
+        place; self.newpos = {place before: [places after]} for the picks (None when not cutting)."""
+        was, self.newpos = self.newpos, None
+        if not self.cutting(d):
+            if was is not None:  # (ticked off again: the picks as they were)
+                self.dr.sel, picks, _ = self.base_sel
+                self.dr.picks = set(picks)
+            return strokes
+        n = len(self.base_strokes)
+        bent = set(self.bend_idx)
+        out, newpos = [], {}
+        which = [j for j in range(len(strokes)) if j in bent or j >= n]
+        cut = dict(zip(which, deform.cut_many([strokes[j] for j in which], d["area"])))  # (all at once: fast)
+        for j, st in enumerate(strokes):
+            pieces = cut.get(j, [st])
+            newpos[j] = list(range(len(out), len(out) + len(pieces)))
+            out.extend(pieces)
+        self.newpos = newpos
+        dr = self.dr  # (the drawer's picks follow while the preview shows: never a pick past the strokes)
+        picks = {k for i in self.base_sel[1] for k in newpos.get(i, ())}
+        dr.picks = picks
+        dr.sel = max(picks) if picks else None
+        return out
 
     def rested(self):
         """The sliders rested: the area colours worked out for the bent drawing, and the line saying which curves
@@ -833,7 +881,15 @@ class DeformWindow(tk.Toplevel):
         self.show(final=True)
         dr = self.dr
         n = len(self.base_strokes)
-        if len(dr.strokes) > n and not self.whole:  # (the copies picked with the strokes: they move on together)
+        if self.newpos is not None:  # (cut: the pieces of the strokes + copies picked)
+            if not self.whole:
+                picks = {k for i in self.idx for k in self.newpos.get(i, ())}
+                picks |= {k for i, ks in self.newpos.items() if i >= n for k in ks}
+                dr.picks, dr.boxes = picks, []
+                dr.sel = max(picks) if picks else None
+            else:
+                dr.picks, dr.boxes, dr.sel = set(), [], None
+        elif len(dr.strokes) > n and not self.whole:  # (the copies picked with the strokes: they move on together)
             dr.picks, dr.boxes = set(self.idx) | set(range(n, len(dr.strokes))), []
             dr.sel = len(dr.strokes) - 1
         dr.push_undo(before=self.base_snap)

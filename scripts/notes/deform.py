@@ -687,12 +687,14 @@ def preview_points(st, d, step=0.004, thin=PREVIEW_TOL):
     return _thin(_bend2(p, d), thin)
 
 
-def _dense(st, d, step=0.004):
-    """A stroke's drawn points, each piece cut to at most step long (shorter for short ripples)."""
+def _dense(st, d, step=0.004, marked=False):
+    """A stroke's drawn points, each piece cut to at most step long (shorter for short ripples). marked: also which
+    of them are the stroke's own points (True) rather than added between."""
     from notes.custom import stroke_points
     p = np.asarray(stroke_points(st), np.float64)
+    own = np.ones(len(p), bool)
     if len(p) < 2:
-        return p
+        return (p, own) if marked else p
     if d["ripple"]:
         step = min(step, d["ripple_len"] / 100 / 8)
     n = np.maximum(np.ceil(np.hypot(*(p[1:] - p[:-1]).T) / step), 1).astype(np.int64)
@@ -700,7 +702,86 @@ def _dense(st, d, step=0.004):
         idx = np.repeat(np.arange(len(n)), n)
         f = np.arange(len(idx)) - np.repeat(np.cumsum(n) - n, n)
         p = np.vstack((p[:-1][idx] + (p[1:] - p[:-1])[idx] * (f / n[idx])[:, None], p[-1:]))
-    return p
+        own = np.r_[f == 0, True]
+    return (p, own) if marked else p
+
+
+def cut_outside(st, area):
+    """A bent stroke cut off at the area's line (PLAN.md "Never escape" stage C, user 2026-11-24: the Deform area's own
+    line is the boundary): [st] when wholly inside, [] when wholly outside, else the inside runs as fine lines (each
+    keeps the stroke's role / colour / layer / group; a closed line cut becomes open runs, the run over its start
+    joined). Crossings found to ~1e-7 of the board by halving each crossing piece."""
+    return cut_many([st], area)[0]
+
+
+def cut_many(sts, area):
+    """cut_outside for many strokes at once: the area asked once for all their points and once per halving for all
+    their crossings (one stroke at a time asked it ~25 times each: 0.75 ms a stroke, Deform's Copies make hundreds)."""
+    from notes.custom import stroke_points
+    out = [None] * len(sts)
+    dense, owner, owns = [], [], []
+    for i, st in enumerate(sts):
+        p = np.asarray(stroke_points(st), np.float64).reshape(-1, 2)
+        own = np.ones(len(p), bool)
+        if len(p) >= 2:
+            p, own = _dense(st, {"ripple": 0}, 0.004, marked=True)
+        dense.append(p)
+        owns.append(own)
+        owner.append(np.full(len(p), i))
+    if not sts:
+        return out
+    P = np.vstack(dense) if dense else np.zeros((0, 2))
+    who = np.concatenate(owner) if owner else np.zeros(0, np.int64)
+    inside = area_q(P[:, 0], P[:, 1], area) < 1 if len(P) else np.zeros(0, bool)
+    starts = np.cumsum([0] + [len(p) for p in dense])
+    # (crossings: between two points of one stroke, one in and one out; all halved together)
+    flips = np.nonzero((inside[1:] != inside[:-1]) & (who[1:] == who[:-1]))[0] if len(P) > 1 else np.zeros(0, np.int64)
+    a, b = P[flips], P[flips + 1]
+    ina = inside[flips]
+    lo, hi = np.zeros(len(flips)), np.ones(len(flips))
+    if len(flips):
+        for _ in range(24):  # (halving: lo stays on a's side, hi on b's)
+            mid = (lo + hi) / 2
+            m = a + (b - a) * mid[:, None]
+            same = (area_q(m[:, 0], m[:, 1], area) < 1) == ina
+            lo, hi = np.where(same, mid, lo), np.where(same, hi, mid)
+    cross = a + (b - a) * ((lo + hi) / 2)[:, None]
+    cut_at = np.searchsorted(flips, starts)  # (each stroke's crossings: flips[cut_at[i]:cut_at[i + 1]])
+    for i, st in enumerate(sts):
+        s0, s1 = starts[i], starts[i + 1]
+        ins = inside[s0:s1]
+        if not len(ins):
+            out[i] = []
+        elif ins.all():
+            out[i] = [st]
+        elif not ins.any() or s1 - s0 < 2:
+            out[i] = []
+        else:
+            f0, f1 = cut_at[i], cut_at[i + 1]
+            out[i] = _runs(st, dense[i], ins, {int(f) - s0: c for f, c in zip(flips[f0:f1], cross[f0:f1])}, owns[i])
+    return out
+
+
+def _runs(st, p, inside, at, own):
+    """cut_many's pieces of one stroke: its points p, which are inside, the crossings at (place -> point); a piece
+    keeps the stroke's own points (own) + its crossings, the points added only to find them are left out."""
+    from notes.custom import stroke_closed
+    n = len(p)
+    starts = np.nonzero(inside & np.r_[True, ~inside[:-1]])[0]
+    ends = np.nonzero(inside & np.r_[~inside[1:], True])[0]
+    runs = []
+    for s, e in zip(starts, ends):  # (one per inside run: few)
+        r = p[s:e + 1][own[s:e + 1]]
+        parts = ([at[int(s) - 1][None]] if s > 0 else []) + [r] + ([at[int(e)][None]] if e < n - 1 else [])
+        runs.append(np.vstack(parts))
+    if stroke_closed(st) and inside[0] and inside[-1] and len(runs) > 1:  # (the run over the closed line's start)
+        runs[0] = np.vstack((runs.pop()[:-1], runs[0]))
+    keep = {k: st[k] for k in PLAIN_KEEP if k in st}
+    out = []
+    for r in runs:
+        if len(r) >= 2 and np.hypot(*(r[-1] - r[0])) + np.hypot(*np.diff(r, axis=0).T).sum() > 1e-6:
+            out.append(dict(keep, kind="poly", pts=np.round(r, 6).tolist()))
+    return out
 
 
 def left_alone(st, d):
