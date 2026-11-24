@@ -317,6 +317,8 @@ class ShapeMenu:
         self.sustain_item(m)
         if app.between_pair():
             item(tr("between.menu_add"), "", app.add_between)
+        elif app.between_blocked():  # (greyed, saying why: user 2026-11-25)
+            item(tr("between.menu_add_only"), "", app.add_between, False)
         self.merge_menu(m)
         self.mask_items(item)
         ok = app.can_join()
@@ -365,6 +367,8 @@ class ShapeMenu:
         app = self.app
         if app.between_pair():
             item(tr("between.menu_add"), "", app.add_between)
+        elif app.between_blocked():
+            item(tr("between.menu_add_only"), "", app.add_between, False)
         b = app.shapes[i].get("between")
         if not b:
             return

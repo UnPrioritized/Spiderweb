@@ -38,8 +38,13 @@ def drawn(sh):
 
 def morphable(sh):
     """A custom shape Add between can use: a drawing (not text, pasted notes, a picture or a Hz bass)."""
-    return (drawn(sh) and bool(sh.get("strokes")) and not sh.get("text") and "notes" not in sh
-            and not sh.get("hz") and not sh.get("image"))
+    return drawn(sh) and bool(sh.get("strokes")) and not unmorphable(sh)
+
+
+def unmorphable(sh):
+    """A shape Add between leaves out (user 2026-11-25; the menu item greyed with why): text, pasted notes, a
+    picture, a Hz bass."""
+    return bool(sh.get("text") or "notes" in sh or "picture" in sh or sh.get("hz"))
 
 
 # ---------------------------------------------------------------- the pieces of a shape
@@ -175,7 +180,10 @@ class _Piece:
 class DrawPair:
     """Two shapes (one or both drawn) matched once; geometry(f) makes the step f of the way."""
 
-    def __init__(self, a, b):
+    def __init__(self, a, b, turn=None):
+        """turn: degrees the steps turn the shape by on the way (+ = clockwise, like Turn by…; WAY C, user
+        2026-11-24: the first shape turned by it is matched with the last, the steps turn while the rest blends);
+        None = the angle found by itself (found: an exact copy moved / resized / turned, else 0)."""
         self.a, self.b = a, b
         views = [v for v in (_view(a), _view(b)) if v]
         self.view = tuple(np.mean(views, axis=0)) if views else (0.0, 1.0)
@@ -183,6 +191,15 @@ class DrawPair:
         self.fa, self.fb = _frame(a), _frame(b)
         A = [_Piece(*x, self.view) for x in _pieces(a)]
         B = [_Piece(*x, self.view) for x in _pieces(b)]
+        self.found = self._found_turn()
+        self.turn = self.found if turn is None else float(turn)
+        self.theta = -math.radians(self.turn)  # (in the view, counter-clockwise)
+        ma = np.array([x.mid for x in A]).reshape(-1, 2)
+        self.ca = ma.mean(axis=0) if len(ma) else self._view_pts(self.fa).mean(axis=0)
+        if self.theta:  # (the first shape turned the whole way first: the pieces matched as they'll end up)
+            for x in A:
+                x.v, x.mid = _turned(x.v, self.theta, self.ca), _turned(x.mid[None], self.theta, self.ca)[0]
+        self.fa_turned = self._bp_pts(_turned(self._view_pts(self.fa), self.theta, self.ca))
         self.pairs = []  # (from points, to points (view), closed, look a, look b, which end it belongs to)
         ma = np.array([x.mid for x in A]).reshape(-1, 2)
         mb = np.array([x.mid for x in B]).reshape(-1, 2)
@@ -207,15 +224,36 @@ class DrawPair:
                 p = _along(x.v, n, x.closed)
                 # (the dot = its middle's place in the OTHER shape's box, so it travels with the steps; at its own
                 # spot, the end shape's extra lines grew in a pile where the last shape is: user 2026-11-25)
-                own, other = (self.fa, self.fb) if first else (self.fb, self.fa)
+                own, other = (self.fa_turned, self.fb) if first else (self.fb, self.fa_turned)
                 dot = np.repeat(self._moved(x.mid, own, other)[None], len(p), axis=0)
                 self.pairs.append((p, dot, x.closed, x.look, x.look) if first else (dot, p, x.closed, x.look, x.look))
-        mid_a = ma.mean(axis=0) if len(ma) else np.zeros(2)
-        mid_b = mb.mean(axis=0) if len(mb) else mid_a
+        self.cb = mb.mean(axis=0) if len(mb) else self.ca
         # (the move of the whole shape, beats / pitch: Steps' pushes; shaped like Pair.d)
         a_, c_ = self.view
-        d = mid_b - mid_a
+        d = self.cb - self.ca
         self.d = np.array([[d[0] - a_ * d[1] / c_, d[1] / c_]])
+
+    def _view_pts(self, bp):
+        a, c = self.view
+        bp = np.asarray(bp, float).reshape(-1, 2)
+        return np.column_stack([bp[:, 0] + a * bp[:, 1], c * bp[:, 1]])
+
+    def _bp_pts(self, v):
+        a, c = self.view
+        pitch = v[:, 1] / c
+        return np.column_stack([v[:, 0] - a * pitch, pitch])
+
+    def _found_turn(self):
+        """The angle (degrees, + = clockwise) the last shape is turned by when it's an exact copy of the first (the
+        same drawing, moved / resized / turned, not mirrored), else 0 (WAY C: found by itself, user 2026-11-24)."""
+        a, b = self.a, self.b
+        if not (drawn(a) and drawn(b)) or json.dumps(a["strokes"]) != json.dumps(b["strokes"]):
+            return 0.0
+        if (_det(self.fa) < 0) != (_det(self.fb) < 0):
+            return 0.0
+        ea, eb = (np.diff(self._view_pts(fr[:2]), axis=0)[0] for fr in (self.fa, self.fb))
+        ang = math.degrees(math.atan2(ea[0] * eb[1] - ea[1] * eb[0], ea @ eb))
+        return round(-ang, 6) + 0.0
 
     def _moved(self, v, own, other):
         """A point in the view at the same place in box `other` as it is in box `own` (itself if a box is flat)."""
@@ -256,7 +294,9 @@ class DrawPair:
     def frame(self, f):
         """The step's box: the first shape's going to the last's; a flat one (a flip on the way) = the box round
         the step's drawing (None)."""
-        fr = self.fa + (self.fb - self.fa) * f
+        fr = self.fa_turned + (self.fb - self.fa_turned) * f
+        if self.theta:  # (turned back the part of the way still to go, round the step's middle)
+            fr = self._bp_pts(_turned(self._view_pts(fr), -self.theta * (1 - f), self.ca + (self.cb - self.ca) * f))
         (b0, p0), (b1, p1), (b2, p2) = fr
         det = (b1 - b0) * (p2 - p0) - (p1 - p0) * (b2 - b0)
         ends = max(abs(_det(self.fa)), abs(_det(self.fb)), 1e-9)
@@ -270,6 +310,8 @@ class DrawPair:
             x = p + (q - p) * f
             if np.ptp(x[:, 0]) < 1e-9 and np.ptp(x[:, 1]) < 1e-9:
                 continue
+            if self.theta:
+                x = _turned(x, -self.theta * (1 - f), self.ca + (self.cb - self.ca) * f)
             pitch = x[:, 1] / c
             bp = np.column_stack([x[:, 0] - a * pitch, pitch])
             look = dict(la if f < 0.5 else lb)
@@ -333,6 +375,15 @@ class DrawPair:
         if rd:
             out["round"] = rd
         return out
+
+
+def _turned(v, ang, centre):
+    """Points (N x 2, the view) turned ang radians counter-clockwise round centre."""
+    if not ang:
+        return v
+    co, si = math.cos(ang), math.sin(ang)
+    d = v - centre
+    return np.column_stack([centre[0] + co * d[:, 0] - si * d[:, 1], centre[1] + si * d[:, 0] + co * d[:, 1]])
 
 
 def _det(fr):

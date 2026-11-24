@@ -165,6 +165,20 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
             Tooltip(w, tr("between.steps_tip"))
         self.info = ttk.Label(side, text="", foreground=look.HINT)
         self.info.pack(anchor="w", pady=(2, 0))
+        row = ttk.Frame(side)  # (Turn by: drawn shapes, WAY C, user 2026-11-25: under Steps)
+        row.pack(anchor="w", pady=(6, 0))
+        lb = self.turn_label = ttk.Label(row, text=tr("between.turn_by"))
+        lb.pack(side="left")
+        self.turn_var = tk.StringVar()
+        e = self.turn_box = ttk.Entry(row, textvariable=self.turn_var, width=7)
+        e.pack(side="left", padx=4)
+        ttk.Label(row, text="°").pack(side="left")
+        e.bind("<Return>", lambda ev: (self.on_turn(), "break")[1])
+        e.bind("<FocusOut>", lambda ev: self.on_turn())
+        Scrub(app, [(e, self.turn_var, self.on_turn)], (1, 15, 0.1), -between.MOST_TURN, between.MOST_TURN, label=lb)
+        for w in (lb, e):
+            Tooltip(w, tr("between.turn_tip"))
+            w.bind("<ButtonRelease-2>", lambda ev: self.turn_found())  # (THE CONTROL SCHEME: middle = default)
         self.rev_var = tk.BooleanVar()
         rev = self.rev_tick = ttk.Checkbutton(side, text=tr("between.reverse"), variable=self.rev_var,
                               command=lambda: self.change("rev", self.rev_var.get()))
@@ -296,6 +310,7 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
         elif shown and not want:
             self.multi_note.pack_forget()
         self.smooth_var.set(self.set.get("smooth", False))
+        self.show_turn()
         self.draw()
         self.draw_preview()
         self.draw_pad()
@@ -321,6 +336,39 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
                 self.app.busy(None)
             self.hist.mark("steps")
             return True
+
+    def show_turn(self):
+        """Turn by: the typed angle, or the one found by itself; greyed when neither end is drawn or there are keys."""
+        found, can = between.found_turn(self.app.shapes, self.gid)
+        turn = self.set.get("turn")
+        shown = turn if turn is not None and can else found
+        self.turn_var.set("" if shown is None else f"{shown:g}")
+        self.turn_box.config(state="normal" if can else "disabled")
+        self.turn_label.config(foreground="" if can else look.HINT)
+
+    def on_turn(self):
+        if self.closed or str(self.turn_box.cget("state")) == "disabled":
+            return
+        try:
+            n = float(calc(self.turn_var.get()))
+            if not -between.MOST_TURN <= n <= between.MOST_TURN:
+                raise ValueError
+        except (ValueError, ZeroDivisionError, TypeError):  # (not a number: the box goes back, user)
+            return self.show_turn()
+        found, _ = between.found_turn(self.app.shapes, self.gid)
+        now = self.set.get("turn")
+        if (found if now is None else now) != n:
+            self.set["turn"] = n
+            self.apply()
+            self.hist.mark("turn")
+            return True
+
+    def turn_found(self):
+        """Middle-click on Turn by: back to the angle found by itself."""
+        if str(self.turn_box.cget("state")) != "disabled" and self.set.get("turn") is not None:
+            self.set.pop("turn", None)
+            self.apply()
+            self.hist.mark()
 
     def on_colours(self):
         self.colours_touched = True
@@ -350,6 +398,7 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
             return
         self.on_steps()  # (a number typed without Enter counts too)
         self.on_turns()
+        self.on_turn()
         self.closed = True
         if json.dumps(self.app.shapes) != self.before:
             self.app.add_undo_step(self.before, self.name, sel=self.sel_was)
@@ -853,6 +902,14 @@ class BetweenGroups:
         if len(sels) == 2 and all(between.usable(self.shapes[i]) for i in sels):
             return sels
         return None
+
+    def between_blocked(self):
+        """Two shapes selected that Add between can't use only because one is text, pasted notes, a picture or a
+        Hz bass (the menu shows the item greyed, saying so: user 2026-11-25)."""
+        from notes.between_draw import unmorphable
+        sels = [i for i in self.sels if i < len(self.shapes)]
+        return (len(sels) == 2 and not self.between_pair() and not any("between" in self.shapes[i] for i in sels)
+                and any(unmorphable(self.shapes[i]) for i in sels))
 
     def add_between(self):
         """Right-click → Add between… on two open lines: the group made, the window opened."""

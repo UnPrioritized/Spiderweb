@@ -35,7 +35,8 @@ STEPS_DEFAULT = 10
 MOST_STEPS = 500
 STRAIGHT = [[0.0, 0.0], [1.0, 1.0]]
 SETTINGS_DEFAULT = {"steps": STEPS_DEFAULT, "graph": STRAIGHT, "rev": False, "colours": 15}
-COLOURS_MOST = 16  # (16 with "Use channel 10"; the window allows areas.most_colours)
+MOST_TURN = 3600.0  # (Turn by: ten spins each way)
+COLOURS_MOST = 16 # (16 with "Use channel 10"; the window allows areas.most_colours)
 _made = {}  # remembered steps: (the pair, f) -> (the step, its fingerprint)
 
 
@@ -64,6 +65,12 @@ def clean_settings(s):
     except (TypeError, ValueError):
         pass
     out["smooth"] = s.get("smooth") is True  # (off for groups saved before it: they keep their look)
+    try:  # (Turn by, drawn shapes: degrees typed, + = clockwise; missing / None = found by itself, between_draw)
+        turn = float(s["turn"]) if s.get("turn") is not None else None
+        if turn is not None and math.isfinite(turn):
+            out["turn"] = round(max(-MOST_TURN, min(MOST_TURN, turn)), 6)
+    except (TypeError, ValueError):
+        pass
     return out
 
 
@@ -266,12 +273,12 @@ class Pair:
     """Two shapes ready to be blended: their points matched ONCE, then each step only moves them part of the way
     (matching long curves for every step made 500 steps take half a minute)."""
 
-    def __init__(self, a, b, rev):
+    def __init__(self, a, b, rev, turn=None):
         self.a, self.b, self.rev = a, b, rev
         self.draw = None
         from notes.between_draw import DrawPair, drawn
-        if drawn(a) or drawn(b):  # (a drawn shape at either end: each piece into the nearest piece, between_draw)
-            self.draw = DrawPair(a, b)
+        if drawn(a) or drawn(b):  # (a drawn shape at either end: each piece into the nearest piece, between_draw;
+            self.draw = DrawPair(a, b, turn)  # turn: the Turn by box, None = found by itself)
             self.kind, self.sharp, self.d = "custom", [], self.draw.d
             return
         plain = not (a.get("shape") or b.get("shape"))
@@ -868,8 +875,9 @@ class Steps:
         # (a key runs the way the first shape does, like the steps it was made from: Reverse pairs the last shape
         # the other way round with the first shape AND with a key)
         k = (id(a), id(b), rev)
-        if k not in self.keys:
-            self.keys[k] = json.dumps([_plain(a), _plain(b), bool(rev)], sort_keys=True)
+        if k not in self.keys:  # (Turn by: the typed angle only for a group without keys, else found by itself)
+            turn = self.s.get("turn") if len(self.marks) == 2 else None
+            self.keys[k] = json.dumps([_plain(a), _plain(b), bool(rev), turn], sort_keys=True)
         graph = self.s["graph"]
         dy = change_at(graph, u1) - change_at(graph, u0)
         return self.keys[k], (dy if abs(dy) > 1e-12 else u1 - u0)
@@ -931,9 +939,20 @@ def _pair(key):
     if pair is None:
         if len(_pairs) > 64:
             _pairs.clear()
-        a, b, rev = json.loads(key)
-        pair = _pairs[key] = Pair(a, b, rev)
+        a, b, rev, turn = json.loads(key)
+        pair = _pairs[key] = Pair(a, b, rev, turn)
     return pair
+
+
+def found_turn(shapes, gid):
+    """(the angle Turn by finds by itself for the group's first and last shape, can it be typed): (None, False) when
+    neither end is drawn or the group has keys (Turn by greyed)."""
+    marks = anchors(shapes, gid)
+    a, b = marks[0][1], marks[-1][1]
+    if a["kind"] != "custom" and b["kind"] != "custom":
+        return None, False
+    key = json.dumps([_plain(a), _plain(b), False, None], sort_keys=True)
+    return _pair(key).draw.found, len(marks) == 2
 
 
 def made(key, f):
