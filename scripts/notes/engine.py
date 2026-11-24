@@ -2649,22 +2649,54 @@ def remade_copy(rest, ppq, get):
     """For a Copy along a path page on top of rest (the shape as the page's notes are made): fn(s, at, key, dt, dk)
     -> (notes, tracks) of rest's drawing made s times as big round (tick at, key) and moved dt ticks, dk keys, with
     every step before the page run on it again (user 2026-11-24: copies stay sharp, the earlier tools work on each
-    at its own size); None when the drawing can't be made again so (pasted notes, text, merged...: stretched)."""
-    def fn(s, at, key, dt, dk, fk=0.5, rows=None):
+    at its own size); None when the drawing can't be made again so (pasted notes, text, merged...: stretched).
+    turn (copypath.apply_path): {"deg" (plus = clockwise on screen), "k" (beats per key on screen), "middle" (the
+    group's box's middle, beats / keys), "box" (its ticks / rows), "ppq", "flip" (a way, or None)}: the drawing
+    flipped within the group's box first, then grown, then turned round the grown box's middle."""
+    def fn(s, at, key, dt, dk, fk=0.5, rows=None, turn=None):
         from notes.merge import mapped_part
         b0 = at / ppq
+        flip = turn and turn.get("flip")
         r = cached_reach(rest) if rows else None
         if r is not None and abs(r[1] - rows[0]) <= 0.5 + 1e-6 and abs(r[2] - rows[1]) <= 0.5 + 1e-6:
             # (round the drawing's own bottom / top at that corner, not its row's middle: the top copy's top row stays
             # on B's key; user 2026-11-24, "one or two key rows too high". Notes made by earlier pages reaching other
             # rows: the row's middle)
-            key += (1 - fk) * (float(r[1]) - rows[0]) + fk * (float(r[2]) - rows[1])
+            lo, hi = float(r[1]) - rows[0], float(r[2]) - rows[1]
+            if flip in ("keys", "both"):  # (upside down: its top is the bottom now)
+                lo, hi = -hi, -lo
+            key += (1 - fk) * lo + fk * hi
             edge = math.floor(key) + 0.5
             if abs(key - edge) < 1e-3:  # (a drawing ON a row edge reads a hair inside it (the reach): round the
                 key = edge  # edge itself, so the grown copy's edge lands on it again, not a hair past it)
+        F = np.eye(2)
+        if turn:
+            box = turn["box"]
+            span_t, span_k = (box[0] + box[1]) / ppq, box[2] + box[3]  # (mirrored within the group's box)
+            if flip in ("time", "both"):
+                F[0, 0] = -1.0
+            if flip in ("keys", "both"):
+                F[1, 1] = -1.0
+            th = math.radians(turn["deg"])
+            c, si, rk = math.cos(-th), math.sin(-th), turn["k"]  # (as fx.turn_pts: on screen, rk beats a key)
+            R = np.array([[c, -si * rk], [si / rk, c]])
+            mb, mk = turn["middle"]
+            mb, mk = b0 + (mb - b0) * s, key + (mk - key) * s  # (the grown box's middle)
+
+            def f(b, k):
+                if F[0, 0] < 0:
+                    b = span_t - b
+                if F[1, 1] < 0:
+                    k = span_k - k
+                b, k = b0 + (b - b0) * s - mb, key + (k - key) * s - mk
+                return [mb + R[0, 0] * b + R[0, 1] * k + dt / ppq, mk + R[1, 0] * b + R[1, 1] * k + dk]
+            L = R @ F * s
+        else:
+            def f(b, k):
+                return [b0 + (b - b0) * s + dt / ppq, key + (k - key) * s + dk]
+            L = np.eye(2) * s
         try:
-            q = mapped_part(rest, lambda b, k: [b0 + (b - b0) * s + dt / ppq, key + (k - key) * s + dk],
-                            np.eye(2) * s)
+            q = mapped_part(rest, f, L)
         except (KeyError, TypeError, ValueError):
             return None
         return None if q is None else get(q)
@@ -2688,14 +2720,13 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256, remake=None):
             if got is None:
                 return None
             n, t = got
-            if t is None:
-                if tracks is not None and not step.get("tag"):
-                    return None
-                t = np.zeros(len(n), np.int64)
-            elif tracks is None and not step.get("tag"):
-                return None
             n = np.asarray(n, np.int64)
-            return np.column_stack([n, t]).astype(np.int64) if whole else n
+            if not whole:
+                return n
+            if t is None:  # (one colour: group 0, as above for the shape's own notes; Colours other than Keep added
+                # that column, and a remade copy without it went back to stretched, unturned: user 2026-11-24)
+                t = np.zeros(len(n), np.int64)
+            return np.column_stack([n, t]).astype(np.int64)
         rm = again if remake is not None else None
         if step.get("tag") and step["cfg"]:  # (Turn into plain shapes: each note's copy rides along as one more
             # column of the notes, through the steps after it: tagged_notes)

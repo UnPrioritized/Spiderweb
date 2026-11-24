@@ -34,8 +34,11 @@ and flips work on the whole group. A page's settings (PATH_DEFAULTS' keys):
   "restart" Speed starts again at each point (with Copies on the points): each run gets the whole Speed (user
            2026-10-16, a tick); off: once over the whole path. Pages from before it: on for One copy every with
            Speed up / Slow down (as they were)
-  "size"   [first copy %, last copy %]: each copy grows / shrinks from its corner on the path (key rows sampled like
-           a stretched picture: no gaps between rows)
+  "size"   [first copy %, last copy %]: each copy grows / shrinks from its corner on the path, made again from the
+           drawing (user 2026-11-24: sharp); a shape that can't be (pasted notes, text...): key rows sampled like a
+           stretched picture (no gaps between rows)
+  "turn"   [first copy °, last copy °] (user 2026-11-24): each copy turned round its own middle as the piano roll
+           shows it ("k"), plus = clockwise; made again from the drawing (a flipped copy: flipped, then turned)
   "colours" "keep" / "shift" (every colour of copy n = n x step channels on, round the "most" colours) / "turn"
            (round the shape's own colours) / "one" (each copy one colour: n x step); "step" (-15 .. 15)
   "flip"   "none" / "each" (copies where the path goes down are flipped within the group's box, "way": "keys" upside
@@ -66,7 +69,8 @@ FLIPS = ("none", "each", "mirror")
 WAYS = ("keys", "time", "both")
 TOPS = ("last", "first")
 PATH_DEFAULTS = {"pts": None, "mids": None, "kind": "straight", "mode": "every", "every": 0.25, "count": 8,
-                 "k": 0.25, "speed": "even", "size": [100.0, 100.0], "colours": "keep", "step": 1, "most": 15,
+                 "k": 0.25, "speed": "even", "size": [100.0, 100.0], "turn": [0.0, 0.0], "colours": "keep",
+                 "step": 1, "most": 15,
                  "flip": "none", "way": "keys", "top": "last", "half": True, "anchor": True,
                  "inside": False, "low": 0, "high": 127, "pattern": None, "curve": None, "restart": False,
                  "grp": [0.0, 0.0, 0.0, 0.0]}
@@ -75,6 +79,7 @@ MOST_POINTS = len(LETTERS) - 1  # B .. Z
 EVERY_LIMITS = (1e-6, 1024.0)  # beats
 COUNT_LIMITS = (2, 10_000)  # copies (the shape itself counts)
 SIZE_LIMITS = (1.0, 1000.0)  # %
+TURN_LIMITS = (-36000.0, 36000.0)  # degrees (plus = clockwise as the piano roll shows it, like Turn by)
 STEP_LIMITS = (-15, 15)
 KEY_LIMITS = (0, 255)  # Keep inside's Lowest / Highest
 MOST_COPIES = 10_000
@@ -141,6 +146,11 @@ def clean_path(c):
         got = [_num(v, *SIZE_LIMITS) for v in size]
         if None not in got:
             out["size"] = got
+    turn = c.get("turn")
+    if isinstance(turn, (list, tuple)) and len(turn) == 2:
+        got = [_num(v, *TURN_LIMITS) for v in turn]
+        if None not in got:
+            out["turn"] = got
     if out["low"] > out["high"]:
         out["low"], out["high"] = out["high"], out["low"]
     if c.get("pattern") is not None:
@@ -575,8 +585,11 @@ def pages_reach(sh, r):
             p = track(cfg, size)[0]
         except (KeyError, TypeError, ValueError, IndexError):
             continue
-        r = (min(r[0], b0 + float(p[:, 0].min())), min(r[1], k0 + float(p[:, 1].min()) - 0.5),
-             max(r[2], k0 + float(p[:, 1].max()) + 0.5), max(r[3], b0 + float(p[:, 0].max())))
+        m = 0.0  # (turned copies reach past the corners: up to half the grown box's diagonal round its middle)
+        if any(abs((t + 180) % 360 - 180) > 1e-9 for t in cfg.get("turn") or ()):
+            m = 0.5 * max(cfg["size"]) / 100 * math.hypot(size[0] / cfg["k"], size[1] + 1)
+        r = (min(r[0], b0 + float(p[:, 0].min()) - m * cfg["k"]), min(r[1], k0 + float(p[:, 1].min()) - 0.5 - m),
+             max(r[2], k0 + float(p[:, 1].max()) + 0.5 + m), max(r[3], b0 + float(p[:, 0].max()) + m * cfg["k"]))
     return r
 
 
@@ -776,9 +789,10 @@ def covered(parts, wide):
 def apply_path(a, cfg, ppq, keys=256, tag=False, remake=None):
     """Notes a (start, end, key, then columns riding along; with 5+ columns the last is the colour group) and their
     copies along the path. tag: one more column at the end, each note's copy (0 = the shape; Turn into plain
-    shapes). remake(s, at, key, dt, dk, fk, rows): the shape's notes (a's columns) made again from its drawing s
-    times as big round (tick at, key: a row's middle; fk = that corner's place in the box's keys 0..1, rows = the
-    shape's lowest / highest key), moved dt ticks / dk keys, or None (then the notes are stretched: scaled)."""
+    shapes). remake(s, at, key, dt, dk, fk, rows, turn): the shape's notes (a's columns) made again from its drawing
+    s times as big round (tick at, key: a row's middle; fk = that corner's place in the box's keys 0..1, rows = the
+    shape's lowest / highest key), turned (engine.remade_copy), moved dt ticks / dk keys, or None (then the notes
+    are stretched: scaled; not turned)."""
     if not len(a) or not cfg:
         return a
     box = group_box(a, cfg, ppq)
@@ -798,6 +812,10 @@ def apply_path(a, cfg, ppq, keys=256, tag=False, remake=None):
     rows = (int(a[:, 2].min()), int(a[:, 2].max()))
     u = np.arange(n) / max(1, n - 1)
     size = (cfg["size"][0] + (cfg["size"][1] - cfg["size"][0]) * u) / 100
+    t0, t1 = cfg.get("turn") or (0.0, 0.0)
+    deg = t0 + (t1 - t0) * u
+    turned = np.abs((deg + 180) % 360 - 180) > 1e-9  # (whole turns: as it is)
+    middle = ((box[0] + box[1]) / 2 / ppq, (box[2] + box[3]) / 2)  # (the group's box's middle: copies turn round it)
     flips = down[:n] if cfg["flip"] == "each" else np.zeros(n, bool)
     col = a.shape[1] - 1 if a.shape[1] >= 5 and cfg["colours"] != "keep" else None
     own = np.unique(a[:, col] % ROUND) if col is not None else None
@@ -812,13 +830,18 @@ def apply_path(a, cfg, ppq, keys=256, tag=False, remake=None):
     for i in range(n):
         x = a
         got = None
-        if sharp and abs(size[i] - 1) > 1e-9:  # (made again from the drawing at its size and place: sharp edges)
-            got = remake(float(size[i]), float(at[i]), float(mid[i]), int(d[i, 0]), int(d[i, 1]), float(fk[i]), rows)
+        if sharp and (abs(size[i] - 1) > 1e-9 or turned[i]):  # (made again from the drawing at its size, angle and
+            # place: sharp edges)
+            turn = {"deg": float(deg[i]), "k": cfg["k"], "middle": middle, "box": box, "ppq": ppq,
+                    "flip": cfg["way"] if flips[i] else None} if turned[i] else None
+            got = remake(float(size[i]), float(at[i]), float(mid[i]), int(d[i, 0]), int(d[i, 1]), float(fk[i]), rows,
+                         turn)
             if got is None or got.shape[1] != a.shape[1]:
                 sharp, got = False, None
         if got is not None:
             x = got
-            if flips[i] and len(x):  # (within the group's box as this copy has it: grown round its corner, moved)
+            if flips[i] and len(x) and not turned[i]:  # (within the group's box as this copy has it: grown round its
+                # corner, moved; a turned copy was flipped in its drawing, before turning)
                 s = size[i]
                 b = (round(at[i] + (box[0] - at[i]) * s) + d[i, 0], round(at[i] + (box[1] - at[i]) * s) + d[i, 0],
                      # (keys: its own rows (the drawing's true height), the group's other rows past them grown)

@@ -18,7 +18,7 @@ from files.mathexpr import calc, fmt
 from files.own_tracks import into_ids
 from files.snap import SNAP_LIST, snap_beats, snap_text
 from notes.copypath import (COLOURS, COUNT_LIMITS, EVERY_LIMITS, FAR, FLIPS, KEY_LIMITS, KINDS, LETTERS, MOST_POINTS,
-                            PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path,
+                            PATH_DEFAULTS, SIZE_LIMITS, SPEEDS, TURN_LIMITS, STEP_LIMITS, TOPS, WAYS, all_points, clean_path,
                             peak, shifts, speed_of, track)
 from notes.engine import tagged_notes
 from notes.fx import before_page
@@ -134,22 +134,30 @@ class PathWindow(ToolWindow):
                                                                               padx=(3, 0))
         ttk.Label(size, text="→", foreground=look.HINT).grid(row=0, column=2, padx=6)
 
-        colours = self.choice(box, 5, "colours", tr("path.colours"))
+        self.label(box, 5, tr("path.angle"))  # (Turn, under Size: user 2026-11-24)
+        turn = ttk.Frame(box)
+        turn.grid(row=5, column=1, sticky="w", pady=(6, 2))
+        for c, key in ((0, "turn0"), (3, "turn1")):
+            self.number(turn, 0, c, key, tr(f"path.tip_angle{key[-1]}"), (1, 15, 0.1))
+            ttk.Label(turn, text="°", foreground=look.HINT).grid(row=0, column=c + 1, sticky="w", padx=(3, 0))
+        ttk.Label(turn, text="→", foreground=look.HINT).grid(row=0, column=2, padx=6)
+
+        colours = self.choice(box, 6, "colours", tr("path.colours"))
         lb = ttk.Label(colours, text=tr("path.colour_step"), foreground=look.HINT)
         lb.grid(row=0, column=1, sticky="e", padx=(10, 3))
         self.number(colours, 0, 2, "step", tr("path.tip_step"), (1, 5, 1), label=lb, width=4)
         self.colour_note = ttk.Label(box, text="", foreground=look.WARN, wraplength=round(440 * s))
-        self.colour_note.grid(row=6, column=1, sticky="w")
-        flip = self.choice(box, 7, "flip", tr("path.flip"))
+        self.colour_note.grid(row=7, column=1, sticky="w")
+        flip = self.choice(box, 8, "flip", tr("path.flip"))
         self.choice(flip, 0, "way", None, column=1)
-        self.choice(box, 8, "top", tr("path.top"))
+        self.choice(box, 9, "top", tr("path.top"))
         same = tuple(v for key in ("kind", "speed", "colours", "flip", "top") for v in self.combos[key].cget("values"))
         for key in ("kind", "speed", "colours", "flip", "top"):  # (one width for the left column's dropdowns, user)
             self.combos[key].fit_also = same
 
-        self.label(box, 9, tr("path.range"))
+        self.label(box, 10, tr("path.range"))
         rng = ttk.Frame(box)
-        rng.grid(row=9, column=1, sticky="w", pady=(6, 2))
+        rng.grid(row=10, column=1, sticky="w", pady=(6, 2))
         var = tk.BooleanVar(value=False)
         tick = ttk.Checkbutton(rng, text=tr("path.inside"), variable=var, command=lambda: self.put_inside(var.get()))
         tick.grid(row=0, column=0, sticky="w")
@@ -163,10 +171,10 @@ class PathWindow(ToolWindow):
             self.range_names[key] = ttk.Label(rng, text="", foreground=look.HINT, width=5)
             self.range_names[key].grid(row=0, column=c + 2, sticky="w", padx=(4, 0))
 
-        self.point_label = self.label(box, 10, LETTERS[1])
+        self.point_label = self.label(box, 11, LETTERS[1])
         Tooltip(self.point_label, tr("path.tip_point"))
         end = ttk.Frame(box)
-        end.grid(row=10, column=1, sticky="w", pady=(6, 2))
+        end.grid(row=11, column=1, sticky="w", pady=(6, 2))
         for c, key, steps in ((0, "bar", (1, 4, 1)), (2, "beat", (1, 4, 1)), (4, "tick", (1, 10, 1)),
                               (6, "key", (1, 12, 1))):
             lb = ttk.Label(end, text=tr(f"path.{key}"), foreground=look.HINT)
@@ -179,9 +187,9 @@ class PathWindow(ToolWindow):
         Tooltip(self.add_button, tr("path.tip_add_point"))
 
         self.info = ttk.Label(box, text="", foreground=look.HINT, wraplength=round(440 * s))  # (the window keeps its size)
-        self.info.grid(row=11, column=0, columnspan=2, sticky="w", pady=(8, 0))
+        self.info.grid(row=12, column=0, columnspan=2, sticky="w", pady=(8, 0))
         row = ttk.Frame(box)
-        row.grid(row=12, column=0, columnspan=2, sticky="ew", pady=(12, 0))
+        row.grid(row=13, column=0, columnspan=2, sticky="ew", pady=(12, 0))
         reset = ttk.Button(row, text=tr("path.reset"), command=self.reset)
         reset.pack(side="left")
         Tooltip(reset, tr("path.tip_reset"))
@@ -810,6 +818,8 @@ class PathWindow(ToolWindow):
             v = int(v)
         elif key in ("size0", "size1"):
             ok = SIZE_LIMITS[0] <= v <= SIZE_LIMITS[1]
+        elif key in ("turn0", "turn1"):
+            ok = TURN_LIMITS[0] <= v <= TURN_LIMITS[1]
         elif key == "step":
             ok = STEP_LIMITS[0] <= v <= STEP_LIMITS[1] and v == int(v)
             v = int(v)
@@ -827,6 +837,12 @@ class PathWindow(ToolWindow):
             size[key == "size1"] = v
             if size != self.cfg["size"]:
                 self.put("size", size, done)
+            return
+        if key in ("turn0", "turn1"):
+            turn = list(self.cfg.get("turn") or (0.0, 0.0))
+            turn[key == "turn1"] = v
+            if turn != list(self.cfg.get("turn") or (0.0, 0.0)):
+                self.put("turn", turn, done)
             return
         if key in ("low", "high"):
             if v != self.cfg[key]:
@@ -893,6 +909,9 @@ class PathWindow(ToolWindow):
         put_text("count", str(c["count"]))
         put_text("size0", fmt(round(c["size"][0], 6)))
         put_text("size1", fmt(round(c["size"][1], 6)))
+        turn = c.get("turn") or (0.0, 0.0)
+        put_text("turn0", fmt(round(turn[0], 6)))
+        put_text("turn1", fmt(round(turn[1], 6)))
         put_text("step", str(c["step"]))
         for key, (tick, var) in self.ticks.items():
             if var.get() != c[key]:
