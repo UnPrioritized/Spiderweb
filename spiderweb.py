@@ -179,6 +179,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     polygon.py       polygons and stars made by the Polygon tool (a pattern along every side)
     joined.py        joining shapes into one curve (pieces, their tumours) and splitting shapes
     between.py       Add between: in-between shapes changing step by step from one line into another, groups
+    between_draw.py  Add between for drawn shapes: each piece into the nearest piece of the other drawing
     convert.py       Turn into live shape: shapes -> one custom shape (and back)
     envelope.py      velocity envelopes
     slice.py         Slice tool maths: where a line crosses shapes, a custom shape cut in two halves

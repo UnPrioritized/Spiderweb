@@ -29,7 +29,8 @@ import uuid
 import numpy as np
 
 ROLES = ("first", "last", "step", "key")
-KINDS = ("line", "poly", "curve", "arc")  # the shapes that can be used (user: open lines, no freehand / funnels)
+KINDS = ("line", "poly", "curve", "arc", "free")  # the lines that can be used (user: open lines, no funnels;
+# freehand + drawn shapes since 2026-11-25: between_draw.py)
 STEPS_DEFAULT = 10
 MOST_STEPS = 500
 STRAIGHT = [[0.0, 0.0], [1.0, 1.0]]
@@ -131,10 +132,15 @@ def _same(p, q):
 
 
 def usable(sh):
-    """A shape Add between can start from: an open line, polyline, curve (joined: only one continuous piece) or arc,
-    not in a group already."""
-    return (sh["kind"] in KINDS and not sh.get("gaps") and not closed(sh) and "between" not in sh
-            and len(sh["pts"]) >= 2)
+    """A shape Add between can start from, not in a group already: an open line, polyline, freehand line, curve
+    (joined: only one continuous piece) or arc, or a drawn shape (between_draw.morphable: not text, pasted notes,
+    pictures or Hz bass; user 2026-11-25)."""
+    if "between" in sh:
+        return False
+    from notes.between_draw import morphable
+    if morphable(sh):
+        return True
+    return sh["kind"] in KINDS and not sh.get("gaps") and not closed(sh) and len(sh["pts"]) >= 2
 
 
 def group_of(sh):
@@ -262,6 +268,12 @@ class Pair:
 
     def __init__(self, a, b, rev):
         self.a, self.b, self.rev = a, b, rev
+        self.draw = None
+        from notes.between_draw import DrawPair, drawn
+        if drawn(a) or drawn(b):  # (a drawn shape at either end: each piece into the nearest piece, between_draw)
+            self.draw = DrawPair(a, b)
+            self.kind, self.sharp, self.d = "custom", [], self.draw.d
+            return
         plain = not (a.get("shape") or b.get("shape"))
         pa, pb = a["pts"], b["pts"][::-1] if rev else b["pts"]
         if plain and a["kind"] == b["kind"] and len(pa) == len(pb) and a["kind"] in ("line", "poly", "arc"):
@@ -278,7 +290,9 @@ class Pair:
         self.d = np.asarray(pb, float).reshape(-1, 2) - self.pa
 
     def geometry(self, f):
-        """The step's kind and points (and sharp anchors / k)."""
+        """The step's kind and points (and sharp anchors / k; a drawn step: its box, strokes and fill settings)."""
+        if self.draw is not None:
+            return self.draw.geometry(f)
         a, b = self.a, self.b
         out = {"kind": self.kind, "pts": (self.pa + self.d * f).tolist()}
         if self.kind == "arc":
@@ -1087,7 +1101,10 @@ def start_group(shapes, i, j, colours=15):
 
 
 def ends_cross(a, b):
-    """True when a's start is nearer b's end than b's start (pairing them the other way round travels less)."""
+    """True when a's start is nearer b's end than b's start (pairing them the other way round travels less). A drawn
+    shape: False (its pieces find their own way round, between_draw)."""
+    if a["kind"] == "custom" or b["kind"] == "custom":
+        return False
     a0, a1, b0, b1 = a["pts"][0], a["pts"][-1], b["pts"][0], b["pts"][-1]
     return math.dist(a0, b1) + math.dist(a1, b0) < math.dist(a0, b0) + math.dist(a1, b1) - 1e-9
 

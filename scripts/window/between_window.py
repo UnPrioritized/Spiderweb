@@ -18,7 +18,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc
 from notes import between
 from notes.areas import most_colours
-from notes.engine import cached_path
+from notes.engine import cached_path, cached_strokes
 from notes.gateflip import all_flipped
 from notes.mask import is_mask, silent
 from notes.strips import has_strips
@@ -134,7 +134,9 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
         marks = [sh for _, sh in between.anchors(app.shapes, gid)]
         self.push_on = next((j for j, sh in enumerate(marks) if sh is opened_on), 0)
         self.build_pad(top)
-        hint = tr("between.preview_hint_dark" if look.DARK else "between.preview_hint")  # (dark: the last is white)
+        drawn = any(sh["kind"] == "custom" for sh in self.ends())  # (no points to drag: draw_preview)
+        hint = tr(("between.preview_hint_drawn" if drawn else "between.preview_hint")
+                  + ("_dark" if look.DARK else ""))  # (dark: the last is white)
         ttk.Label(top, text=hint, foreground=look.HINT, font=look.font(8), justify="left",
                   wraplength=self.w).grid(row=2, column=0, sticky="nw", pady=(2, 6))
         pv.bind("<ButtonPress-1>", self.pv_press)
@@ -279,6 +281,8 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
         self.steps_box.config(style="TEntry")
         self.info.config(text=tr("between.in_all", n=len(between.members(self.app.shapes, self.gid))))
         self.rev_var.set(self.set["rev"])
+        drawn = any(sh["kind"] == "custom" for sh in self.ends())  # (a drawn shape's pieces find their own way
+        self.rev_tick.config(state="disabled" if drawn else "normal")  # round: Reverse does nothing, my pick)
         on = self.set["colours"] > 0
         self.col_var.set(on)
         if on:
@@ -396,7 +400,18 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
 
     def px_line(self, sh, most=None):
         """A shape's line as preview coordinates (most: at most this many of its points, spread along it)."""
-        a = np.asarray(cached_path(sh), float).reshape(-1, 2)
+        return self._px(cached_path(sh), most)
+
+    def px_lines(self, sh, most=None):
+        """Each stroke of a shape as preview coordinates (a drawn shape: one per stroke; most is shared out)."""
+        if sh["kind"] != "custom":
+            return [self.px_line(sh, most)]
+        strokes = cached_strokes(sh)
+        each = max(4, most // max(1, len(strokes))) if most else None
+        return [self._px(p, each) for p in strokes]
+
+    def _px(self, path, most):
+        a = np.asarray(path, float).reshape(-1, 2)
         if most and len(a) > most:
             a = a[np.unique(np.linspace(0, len(a) - 1, most).round().astype(int))]
         b0, bw, top, kh = self.pv_view
@@ -413,21 +428,27 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
         most = max(16, min(400, PREVIEW_POINTS // max(1, len(order))))  # (500 long curves were 9 M points)
         marks = self.anchors()
         self.push_on = min(self.push_on, len(marks) - 1)
-        xy = self.px_line(marks[self.push_on])  # (the shape the pad pushes: a wide pale band under it)
-        if len(xy) >= 4:
-            cv.create_line(*xy, fill=look.PUSH_PICKED, width=max(3, round(9 * s)), capstyle="round")
+        for xy in self.px_lines(marks[self.push_on]):  # (the shape the pad pushes: a wide pale band under it)
+            if len(xy) >= 4:
+                cv.create_line(*xy, fill=look.PUSH_PICKED, width=max(3, round(9 * s)), capstyle="round")
         for i in order[1:-1]:
             sh = self.app.shapes[i]
             colour = look.CHART_LINE_FAINT if sh["between"]["role"] == "step" else look.CHART_GRID_STRONG
-            xy = self.px_line(sh, most)
-            if len(xy) >= 4:
-                cv.create_line(*xy, fill=colour, width=max(1, round(s)))
+            for xy in self.px_lines(sh, most):
+                if len(xy) >= 4:
+                    cv.create_line(*xy, fill=colour, width=max(1, round(s)))
         lw = max(1, round(2 * s))
         r = 4 * s
         for sh, colour, name in zip(self.ends(), (look.VALUE, look.CHART_LINE), ("first", "last")):
-            xy = self.px_line(sh)
-            if len(xy) >= 4:
-                cv.create_line(*xy, fill=colour, width=lw)
+            for xy in self.px_lines(sh):
+                if len(xy) >= 4:
+                    cv.create_line(*xy, fill=colour, width=lw)
+            if sh["kind"] == "custom":  # (a drawn shape: no points to drag here (its box's corners would only
+                # stretch it); its name over its top left, my pick)
+                a = np.asarray(cached_path(sh), float).reshape(-1, 2)
+                x, y = self.to_px(a[:, 0].min(), a[:, 1].max())
+                cv.create_text(x, y - 4 * s, text=tr("between." + name), anchor="sw", fill=colour, font=look.font(7))
+                continue
             pts = sh["pts"]
             if sh["kind"] == "curve":  # (handles: thin lines to their anchors)
                 for j, (b, p) in enumerate(pts):
@@ -448,6 +469,8 @@ class BetweenWindow(DefaultPin, PointGraph, tk.Toplevel):
             return None
         best = None
         for sh, name in zip(self.ends(), ("first", "last")):
+            if sh["kind"] == "custom":  # (no points shown to drag: draw_preview)
+                continue
             for j, (b, p) in enumerate(sh["pts"]):
                 px, py = self.to_px(b, p)
                 d = max(abs(px - x), abs(py - y))

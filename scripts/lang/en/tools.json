@@ -1073,6 +1073,8 @@
  "between.hint": "Left = the first shape, right = the last. Up = more like the last shape. Each pale line is a step. Drag a point to move it (Shift = free), click the line or empty space to add one, right-click a point and pick Delete point (the first and last stay).",
  "between.preview_hint": "Blue = the first shape, red = the last. Drag their points to change them (Shift = free); the steps follow. Click a shape's line to push it with the pad (yellow = the one pushed).",
  "between.preview_hint_dark": "Blue = the first shape, white = the last. Drag their points to change them (Shift = free); the steps follow. Click a shape's line to push it with the pad (yellow = the one pushed).",
+ "between.preview_hint_drawn": "Blue = the first shape, red = the last. Each piece turns into the nearest piece of the other shape; a piece with none shrinks to a dot (or grows from one). Click a shape's line to push it with the pad (yellow = the one pushed).",
+ "between.preview_hint_drawn_dark": "Blue = the first shape, white = the last. Each piece turns into the nearest piece of the other shape; a piece with none shrinks to a dot (or grows from one). Click a shape's line to push it with the pad (yellow = the one pushed).",
  "between.push_on": "Push: {name}",
  "between.key_n": "Key {n}",
  "between.push_tip": "Drag from the middle: the steps leave the picked shape this way, and the further out, the harder. Middle = no push (straight). The middle pulls the stick in; hold Shift to place it anywhere. Ctrl = 8 ways only. Double-click or middle-click = no push.",
