@@ -1390,7 +1390,7 @@
  "props.low_tip": "The lowest key it has notes on. Type another to move the shape up or down.",
  "props.high": "Highest key:",
  "props.edges": "Top and bottom:",
- "props.edges_tip": "Where the shape's box ends at the top and bottom. Between keys: the top and bottom keys are wholly inside. On key middles: only half of those keys is inside, so they get fewer notes. Dragging a side without Shift puts the box between keys again.",
+ "props.edges_tip": "Where the shape's box ends at the top and bottom. Between keys: the top and bottom keys are wholly inside. On key middles: only half of those keys is inside, so they get fewer notes. Dragging a side without Shift puts that side between keys again.",
  "props.edges_lines": "Between keys",
  "props.edges_middles": "On key middles",
  "props.edges_neither": "Somewhere else (moved with Shift)",
