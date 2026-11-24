@@ -1058,6 +1058,9 @@ def past_edges(sh, keys, ppq=960, over_top=None):
     if isinstance(sh.get("recolour"), dict) and _has_shape_tab(sh["recolour"]):  # (bent past an edge: kept too)
         from notes.shape_bend import grown_reach
         r = grown_reach(sh, r)
+    if r is not None and sh.get("fx"):  # (copies along a path reaching past the edges: kept too)
+        from notes.copypath import pages_reach
+        r = pages_reach(sh, r)
     if r is None or r[0] >= 0 and r[1] >= -0.5 and (r[2] <= keys - 0.5 or not over_top):
         return None
     up = max(0, math.ceil(-0.5 - float(r[1]) - 1e-9))
@@ -2045,6 +2048,8 @@ def fx_notes(sh, ppq, keys, get):
             return colour_step(notes, tracks, last["rc"], ppq)
         if last["tool"] in RUNNER:
             return run_step(notes, tracks, last, rest, ppq, get)
+        if last["tool"] == "path":  # (copies at another size made again from the drawing: sharp, not stretched)
+            return fx_step(notes, tracks, last, sh, ppq, keys, remade_copy(rest, ppq, get))
         return fx_step(notes, tracks, last, sh, ppq, keys)
     if sh.get("_m"):
         if sh.get("cut"):  # (a sliced piece: its notes as it was, before the flips; sliced.steps_kept)
@@ -2640,8 +2645,34 @@ def bare_of(sh):
     return {k: v for k, v in sh.items() if k not in ("fx", "_m")}
 
 
-def fx_step(notes, tracks, step, sh, ppq, keys=256):
-    """The notes after one step of sh["fx"] (fx.py)."""
+def remade_copy(rest, ppq, get):
+    """For a Copy along a path page on top of rest (the shape as the page's notes are made): fn(s, at, key, dt, dk)
+    -> (notes, tracks) of rest's drawing made s times as big round (tick at, key) and moved dt ticks, dk keys, with
+    every step before the page run on it again (user 2026-11-24: copies stay sharp, the earlier tools work on each
+    at its own size); None when the drawing can't be made again so (pasted notes, text, merged...: stretched)."""
+    def fn(s, at, key, dt, dk, fk=0.5, rows=None):
+        from notes.merge import mapped_part
+        b0 = at / ppq
+        r = cached_reach(rest) if rows else None
+        if r is not None and abs(r[1] - rows[0]) <= 0.5 + 1e-6 and abs(r[2] - rows[1]) <= 0.5 + 1e-6:
+            # (round the drawing's own bottom / top at that corner, not its row's middle: the top copy's top row stays
+            # on B's key; user 2026-11-24, "one or two key rows too high". Notes made by earlier pages reaching other
+            # rows: the row's middle)
+            key += (1 - fk) * (float(r[1]) - rows[0]) + fk * (float(r[2]) - rows[1])
+            edge = math.floor(key) + 0.5
+            if abs(key - edge) < 1e-3:  # (a drawing ON a row edge reads a hair inside it (the reach): round the
+                key = edge  # edge itself, so the grown copy's edge lands on it again, not a hair past it)
+        try:
+            q = mapped_part(rest, lambda b, k: [b0 + (b - b0) * s + dt / ppq, key + (k - key) * s + dk],
+                            np.eye(2) * s)
+        except (KeyError, TypeError, ValueError):
+            return None
+        return None if q is None else get(q)
+    return fn
+
+
+def fx_step(notes, tracks, step, sh, ppq, keys=256, remake=None):
+    """The notes after one step of sh["fx"] (fx.py). remake: remade_copy's fn for a Copy along a path page."""
     if step.get("off"):
         return notes, tracks
     tool = step["tool"]
@@ -2650,12 +2681,29 @@ def fx_step(notes, tracks, step, sh, ppq, keys=256):
             tracks = np.zeros(len(notes), np.int64)
         if sh.get("_rounds") and step["cfg"]:  # ("New channels each Colours round": copies' rounds too)
             step = dict(step, cfg=dict(step["cfg"], rounds=True))
+        whole = step.get("tag") or tracks is not None  # (a column of tracks rides along: zeros when made without)
+
+        def again(*args):  # (a remade copy with the same columns as the notes given to apply_path)
+            got = remake(*args)
+            if got is None:
+                return None
+            n, t = got
+            if t is None:
+                if tracks is not None and not step.get("tag"):
+                    return None
+                t = np.zeros(len(n), np.int64)
+            elif tracks is None and not step.get("tag"):
+                return None
+            n = np.asarray(n, np.int64)
+            return np.column_stack([n, t]).astype(np.int64) if whole else n
+        rm = again if remake is not None else None
         if step.get("tag") and step["cfg"]:  # (Turn into plain shapes: each note's copy rides along as one more
             # column of the notes, through the steps after it: tagged_notes)
             who = tracks if tracks is not None else np.zeros(len(notes), np.int64)
-            got = apply_path(np.column_stack([notes, who]).astype(np.int64), step["cfg"], ppq, keys, tag=True)
+            got = apply_path(np.column_stack([notes, who]).astype(np.int64), step["cfg"], ppq, keys, tag=True,
+                             remake=rm)
             return np.column_stack([got[:, :-2], got[:, -1]]), None if tracks is None else got[:, -2]
-        return _after(lambda a, cfg, q: apply_path(a, cfg, q, keys), notes, tracks, step["cfg"], ppq)
+        return _after(lambda a, cfg, q: apply_path(a, cfg, q, keys, remake=rm), notes, tracks, step["cfg"], ppq)
     if tool == "chop":
         return with_chop(notes, tracks, dict(sh, chop=step["cfg"]), ppq)
     if tool == "claw":

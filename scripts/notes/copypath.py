@@ -560,6 +560,26 @@ def _halves(p, val, moved, f, down, spans, steps, ways, size):
     return out
 
 
+def pages_reach(sh, r):
+    """r = (first beat, lowest key, highest key, last beat) of sh's drawing, grown by where its Copy along a path pages'
+    copies reach (each run's copies stay between its points: the path's samples), so Keep notes made there keeps
+    copies past the keys / before beat 0 too (user 2026-11-24). A page's group box from r and its "grp"."""
+    for st in sh.get("fx") or ():
+        cfg = st.get("cfg") if st.get("tool") == "path" and not st.get("off") else None
+        if not cfg or not cfg.get("pts"):
+            continue
+        try:
+            g = cfg.get("grp") or (0, 0, 0, 0)
+            b0, k0 = r[0] + g[0], round(r[1]) + g[2]
+            size = (r[3] + g[1] - b0, round(r[2]) + g[3] - k0)
+            p = track(cfg, size)[0]
+        except (KeyError, TypeError, ValueError, IndexError):
+            continue
+        r = (min(r[0], b0 + float(p[:, 0].min())), min(r[1], k0 + float(p[:, 1].min()) - 0.5),
+             max(r[2], k0 + float(p[:, 1].max()) + 0.5), max(r[3], b0 + float(p[:, 0].max())))
+    return r
+
+
 def box_size(box, ppq):
     """A group_box's size: (beats, keys)."""
     return (box[1] - box[0]) / ppq, box[3] - box[2]
@@ -753,10 +773,12 @@ def covered(parts, wide):
     return np.concatenate(out)
 
 
-def apply_path(a, cfg, ppq, keys=256, tag=False):
+def apply_path(a, cfg, ppq, keys=256, tag=False, remake=None):
     """Notes a (start, end, key, then columns riding along; with 5+ columns the last is the colour group) and their
     copies along the path. tag: one more column at the end, each note's copy (0 = the shape; Turn into plain
-    shapes)."""
+    shapes). remake(s, at, key, dt, dk, fk, rows): the shape's notes (a's columns) made again from its drawing s
+    times as big round (tick at, key: a row's middle; fk = that corner's place in the box's keys 0..1, rows = the
+    shape's lowest / highest key), moved dt ticks / dk keys, or None (then the notes are stretched: scaled)."""
     if not len(a) or not cfg:
         return a
     box = group_box(a, cfg, ppq)
@@ -766,6 +788,14 @@ def apply_path(a, cfg, ppq, keys=256, tag=False):
     d = np.column_stack([np.round(got[:n, 0] * ppq), np.round(got[:n, 1])]).astype(np.int64)
     d[0] = 0
     at, key = box[0] + corner[:n, 0] * ppq, box[2] + corner[:n, 1]
+    # (grown / shrunk round the box's OUTER row edge there, not its row's middle: the top copy's top row stays on B's
+    # key; round the middle, half a key above it grew past B: user 2026-11-24, "one or two key rows too high")
+    h = box[3] - box[2]
+    fk = corner[:n, 1] / h if h > 0 else np.full(n, 0.5)  # (the corner's place in the box's keys, 0 .. 1)
+    mid = key  # (remade copies: round the drawing's own top / bottom there, remade_copy)
+    if h > 0:
+        key = key + fk - 0.5
+    rows = (int(a[:, 2].min()), int(a[:, 2].max()))
     u = np.arange(n) / max(1, n - 1)
     size = (cfg["size"][0] + (cfg["size"][1] - cfg["size"][0]) * u) / 100
     flips = down[:n] if cfg["flip"] == "each" else np.zeros(n, bool)
@@ -778,11 +808,28 @@ def apply_path(a, cfg, ppq, keys=256, tag=False):
     by_key = (a[order], a[order, 2])
     flip_key = None
     parts, total = [], 0
+    sharp = remake is not None  # (False after the first copy the drawing can't make: stretched from then on)
     for i in range(n):
         x = a
-        if flips[i]:
+        got = None
+        if sharp and abs(size[i] - 1) > 1e-9:  # (made again from the drawing at its size and place: sharp edges)
+            got = remake(float(size[i]), float(at[i]), float(mid[i]), int(d[i, 0]), int(d[i, 1]), float(fk[i]), rows)
+            if got is None or got.shape[1] != a.shape[1]:
+                sharp, got = False, None
+        if got is not None:
+            x = got
+            if flips[i] and len(x):  # (within the group's box as this copy has it: grown round its corner, moved)
+                s = size[i]
+                b = (round(at[i] + (box[0] - at[i]) * s) + d[i, 0], round(at[i] + (box[1] - at[i]) * s) + d[i, 0],
+                     # (keys: its own rows (the drawing's true height), the group's other rows past them grown)
+                     int(x[:, 2].min()) - round((rows[0] - box[2]) * s),
+                     int(x[:, 2].max()) + round((box[3] - rows[1]) * s))
+                x = flipped(x, b, cfg["way"])
+        elif flips[i]:
             x = flipped(x, box, cfg["way"])
-        if abs(size[i] - 1) > 1e-9:
+        if got is not None:
+            pass
+        elif abs(size[i] - 1) > 1e-9:
             if x is a:
                 x = scaled(x, size[i], at[i], key[i], by_key)
             else:
@@ -792,8 +839,9 @@ def apply_path(a, cfg, ppq, keys=256, tag=False):
                 x = scaled(x, size[i], at[i], key[i], flip_key)
         else:
             x = x.copy()
-        x[:, :2] += d[i, 0]
-        x[:, 2] += d[i, 1]
+        if got is None:
+            x[:, :2] += d[i, 0]
+            x[:, 2] += d[i, 1]
         if not np.isnan(cut[i, 0]):  # (a half copy: only what's on the near side of the point)
             c, k = box[0] + round(cut[i, 0] * ppq), box[2] + round(cut[i, 2])
             if cut[i, 1] > 0:
