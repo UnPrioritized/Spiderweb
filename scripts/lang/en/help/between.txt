@@ -1,4 +1,4 @@
-Select two open lines: lines, polylines, curves or arcs (a joined curve only when its pieces all touch). Right-click one of them: Add between…. Shapes appear between them that change step by step from the first shape (the one that starts earlier) into the second, and a window opens.
+Select two shapes: open lines (lines, polylines, freehand lines, curves or arcs; a joined curve only when its pieces all touch) or drawn shapes ([page:custom|custom shapes], a drawn shape with a line works too). Right-click one of them: Add between…. Shapes appear between them that change step by step from the first shape (the one that starts earlier) into the second, and a window opens. Text, pasted notes, pictures and Hz bass shapes can't be used: the menu shows the item greyed.
 
 In the window:
 
@@ -21,7 +21,19 @@ Click a shape's line in the picture to pick which one the pad pushes (the first 
 
 The group stays linked: move or reshape the first or last shape and the steps follow. A spot where both shapes are the same (a shared start) stays put in every step. Change a step's shape yourself and it becomes a key shape: the steps on each side change towards it. A step whose velocity, [page:sustain|Sustain] or [page:subtract|Gate subtract] you change stays a step and keeps them (right-click → Velocity from the group again undoes the velocity). Right-click a key → Not a key any more makes it a step again.
 
-Velocities, [page:tumours|tumours] and [page:formulas|formulas] change step by step too. A tumour or formula only one of the shapes has (or two that can't change into each other) shrinks to nothing by the middle step, then the other one grows from there. Settings that are only on or off switch at the middle step. [page:glue|Glue], Colours and the [page:claw|Claw machine], [page:strum|Strum], [page:chop|Chop] and [page:path|Copy along a path] pages are kept only when both shapes have the same ones (their numbers change step by step). Sustain is kept when both shapes are sustained; a typed gap changes step by step. Gate subtract the same: kept when both shapes have it, its amounts changing step by step.
+Velocities, [page:tumours|tumours] and [page:formulas|formulas] change step by step too. A tumour or formula only one of the shapes has (or two that can't change into each other) shrinks to nothing by the middle step, then the other one grows from there. Settings that are only on or off switch at the middle step.
+
+[page:glue|Glue], Colours and the [page:claw|Claw machine], [page:strum|Strum], [page:chop|Chop] and [page:path|Copy along a path] pages are kept only when both shapes have the same ones (their numbers change step by step). Sustain is kept when both shapes are sustained; a typed gap changes step by step. Gate subtract the same: kept when both shapes have it, its amounts changing step by step.
+
+## Drawn shapes
+
+Each piece of the first drawing turns into the nearest piece of the second (where it is and how big). Lines that meet end to end count as one piece, as Fill sees them. Any piece can go with any other: a line can open up into a closed area and back. A piece with no partner shrinks to a dot (or grows from one) inside the steps as they travel.
+
+• The steps are drawn shapes too. Fill, Spam and their numbers change step by step when both shapes use the same kind; a choice that differs switches at the middle step. Areas coloured by hand and the middle points of Nested, Tiles and Ripples come from the nearer shape. A stroke's Thickness changes step by step, its own colour comes from the nearer shape.
+
+• Turn by: how far the steps turn the shape on the way (+ = clockwise). When the second shape is a moved, resized or turned copy of the first, the angle is found by itself, so the steps turn instead of melting through each other. Type another angle, add 360 for one more spin; middle-click = back to the angle found by itself. Greyed for lines and for groups with key shapes.
+
+• Reverse is greyed (the pieces find their own way round), and the picture has no points to drag for a drawn shape: change it on the piano roll.
 
 The [page:shapes|Shapes list] shows the group as one row; clicking it selects the whole group. Right-click a shape of the group: Edit add between… (or double-click it), Select the whole group, Unlink (make them plain shapes).
 

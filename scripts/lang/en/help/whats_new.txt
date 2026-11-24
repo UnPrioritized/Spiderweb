@@ -4,6 +4,8 @@ What changed in each version, newest first. This page opens by itself the first 
 
 What's new:
 
+• Add between works with drawn shapes, freehand lines, and a drawn shape with a line: each piece turns into the nearest piece of the other shape, and pieces with no partner grow or shrink along the way. A turned copy makes steps that turn instead of melting, and the new Turn by box turns or spins them by any angle. See [page:between#Drawn shapes|Add between].
+
 • Copy along a path can turn the copies: the new Turn boxes under Size set the first and the last copy's angle, and the ones between turn step by step (0 → 360 spins them once along the path). Bigger, smaller and turned copies are now made again from your drawing, so their edges stay clean instead of being stretched into steps. See [page:path|Copy along a path].
 
 • Faster: the outline of any drawn shape makes its notes much faster, so Copy along a path's grown and turned copies of a drawing are made about twice as fast.
