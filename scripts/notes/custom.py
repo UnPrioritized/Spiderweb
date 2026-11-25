@@ -8,6 +8,7 @@ import itertools
 import json
 import marshal
 import math
+import threading
 import zlib
 
 import numpy as np
@@ -336,7 +337,16 @@ def ellipse_points(u0, v0, u1, v1):
 
 _POINTS = {}  # id(stroke) -> (the stroke, a copy of it, its points): curves / formulas worked out once while unchanged
 POINTS_KEPT = 4096
+POINTS_MOST = 2_000_000  # (points held in all; hunt 2026-11-26: the count alone let old copies pile up to ~1 GB)
 _JSON = {}  # id(strokes list) -> (the list, a copy of it, its JSON): strokes_json
+JSON_MOST = 16_000_000  # (characters held in all)
+_held = [0, 0]  # points in _POINTS, characters in _JSON
+
+
+def _remembers():
+    """Only the window's own thread remembers (hunt 2026-11-26): background jobs and undo work on fresh copies that
+    are never asked again, so remembering them only kept old shapes alive."""
+    return threading.current_thread() is threading.main_thread()
 
 
 def strokes_json(strokes):
@@ -350,13 +360,20 @@ def strokes_json(strokes):
         except Exception:  # noqa: BLE001 (a value that can't be compared: written out)
             pass
     text = json.dumps(strokes)
+    if not _remembers():
+        return text
     try:
         kept = marshal.loads(marshal.dumps(strokes))
     except ValueError:  # (not plain data: not remembered)
         return text
-    if len(_JSON) >= POINTS_KEPT:
+    if len(_JSON) >= POINTS_KEPT or _held[1] + len(text) > JSON_MOST:
         _JSON.clear()
+        _held[1] = 0
+    old = _JSON.get(id(strokes))
+    if old is not None:
+        _held[1] -= len(old[2])
     _JSON[id(strokes)] = (strokes, kept, text)
+    _held[1] += len(text)
     return text
 
 
@@ -377,13 +394,20 @@ def stroke_points(st):
         except Exception:  # noqa: BLE001 (a value that can't be compared: worked out again)
             pass
     got = tuple(tuple(p) for p in _stroke_points(st))  # (points as tuples: shared by every caller, never changed)
+    if not _remembers():
+        return list(got)
     try:
         kept = marshal.loads(marshal.dumps(st))
     except ValueError:  # (not plain data: not remembered)
         return list(got)
-    if len(_POINTS) >= POINTS_KEPT:
+    if len(_POINTS) >= POINTS_KEPT or _held[0] + len(got) > POINTS_MOST:
         _POINTS.clear()
+        _held[0] = 0
+    old = _POINTS.get(id(st))
+    if old is not None:
+        _held[0] -= len(old[2])
     _POINTS[id(st)] = (st, kept, got)
+    _held[0] += len(got)
     return list(got)
 
 

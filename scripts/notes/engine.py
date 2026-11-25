@@ -1887,7 +1887,8 @@ def _chopped_after(got, base, notes, before, lead, rest, box, ppq, keys, get, be
     plain = _steps_off(without_recolour(got))
     made, tracks = get(dict(plain, _free=True) if "pts" in plain else plain)
     made = np.asarray(made, np.int64)
-    if bend and before is not None and len(before) and len(made):
+    if bend and before is not None and len(before) and len(made) and not _drawn_colours_only(base):
+        # (colours drawn only: its areas were bent along with the lead's lines, exact; user 2026-11-25 took A)
         from notes.recolour import nearest
         t, k = (made[:, 0] + made[:, 1]) / 2, made[:, 2].astype(np.float64)
         for b in reversed(lead):
