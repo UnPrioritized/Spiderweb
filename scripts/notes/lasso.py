@@ -9,6 +9,7 @@ import math
 
 import numpy as np
 
+from notes.basics import edge_tick
 from notes.bezier import fit, seg_point, segments, split
 from notes.pen import pen_kept
 from notes.slice import EPS, _halves
@@ -81,7 +82,7 @@ def _box_spans(boxes, r, ppq):
     boxes: the whole row)."""
     if boxes is None:
         return None
-    got = sorted((int(round(min(b[0], b[2]) * ppq)), int(round(max(b[0], b[2]) * ppq))) for b in boxes
+    got = sorted((edge_tick(min(b[0], b[2]), ppq), edge_tick(max(b[0], b[2]), ppq)) for b in boxes
                  if min(b[1], b[3]) < r < max(b[1], b[3]))
     out = []
     for a, b in got:

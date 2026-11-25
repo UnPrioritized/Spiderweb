@@ -14,6 +14,7 @@ import numpy as np
 from files.lang import tr, trn
 from files.midi_read import Cancelled, MidiError
 from files.own_tracks import FILE0, HAND, key_track
+from notes.basics import edge_tick
 from notes.custom import notes_shape
 from notes.engine import slot_track_channel, track_ids
 from notes.loaded import (EXTRACT_MOST, box_groups, box_key, boxes_meet, drop_extract, extract_groups, gather_box,
@@ -41,7 +42,7 @@ def boxed(app, boxes, notes=None):
     rows = app.track_list.note_rows() if notes is None else app.track_list.rows_of(notes[:, 4])
     out = np.zeros(len(r), bool)
     for b in boxes:
-        a, z = round(b["t0"] * ppq), round(b["t1"] * ppq)
+        a, z = edge_tick(b["t0"], ppq), edge_tick(b["t1"], ppq)
         m = (r[:, 0] >= a) & (r[:, 0] < z) & (rows >= 0)
         if b["rows"] is not None:
             m &= (rows >= b["rows"][0]) & (rows <= b["rows"][1])
@@ -262,7 +263,7 @@ def loaded_boxes(app, boxes):
         for n, chans in tl.rows_chans(rows).items():
             if n < len(lm.tracks) and lm.tracks[n].notes and n < len(lm.mf.tracks) and lm.mf.tracks[n].whole:
                 by.setdefault(tuple(chans), []).append(n)
-        t0, t1 = max(0, round(b["t0"] * lm.ppq)), round(b["t1"] * lm.ppq)
+        t0, t1 = max(0, edge_tick(b["t0"], lm.ppq)), edge_tick(b["t1"], lm.ppq)
         for chans, tracks in by.items():
             if t1 > t0:
                 out.append({"t0": t0, "t1": t1, "k0": 0, "k1": lm.keys - 1, "tracks": sorted(tracks),

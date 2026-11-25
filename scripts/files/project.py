@@ -20,6 +20,7 @@ from notes.custom import ALIGNS, ENDS, CUSTOM_DEFAULTS, CUSTOM_FLAGS, FILLS, cle
 from notes.engine import (CHANNEL_MODES, OWN0, SHAPE_DEFAULTS, SPLITS, auto_count, clean_basics, clean_kept_patterns, clean_shape,
                           channels_of, merges_unmade, one_voice, shape_notes_tracks, slot_port, slot_ports,
                           slot_track_channel, track_ids)
+from notes.basics import edge_tick
 from notes.hzbass import clean_hz
 from notes.loaded import (clean_link, conductor_line, extract_groups, extract_ports, file_tempos, own_hits, retime_for,
                           moved_conductor, same_conductor, tempo_new, tempo_tracks)
@@ -2257,7 +2258,7 @@ class ProjectFiles:
         else:
             cc = self.cc_messages(ppq, bpm, only)  # (the export's layout: the notes copied are App.outgoing's)
         if time is not None:
-            time = round(time[0] * ppq), round(time[1] * ppq)
+            time = edge_tick(time[0], ppq), edge_tick(time[1], ppq)
         # (the earliest Select box / ruler band / track list box's left side: Domino start "From the select box")
         kept = getattr(self.roll, "kept_box", lambda: None)() if sels and boxed is None else None
         box = (min(b["t0"] for b in boxes) if boxed is not None else
@@ -2265,7 +2266,7 @@ class ProjectFiles:
         box = None if box is None else round(max(box, 0) * ppq)
         if boxed is not None:  # (their CC lines: only on a box's rows inside its time, hunt 2026-10-29: a box
             # over one track took the shape's other tracks' controllers too)
-            spans = [(round(b["t0"] * ppq), round(b["t1"] * ppq), b["rows"]) for b in boxes]
+            spans = [(edge_tick(b["t0"], ppq), edge_tick(b["t1"], ppq), b["rows"]) for b in boxes]
             slots = sorted(cc)
             rows = dict(zip(slots, self.track_list.rows_of(slots).tolist())) if slots else {}
             cc = {s: [m for m in ms if any(t0 <= m[0] < t1 and (r is None or r[0] <= rows[s] <= r[1])
