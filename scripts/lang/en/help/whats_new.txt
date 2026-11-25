@@ -14,6 +14,8 @@ What's new:
 
 • Faster: the outline of any drawn shape makes its notes much faster, so Copy along a path's grown and turned copies of a drawing are made about twice as fast.
 
+• Faster: long tempo ramps at a high PPQ get ready to play and export several times faster (a 400-beat ramp stepping every tick at PPQ 15360: 0.8 s → 0.13 s).
+
 • Faster: Load MIDI reads big MIDI files faster, most of all files with a few huge tracks, and uses half of the computer's threads, so other programs keep running smoothly on smaller PCs.
 
 • Faster: drawn shapes with many coloured areas make their notes up to 3 to 4 times faster, so projects holding them open sooner, and an edit's notes made in the background no longer wait for older ones that aren't wanted any more.
@@ -24,7 +26,7 @@ What's new:
 
 • Fixed: Kestrel (GPU)'s read-ahead of a loaded MIDI's busiest parts was never offered for keeping, so it was read again at every load.
 
-• Fixed: loaded MIDIs with huge tick numbers (like songs at 60,000,000 BPM with PPQ 32767) now load, show, play on every MIDI out and export properly. Before, Kestrel (GPU) couldn't start on them, playback fell far behind, zooming out froze, tempo changes far into the song were lost, and exporting with a changed tempo could fill the computer's memory. A Keep timing part too long to work out is now refused with a message. Tick numbers up to 4,503,599,627,370,496 (2^52) now count as a normal MIDI, and notes far into such songs play exactly on time even at slow tempos, where they used to come up to about 70 ms off.
+• Fixed: loaded MIDIs with huge tick numbers (like songs at 60,000,000 BPM with PPQ 32767) now load, show, play on every MIDI out and export properly. Before, Kestrel (GPU) couldn't start on them, playback fell far behind, zooming out froze, tempo changes far into the song were lost, and exporting with a changed tempo could fill the computer's memory. Tempo ramps there keep their exact Interval steps, and catch-ups and Keep timing parts work at any length (very long curved ones change in slightly longer steps, and the export message says so). Tick numbers up to 4,503,599,627,370,496 (2^52) now count as a normal MIDI, and notes far into such songs play exactly on time even at slow tempos, where they used to come up to about 70 ms off.
 
 • Smoother: panning and dragging near a selected shape with many curves (its lines are drawn the quicker way, and its curves aren't worked out again at every step).
 
