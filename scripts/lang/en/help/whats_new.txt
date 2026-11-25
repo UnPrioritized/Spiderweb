@@ -16,6 +16,10 @@ What's new:
 
 • Fixed: some damaged MIDI files stopped Load MIDI with an error instead of loading.
 
+• Fixed small rounding mistakes that changed the notes: Notes by snap could add an extra note one step early on the last key; Wrapped slices could give one tick two different slices; Hz bass could add an extra wave after a held tone; Gate Range across the keys could miss its first or last gate; a velocity line could read a stretched paste's note a tick off.
+
+• Fixed small rounding mistakes in the tools: boxes with an edge between two ticks (a fine snap at a low PPQ) could leave a note out; Bend → Wobble could end above or below the note; Turn in the drawer landed off the grid on grids 12, 24 and 48; pasting Hz effect points onto a repeat's start did nothing; the Conductor's Interval box and the Hz Repeat every box cut a typed fraction down (2.9 became 2) instead of refusing it.
+
 • Fixed: in Copy along a path, a grown copy could reach a key row or two past the point it should end on, and copies past the top key or before bar 1 weren't kept with Keep notes made there on.
 
 • Fixed: a funnel whose wall comes before its line start in time (flipped sideways, or turned past upright) lost pieces where a key row crosses it twice: holes, horns floating apart or missing. Such funnels in older projects get those pieces back.
@@ -87,6 +91,8 @@ What's new:
 • The settings backups made when you update now go into the user folder's backups\settings folder (older ones are moved there).
 
 • Before you update: saved indexes of loaded MIDI files are made again, so the first load of each big MIDI after updating takes its full time once (and offers Save Index again). Projects with a loaded MIDI still find their file.
+
+• Before you update: shapes with Gate Range across the keys (on a frame on the key lines) now run from the first gate on their lowest key to the last on their highest, so their gates can change a little. A few Hz bass notes, Notes by snap lines and Wrapped slices in older projects can lose an extra note or change one tick's colour where the rounding fixes above apply.
 
 • Before you update: Gate extend's box now reads a plain number as ticks. Type 50% for percent (it used to follow the Ticks / % choice). Projects open with the same notes as before.
 
