@@ -20,7 +20,7 @@ import bisect
 import numpy as np
 
 from files import speed
-from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of
+from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of, where as meter_where
 from notes.tempo import (EVERY, _put_all, _put_many, base_us, beat_tick,
                          typed_bpms, step_of,
                          file_segments, has_tempo, keep_heard, known_key, layout, segs_end, tempo_key)
@@ -93,12 +93,24 @@ def bar_line(sigs, tick, ppq, after=False):
     return line
 
 
-def bar_ticks(tempo, ppq, upto):
-    """The bar lines' ticks by the Conductor pane's time signatures, from 0 to the first one past upto (and one
-    more): int64 array, at least two."""
+KEEP_TICKS_MOST = 1 << 27  # a Keep timing part's ticks at most (its tempo worked out on every tick: ~1 GB a list here;
+# a huge-tick MIDI's parts run to trillions: refused with load.keep_too_long, never the memory)
+BARS_MOST = 1 << 20  # Fit bar lines works on songs of at most this many bars (bar by bar: a huge-tick MIDI, 60 M BPM
+# at PPQ 32767, has billions and its export took 20 GB; past it the bars are written unfitted: the sound is the same)
+
+
+def bars_fit(tempo, ppq, upto):
+    """Fit bar lines (tempo "bars") works here: on, and at most BARS_MOST bars from the start to tick upto."""
+    return bool(tempo.get("bars", True)) and meter_where(sigs_of(tempo), upto / ppq)[0] < BARS_MOST
+
+
+def bar_ticks(tempo, ppq, upto, start=0):
+    """The bar lines' ticks by the Conductor pane's time signatures, from 0 (start: from a few bars before tick
+    start) to the first one past upto (and one more): int64 array, at least two."""
     sigs = sigs_of(tempo)
     longest = max(s[1] * 4 / s[2] for s in sigs)
-    lines = [round(b * ppq) for b, _ in meter_bar_lines(sigs, 0, upto / ppq + 2 * longest + 1)]
+    lines = [round(b * ppq) for b, _ in meter_bar_lines(sigs, max(0.0, start / ppq - 2 * longest - 1),
+                                                         upto / ppq + 2 * longest + 1)]
     return np.unique(np.array(lines + [lines[-1] + 1], np.int64)) if len(lines) < 2 else np.unique(
         np.array(lines, np.int64))
 
@@ -380,8 +392,12 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     own = [lay["own_line"][n] for n, a, e in keeps if e > a]  # (a part with its own heard line: that, always)
     known = None if heard is None else FileTempo(heard, lay)
     files = [None if heard is None else known.part(n, e) for n, a, e in keeps if e > a]
+    longest = max([e - a for _, a, e in keeps if e > a] + [0])
+    if longest > KEEP_TICKS_MOST:  # (worked out tick by tick: a part over a huge-tick MIDI took terabytes)
+        from files.midi_read import MidiError
+        raise MidiError("load.keep_too_long", ticks=f"{longest:,}", most=f"{KEEP_TICKS_MOST:,}")
     keeps = [(a, e, keep_heard(lay, n, a, e)) for n, a, e in keeps if e > a]
-    fit_bars = tempo.get("bars", True)
+    fit_bars = bars_fit(tempo, ppq, max([last_tick] + [e for _, e, _ in keeps]))
     if fit_bars and bars is None:  # (bar lines by the time signatures: fitting works inside each one, user)
         bars = bar_ticks(tempo, ppq, max([last_tick] + [e for _, e, _ in keeps]))
     # gaps between anchors, part by part: (first tick, end tick, time = ticks x heard us, file ticks)
@@ -466,10 +482,10 @@ def limit_spots(tempo, base, ppq, beats, ticks, heard=None, loose=None):
     # (ds5: beat_tick is steady up with the beat: the last tick is the latest beat's; one read, not 190,000)
     upto = max([int(t.max()) for t in (ticks, loose) if len(t)]
                + ([beat_tick(max(p[0] for p in tempo["points"]), ppq)] if tempo["points"] else []))
-    bars = bar_ticks(tempo, ppq, upto)
+    bars = bar_ticks(tempo, ppq, upto) if bars_fit(tempo, ppq, upto) else None
     _, _, _, keeps, gaps, out["dense"], out["gave"], _ = keep_gaps(tempo, base, ppq, beats, ticks, bars, loose,
                                                                    heard)
-    if not tempo.get("bars", True) or not gaps:
+    if not gaps or not bars_fit(tempo, ppq, max([upto] + [e for _, e, _ in keeps])):
         return out
     bars = bar_ticks(tempo, ppq, max(upto, max(e for _, e, _ in keeps)))
     _fit_bar_lines(gaps, keeps, bars, bar_lengths(ppq))
@@ -542,14 +558,14 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     # (ds5: beat_tick is steady up with the beat: the last tick is the latest beat's; one read, not 190,000)
     upto = max([int(t.max()) for t in (ticks, loose) if len(t)]
                + ([beat_tick(max(p[0] for p in tempo["points"]), ppq)] if tempo["points"] else []))
-    bars = bar_ticks(tempo, ppq, upto)
+    bars = bar_ticks(tempo, ppq, upto) if bars_fit(tempo, ppq, upto) else None
     lay, segs, out["bad"], keeps, gaps, out["dense"], out["gave"], times = keep_gaps(tempo, base, ppq, beats, ticks,
                                                                                     bars, loose, heard)
     end = segs[-1][1]
     every_all = tempo.get("every", EVERY)
     # (each Keep timing part's drawn ramp steps by its own Interval, point[8]: user 2026-11-12)
     every_at = {a: step_of(tempo["points"][i], every_all)[0] for i, a, _, _ in lay["keeps"]}
-    fit_bars = tempo.get("bars", True)
+    fit_bars = bars_fit(tempo, ppq, max([upto] + [e for _, e, _ in keeps]))
     if fit_bars and gaps:
         if keeps:  # (bar lines far enough for every part)
             bars = bar_ticks(tempo, ppq, max(upto, max(e for _, e, _ in keeps)))

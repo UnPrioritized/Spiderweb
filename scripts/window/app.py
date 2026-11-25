@@ -1628,7 +1628,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # (tick 0 on, pitch 0-255 at 128 keys too: user; ticks only as far as a saved file keeps a shape; the Space
         # settings widen it as far as the mouse goes)
         t_lo, p_lo, p_hi = self.point_limits()
-        for var, entry, lo, hi in ((tv, te, t_lo, BEATS_FAR * self.ppq), (pv, pe, p_lo, p_hi)):
+        for var, entry, lo, hi in ((tv, te, t_lo, max(BEATS_FAR * self.ppq, self.loaded.last_tick if self.loaded is not None else 0)), (pv, pe, p_lo, p_hi)):
+            # (a loaded MIDI's far end: its Extracts' points typed there too)
             value = read_number(var.get(), lo, hi)
             if value is None:
                 bad(entry, typing=True)

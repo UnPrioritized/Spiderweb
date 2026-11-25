@@ -28,6 +28,7 @@ import numpy as np
 from files.colours import BLACK, WHITE, mix
 from files.lang import tr, trn
 from files.mathexpr import calc, calc_int, fmt
+from files.midi_read import MidiError
 from files.system import double_click_ms
 from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, bpm_at,
                          bpm_text, clamp_bpm, curve, drawn_bpm, drawn_from, drop_loose, end_point, formula_fn,
@@ -2403,7 +2404,7 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
                     cc = app.cc_messages(app.ppq, self.base())
                     loose = np.array([m[0] for ms in cc.values() for m in ms], np.int64)
                 limits = limit_spots(app.tempo, self.base(), app.ppq, app.beats, ticks, heard, loose)
-            except MemoryError:
+            except (MemoryError, MidiError):  # (MidiError: a Keep timing part too long to work out, the export says)
                 pass
         self._limits = {k: sorted(set(v)) for k, v in limits.items()}
         self._dense = (key, self._limits["dense"])

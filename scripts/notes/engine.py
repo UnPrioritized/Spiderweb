@@ -182,9 +182,12 @@ def clean_basics(sh):
     return out
 
 
-FAR = 1e12  # no number in a shape is ever this big (a beat that far is long past what a MIDI file can reach)
-BEATS_FAR = 1e7  # a shape reaching past this beat (months of music) or key is a changed file: its notes alone could
-KEYS_FAR = 1e4  # take all the memory there is (keys are 0-255; hz_settings.LONGEST for Hz tones)
+FAR = float(1 << 53)  # no number in a shape is ever this big (past any tick a MIDI file holds, still exact as a
+# decimal: an Extract's notes keep a huge-tick MIDI's ticks; Infinity / NaN / 1e300 = a changed file)
+BEATS_FAR = 1e7  # a shape LONGER than this (months of music) or reaching past this key is a changed file: its notes
+KEYS_FAR = 1e4  # alone could take all the memory there is (keys are 0-255; hz_settings.LONGEST for Hz tones)
+POS_FAR = float(1 << 46)  # beats: a shape may sit this far out at most (a loaded huge-tick MIDI's end; x PPQ 65535
+# still well inside 64 bits)
 
 
 def sane(x):
@@ -627,7 +630,11 @@ def within_reach(sh):
         (b0, p0), (b1, p1), (b2, p2) = pts
         pts += [(b0 + u * (b1 - b0) + v * (b2 - b0), p0 + u * (p1 - p0) + v * (p2 - p0))
                 for u in (min(us), max(us)) for v in (min(vs), max(vs))]
-    return all(abs(b) <= BEATS_FAR and abs(p) <= KEYS_FAR for b, p in pts)
+    # (BEATS_FAR = how LONG a shape may be; it may sit as far out as a loaded MIDI reaches, POS_FAR: an Extract at
+    # the end of a huge-tick song, 60 M BPM at PPQ 32767, was dropped by a saved project)
+    bs = [b for b, _ in pts]
+    return (max(bs) - min(bs) <= BEATS_FAR and all(abs(b) <= POS_FAR for b in bs)
+            and all(abs(p) <= KEYS_FAR for _, p in pts))
 
 
 def clean_hz_of(sh, out):

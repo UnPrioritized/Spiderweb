@@ -212,6 +212,8 @@ def short_num(x, digits=12):
     """A float with the noise digits dropped (4.0 -> 4, 0.1000000000000001 -> 0.1)."""
     if not isinstance(x, float):
         return x
+    if abs(x) >= 1e6:  # (a beat this far out, a huge-tick MIDI's Extract at 8.6e9: 12 digits moved it by 24 ticks;
+        return int(x) if x.is_integer() else x  # kept exact: json writes the shortest exact form)
     x = float(f"{x:.{digits}g}")
     return int(x) if x.is_integer() else x
 
@@ -2285,7 +2287,8 @@ class ProjectFiles:
             upto = max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms])
             # (... to the end of that bar: bar fitting spreads ticks over the whole bar, the copy's last bar came out
             # a few ticks off from Export MIDI, hunt 2026-10-24)
-            lines = bar_ticks(self.tempo, ppq, upto)
+            lines = bar_ticks(self.tempo, ppq, upto, start=upto)  # (only the bars near it: every bar from 0 of a
+            # huge-tick song took gigabytes)
             upto = int(lines[np.searchsorted(lines, upto)]) if upto < lines[-1] else upto
             timed, _, plan = self.tempo_timed(ppq, bpm, beats, self.cc_messages(ppq, bpm), notes=base, upto=upto)
             cc = timed_ticks(plan, notes[:0], cc)[1]  # (the notes as the file has them: finer Hz basses too)

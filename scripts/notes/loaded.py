@@ -24,6 +24,7 @@ from notes import loaded_map
 PIC_COLS = 1024  # a track's own picture: this many columns at most across its notes (+ its key range)
 PLAIN_MOST = 16 << 20  # bytes a file may have to load without the speed-ups (plain Python: ~1-2 MB a second)
 MARK_MOST = 1 << 26  # Keep timing's note ticks are marked this many ticks at a time (a byte each)
+MARK_WINDOWS = 64  # ... in at most this many windows; a longer song: LoadedMidi._sparse_anchors
 SPARE = 2 << 30  # "Keep in memory" only with this much memory left over (user 2026-10-23)
 TEMPO, NAME, PORT, TIME_SIG, KEY_SIG = 0x51, 0x03, 0x21, 0x58, 0x59
 PAIRING = "fifo"  # how note-ons and note-offs are paired (first on, first off: Domino, user 2026-10-23); saved
@@ -116,6 +117,9 @@ class LoadedMidi:
         span = self.end + 1  # (past the last note's end nothing is an anchor: events there move along with it)
         size = min(span, MARK_MOST)
         windows = range(0, span, size)
+        if len(windows) > MARK_WINDOWS:  # (a huge-tick MIDI: millions of windows, each a read of every track)
+            self._anchors = self._sparse_anchors(cancel, progress)
+            return self._anchors
         total = sum(t.size for t in mf.tracks if t.whole) * len(windows)
         mark = np.zeros(size, np.uint8)
         buf = bytearray(PIECE)
@@ -153,6 +157,64 @@ class LoadedMidi:
                 other.append(np.flatnonzero(mark == midi_scan.OTHER_TICK).astype(np.int64) + base)
         self._anchors = np.concatenate(notes), np.concatenate(other)
         return self._anchors
+
+    def _sparse_anchors(self, cancel=None, progress=None):
+        """anchors() for a song of very many ticks (huge-tick MIDIs: 60 M BPM at PPQ 32767 = 2^48 ticks; the
+        windows of marks never ended): the events read in order by the playback reader (play_loaded.LoadedPlayer's
+        _read, every playable track, hidden notes too: they are in the file), a window of ticks at a time, empty
+        stretches stepped over to the next event, each window's ticks kept once. Memory by the window and the
+        anchors found, time by the events. The same answers as the marks on every whole track."""
+        from files.play_loaded import WANT, LoadedPlayer, _Scratch
+        lp = LoadedPlayer(self, None, None)
+        lp._sc = _Scratch(self.path if self.mode != "memory" else None)
+        lp._file = lp._sc.file
+        notes, other = [], []
+        try:
+            lp._table()
+            whole = np.array([self.mf.tracks[int(n)].whole for n in lp.num], bool)
+            lp.sk = np.zeros(0, np.int64)  # (no event left out: hidden notes are in the file)
+            lp.sk_end = np.zeros(len(lp.num), np.int64)
+            lp.off = ~whole  # (a damaged track: none, as the marks)
+            lp._placed(0)
+            lp.sk_i[:] = 0  # (places in the empty skip list)
+            total = int(lp.limit.sum()) or 1
+            w0, span, end = 0, max(1, self.ppq), self.end
+            while w0 <= end:
+                if cancel and cancel():
+                    raise Cancelled()
+                live = ~lp.done & ~lp.off
+                if not live.any():
+                    break
+                w1 = min(w0 + span, end + 1)
+                todo = np.flatnonzero(live & (lp.nxt < w1))
+                if not len(todo):  # (nothing until the next event: straight there)
+                    nx = lp.nxt[live]
+                    nx = nx[nx >= 0]
+                    if not len(nx):
+                        break
+                    w0 = max(w1, int(nx.min()))
+                    continue
+                kept = [a.copy() for a in (lp.pos, lp.tick, lp.run, lp.nxt, lp.want, lp.done, lp.sk_i)]
+                got = lp._read(todo, w1, None if w1 - w0 <= 1 else 4 * WANT)
+                if got is None:  # (too many events: a shorter window from the same place)
+                    lp.pos, lp.tick, lp.run, lp.nxt, lp.want, lp.done, lp.sk_i = kept
+                    span = max(1, (w1 - w0) // 4)
+                    continue
+                ts, ms, _ = got
+                st = ms & 0xF0
+                is_note = (st == 0x80) | (st == 0x90)
+                notes.append(np.unique(ts[is_note]))
+                other.append(np.unique(ts[~is_note]))
+                if progress:
+                    progress(int(lp.pos.sum()), total)
+                span = max(1, (w1 - w0) // 2) if len(ts) > 2 * WANT else (w1 - w0) * 2 if len(ts) < WANT // 4 \
+                    else w1 - w0
+                w0 = w1
+        finally:
+            lp._sc.close()
+        n = np.unique(np.concatenate(notes)) if notes else np.zeros(0, np.int64)
+        o = np.unique(np.concatenate(other)) if other else np.zeros(0, np.int64)
+        return n.astype(np.int64), np.setdiff1d(o, n).astype(np.int64)
 
     def link(self):
         """What a project file keeps to find this MIDI again and know it's the same (never its notes)."""
