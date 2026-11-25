@@ -62,12 +62,11 @@ def write_npz(f, items, workers=None):
     join into one deflate stream (each ends on a byte boundary, Z_SYNC_FLUSH; the last finishes it): a few bytes more
     per piece. Every size in the zip64 form."""
     import struct
-    import time
     import zlib
     from concurrent.futures import ThreadPoolExecutor
     workers = workers or max(1, (os.cpu_count() or 2) // 2)
-    t = time.localtime()
-    when = ((t.tm_hour << 11) | (t.tm_min << 5) | (t.tm_sec // 2), ((t.tm_year - 1980) << 9) | (t.tm_mon << 5) | t.tm_mday)
+    when = (0, (0 << 9) | (1 << 5) | 1)  # (1 Jan 1980 as np.savez wrote: the clock never read; a PC dated before
+    # 1980 / after 2107 couldn't save, hunt 2026-11-25)
 
     def pack(piece, last):
         c = zlib.compressobj(6, zlib.DEFLATED, -15)
@@ -129,8 +128,14 @@ def packed_guess(streams, slices=INDEX_SLICES, rows=()):
     import zlib
     GUESS_SLICES, GUESS_SLICE = slices
     total = 0
+    work = []  # (byte rows: slices whole numbers, split each; parts of each number size apart: a read-ahead's copies
+    # are 2 or 4 bytes a part, hunt 2026-11-25 = a crash when the first part's size was taken for all)
     for s, parts in enumerate(streams):
-        w = parts[0].itemsize if s in rows and parts else 1  # (byte rows: slices whole numbers, split each)
+        if s in rows and parts:
+            work += [([a for a in parts if a.itemsize == w], w) for w in sorted({a.itemsize for a in parts})]
+        else:
+            work.append((parts, 1))
+    for parts, w in work:
         parts = [np.ascontiguousarray(a).reshape(-1).view(np.uint8) for a in parts]
         size = sum(len(p) for p in parts)
         if size <= GUESS_SLICES * GUESS_SLICE:  # (whole, as one run: saved joined)
