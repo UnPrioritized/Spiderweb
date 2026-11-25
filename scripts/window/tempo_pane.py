@@ -35,7 +35,7 @@ from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_
                          catch_get, catch_set, heard_before, heard_line, heard_of, keep_off, keep_points, keep_runs, keeps, on_beat,
                          layout, plans, set_bend, shift_heard, shown_bpm, split_at, step_edges, stretches,
                          swap_part, tempo_key, tempo_text)
-from notes.tempo import changed as tempo_edited, keep_heard, FAR, hold as hold_tempo, version as tempo_version
+from notes.tempo import changed as tempo_edited, keep_heard, FAR, far_beat, hold as hold_tempo, version as tempo_version
 from notes.tempo import catch_step, copy_step, own_step, set_heard, set_step, stamp_steps, step_of
 from notes.loaded import file_tempos
 from notes.loaded_shown import anchors_shown, map_key
@@ -3208,10 +3208,11 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
         if bar < 1 or beat < 1 or tick < 0:
             return None
         ppq = max(1, self.app.ppq)
-        if max(bar, beat, tick / ppq) > FAR:  # (before any maths: huge numbers froze the pane / overflowed)
+        far = far_beat(ppq)  # (what a MIDI file holds at this PPQ: past it Export wrote a damaged file, hunt 11-26)
+        if max(bar, beat, tick / ppq) > far:  # (before any maths: huge numbers froze the pane / overflowed)
             return "far"
         b = round(from_bar_beat_tick(sigs_of(self.app.tempo), bar, beat, tick, ppq) * ppq) / ppq
-        return "far" if b > FAR else b
+        return "far" if b > far else b
 
     def typing_left(self):
         """The keyboard left a box: Tab to the other one keeps them open, anywhere else = done."""

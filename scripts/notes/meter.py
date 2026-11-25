@@ -17,7 +17,7 @@ SHARPS = ("C", "G", "D", "A", "E", "B", "F#", "C#")  # (major keys by sharps; mi
 FLATS = ("C", "F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb")
 MINOR_SHARPS = ("A", "E", "B", "F#", "C#", "G#", "D#", "A#")
 MINOR_FLATS = ("A", "D", "G", "C", "F", "Bb", "Eb", "Ab")
-FAR = float(MOST_TICK)  # beats: past this a mark is left out (as the tempo line's points: a loaded MIDI's farthest)
+FAR = float(MOST_TICK >> 2)  # beats: past this a mark is left out (= tempo.FAR, 2^46: a loaded MIDI's farthest)
 EPS = 1e-9
 
 

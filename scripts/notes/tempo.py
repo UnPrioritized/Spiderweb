@@ -70,8 +70,15 @@ FORMULA = "x^3"  # a new formula part's / catch-up's starting formula
 SCALES = ("lin", "exp")  # a part's BPM change: linear (default, user) / exponential (straight on the doubling scale)
 EVERY = 24  # ticks between the tempo changes of a curved part (user: like Domino's default; 1 = every tick)
 BLOCKS_FROM = 8  # an interval this long or more: a curved part worked out step by step, not tick by tick
-FAR = float(MOST_TICK)  # beats: past this a point is left out (the farthest tick a loaded MIDI holds, at PPQ 1:
-# huge-tick MIDIs at 60 M BPM pass 10 M beats in 10 s, their tempo changes after it were dropped)
+FAR = float(1 << 46)  # beats: past this a point is left out (a loaded MIDI's farthest tick, MOST_TICK, at PPQ 4 and
+# up: huge-tick MIDIs at 60 M BPM pass 10 M beats in 10 s, their tempo changes after it were dropped; x PPQ 65535
+# stays inside 64 bits: at 2^48 beats the pane's ticks overflowed, hunt 2026-11-26). Typed places: far_beat.
+
+
+def far_beat(ppq):
+    """The farthest beat a point may be typed / placed at in a project of this PPQ: the farthest tick a MIDI file holds
+    (typed past it, Export wrote a damaged file or gigabytes of waits; hunt 2026-11-26)."""
+    return min(FAR, MOST_TICK / max(1, ppq))
 SLOWEST = 16_777_211  # the slowest Domino-safe tempo (us per beat; a file holds up to 0xFFFFFF)
 
 
@@ -1364,6 +1371,7 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
             origin = edges[j] + off
             part = (edges[j], edges[j + 1])
             jump = to_jump(pts, i)
+            every = ramp_step(every, part[1] - part[0])  # (a huge-tick song's ramp: longer steps, the same glide)
 
             def read(starts):
                 if jump:
@@ -1386,6 +1394,34 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
             us = nearest_safe(6e7 / bpm)
             us[bpm == base] = base_u  # (the project's own tempo, exactly as the file starts)
             out.append((a, b, us))
+    return out
+
+
+CATCH_TICKS_MOST = 1 << 27  # a catch-up's stretch at most (its time worked out on every tick: "Not possible: too long")
+RAMP_STEPS_MOST = 1 << 20  # a gliding part's tempo steps at most (each worked out and kept: on a 60 M BPM song at
+# PPQ 32767 a 1.5 s ramp was 1.4 billion steps of 24 ticks, 10 GB; user picked longer steps until ramps are worked
+# out step by step, planned-features "TEMPO RAMPS STEP BY STEP", 2026-11-26)
+
+
+def ramp_step(every, length):
+    """A gliding part's step in ticks: its Interval, made a whole number of times longer when the part would have
+    more than RAMP_STEPS_MOST steps (from the part's WHOLE length: every read of it, the same steps)."""
+    n = -(-length // max(1, every))
+    if n <= RAMP_STEPS_MOST:
+        return every
+    return max(1, every) * -(-n // RAMP_STEPS_MOST)
+
+
+def coarse_ramps(tempo, ppq):
+    """Beats where a gliding part's steps were made longer than its Interval (ramp_step): the export's note."""
+    pts, every_all = tempo.get("points") or [], tempo.get("every", EVERY)
+    out = []
+    for i in range(len(pts) - 1):
+        if pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1]:
+            every = step_of(pts[i], every_all)[0]
+            length = beat_tick(pts[i + 1][0], ppq) - beat_tick(pts[i][0], ppq)
+            if ramp_step(every, length) != every:
+                out.append(pts[i][0])
     return out
 
 
@@ -1506,6 +1542,9 @@ def catch_plan(tempo, base, st, ppq, real=None):
     s0, ln, e = (beat_tick(st[k], ppq) for k in ("from", "line", "end"))
     if e - ln <= 0:
         out["why"] = "short"
+        return out
+    if e - s0 > CATCH_TICKS_MOST:  # (worked out tick by tick: a huge-tick song's catch-up took gigabytes, hunt
+        out["why"] = "long"        # 2026-11-26)
         return out
     total = (e - s0) * base_u
     bpm = 60_000_000 / base_u

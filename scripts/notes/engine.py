@@ -632,8 +632,10 @@ def within_reach(sh):
                 for u in (min(us), max(us)) for v in (min(vs), max(vs))]
     # (BEATS_FAR = how LONG a shape may be; it may sit as far out as a loaded MIDI reaches, POS_FAR: an Extract at
     # the end of a huge-tick song, 60 M BPM at PPQ 32767, was dropped by a saved project)
+    # A shape holding its OWN notes (an Extract, a paste, plain notes) makes no more notes for being longer: any
+    # length (an Extract over 20 s of a 60 M BPM song = 2e7 beats was dropped on reopening, hunt 2026-11-26)
     bs = [b for b, _ in pts]
-    return (max(bs) - min(bs) <= BEATS_FAR and all(abs(b) <= POS_FAR for b in bs)
+    return ((max(bs) - min(bs) <= BEATS_FAR or "notes" in sh) and all(abs(b) <= POS_FAR for b in bs)
             and all(abs(p) <= KEYS_FAR for _, p in pts))
 
 

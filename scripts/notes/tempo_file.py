@@ -20,9 +20,10 @@ import bisect
 import numpy as np
 
 from files import speed
+from files.midi_scan import MOST_TICK
 from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of, where as meter_where
 from notes.tempo import (EVERY, _put_all, _put_many, base_us, beat_tick,
-                         typed_bpms, step_of,
+                         typed_bpms, step_of, coarse_ramps,
                          file_segments, has_tempo, keep_heard, known_key, layout, segs_end, tempo_key)
 from notes.tempo_safe import PAIR_REACH, SAFE_REACH, _fit_blocks, _fit_exact, _flat_pair, _runs, domino_safe
 
@@ -93,8 +94,9 @@ def bar_line(sigs, tick, ppq, after=False):
     return line
 
 
-KEEP_TICKS_MOST = 1 << 27  # a Keep timing part's ticks at most (its tempo worked out on every tick: ~1 GB a list here;
-# a huge-tick MIDI's parts run to trillions: refused with load.keep_too_long, never the memory)
+KEEP_TICKS_MOST = 1 << 30  # a Keep timing part's ticks at most (its tempo worked out on every tick; a huge-tick MIDI's
+# parts run to trillions: refused with load.keep_too_long, never the memory; 2^27 refused normal PPQ 65535 songs of
+# 2,500 beats that worked before, hunt 2026-11-26: a 2-hour part at PPQ 65535, 120 BPM still passes)
 BARS_MOST = 1 << 20  # Fit bar lines works on songs of at most this many bars (bar by bar: a huge-tick MIDI, 60 M BPM
 # at PPQ 32767, has billions and its export took 20 GB; past it the bars are written unfitted: the sound is the same)
 
@@ -549,10 +551,11 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
            "map": lambda t: np.asarray(t, np.int64), "bp": None, "jumps": [], "hz": [], "dense": [], "gave": [],
            "unfit": [], "moved": []}
     if not has_tempo(tempo):
-        return out
+        return _in_file(out)
     start_u = base_us(base)
     out["events"] = [(0, start_u)]
     out["typed"] = typed_bpms(tempo)  # (Domino's items write these BPMs as typed: domino_clip.dms_bpm)
+    out["coarse"] = coarse_ramps(tempo, ppq)  # (ramps stepped longer than their Interval: the export says so)
     ticks = np.asarray(ticks, np.int64).ravel()
     loose = np.asarray(loose, np.int64).ravel()
     # (ds5: beat_tick is steady up with the beat: the last tick is the latest beat's; one read, not 190,000)
@@ -745,6 +748,14 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
             bad = (i >= 0) & (hi[np.maximum(i, 0)] > s)
             if bad.any():
                 out["hz"] = [int(s[bad].min()) / ppq]
+    return _in_file(out)
+
+
+def _in_file(out):
+    """file_plan's tempo / time / key signature events past the farthest tick a MIDI file holds (midi_scan.MOST_TICK)
+    left out: a point dragged that far wrote a file read back as damaged, or gigabytes of waits (hunt 2026-11-26)."""
+    for k in ("events", "sigs", "keys"):
+        out[k] = [e for e in out[k] if e[0] <= MOST_TICK] or out[k][:1]
     return out
 
 

@@ -3631,9 +3631,17 @@ TRACKS = "t:"  # packed notes starting with this have the track column (the firs
 _unpacked = {}
 
 
+WIDE = "w:"  # (... with 64-bit numbers: notes spanning past 2^31 ticks, a huge-tick MIDI's Extract; hunt 2026-11-26)
+_I4 = np.iinfo(np.int32)
+
+
 def pack_notes(rows):
-    """(start, end, row, velocity, track) rows -> text for the save file (zlib, base64)."""
-    return TRACKS + base64.b64encode(zlib.compress(np.asarray(rows, "<i4").tobytes(), 1)).decode("ascii")
+    """(start, end, row, velocity, track) rows -> text for the save file (zlib, base64). 32-bit numbers ("t:") as
+    always; a number past them (ticks over 2^31 from the box's start) = 64-bit ("w:"), the same text otherwise."""
+    a = np.asarray(rows, np.int64)
+    if a.size and (a.min() < _I4.min or a.max() > _I4.max):
+        return WIDE + base64.b64encode(zlib.compress(a.astype("<i8").tobytes(), 1)).decode("ascii")
+    return TRACKS + base64.b64encode(zlib.compress(a.astype("<i4").tobytes(), 1)).decode("ascii")
 
 
 def unpack_notes(text):
@@ -3642,8 +3650,10 @@ def unpack_notes(text):
     if got is None:
         if len(_unpacked) > 20:
             _unpacked.clear()
-        tracks = text.startswith(TRACKS)
-        got = np.frombuffer(unzip(base64.b64decode(text[len(TRACKS):] if tracks else text), key=text), "<i4")
+        wide = text.startswith(WIDE)
+        tracks = wide or text.startswith(TRACKS)
+        got = np.frombuffer(unzip(base64.b64decode(text[len(TRACKS):] if tracks else text), key=text),
+                            "<i8" if wide else "<i4")
         got = got.reshape(-1, 5 if tracks else 4).astype(np.int64)
         if not tracks:
             got = np.column_stack([got, np.zeros(len(got), np.int64)])
