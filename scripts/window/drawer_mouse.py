@@ -428,7 +428,9 @@ class DrawerMouse:
                                          else [self.strokes[i]["box"][:2], self.strokes[i]["box"][2:]])]
         us, vs = [u * n for u, _ in pts], [v * n for _, v in pts]
         cu, cv = (min(us) + max(us)) / 2, (min(vs) + max(vs)) / 2
-        on_grid = all(abs(c - round(c)) < 1e-6 for c in us + vs)
+        # (points are stored to 5 decimals: 1/12 = 0.08333, x 12 = 0.99996, so the test forgives that much; grids
+        # 12 / 24 / 48 turned half a square off the grid)
+        on_grid = all(abs(c - round(c)) < 1e-5 * max(n, 1) for c in us + vs)
         return cu, cv, on_grid, n
 
     def flip(self, sideways):
