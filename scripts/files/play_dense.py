@@ -30,6 +30,7 @@ SAVED_VER = 3  # (a saved read-ahead: how parts are read / collapsed changed = a
 SAVED_END = ".dense.npz"  # (beside the saved index: <index name>.dense.npz)
 DECLINED_END = ".dense.no"  # (beside it: the user said No to keeping it)
 PART_ARRAYS = ("ts", "ms", "tr", "cp", "s0_q", "s0_n")  # (each part's, saved as <name><part number>)
+BYTE_ROWS = ("ms", "cp")  # (saved as midi_saved.byte_rows, the head says so: older kept ones open as they are)
 
 
 def stretches(lm, tmap):
@@ -353,7 +354,8 @@ def kept_bytes(lm):
     got = getattr(d, "_guess", None)
     if got is None or got[0] is not ps:
         from files.midi_saved import AHEAD_SLICES, packed_guess
-        got = d._guess = (ps, packed_guess([[getattr(p, k) for p in ps] for k in PART_ARRAYS], AHEAD_SLICES))
+        got = d._guess = (ps, packed_guess([[getattr(p, k) for p in ps] for k in PART_ARRAYS], AHEAD_SLICES,
+                                           [PART_ARRAYS.index(k) for k in BYTE_ROWS]))
     return got[1]
 
 
@@ -386,11 +388,14 @@ def save(d):
             return False
         ps = d.parts
         head = dict(_saved_head(lm), todo=[list(map(int, t)) for t in d.todo], failed=d.failed,
-                    parts=[[int(p.t0), int(p.t1), len(p.ts), len(p.s0_q)] for p in ps])
-        arrays = {"head": np.frombuffer(json.dumps(head).encode("utf-8"), np.uint8)}
-        for i, p in enumerate(ps):  # (each part's own arrays: never all of them joined into one more copy)
+                    parts=[[int(p.t0), int(p.t1), len(p.ts), len(p.s0_q)] for p in ps],
+                    rows={k: str(getattr(ps[0], k).dtype) if ps else "" for k in BYTE_ROWS})
+        arrays = [("head", lambda: np.frombuffer(json.dumps(head).encode("utf-8"), np.uint8))]
+        for i, p in enumerate(ps):  # (each part's own arrays: never all of them joined into one more copy; byte
+            # rows made one array at a time while writing: all at once = 1.7 GB more for Shinki)
             for k in PART_ARRAYS:
-                arrays[f"{k}{i}"] = getattr(p, k)
+                arrays.append((f"{k}{i}", (lambda a=getattr(p, k): midi_saved.byte_rows(a)) if k in BYTE_ROWS
+                               else (lambda a=getattr(p, k): a)))
         # straight into a file beside it, then put in place (safefile's way): built in memory first, a 3 GB
         # read-ahead took two more copies and the PC ran out of memory (2026-10-28)
         index = midi_saved.index_file(lm.mf.path, lm.mf.size)
@@ -398,8 +403,13 @@ def save(d):
         tmp = path + ".tmp"
         SAVING.add(tmp)
         try:
-            with open(tmp, "wb") as f:  # (compressed, user 2026-11-25: Shinki 3 GB -> ~290 MB, ~21 s here)
-                np.savez_compressed(f, **arrays)
+            with open(tmp, "wb") as f:  # (compressed as np.savez_compressed writes it, user 2026-11-25: Shinki
+                # 3 GB -> ~180 MB)
+                import zipfile
+                with zipfile.ZipFile(f, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
+                    for name, make in arrays:
+                        with zf.open(name + ".npy", "w", force_zip64=True) as out:
+                            np.lib.format.write_array(out, make(), allow_pickle=False)
                 f.flush()
                 os.fsync(f.fileno())
                 size = f.tell()
@@ -435,8 +445,10 @@ def _load(lm, todo):
                     json.loads(json.dumps(_saved_head(lm))) or head.get("todo") != [list(map(int, t)) for t in todo]:
                 return None
             parts = []
+            rows = head.get("rows", {})  # (byte rows since 2026-11-25; older kept ones = plain arrays)
             for i, (t0, t1, n, k) in enumerate(head["parts"]):
-                a = {key: z[f"{key}{i}"] for key in PART_ARRAYS}
+                a = {key: midi_saved.from_rows(z[f"{key}{i}"], np.dtype(rows[key])) if key in rows else
+                     z[f"{key}{i}"] for key in PART_ARRAYS}
                 if any(len(a[key]) != n for key in ("ts", "ms", "tr", "cp")) or len(a["s0_q"]) != k:
                     return None
                 parts.append(Part(t0, t1, a["ts"], a["ms"], a["tr"], a["cp"], s0_q=a["s0_q"], s0_n=a["s0_n"]))

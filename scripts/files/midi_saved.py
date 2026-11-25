@@ -52,18 +52,32 @@ def _layout(mf):
 INDEX_SLICES, AHEAD_SLICES = (256, 1 << 14), (16, 1 << 20)
 
 
-def packed_guess(streams, slices=INDEX_SLICES):
+def byte_rows(a):
+    """a's numbers as rows of bytes (every number's 1st byte, then every 2nd...): Kestrel's read-ahead messages + copy
+    counts compress far better so (PLAN stage C 2026-11-25, Shinki 292 -> 178 MB, quicker too)."""
+    a = np.ascontiguousarray(a).reshape(-1)
+    return np.ascontiguousarray(a.view(np.uint8).reshape(-1, a.itemsize).T)
+
+
+def from_rows(r, dtype):
+    """byte_rows back."""
+    return np.ascontiguousarray(r.T).view(dtype).reshape(-1)
+
+
+def packed_guess(streams, slices=INDEX_SLICES, rows=()):
     """About the bytes streams (lists of arrays, each list read as one run of bytes) take compressed as np.savez_
     compressed writes them: small ones compressed whole, big ones from slices (how many, bytes) spread over them
-    (Shinki's read-ahead: 3 GB, ~290 MB compressed; the question asks before saving, user 2026-11-25: "about")."""
+    (Shinki's read-ahead: 3 GB, ~290 MB compressed; the question asks before saving, user 2026-11-25: "about").
+    rows = places in streams saved as byte_rows."""
     import zlib
     GUESS_SLICES, GUESS_SLICE = slices
     total = 0
-    for parts in streams:
+    for s, parts in enumerate(streams):
+        w = parts[0].itemsize if s in rows and parts else 1  # (byte rows: slices whole numbers, split each)
         parts = [np.ascontiguousarray(a).reshape(-1).view(np.uint8) for a in parts]
         size = sum(len(p) for p in parts)
         if size <= GUESS_SLICES * GUESS_SLICE:  # (whole, as one run: saved joined)
-            total += len(zlib.compress(b"".join(p.tobytes() for p in parts), 6))
+            total += len(zlib.compress(b"".join((p.reshape(-1, w).T if w > 1 else p).tobytes() for p in parts), 6))
             continue
         ends = np.cumsum([len(p) for p in parts])
         packed = taken = 0
@@ -71,9 +85,12 @@ def packed_guess(streams, slices=INDEX_SLICES):
             n = int(np.searchsorted(ends, at, "right"))  # (the part holding at; a slice stops at its end)
             p = parts[n]
             a = at - (int(ends[n - 1]) if n else 0)
-            piece = p[a:a + GUESS_SLICE]
+            a -= a % w
+            piece = p[a:a + GUESS_SLICE - GUESS_SLICE % w]
+            if w > 1:
+                piece = np.ascontiguousarray(piece[:len(piece) - len(piece) % w].reshape(-1, w).T)
             packed += len(zlib.compress(piece, 6))
-            taken += len(piece)
+            taken += piece.size
         total += int(size * packed / max(1, taken))
     return total
 
