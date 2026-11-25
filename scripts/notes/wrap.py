@@ -111,13 +111,24 @@ def upright(a, cfg):
     # when f[j] < (t - base + 0.5) / span. ka = how many cuts are at or before the note's start (its first piece's
     # slice), kb = at or before its last tick: the cuts ka .. kb - 1 fall inside it.
     safe = np.maximum(span, 1.0)
-    ka = np.searchsorted(f, (s - base + 0.5) / safe - 1e-12, "left")
-    kb = np.searchsorted(f, (e - 1 - base + 0.5) / safe - 1e-12, "left")
+
+    def cut(m, at, sp):  # tick of cut m (0-based) in rows starting at `at`, `sp` ticks long
+        return at + np.floor(sp * f[np.clip(m, 0, n - 2)] + 0.5).astype(np.int64)
+
+    def cuts_by(t):  # how many cuts are at or before tick t: the search, then checked against the cuts' own ticks
+        # (on an exact half-tick tie the share's float rounding disagreed with the tick: one tick got two slices)
+        k = np.searchsorted(f, (t - base + 0.5) / safe - 1e-12, "left")
+        for _ in range(2):
+            k += (k < n - 1) & (cut(k, base, span) <= t)
+            k -= (k > 0) & (cut(k - 1, base, span) > t)
+        return k
+
+    ka, kb = cuts_by(s), cuts_by(e - 1)
     reps = kb - ka + 1
     idx = np.repeat(np.arange(len(b)), reps)
     j = np.arange(len(idx)) - np.repeat(np.cumsum(reps) - reps, reps)
     k = ka[idx] + j  # each piece's slice
-    tick = lambda m: base[idx] + np.floor(span[idx] * f[np.minimum(m, n - 2)] + 0.5).astype(np.int64)
+    tick = lambda m: cut(m, base[idx], span[idx])
     start = np.where(j == 0, s[idx], tick(k - 1))
     end = np.where(k == kb[idx], e[idx], tick(k))
     out = b[idx]
