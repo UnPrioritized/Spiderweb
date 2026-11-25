@@ -145,6 +145,27 @@ class RampRule:
         return ks[ch], vs[ch]
 
 
+class FixedRule:
+    """Runs already worked out (a long catch-up's values): run i = us vs[i] from tick origin + ks[i] up to the next
+    run, the last to origin + n. Reads like a RampRule with one-tick steps."""
+    __slots__ = ("origin", "every", "k0", "k1", "_runs")
+
+    def __init__(self, origin, ks, vs, n):
+        self.origin, self.every, self.k0, self.k1 = int(origin), 1, 0, int(n) - 1
+        ks, vs = np.asarray(ks, np.int64), np.asarray(vs, np.int64)
+        keep = np.ones(len(vs), bool)
+        keep[1:] = vs[1:] != vs[:-1]
+        self._runs = (ks[keep], vs[keep])
+
+    def runs(self):
+        return self._runs
+
+
+def fixed_ramp(a, b, ks, vs):
+    """Ticks a..b holding runs (first tick of each from a, its us) as a Ramp."""
+    return Ramp(a, b, FixedRule(a, ks, vs, b - a))
+
+
 class Ramp:
     """Ticks a..b (absolute) of a RampRule's steps."""
     __slots__ = ("a", "b", "rule")

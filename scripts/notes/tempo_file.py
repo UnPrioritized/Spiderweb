@@ -22,7 +22,7 @@ import numpy as np
 from files import speed
 from files.midi_scan import MOST_TICK
 from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of, where as meter_where
-from notes.tempo import (EVERY, _put_all, _put_many, base_us, beat_tick,
+from notes.tempo import (CATCH_TICKS_MOST, EVERY, _put_all, _put_many, base_us, beat_tick,
                          typed_bpms, step_of,
                          file_segments, has_tempo, keep_heard, known_key, layout, segs_end, tempo_key)
 from notes.tempo_ramp import Ramp
@@ -576,6 +576,8 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     lay, segs, out["bad"], keeps, gaps, out["dense"], out["gave"], times = keep_gaps(tempo, base, ppq, beats, ticks,
                                                                                     bars, loose, heard)
     end = segs[-1][1]
+    # (long curved catch-ups stepped longer than their Interval: the export says so, user 2026-11-26)
+    out["coarse"] = [st["line"] for st, cp in lay["worked"] if cp.get("ok") and cp.get("coarse")]
     every_all = tempo.get("every", EVERY)
     # (each Keep timing part's drawn ramp steps by its own Interval, point[8]: user 2026-11-12)
     every_at = {a: step_of(tempo["points"][i], every_all)[0] for i, a, _, _ in lay["keeps"]}
@@ -742,6 +744,15 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         on = starts[(starts > s0) & (starts < e)]
         if not len(on):
             continue
+        if e - s0 > CATCH_TICKS_MOST:  # (a huge-tick song's long catch-up: by runs, never a tick each)
+            pieces = _put_many(_cut(segs, s0, e, seg_starts),
+                               [(max(a, s0), min(ke, e), [(max(a, s0), min(ke, e), ku if isinstance(ku, int) else
+                                                           ku[max(a, s0) - a:min(ke, e) - a])])
+                                for a, ke, ku in keeps if min(ke, e) > max(a, s0)])
+            off = [t for t, so in zip(on.tolist(), _time_at(pieces, on)) if so != (t - s0) * st["base_u"]]
+            if off:
+                out["jumps"].append(min(off) / ppq)
+            continue
         real = _per_tick(segs, s0, e, seg_starts)
         for a, ke, ku in keeps:
             lo, hi = max(a, s0), min(ke, e)
@@ -760,6 +771,36 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
             if bad.any():
                 out["hz"] = [int(s[bad].min()) / ppq]
     return _in_file(out)
+
+
+def _time_at(pieces, ticks):
+    """Ticks x us from the first piece's start up to each tick (sorted, inside the pieces), exact Python ints:
+    pieces [(a, b, us)] in order, us one number, one per tick or a Ramp (its runs)."""
+    starts, us = [], []
+    for a, b, u in pieces:
+        if isinstance(u, (int, np.integer)):
+            starts.append(np.array([a], np.int64))
+            us.append(np.array([u], np.int64))
+        elif isinstance(u, Ramp):
+            ra, _, ru = u.spans()
+            starts.append(ra + (a - u.a))
+            us.append(ru)
+        else:
+            v = np.asarray(u, np.int64)
+            keep = np.ones(len(v), bool)
+            keep[1:] = v[1:] != v[:-1]
+            starts.append(np.arange(a, b, dtype=np.int64)[keep])
+            us.append(v[keep])
+    s = np.concatenate(starts).tolist()
+    u = np.concatenate(us).tolist()
+    sums = [0]
+    for i in range(len(s) - 1):
+        sums.append(sums[-1] + (s[i + 1] - s[i]) * u[i])
+    out = []
+    for t in np.asarray(ticks, np.int64).tolist():
+        i = bisect.bisect_right(s, t) - 1
+        out.append(sums[i] + (t - s[i]) * u[i])
+    return out
 
 
 def _in_file(out):

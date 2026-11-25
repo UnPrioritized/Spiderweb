@@ -52,7 +52,9 @@ import numpy as np
 from files.mathexpr import fmt, formula
 from files.midi_scan import MOST_TICK
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_keysigs, clean_sigs
-from notes.tempo_ramp import Ramp, RampRule
+from notes import tempo_ramp
+from notes.tempo_ramp import Ramp, RampRule, fixed_ramp
+from notes.tempo_safe import fit_block_runs, flat_pair_runs
 from notes.tempo_safe import (PAIR_REACH, SAFE_REACH, _FAR, _WINDOW, _fit_blocks, _fit_exact, _first_safe, _flat_pair,  # (moved)
                               _flat_pair_search, _near_pair, _nearest1, _next1, _next_by_bpm, _next_small, _pairs, _runs,
                               _safe1, _safe_side, PAIRS_KEPT, domino_safe, nearest_safe, next_safe)
@@ -1457,6 +1459,16 @@ def _latest_tick(segs, total, e):
     """The last tick a catch-up could start at with at least 1 microsecond per beat left for each tick after it
     (the fastest a file holds), the drawn line up to it. None when even the whole stretch drawn leaves time."""
     acc, best = 0, None
+    if any(isinstance(u, Ramp) for _, _, u in segs):  # (a long ramp: its runs as held pieces, never a tick each)
+        flat = []
+        for a, b, u in segs:
+            if isinstance(u, Ramp):
+                ra, rb, ru = u.spans()
+                off = a - u.a
+                flat += zip((ra + off).tolist(), (rb + off).tolist(), ru.tolist())
+            else:
+                flat.append((a, b, u))
+        segs = flat
     for a, b, u in segs:
         if isinstance(u, int):
             if acc + e - a > total:
@@ -1567,9 +1579,8 @@ def catch_plan(tempo, base, st, ppq, real=None):
     if e - ln <= 0:
         out["why"] = "short"
         return out
-    if e - s0 > CATCH_TICKS_MOST:  # (worked out tick by tick: a huge-tick song's catch-up took gigabytes, hunt
-        out["why"] = "long"        # 2026-11-26)
-        return out
+    if e - s0 > CATCH_TICKS_MOST:  # (tick by tick took gigabytes on a huge-tick song: by runs, PLAN stage D)
+        return _catch_long(tempo, st, ppq, real, out, s0, ln, e, base_u)
     total = (e - s0) * base_u
     bpm = 60_000_000 / base_u
     every = st.get("every") or tempo.get("every", EVERY)  # (its own Interval, stretches)
@@ -1617,6 +1628,78 @@ def catch_plan(tempo, base, st, ppq, real=None):
     w = weight(st, np.linspace(0, 1, 257))
     top = bpm * 2 ** float((push * w).max() if push > 0 else (push * w).min())
     out.update(ok=True, push=push, bpm=clamp_bpm(top), target=target, fit=fit)
+    return out
+
+
+CATCH_STEPS_MOST = 1 << 22  # a long curved catch-up's Interval steps at most: past it they're made longer (user
+# 2026-11-26: same shape, still lands exactly; the export says so: "coarse"). ~7 s at the most (fit_block_runs'
+# Domino-safe loop), said in the status line past CATCH_SAY_FROM steps
+CATCH_SAY_FROM = 1 << 19
+
+
+def _catch_long(tempo, st, ppq, real, out, s0, ln, e, base_u):
+    """catch_plan for a stretch over CATCH_TICKS_MOST ticks (a huge-tick song), never one value a tick: a flat
+    catch-up = its flat pair (two values, exact at any length); a curved one = _fit_blocks' way on its Interval
+    steps (made longer past CATCH_STEPS_MOST), the last landing exactly. "fit" = a Ramp of runs. When it can't, the
+    latest spot is the flat one's (no halving over attempts: each is seconds long)."""
+    total = (e - s0) * base_u
+    bpm = 60_000_000 / base_u
+    every = int(st.get("every") or tempo.get("every", EVERY))
+    w = weight(st, (np.arange(512) + 0.5) / 512)
+    if not np.any(w > 1e-9) or np.any(w < -1e-9):
+        out["why"] = "shape"
+        return out
+    why = [None]
+
+    def attempt(line):
+        n, target = e - line, total - _us_sum(real(s0, line))
+        if not n <= target <= n * SLOWEST:
+            why[0] = "too_fast" if target < n else "too_slow"
+            return None
+        push = _solve_push(st, n / ppq, target / ppq / 1e6, bpm)
+        if push is None:
+            why[0] = "peak"
+            return None
+        steps = -(-n // max(1, every))
+        ev = max(1, every) if steps <= CATCH_STEPS_MOST else max(1, every) * -(-steps // CATCH_STEPS_MOST)
+        starts = np.arange(0, n, ev, dtype=np.int64)
+        ideal = 6e7 / np.clip(bpm * 2 ** (push * weight(st, (starts + 0.5) / n)), MIN_BPM, MAX_BPM)
+        if st["shape"] == "flat" or len(starts) == 1 or ideal.max() - ideal.min() < 1:
+            pair = flat_pair_runs(n, target)
+            got = None if pair is None else ([], pair)
+        else:
+            hook = tempo_ramp.slow_hook if len(starts) > CATCH_SAY_FROM else None
+            if hook:
+                hook(True, "catch")
+            try:
+                got = fit_block_runs(ideal, np.diff(np.append(starts, n)).tolist(), target)
+            finally:
+                if hook:
+                    hook(False)
+        if got is None:
+            why[0] = "fit"
+            return None
+        vals, (a, b, k) = got
+        last = int(starts[len(vals)])  # (the flat pair's first tick: after the blocks given values)
+        ks, vs = starts[:len(vals)].tolist(), list(vals)
+        if k > 0:  # (the last block: k ticks of A, then B)
+            ks.append(last)
+            vs.append(a)
+        if k < n - last:
+            ks.append(last + k)
+            vs.append(b)
+        return push, fixed_ramp(line, e, ks, vs), target, bool(vals) and ev != max(1, every)  # (flat: no steps)
+
+    got = attempt(ln)
+    out["why"] = why[0]
+    if got is None:
+        latest = _latest_tick(real(s0, e), total, e)
+        out["latest"] = None if latest is None or latest <= s0 else latest / ppq
+        return out
+    push, fit, target, coarse = got
+    w = weight(st, np.linspace(0, 1, 257))
+    top = bpm * 2 ** float((push * w).max() if push > 0 else (push * w).min())
+    out.update(ok=True, push=push, bpm=clamp_bpm(top), target=target, fit=fit, coarse=coarse)
     return out
 
 

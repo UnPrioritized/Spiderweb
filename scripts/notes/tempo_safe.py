@@ -256,6 +256,86 @@ def _fit_blocks(ideal, target, every):
     return out
 
 
+def flat_pair_runs(n, target):
+    """_flat_pair for a stretch too long to list (a huge-tick song's catch-up): (A, B, ticks of A) in plain
+    Python whole numbers (n x B passes 64 bits there), the same order of trying (the two whole numbers round the
+    average first, then the nearest safe pair); None if none."""
+    n, target = int(n), int(target)
+    if n <= 0 or not n <= target <= n * 0xFFFFFF:
+        return None
+    a, r = divmod(target, n)
+    if r == 0 and _safe1(a):
+        return a, a, n
+    if r and _safe1(a) and _safe1(a + 1):
+        return a, a + 1, n * (a + 1) - target
+    q = target / n
+    downs, ups = _safe_side(math.floor(q), -1), _safe_side(math.ceil(q), 1)
+    best = None
+    for x in downs:
+        for y in ups:
+            if x == y:
+                if x * n == target:
+                    return x, x, n
+                continue
+            k, rest = divmod(n * y - target, y - x)
+            if rest == 0 and 0 <= k <= n:
+                far = (q - x) + (y - q)
+                if best is None or far < best[0]:
+                    best = (far, x, y, k)
+    return None if best is None else best[1:]
+
+
+def fit_block_runs(ideal, lens, target):
+    """_fit_blocks for a stretch too long to list: ideal = the wanted us at each block's first tick, lens = the
+    blocks' ticks (Python ints); each block the Domino-safe value nearest what keeps the sum on track, the last
+    block landing exactly with a flat pair. (block values, (A, B, ticks of A) of the last) or None."""
+    wl = (np.asarray(ideal, np.float64) * np.asarray(lens, np.float64))
+    wl = (wl * (target / wl.sum())).tolist()
+    ll = [int(x) for x in lens]
+    top = float(0xFFFFFF)
+    vals, done = _carried_at_once(wl, ll)
+    if vals is None:
+        vals, done, owed = [], 0, 0.0
+        for k in range(len(ll) - 1):
+            u = _nearest1(min(max((wl[k] + owed) / ll[k], 1.0), top))
+            vals.append(u)
+            owed += wl[k] - u * ll[k]
+            done += u * ll[k]
+    # (no Domino-safe pair lands the last block: the last few blocks together as one pair instead; the per-tick
+    # way _fit_blocks falls back to can't be listed here)
+    for m in range(1, min(TAIL_BLOCKS, len(ll)) + 1):
+        if m > 1:
+            u = vals.pop()
+            done -= u * ll[len(vals)]
+        tail = flat_pair_runs(sum(ll[len(vals):]), target - done)
+        if tail is not None:
+            return vals, tail
+    return None
+
+
+def _carried_at_once(wl, ll):
+    """fit_block_runs' carry loop over every block but the last, all at once when the blocks are one length L and
+    every value comes out a Domino-safe whole number in range: then "nearest to what keeps the sum on track, the rest
+    carried on" = the difference of the running total's rounded counts (u_k = rint(W_k+1 / L) - rint(W_k / L)).
+    (values, their ticks x us) or (None, 0) for the loop."""
+    m = len(ll) - 1
+    if m <= 0:
+        return [], 0
+    L = ll[0]
+    if any(x != L for x in ll[:m]):
+        return None, 0
+    w = np.concatenate([[0.0], np.cumsum(np.asarray(wl[:m], np.float64))])
+    if w[-1] >= 2.0 ** 52:  # (running totals past exact decimals: the loop)
+        return None, 0
+    u = np.diff(np.rint(w / L)).astype(np.int64)
+    if not len(u) or u.min() < 1 or u.max() > 0xFFFFFF or not bool(domino_safe(u).all()):
+        return None, 0
+    return u.tolist(), int(u.sum()) * L
+
+
+TAIL_BLOCKS = 8  # fit_block_runs: the last blocks tried together when the last one can't land alone
+
+
 PAIR_REACH = 48  # Domino-safe values tried on each side of a flat catch-up's tempo
 
 
