@@ -261,7 +261,7 @@ pub fn index(b: &[u8], p: i64, end: i64, at: i64, g_: i64, ix: &mut [i64], q_hd:
                 }
             } else {
                 let kind = if hi == 0xB {
-                    byte(q)
+                    byte(q) & 0x7F // (a damaged file's controller number 128+: counted past its row)
                 } else if hi == 0xC {
                     K_PROGRAM
                 } else if hi == 0xE {

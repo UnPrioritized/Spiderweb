@@ -213,7 +213,8 @@ def index(b, p, end, at, G, ix, q_hd, q_tl, q_rl, q_pos, q_vel, opened, pt, pn, 
                         q_pos[qq] = -1
                         ix[X_NOPEN] = nopen - 1
             else:
-                kind = np.int64(b[q]) if hi == 0xB else (
+                kind = np.int64(b[q] & 0x7F) if hi == 0xB else (  # (& 0x7F: a damaged file's controller
+                    # number of 128+ counted past its row: crashed on channel 16)
                     K_PROGRAM if hi == 0xC else K_BEND if hi == 0xE else K_PRESSURE if hi == 0xD else K_POLY)
                 c = ix[X_NCC]
                 if c < CC_MOST:
