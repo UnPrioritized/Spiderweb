@@ -14,6 +14,14 @@ What's new:
 
 • Faster: Load MIDI reads big MIDI files faster, most of all files with a few huge tracks, and uses half of the computer's threads, so other programs keep running smoothly on smaller PCs.
 
+• Faster: drawn shapes with many coloured areas make their notes up to 3 to 4 times faster, so projects holding them open sooner, and an edit's notes made in the background no longer wait for older ones that aren't wanted any more.
+
+• Smoother: panning and dragging near a selected shape with many curves (its lines are drawn the quicker way, and its curves aren't worked out again at every step).
+
+• While notes are being made after you turn or slant a shape, it shows only its outline, not its old unturned notes.
+
+• Fixed: a drawn shape coloured by areas and bent by a Stir, Warp or Liquify set to Shape (with "Colours bend too" ticked) got stray notes of a neighbouring colour along its colour borders.
+
 • Fixed: some damaged MIDI files stopped Load MIDI with an error instead of loading.
 
 • Fixed small rounding mistakes that changed the notes: Notes by snap could add an extra note one step early on the last key; Wrapped slices could give one tick two different slices; Hz bass could add an extra wave after a held tone; Gate Range across the keys could miss its first or last gate; a velocity line could read a stretched paste's note a tick off.

@@ -73,7 +73,7 @@ Shape bends always run first, before every colour step: first the [page:stir|Sti
 
 Unticked, only the outline bends and the notes are laid out again inside it: then a point in the middle of a filled square bends only its inside, which is all filled anyway, so nothing changes (the window says so in orange); drag points on or near the outline. Pasted notes and plain notes are always cut (the tick is greyed for them). Shapes without a Warp yet take the window's tick with their first drag.
 
-"Colours bend too" (beside Moves, ticked at first) is for the unticked way: it keeps the shape's colours on the notes they were on, so a Colours pattern or coloured areas bend along with the shape. Unticked, the colours are laid out again on the bent shape. Cut notes always keep their own colours, so it's greyed while "Cut notes where bent" is ticked. Colour edges, Folds and At the edges only choose colours, so they're greyed for Shape. It works in every Channels mode.
+"Colours bend too" (beside Moves, ticked at first) is for the unticked way: it keeps the shape's colours on the notes they were on, so a Colours pattern bends along with the shape. Coloured areas bend with the lines either way. Unticked, the colours are laid out again on the bent shape. Cut notes always keep their own colours, so it's greyed while "Cut notes where bent" is ticked. Colour edges, Folds and At the edges only choose colours, so they're greyed for Shape. It works in every Channels mode.
 
 ## Strength and Show the bend
 

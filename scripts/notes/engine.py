@@ -1791,7 +1791,10 @@ def shape_tabs_done(sh, ppq, keys, get):
             else:
                 made, tracks = pulled(made, tracks, look, box, ppq, joined=got == PULL, within=within)
         return dict(out, _bent=bent_token(*fin(*_on_keys(made, tracks, keys))))
-    carried = bend and before is not None and len(before)
+    # (LINES WAY, colours drawn only (user 2026-11-25 took A): a drawn shape whose colours are its areas / stroke
+    # colours alone keeps the bent shape's own: those are bent along with the lines, exact to each bent border. The
+    # nearest-note look-up gave ~9 % of sample15's notes a neighbour's colour near borders (stray one-row slivers))
+    carried = bend and before is not None and len(before) and not _drawn_colours_only(base)
     if not carried and (edges is None or last == "escape"):
         return got
     from notes.recolour import nearest
@@ -1803,6 +1806,15 @@ def shape_tabs_done(sh, ppq, keys, get):
             t, k = look((made[:, 0] + made[:, 1]) / 2, made[:, 2].astype(np.float64))
             tracks = np.asarray(before)[nearest(notes, t, k, own=False)]
     return dict(got, _bent=bent_token(*fin(made, tracks)))
+
+
+def _drawn_colours_only(sh):
+    """A drawn custom shape whose notes' colours come only from its drawing (areas, stroke outline colours): no
+    Colours cycle, no Nested / Tiles / Ripples fill, not text or notes. Bent the lines way, its areas and strokes
+    go along, so the bent shape's own colours are already the bent colours (shape_tabs_done)."""
+    from notes.custom import cycling, has_pattern
+    return (sh.get("kind") == "custom" and not sh.get("text") and "notes" not in sh and not sh.get("merge")
+            and not cycling(sh) and not has_pattern(sh))
 
 
 def _folded_parts(made, tracks, benders, ppq, rect, look):

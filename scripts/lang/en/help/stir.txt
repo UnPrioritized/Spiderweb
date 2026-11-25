@@ -178,7 +178,7 @@ Fill rows, Spam and patterns bend along like a picture. Notes that touched still
 
 Pasted notes and plain notes are always cut this way (the tick is greyed for them), and so are Funnels, Glissandos and joined curves. Notes bent past the top or bottom key or before beat 0 follow "Keep notes made there" like any others.
 
-"Colours bend too" (beside Moves, ticked at first) is for the unticked way: it keeps the shape's colours on the notes they were on, so a Colours pattern or coloured areas bend and swirl along with the shape. Unticked, the colours are laid out again on the bent shape as if it had been drawn that way (a Colours pattern by key stays in flat stripes). Cut notes always keep their own colours, so it's greyed while "Cut notes where bent" is ticked. In Properties a Shape tab is listed at the top, since it runs before every other step.
+"Colours bend too" (beside Moves, ticked at first) is for the unticked way: it keeps the shape's colours on the notes they were on, so a Colours pattern bends and swirls along with the shape. Coloured areas bend with the lines either way. Unticked, the colours are laid out again on the bent shape as if it had been drawn that way (a Colours pattern by key stays in flat stripes). Cut notes always keep their own colours, so it's greyed while "Cut notes where bent" is ticked. In Properties a Shape tab is listed at the top, since it runs before every other step.
 
 A Shape tab runs before everything else on the shape: note tool pages, Glue and Sustain work on the bent notes. Slicing a bent shape cuts the notes you see; each piece keeps its Shape tab, so turning its knobs still bends the whole and shows its own part.
 

@@ -31,7 +31,7 @@ A Liquify set to Shape can also reach past the box: brush outside it and the sha
 
 Shape steps always run first, before any colour step, in this order: the Stir tabs set to Shape (left to right), then the Warp, then the Liquify. After that come all the colour steps (Recolour, Stir tabs set to Colours, Warp, Liquify and the rest) in their usual order. So a colour step always sees the shape already bent. Properties lists the Shape steps at the top and won't let you drag a colour step above them.
 
-"Colours bend too" (beside Moves, ticked at first) keeps the shape's own colours on the notes they were on, so a Colours pattern or coloured areas bend with the shape. Unticked, the colours are laid out again on the bent shape as if it had been drawn that way. It only matters when "Cut notes where bent" is unticked: cut notes always keep their own colours, so it's greyed then.
+"Colours bend too" (beside Moves, ticked at first) keeps the shape's own colours on the notes they were on, so a Colours pattern bends with the shape. Coloured areas bend with the lines either way. Unticked, the colours are laid out again on the bent shape as if it had been drawn that way. It only matters when "Cut notes where bent" is unticked: cut notes always keep their own colours, so it's greyed then.
 
 ## Notes cut into pieces
 

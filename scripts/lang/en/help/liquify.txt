@@ -57,7 +57,7 @@ Where a push squeezes notes together they bunch up, and behind it they spread ap
 
 Switching Moves on a shape you've already brushed asks first: the brush's bends can't be carried from one kind to the other, so they're taken away (the freeze mask stays). Ctrl+Z brings them back.
 
-"Colours bend too" (beside Moves, ticked at first) is for the unticked way: it keeps the shape's colours on the notes they were on, so a Colours pattern or coloured areas bend along with the shape. Cut notes always keep their own colours, so it's greyed while "Cut notes where bent" is ticked. At the edges only chooses colours, so it's greyed for Shape; Freeze, Restore, Smooth and Strength work as always. On very big pastes (a million notes) each update while brushing takes about a second.
+"Colours bend too" (beside Moves, ticked at first) is for the unticked way: it keeps the shape's colours on the notes they were on, so a Colours pattern bends along with the shape. Coloured areas bend with the lines either way. Cut notes always keep their own colours, so it's greyed while "Cut notes where bent" is ticked. At the edges only chooses colours, so it's greyed for Shape; Freeze, Restore, Smooth and Strength work as always. On very big pastes (a million notes) each update while brushing takes about a second.
 
 ## Strength and Show the bends
 
