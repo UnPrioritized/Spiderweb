@@ -325,7 +325,15 @@ def frame_span(sh):
 def _span(sh, r, ppq):
     """Where the range runs over (the same ends range_grid uses): ticks for time, keys for keys."""
     lo, hi, k0, k1 = frame_span(sh)
-    return (round(k0), round(k1)) if r["dir"] != "time" else (math.floor(lo * ppq), math.ceil(hi * ppq))
+    return frame_keys(k0, k1) if r["dir"] != "time" else (math.floor(lo * ppq), math.ceil(hi * ppq))
+
+
+def frame_keys(k0, k1):
+    """A frame's lowest and highest key for a keys Range: an edge ON a row line (60.5) counts the row inside it, so
+    a frame on row lines runs its gates from exactly its lowest row to its highest. (round() went halves to even:
+    60.5..64.5 gave 60..64, so the lowest key never got the first gate; 61.5..65.5 gave 62..66, the top never the
+    last.)"""
+    return math.floor(k0 + 0.5), math.ceil(k1 - 0.5)
 
 
 def part_range(whole, part, ppq):
@@ -379,5 +387,5 @@ def range_grid(sh, ppq):
     if exact and r["dir"] == "time":  # (rounded as the rows are, custom.inside_spans: else a frame between ticks
         t0, t1 = math.floor(lo * ppq + 0.5), math.floor(hi * ppq + 0.5)  # ran a tick past each edge, hunt)
     if r["dir"] == "keys":
-        return RangeKeys(t0, t1, round(k0), round(k1), a, b, r["graph"], r.get("halves"))
+        return RangeKeys(t0, t1, *frame_keys(k0, k1), a, b, r["graph"], r.get("halves"))
     return (exact_squares if exact else range_squares)(t0, t1, a, b, r["graph"], r.get("halves"))
