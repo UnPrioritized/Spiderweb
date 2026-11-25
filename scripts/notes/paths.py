@@ -368,7 +368,9 @@ def snap_steps(notes, step, origin, end=None, how="cut"):
         notes[:, :2] = origin + np.floor((np.minimum(notes[:, :2], origin + span) - origin) * (steps * step / span)
                                          + 0.5).astype(np.int64)
         notes[:, 1] = np.maximum(notes[:, 1], notes[:, 0] + 1)  # (keys on the very last tick: still a note)
-        notes[:, 0] = np.minimum(notes[:, 0], origin + steps * step - 1)
+        # (steps * step is a float that can land just under a whole tick: forgiven, else the last tick's key got an
+        # extra note one step early)
+        notes[:, 0] = np.minimum(notes[:, 0], origin + math.floor(steps * step + 1e-9) - 1)
     s, e, k = notes[:, 0], notes[:, 1], notes[:, 2]
 
     def edge(j):  # tick where step j starts
