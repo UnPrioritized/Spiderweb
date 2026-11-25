@@ -375,13 +375,60 @@ def _f32_step(f, n):
     return np.array([bits], np.int32).view(np.float32)[0]
 
 
+DOMINO_TEMPO_MOST = 1_000_000  # tempo changes a Domino copy / .dms holds at most (user 2026-11-26): past it thinned
+
+
+def domino_thin(tempo, most=DOMINO_TEMPO_MOST):
+    """tempo [(tick, us)] with at most `most` changes for Domino (user 2026-11-26: exact like the export, longer
+    steps only past 1 M): neighbouring changes inside one stretch of S ticks joined into ONE at their average
+    microseconds (ticks x us summed: the stretch takes the same time, to a microsecond a beat), S the smallest
+    that's enough. A change lasting longer than S (a held tempo) is never joined: only dense ramps thin out."""
+    if len(tempo) <= most:
+        return list(tempo)
+    from notes.tempo_safe import nearest_safe
+    tempo = sorted(tempo)
+    t = np.array([e[0] for e in tempo], np.int64)
+    u = np.array([e[1] for e in tempo], np.int64)
+    span = np.append(np.diff(t), np.iinfo(np.int64).max)  # (the last change: held to the end)
+
+    def starts(s):
+        new = np.ones(len(t), bool)
+        w = t // s
+        new[1:] = w[1:] != w[:-1]
+        long = span > s
+        new |= long
+        new[1:] |= long[:-1]
+        return new
+    lo, hi = 1, max(2, int(t[-1]) + 1)
+    while lo < hi:  # (the smallest stretch giving few enough; counts fall as it grows, near enough)
+        mid = (lo + hi) // 2
+        if int(starts(mid).sum()) <= most:
+            hi = mid
+        else:
+            lo = mid + 1
+    new = starts(lo)
+    while int(new.sum()) > most:  # (window edges can wobble the count: grow until it fits)
+        lo *= 2
+        new = starts(lo)
+    block = np.cumsum(new) - 1
+    first = np.flatnonzero(new)
+    size = np.diff(np.append(first, len(t)))
+    w = np.where(size[block] > 1, span, 0).astype(np.float64)  # (the last change is always alone: no inf weight)
+    num = np.bincount(block, w * u)
+    den = np.bincount(block, w)
+    joined = nearest_safe(np.where(den > 0, num / np.maximum(den, 1), 1))
+    out_u = np.where(size > 1, joined, u[first])  # (a change left alone keeps its exact value: typed BPMs too)
+    return list(zip(t[first].tolist(), out_u.tolist()))
+
+
 def tempo_items(tempo, sigs=(), first=0, end=None, keys=(), typed=None):
-    """(Conductor item bytes, slow): tempo [(tick, us)], time signatures [(tick, top, bottom power)] and key
+    """(Conductor item bytes, slow, thinned): tempo [(tick, us)], time signatures [(tick, top, bottom power)] and key
     signatures [(tick, sharps, minor)] as Domino's items, by tick (tempo, then time, then key signature on a tick). first..end: only that stretch, ticks counted
     from first, with what is in effect at first put on tick 0, and what is in effect at end put on end when it
     changed (user 2026-10-22: Domino ADDS a pasted Conductor's items, so without it the song after the paste
     would stay at the copy's last tempo). slow = how many tempos can't come back exact. typed = {us: typed BPM}
-    (file_plan's "typed"): those BPMs written as typed (dms_bpm)."""
+    (file_plan's "typed"): those BPMs written as typed (dms_bpm). The stretch's tempo past DOMINO_TEMPO_MOST
+    changes: domino_thin (the third answer: True)."""
     typed = typed or {}
     tempo = sorted(tempo)
     sigs = sorted(sigs)
@@ -394,7 +441,9 @@ def tempo_items(tempo, sigs=(), first=0, end=None, keys=(), typed=None):
         if back and got and tuple(back[0][1:]) != tuple(got[-1][1:]):
             got += back
         return [r for r in got if r[0] - first <= LONGEST]  # (past what Domino's ticks hold: left out)
-    for tick, us in take(tempo):
+    rows = take(tempo)
+    thin = len(rows) > DOMINO_TEMPO_MOST
+    for tick, us in domino_thin(rows) if thin else rows:
         bpm, exact = dms_bpm(us, typed.get(us))
         slow += not exact
         out.append((tick - first, 0, item(2008, item(1001, struct.pack("<I", tick - first))
@@ -404,7 +453,7 @@ def tempo_items(tempo, sigs=(), first=0, end=None, keys=(), typed=None):
     for tick, sharps, minor in take(keys):
         out.append((tick - first, 2, key_signature(sharps, minor, tick - first)))
     out.sort(key=lambda r: r[:2])
-    return b"".join(r[2] for r in out), slow
+    return b"".join(r[2] for r in out), slow, thin
 
 
 def dms_data(notes, ppq, bpm, beats, use10=False, drums=True, pad=True, cc=None, tempo=None, sigs=None, keys=None,

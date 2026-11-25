@@ -2122,8 +2122,9 @@ class ProjectFiles:
                 + (trn("project.dms_long_gates", long, long=long, most=GATE_MAX) if long else "")
                 + (tr("project.ports_dms_edo" if engine.edo_lanes else "project.ports_dms") if ports else "") + self.track_list.mixed_note(domino=True)
                 + self.loaded_left_out())
-        slow = tempo_items(tempo)[1] if tempo else 0
-        warn = self.tempo_notes(plan) + (tr("project.dms_tempo_slow") if slow else "") + self.cc_note(cc)
+        _, slow, thin = tempo_items(tempo) if tempo else (b"", 0, False)
+        warn = (self.tempo_notes(plan) + (tr("project.dms_tempo_slow") if slow else "")
+                + (tr("project.dms_tempo_thinned") if thin else "") + self.cc_note(cc))
         bad = bool(long or ports or warn)
         self.say_saved(quiet, path, text + warn, warn=bad or high or mod or self.loaded is not None
                        or bool(self.track_list.mixed_note(domino=True)),
@@ -2164,9 +2165,9 @@ class ProjectFiles:
         plan = self.tempo_timed(ppq, bpm, beats, {}, upto=top)[2]
         first, end = (int(t) for t in plan["map"](np.array([round(lo * ppq), top], np.int64)).tolist())
         end = max(end, first + 1)
-        items, slow = tempo_items(plan["events"], domino_sigs(plan["sigs"], first, ppq), first, end,
-                                  plan["keys"], plan.get("typed"))
-        return conductor_clip(ppq, items, end - first), slow
+        items, slow, thin = tempo_items(plan["events"], domino_sigs(plan["sigs"], first, ppq), first, end,
+                                        plan["keys"], plan.get("typed"))
+        return conductor_clip(ppq, items, end - first), slow, thin
 
     def tempo_to_domino(self, clip, quiet):
         """The Conductor pane's copy (clip = app.tempo_clip) on the clipboard for Domino: Ctrl+C there with "Ctrl+C
@@ -2176,7 +2177,7 @@ class ProjectFiles:
                 messagebox.showinfo(tr("project.spiderweb"), tr("project.notes_clipboard_windows_only"))
             return
         try:
-            raw, slow = self.tempo_for_domino(clip["from"], clip["from"] + clip["length"])
+            raw, slow, thin = self.tempo_for_domino(clip["from"], clip["from"] + clip["length"])
             copied = put_on_clipboard(raw)
         except (ValueError, MemoryError) as e:
             copied, why = False, (str(e) if isinstance(e, ValueError) else tr("big_ask.out_of_memory"))
@@ -2193,8 +2194,10 @@ class ProjectFiles:
             self.status.config(text=self.status.cget("text") + tr("app.copied_for_domino_too"))
             return
         self.status.config(text=tr("tempo.copied_for_domino"))
-        if slow:
-            messagebox.showwarning(tr("project.spiderweb"), tr("tempo.copied_for_domino") + tr("project.dms_tempo_slow"))
+        if slow or thin:
+            messagebox.showwarning(tr("project.spiderweb"), tr("tempo.copied_for_domino")
+                                   + (tr("project.dms_tempo_slow") if slow else "")
+                                   + (tr("project.dms_tempo_thinned") if thin else ""))
 
     def copy_to_domino(self):
         """Ctrl+Shift+C: the selected shapes' notes (all notes when nothing is selected; the track list's Select
@@ -2347,6 +2350,7 @@ class ProjectFiles:
                                  + self.loaded_left_out())
             return
         span = conductor = None
+        thin = False  # (the copied tempo thinned for Domino: domino_clip.domino_thin)
         # (CCs before the first note: the copy starts at the earliest, so a lead-in keeps its timing, hunt 2026-10-22)
         early = min([int(notes[:, 0].min())] + [ms[0][0] for ms in cc.values() if ms])
         start = self.domino_start()
@@ -2357,8 +2361,8 @@ class ProjectFiles:
             first = min(box, early)  # sticking out past it)
             span = first, max(int(notes[:, 1].max()) - first, 1)
             if plan and self.copied_whole():
-                conductor = tempo_items(plan["events"], domino_sigs(plan["sigs"], first, ppq), first,
-                                        first + span[1], plan["keys"], plan.get("typed"))[0]
+                conductor, _, thin = tempo_items(plan["events"], domino_sigs(plan["sigs"], first, ppq), first,
+                                                 first + span[1], plan["keys"], plan.get("typed"))
         elif plan:  # (bar lines from the file's time signatures; only "from the bar line" takes them along)
             bar = start == "bar"
             lo, hi = early, int(notes[:, 1].max())
@@ -2367,8 +2371,8 @@ class ProjectFiles:
             # (the tempo goes along only with everything picked by Ctrl+A, user 2026-11-01: a Conductor track
             # first pushed the notes one track down in Domino)
             if self.copied_whole():
-                conductor = tempo_items(plan["events"], domino_sigs(plan["sigs"], first, ppq), first,
-                                        first + span[1], plan["keys"], plan.get("typed"))[0]
+                conductor, _, thin = tempo_items(plan["events"], domino_sigs(plan["sigs"], first, ppq), first,
+                                                 first + span[1], plan["keys"], plan.get("typed"))
         elif early < int(notes[:, 0].min()):
             first, length = clip_span(notes, beats * ppq, start)
             lead = early if start == "note" else early // (beats * ppq) * beats * ppq
@@ -2421,6 +2425,8 @@ class ProjectFiles:
             warn = self.tempo_notes(dict(plan, **inside))
             if conductor and tempo_items(plan["events"])[1]:
                 warn += tr("project.dms_tempo_slow")
+            if thin:
+                warn += tr("project.dms_tempo_thinned")
         return raw, text, warn
 
     def notes_copy(self, got=False):
