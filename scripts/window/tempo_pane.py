@@ -27,7 +27,7 @@ import numpy as np
 
 from files.colours import BLACK, WHITE, mix
 from files.lang import tr, trn
-from files.mathexpr import calc, fmt
+from files.mathexpr import calc, calc_int, fmt
 from files.system import double_click_ms
 from notes.tempo import (BEND, CATCH_BEND, CURVES, EVERY, FORMULA, MAX_BPM, MIN_BPM, SCALES, SHAPES, bend_of, bpm_at,
                          bpm_text, clamp_bpm, curve, drawn_bpm, drawn_from, drop_loose, end_point, formula_fn,
@@ -680,7 +680,7 @@ class TempoBox(ttk.Frame):
         tempo = self.app.tempo
         ramps = self.picked_ramps()
         try:
-            v = int(calc(self.every_var.get()))
+            v = calc_int(self.every_var.get())  # (2.9 refused like other whole-number boxes, never cut to 2)
             if not 1 <= v <= 65535:
                 raise ValueError
         except (ValueError, ArithmeticError, TypeError, SyntaxError, OverflowError):

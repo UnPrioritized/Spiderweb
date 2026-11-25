@@ -38,7 +38,7 @@ import numpy as np
 
 from files.colours import WHITE, mix
 from files.lang import tr, trn
-from files.mathexpr import calc
+from files.mathexpr import calc, calc_int
 from files.snap import SNAPS, snap_beats, snap_text
 from notes.hzbass import (BEND, BOOST_FX, CC_FX, ENVELOPES, FROM_MODES, FX, FX_START, HEIGHT_FROM, LOOP_SHAPES, NOTE_FX, OFF_PITCH,
                           PITCH, TREMOLO, VIBRATO, WHEEL_KEYS, bend_of, bent_part, cc_db, cc_midi, chains, clean_extra,
@@ -1356,7 +1356,7 @@ class FxPane:
         def value():
             """The length in beats, or None when the numbers aren't whole numbers 1.. or it's too long."""
             try:
-                n, d = int(calc(num.get())), int(calc(den.get()))
+                n, d = calc_int(num.get()), calc_int(den.get())  # (2.9 refused, never cut to 2)
             except Exception:  # (anything typed that isn't a number)
                 return None
             v = 4.0 * n / d if 1 <= n <= REPEAT_MOST and 1 <= d <= REPEAT_MOST else None
