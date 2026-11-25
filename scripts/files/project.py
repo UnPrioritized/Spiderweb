@@ -990,7 +990,8 @@ class ProjectFiles:
             self.keep_offrange.set(win.get("keep_offrange") is True)
             if self.even_rows.get() != (win.get("even_rows") is True):
                 self.even_rows.set(win.get("even_rows") is True)
-                roll = getattr(self, "roll", None)  # (none yet at the start: its first Fit view snaps)
+                from roll.roll_shared import own_roll  # (not Draw on Domino's overlay: hunt 2026-11-26)
+                roll = own_roll(self) if getattr(self, "roll", None) is not None else None  # (none yet at the start)
                 if roll is not None:
                     roll.rows_changed()
             self.wrap_offrange.set(win.get("wrap_offrange") is True)

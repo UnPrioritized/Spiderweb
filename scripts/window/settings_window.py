@@ -423,7 +423,8 @@ class SettingsWindow(tk.Toplevel):
         app = self.app
 
         def even():  # ("Even key rows", user 2026-11-25: both piano rolls snap to whole row heights at once)
-            app.roll.rows_changed()
+            from roll.roll_shared import own_roll  # (not Draw on Domino's overlay: hunt 2026-11-26)
+            own_roll(app).rows_changed()
             hz = getattr(app, "hz_window", None)
             if hz is not None and hz.winfo_exists():
                 hz.rows_changed()

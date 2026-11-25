@@ -916,12 +916,18 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     def even_sy(self, sy, old=None):
         """sy as the row height the piano roll uses: whole pixels with "Even key rows" on (old: the height before an
         up / down zoom step), else as it is."""
-        return whole_row(sy, 60 * self.scale, old) if even_rows(self.app) else sy
+        if not even_rows(self.app) or self.companion_overlay():
+            return sy
+        return whole_row(sy, 60 * self.scale, old, self.winfo_height() - self.ruler_h, self.app.keys)
+
+    def companion_overlay(self) -> bool:
+        """True for Draw on Domino's overlay (its rows follow Domino's, never snapped)."""
+        return False
 
     def rows_changed(self):
         """"Even key rows" was ticked / unticked: rows snapped to the nearest whole height (the key in the middle
         stays where it is)."""
-        if self.sy is None or not even_rows(self.app):
+        if self.sy is None or not even_rows(self.app) or self.companion_overlay():
             return
         y = (self.ruler_h + self.winfo_height()) / 2
         p = self.y2p(y)

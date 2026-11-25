@@ -51,6 +51,9 @@ class OverlayRoll(PianoRoll):
     def clamp_view(self):
         pass  # (Domino decides where the view is)
 
+    def companion_overlay(self):
+        return True  # (Settings "Even key rows" never snaps Domino's rows: hunt 2026-11-26)
+
     def room_keys(self):
         return 0  # (Space past the keys / before the start: main piano roll only; Domino's view can't go there)
 

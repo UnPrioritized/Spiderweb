@@ -86,7 +86,11 @@ class HzView:
     def even_sy(self, sy, old=None):
         """sy as the row height this window uses: whole pixels with Settings → Piano roll "Even key rows" on (old:
         the height before an up / down zoom step), else as it is (roll_shared.whole_row)."""
-        return whole_row(sy, 60.0 * self.s, old) if even_rows(self.app) else sy
+        if not even_rows(self.app):
+            return sy
+        lo, hi = self.key_room() if hasattr(self, "tones") else (0.0, 127.0)
+        px = self.canvas.winfo_height() - self.ruler_h if hasattr(self, "canvas") else None
+        return whole_row(sy, 60.0 * self.s, old, px if px and px > 1 else None, hi - lo + 1.0)
 
     def rows_changed(self):
         """"Even key rows" was ticked / unticked: rows snapped to the nearest whole height (the middle key stays)."""

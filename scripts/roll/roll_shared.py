@@ -30,9 +30,17 @@ def even_rows(app):
     return bool(getattr(getattr(app, "even_rows", None), "get", lambda: False)())
 
 
-def whole_row(sy, most, old=None):
+def own_roll(app):
+    """Spiderweb's own piano roll, also while Draw on Domino has app.roll pointing at its overlay (which follows
+    Domino's rows and never snaps: hunt 2026-11-26)."""
+    return getattr(getattr(app, "companion", None), "main_roll", None) or app.roll
+
+
+def whole_row(sy, most, old=None, px=None, rows=None):
     """A key row height as a whole number of pixels, 1..most (rounded down). old = the height before an up / down
-    zoom: each zoom step then moves at least 1 px (more when the zoom jumps further: the nearest whole height)."""
+    zoom: each zoom step then moves at least 1 px (more when the zoom jumps further: the nearest whole height).
+    px / rows = the room and the rows the view can show: a height where they all fit never rounds up past the
+    biggest one that still fits (hunt 2026-11-26: "every key shown" lost the bottom keys)."""
     top = max(1, math.floor(most + 1e-9))
     h = round(sy)
     if old is not None:
@@ -41,6 +49,8 @@ def whole_row(sy, most, old=None):
             h = max(h, was + 1)
         elif sy < old - 1e-9:
             h = min(h, was - 1)
+    if px is not None and rows and sy * rows <= px + 1e-6:
+        h = min(h, math.floor(px / rows + 1e-9))
     return float(max(1, min(top, h)))
 
 
