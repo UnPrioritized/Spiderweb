@@ -52,7 +52,7 @@ import numpy as np
 from files.mathexpr import fmt, formula
 from files.midi_scan import MOST_TICK
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_keysigs, clean_sigs
-from notes.tempo_ramp import Ramp
+from notes.tempo_ramp import Ramp, RampRule
 from notes.tempo_safe import (PAIR_REACH, SAFE_REACH, _FAR, _WINDOW, _fit_blocks, _fit_exact, _first_safe, _flat_pair,  # (moved)
                               _flat_pair_search, _near_pair, _nearest1, _next1, _next_by_bpm, _next_small, _pairs, _runs,
                               _safe1, _safe_side, PAIRS_KEPT, domino_safe, nearest_safe, next_safe)
@@ -1372,10 +1372,9 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
             origin = edges[j] + off
             part = (edges[j], edges[j + 1])
             jump = to_jump(pts, i)
-            every = ramp_step(every, part[1] - part[0])  # (a huge-tick song's ramp: longer steps, the same glide)
             if (-(-(b - a) // every) if every >= BLOCKS_FROM else b - a) > RAMP_LAZY:  # (worked out when read)
                 out.append((a, b, _lazy_ramp(tempo, near, arrays, i, part, every, origin, jump, base, base_u,
-                                             a, b, ppq)))
+                                             a, b, ppq, pts[i][2] in ONE_WAY)))
                 continue
 
             def read(starts):
@@ -1404,61 +1403,50 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
 
 RAMP_LAZY = 1 << 16  # a gliding piece with more steps than this (ticks, for an Interval under BLOCKS_FROM) comes as a
 # tempo_ramp.Ramp: worked out when read, never every step kept (PLAN "Tempo ramps step by step")
+ONE_WAY = ("line", "s")  # part curves that only go one way (bent lines + S-curves too: bent never passes an end):
+# a long ramp's runs found by halving; a formula can turn back (read step by step)
 
 
-def _lazy_ramp(tempo, near, arrays, i, part, every, origin, jump, base, base_u, a, b, ppq):
+def _lazy_ramp(tempo, near, arrays, i, part, every, origin, jump, base, base_u, a, b, ppq, one_way):
     """_segments' gliding piece a..b of point i's part as a Ramp: the same values its step list would have, read
-    from its OWN copy of the few points it reads (the line edited later never changes it)."""
+    from its OWN copy of the few points it reads (the line edited later never changes it). The rule covers the
+    whole part (every piece / window of it shares its runs) and is remembered by what it reads (_RULES)."""
     if jump:
         own = {"points": copy.deepcopy(tempo["points"][i:i + 2])}
-
-        def fn(starts):
-            return part_bpm(own, 0, step_shares(*part, starts, every))
     else:
         pb = arrays[0]
-        lo = origin + (a - origin) // every * every  # (the earliest step start any slice of it reads)
+        lo = origin + (part[0] - origin) // every * every  # (the earliest step start the part reads)
         k_lo = max(0, int(np.searchsorted(pb, lo / ppq, "right")) - 1)
-        k_hi = min(len(pb), int(np.searchsorted(pb, b / ppq, "right")) + 1)
+        k_hi = min(len(pb), int(np.searchsorted(pb, part[1] / ppq, "right")) + 1)
         own = {"points": copy.deepcopy(near["points"][k_lo:k_hi])}
-        own_arr = point_arrays(own["points"])
+    key = repr((own["points"], jump, part, every, origin, base, base_u, ppq, one_way))
+    rule = _RULES.get(key)
+    if rule is None:
+        if jump:
+            def fn(starts):
+                return part_bpm(own, 0, step_shares(*part, starts, every))
+        else:
+            own_arr = point_arrays(own["points"])
 
-        def fn(starts):
-            return drawn_bpm(own, base, np.asarray(starts) / ppq, own_arr)
+            def fn(starts):
+                return drawn_bpm(own, base, np.asarray(starts) / ppq, own_arr)
 
-    def read(starts):
-        bpm = fn(starts)
-        us = nearest_safe(6e7 / bpm)
-        us[bpm == base] = base_u
-        return us
-    return Ramp(a, b, origin, every, read)
+        def read(starts):
+            bpm = fn(starts)
+            us = nearest_safe(6e7 / bpm)
+            us[bpm == base] = base_u
+            return us
+        if len(_RULES) >= RULES_KEPT:
+            _RULES.clear()
+        rule = _RULES[key] = RampRule(read, origin, every, part[0], part[1], one_way)
+    return Ramp(a, b, rule)
+
+
+RULES_KEPT = 32  # long ramps' rules remembered (their runs: a giant ramp's are worked out once)
+_RULES = {}
 
 
 CATCH_TICKS_MOST = 1 << 27  # a catch-up's stretch at most (its time worked out on every tick: "Not possible: too long")
-RAMP_STEPS_MOST = 1 << 20  # a gliding part's tempo steps at most (each worked out and kept: on a 60 M BPM song at
-# PPQ 32767 a 1.5 s ramp was 1.4 billion steps of 24 ticks, 10 GB; user picked longer steps until ramps are worked
-# out step by step, planned-features "TEMPO RAMPS STEP BY STEP", 2026-11-26)
-
-
-def ramp_step(every, length):
-    """A gliding part's step in ticks: its Interval, made a whole number of times longer when the part would have
-    more than RAMP_STEPS_MOST steps (from the part's WHOLE length: every read of it, the same steps)."""
-    n = -(-length // max(1, every))
-    if n <= RAMP_STEPS_MOST:
-        return every
-    return max(1, every) * -(-n // RAMP_STEPS_MOST)
-
-
-def coarse_ramps(tempo, ppq):
-    """Beats where a gliding part's steps were made longer than its Interval (ramp_step): the export's note."""
-    pts, every_all = tempo.get("points") or [], tempo.get("every", EVERY)
-    out = []
-    for i in range(len(pts) - 1):
-        if pts[i][2] != "hold" and pts[i][1] != pts[i + 1][1]:
-            every = step_of(pts[i], every_all)[0]
-            length = beat_tick(pts[i + 1][0], ppq) - beat_tick(pts[i][0], ppq)
-            if ramp_step(every, length) != every:
-                out.append(pts[i][0])
-    return out
 
 
 def _us_sum(segs):

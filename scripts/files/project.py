@@ -1865,8 +1865,6 @@ class ProjectFiles:
             note += tr("project.tempo_dense", where=self.bar_text(plan["dense"][0]))
         if plan.get("unfit"):
             note += tr("project.tempo_unfit", where=self.bar_text(plan["unfit"][0]))
-        if plan.get("coarse"):  # (a ramp's steps made longer than its Interval: tempo.ramp_step, user 2026-11-26)
-            note += tr("project.tempo_coarse", where=self.bar_text(plan["coarse"][0]))
         if plan.get("moved"):  # (bar carry-over, user 2026-10-24: no surprises in the export)
             note += tr("project.tempo_moved", where=self.bar_text(plan["moved"][0]))
         if plan.get("gave"):  # (a heads-up only, user 2026-10-23)
@@ -2551,6 +2549,13 @@ class ProjectFiles:
         self.status.config(text=text)
         self.config(cursor="watch")
         self.update_idletasks()
+
+    def ramp_wait(self, on):
+        """tempo_ramp.slow_hook: a giant tempo ramp being worked out (seconds, once per line): "Working out the
+        tempo ramp…" + the busy pointer while it is, on the window's thread only (pieces made on other threads say
+        nothing)."""
+        if threading.current_thread() is threading.main_thread():
+            self.busy(tr("app.working_ramp") if on else None)
 
     def domino_start(self):
         """The start dropdown above the Domino buttons: "box" (from the select box: the earliest kept box's left

@@ -23,7 +23,7 @@ from files import speed
 from files.midi_scan import MOST_TICK
 from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of, where as meter_where
 from notes.tempo import (EVERY, _put_all, _put_many, base_us, beat_tick,
-                         typed_bpms, step_of, coarse_ramps,
+                         typed_bpms, step_of,
                          file_segments, has_tempo, keep_heard, known_key, layout, segs_end, tempo_key)
 from notes.tempo_ramp import Ramp
 from notes.tempo_safe import PAIR_REACH, SAFE_REACH, _fit_blocks, _fit_exact, _flat_pair, _runs, domino_safe
@@ -567,7 +567,6 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     start_u = base_us(base)
     out["events"] = [(0, start_u)]
     out["typed"] = typed_bpms(tempo)  # (Domino's items write these BPMs as typed: domino_clip.dms_bpm)
-    out["coarse"] = coarse_ramps(tempo, ppq)  # (ramps stepped longer than their Interval: the export says so)
     ticks = np.asarray(ticks, np.int64).ravel()
     loose = np.asarray(loose, np.int64).ravel()
     # (ds5: beat_tick is steady up with the beat: the last tick is the latest beat's; one read, not 190,000)

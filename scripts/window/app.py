@@ -52,7 +52,7 @@ from notes.app_layout import (Stopped, can_go_in, recolour_alone, colours_apart,
                               all_notes, cut_across, lay_inside, lay_again, in_track,
                               as_heard, fix_rows, recolour_back, sends_cc, cc_busy,
                               cc_texts)  # (moved)
-from notes import engine, hz_cc
+from notes import engine, hz_cc, tempo_ramp
 from notes.hz_cc import cc_spans
 from notes.passengers import spans as passenger_spans
 from notes.hzbass import fit_length, has_cc, own_channels
@@ -847,6 +847,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
         self.status =StatusLine(self, text="", padding=(6, 2), font=look.font(9))
         self.status.pack(side="bottom", fill="x")
+        tempo_ramp.slow_hook = self.ramp_wait  # (a giant tempo ramp worked out on this thread: the status says so)
         # (Built-in BASSMIDI's red "Overloaded" while it can't keep up: the status line's right end, placed only
         # then (show_overload), so nothing moves, user 2026-10-18)
         self.overload_label = ttk.Label(self.status, text="", foreground=look.ERROR, font=look.font(9))
