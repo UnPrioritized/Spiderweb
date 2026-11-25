@@ -262,11 +262,13 @@ class AheadPlay:
         """What the pieces are made of: your shapes (a Song), with the loaded MIDI along (a LoadedSong: its tracks
         as the track list mutes them) when one is loaded. at = the tick it will play from: a huge-tick song whose
         clock isn't exact there gets one counted from just before it (self.near; playback.TimeMap)."""
-        song = self._song(rendered, ccs, ports, ppq, bpm, tempo, engine)
-        if at is not None and song.map.far_from(int(at)):
-            self.near = int(at)
-            song = self._song(rendered, ccs, ports, ppq, bpm, tempo, engine)
-        return song
+        if at is not None:  # (asked on the tempo alone first: the whole song made once, not again after a far jump)
+            from files.ahead_pieces import ORIGIN_BACK_S
+            from files.playback import TimeMap
+            changes = list(tempo) if tempo else [(0, int(round(60e6 / bpm)))]
+            if TimeMap(ppq, changes, self.near, ORIGIN_BACK_S).far_from(int(at)):
+                self.near = int(at)
+        return self._song(rendered, ccs, ports, ppq, bpm, tempo, engine)
 
     def far_off(self, at):
         """True when the made song's clock isn't exact at tick `at` (a far jump in a huge-tick song): the song is
@@ -687,9 +689,11 @@ class AheadPlay:
         return None if f is None else self.sec_on(f, tmap)
 
     def sec_on(self, f, tmap=None):
-        """The song frame f in seconds on tmap (the same as f / RATE when both count from tick 0)."""
+        """The song frame f in seconds on tmap, always through the tick: the two maps may count from other origins,
+        and a typed BPM's play line uses 60,000,000 / BPM exactly while the pieces use whole microseconds like the
+        file (140 BPM: the line fell a beat behind at beat 1,000,000; hunt 2026-11-26)."""
         song = self.maker.song if self.maker is not None else None
-        if song is None or tmap is None or (song.map.origin == 0 and tmap.origin == 0):
+        if song is None or tmap is None:
             return f / RATE
         return tmap.sec(song.map.tick(f / RATE))
 

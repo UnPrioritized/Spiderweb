@@ -234,7 +234,12 @@ def _one_sound_rows(r, s, e):
     grp = np.cumsum(~same) - 1
     t0 = int(min(s.min(), e.min()))
     span = int(max(s.max(), e.max())) - t0 + 2
-    reach = np.maximum.accumulate(e - t0 + grp * span) - grp * span + t0
+    if (int(grp[-1]) + 1) * span < 1 << 62:
+        reach = np.maximum.accumulate(e - t0 + grp * span) - grp * span + t0
+    else:  # (huge-tick songs: rows x span past 64 bits; each end by its rank among the ends, same order)
+        u = np.unique(e)
+        w = len(u) + 1
+        reach = u[np.maximum.accumulate(np.searchsorted(u, e) + grp * w) - grp * w]
     nxt = np.zeros(n, bool)
     nxt[:-1] = same[1:] & (s[1:] < reach[:-1])  # (the next note on the row starts while this run sounds)
     end_o = reach.copy()
@@ -403,8 +408,12 @@ class Song:
             row = part.row[mine].astype(np.int64)
             oo = np.lexsort((own[0], o_row))  # (yours the same way: before a loaded note at the same row + tick)
             lo = int(min(part.start[mine].min() if len(mine) else 0, own[0].min()))
-            comp = (row << 44) | (part.start[mine] - lo)
-            at = np.searchsorted(comp, (o_row[oo] << 44) | (own[0][oo] - lo), "left")
+            p_s, o_s = part.start[mine] - lo, own[0][oo] - lo
+            if int(max(p_s.max() if len(p_s) else 0, o_s.max())) >= 1 << 44:  # (huge-tick songs: ticks by rank,
+                u = np.unique(np.concatenate([p_s, o_s]))  # same order and ties, inside the 44 bits)
+                p_s, o_s = np.searchsorted(u, p_s), np.searchsorted(u, o_s)
+            comp = (row << 44) | p_s
+            at = np.searchsorted(comp, (o_row[oo] << 44) | o_s, "left")
             src = np.insert(mine, at, -1 - oo)  # (a loaded note's place; yours = -1 - its number)
             r = np.insert(row, at, o_row[oo])
             s = np.insert(part.start[mine], at, own[0][oo])
@@ -1168,20 +1177,46 @@ class Maker:
             return spans
         with self._lock:
             jobs = list(self.jobs)
-        for i in range(lo // BLOCK, (hi - 1) // BLOCK + 1):
-            if i in self.blocks:
-                continue
-            a, b = max(lo, i * BLOCK), min(hi, (i + 1) * BLOCK)
-            job = next((j for j in jobs if j.first <= i < j.first + j.count), None)
-            if job is not None:  # (made in order through the piece)
-                done = job.first * BLOCK + job.progress * job.count * BLOCK
-                a = max(a, int(done))
-            if b <= a:
-                continue
-            if spans and spans[-1][1] >= a:
-                spans[-1][1] = b
-            else:
-                spans.append([a, b])
+        # (by the made blocks and the pieces being made, never block by block over the view: a zoomed-out view of a
+        # days-long song was millions of blocks every play tick, the window froze; hunt 2026-11-26. Same spans as
+        # the block-by-block walk: dev/scratch/grey_same.py)
+        i0, i1 = lo // BLOCK, (hi - 1) // BLOCK
+        made = sorted(i for i in list(self.blocks) if i0 <= i <= i1)
+        holes, at = [], i0  # (runs of blocks not made: [first, last])
+        for i in made:
+            if i > at:
+                holes.append((at, i - 1))
+            at = i + 1
+        if at <= i1:
+            holes.append((at, i1))
+        # (inside a piece being made, its blocks are made in order: from its start to its progress isn't grey)
+        cuts = sorted((j.first * BLOCK, int(j.first * BLOCK + j.progress * j.count * BLOCK), j.first, j.count)
+                      for j in jobs)
+        for h0, h1 in holes:
+            a, b = max(lo, h0 * BLOCK), min(hi, (h1 + 1) * BLOCK)
+            pieces = [(a, b)]
+            for c0, done, first, count in cuts:
+                if first + count <= h0 or first > h1:
+                    continue
+                c1 = min(done, (first + count) * BLOCK)  # (the part already made)
+                c0 = max(c0, h0 * BLOCK)
+                left = []
+                for p0, p1 in pieces:
+                    if c1 <= p0 or c0 >= p1:
+                        left.append((p0, p1))
+                        continue
+                    if p0 < c0:
+                        left.append((p0, c0))
+                    if c1 < p1:
+                        left.append((c1, p1))
+                pieces = left
+            for p0, p1 in pieces:
+                if p1 <= p0:
+                    continue
+                if spans and spans[-1][1] >= p0:
+                    spans[-1][1] = max(spans[-1][1], p1)
+                else:
+                    spans.append([p0, p1])
         return [tuple(s) for s in spans]
 
     def made_ahead(self, at):

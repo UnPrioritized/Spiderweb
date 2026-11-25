@@ -1374,7 +1374,14 @@ class LoadedPlayer:
             _SONGS += 1
             no = self.lm._kb_no = _SONGS
         from files.play_dense import key_of
-        return hash((no, len(tm[0]), float(tm[0].sum()), float(tm[2].sum()), self.muted.tobytes(), key_of(self.lm),
+        # (changes to the same tempo left out: far into a huge-tick song the clock's origin is one, a new one at every
+        # play start, and the limits started over each time; hunt 2026-11-26)
+        ticks, spt = tm[0], tm[2]
+        if len(spt) > 1:
+            keep = np.ones(len(spt), bool)
+            keep[1:] = spt[1:] != spt[:-1]
+            ticks, spt = ticks[keep], spt[keep]
+        return hash((no, len(ticks), float(ticks.sum()), float(spt.sum()), self.muted.tobytes(), key_of(self.lm),
                      getattr(self.player, "notes_ver", 0), self.shown.key())) | 1
 
     @staticmethod
