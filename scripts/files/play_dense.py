@@ -26,6 +26,10 @@ EARLY_BEATS = 0.25  # each part starts this much before its first dense stretch
 PART_MOST = 1 << 26  # events a part may keep after collapsing (~1.2 GB): more = that part read live as before
 GROUP_TRACKS = 64  # one tick holding more than a reading window: its tracks read this many at a time
 SLICE = 1 << 22  # events collapsed at a time (room kept for this many more)
+PART_TICKS = 1 << 30  # ticks a part spans at most (its times are 32-bit from its start, Part.ts: huge-tick MIDIs,
+# 60 M BPM at PPQ 32767 = 2^31 ticks in 0.065 s)
+PLAN_BUCKETS = 1 << 22  # a song of more 1/16 beats: plan works by runs (_runs_plan), not one entry per 1/16 beat
+EXACT_RUN = 1 << 16  # (_runs_plan: a run of at most this many 1/16 beats is added up one at a time, as plan's way)
 SAVED_VER = 3  # (a saved read-ahead: how parts are read / collapsed changed = a new number, old ones read again)
 SAVED_END = ".dense.npz"  # (beside the saved index: <index name>.dense.npz)
 DECLINED_END = ".dense.no"  # (beside it: the user said No to keeping it)
@@ -42,10 +46,12 @@ def stretches(lm, tmap):
 def plan(lm, tmap):
     """([(t0, t1)] ticks of the parts to read ahead, [MB of file a song second each]): bytes of each track between
     its checkpoints (64 KB apart) spread evenly over their ticks, summed per 1/16 beat, over DENSE_MBS a song
-    second; stretches closer than JOIN_BEATS joined, then cut so none holds more than PART_MB."""
+    second; stretches closer than JOIN_BEATS joined, then cut so none holds more than PART_MB (nor PART_TICKS).
+    A song of more than PLAN_BUCKETS 1/16 beats (huge-tick MIDIs: 60 M BPM at PPQ 32767 = 2 billion in 2 minutes)
+    is worked out by RUNS of 1/16 beats where nothing changes (_runs_plan), never one entry per 1/16 beat."""
     G = max(1, lm.ppq // 16)
     nb = lm.last_tick // G + 2
-    dens = np.zeros(nb + 1, np.float64)
+    pos, add = [], []
     for n, tr in enumerate(lm.tracks):
         if n in lm.gone or not len(tr.cp_tick):
             continue
@@ -54,8 +60,13 @@ def plan(lm, tmap):
         a = ticks[:-1] // G
         b = np.maximum(ticks[1:] // G, a + 1)
         per = (offs[1:] - offs[:-1]) / (b - a)
-        np.add.at(dens, np.minimum(a, nb), per)
-        np.add.at(dens, np.minimum(b, nb), -per)
+        pos += [np.minimum(a, nb), np.minimum(b, nb)]
+        add += [per, -per]
+    if nb > PLAN_BUCKETS:
+        return _runs_plan(lm, tmap, G, nb, pos, add)
+    dens = np.zeros(nb + 1, np.float64)
+    for p, v in zip(pos, add):
+        np.add.at(dens, p, v)
     per_g = np.cumsum(dens)[:nb]
     edges = np.array([tmap.sec(int(k) * G) for k in range(nb + 1)])
     over = np.flatnonzero(per_g / np.maximum(np.diff(edges), 1e-9) > DENSE_MBS * 1e6)
@@ -74,14 +85,81 @@ def plan(lm, tmap):
         cum = np.cumsum(per_g[k0:k1])
         start, used = a, 0.0
         for j in range(k1 - k0):
-            if cum[j] - used > PART_MB * 1e6 and (k0 + j) * G > start:  # (cut before this 1/16 beat)
-                cut = (k0 + j) * G
+            if (cum[j] - used > PART_MB * 1e6 or (k0 + j + 1) * G - start > PART_TICKS) and (k0 + j) * G > start:
+                cut = (k0 + j) * G  # (cut before this 1/16 beat)
                 parts.append((start, cut))
                 start, used = cut, cum[j - 1] if j else 0.0
         parts.append((start, b))
     for a, b in parts:
         k0, k1 = a // G, max(a // G + 1, b // G)
         rates.append(float(per_g[k0:k1].sum()) / 1e6 / max(1e-9, float(edges[k1] - edges[k0])))
+    return parts, rates
+
+
+def _runs_plan(lm, tmap, G, nb, pos, add):
+    """plan for a song of very many 1/16 beats: the bytes a 1/16 beat change only where a track's checkpoint stretch
+    starts / ends, and a 1/16 beat's length only where the tempo changes, so the song is cut into RUNS where both
+    stay the same (each run's value = the per-1/16-beat sum plan's way gives there, added in the same order); a run
+    is dense or not as a whole, and parts are cut inside runs by arithmetic. Same parts as plan's 1/16-beat way
+    (dev/tests/dense_plan_runs: tiny float differences at the exact limit aside)."""
+    tc = np.asarray(tmap.ticks, np.int64) // G
+    u = np.unique(np.concatenate(pos + [np.array([0, nb], np.int64), np.clip(tc, 0, nb), np.clip(tc + 1, 0, nb)]))
+    at = np.zeros(len(u), np.float64)
+    for p, v in zip(pos, add):
+        np.add.at(at, np.searchsorted(u, p), v)
+    val = np.cumsum(at)[:-1]  # (run r = 1/16 beats u[r] .. u[r + 1] - 1, each holding val[r] bytes)
+    lo, hi = u[:-1], u[1:]
+    dur = np.array([tmap.sec((int(k) + 1) * G) - tmap.sec(int(k) * G) for k in lo.tolist()])
+    over = val / np.maximum(dur, 1e-9) > DENSE_MBS * 1e6
+    out = []
+    for r in np.flatnonzero(over).tolist():
+        t0, t1 = int(lo[r]) * G, int(hi[r]) * G
+        if out and t0 - out[-1][1] <= JOIN_BEATS * lm.ppq:
+            out[-1][1] = t1
+        else:
+            out.append([t0, t1])
+    early = int(EARLY_BEATS * lm.ppq)
+    most = PART_MB * 1e6
+
+    def runs_in(k0, k1):
+        """(first, end, value) of each run's piece inside 1/16 beats k0 .. k1 - 1."""
+        r = int(np.searchsorted(u, k0, "right")) - 1
+        while r < len(lo) and lo[r] < k1:
+            yield max(k0, int(lo[r])), min(k1, int(hi[r])), float(val[r])
+            r += 1
+    parts, rates = [], []
+    for a, b in out:
+        a = max(0, a - early)
+        k0, k1 = a // G, max(a // G + 1, b // G)
+        start, used, cum = a, 0.0, 0.0  # (cum = bytes before the run piece being looked at, from k0)
+        for s, e, v in runs_in(k0, k1):
+            if e - s <= EXACT_RUN:  # (added up one 1/16 beat at a time as plan's way does: the same cuts)
+                c = np.cumsum(np.concatenate([[cum], np.full(e - s, v)]))[1:]
+                ks = np.arange(s, e, dtype=np.int64)
+                while True:
+                    cut = np.flatnonzero(((c - used > most) | ((ks + 1) * G - start > PART_TICKS)) & (ks * G > start))
+                    if not len(cut):
+                        break
+                    j = int(cut[0])
+                    parts.append((start, int(ks[j]) * G))
+                    start, used = int(ks[j]) * G, (c[j - 1] if j else cum)
+                cum = float(c[-1])
+                continue
+            while True:
+                jt = (start + PART_TICKS) // G  # (first 1/16 beat ending past PART_TICKS from start)
+                jb = s + int((most + used - cum) // v) if v > 0 else e  # (first one taking the bytes past PART_MB)
+                j = max(min(jt, jb), start // G + 1, s)
+                if j >= e:
+                    break
+                parts.append((start, j * G))
+                used = cum + (j - s) * v
+                start = j * G
+            cum += (e - s) * v
+        parts.append((start, b))
+    for a, b in parts:
+        k0, k1 = a // G, max(a // G + 1, b // G)
+        got = sum((e - s) * v for s, e, v in runs_in(k0, k1))
+        rates.append(got / 1e6 / max(1e-9, float(tmap.sec(k1 * G) - tmap.sec(k0 * G))))
     return parts, rates
 
 
