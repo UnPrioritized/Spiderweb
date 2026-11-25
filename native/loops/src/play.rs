@@ -550,12 +550,35 @@ pub fn condense(ts: &[i64], ms: &[i32], ks: &[i32], tport: &[i64], n: i64, out_t
     n
 }
 
-/// midi_play.stamp_pre -> how many.
+/// midi_play.stamp_pre -> how many (a part's copies kept as 4 bytes: some ran past 65,535).
 #[allow(clippy::too_many_arguments)]
 #[inline(always)]
-pub fn stamp_pre(ts: &[i32], ms: &[u32], trs: &[u16], cps: &[u32], t0: i64, i0: i64, i1: i64, mt: &[i64],
+pub fn stamp_pre(ts: &[i32], ms: &[u32], trs: &[u8], cps: &[u32], t0: i64, i0: i64, i1: i64, mt: &[i64],
                  ms_: &[f64], mspt: &[f64], base: f64, rate: f64, least: f64, fr: &mut [u64], out: &mut [u32],
                  tr: &mut [u16], cp: &mut [u32], counts: &mut [i64], dry: bool, head: &mut [i64],
+                 tail: &mut [i64], val: &mut [i64], nxt: &mut [i64], st: &mut [i64]) -> i64 {
+    stamp_pre_of(ts, ms, trs, cps, t0, i0, i1, mt, ms_, mspt, base, rate, least, fr, out, tr, cp, counts, dry, head,
+                 tail, val, nxt, st)
+}
+
+/// midi_play.stamp_pre -> how many (a part's copies kept as 2 bytes: every count fits; the usual one).
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+pub fn stamp_pre16(ts: &[i32], ms: &[u32], trs: &[u8], cps: &[u16], t0: i64, i0: i64, i1: i64, mt: &[i64],
+                   ms_: &[f64], mspt: &[f64], base: f64, rate: f64, least: f64, fr: &mut [u64], out: &mut [u32],
+                   tr: &mut [u16], cp: &mut [u32], counts: &mut [i64], dry: bool, head: &mut [i64],
+                   tail: &mut [i64], val: &mut [i64], nxt: &mut [i64], st: &mut [i64]) -> i64 {
+    stamp_pre_of(ts, ms, trs, cps, t0, i0, i1, mt, ms_, mspt, base, rate, least, fr, out, tr, cp, counts, dry, head,
+                 tail, val, nxt, st)
+}
+
+/// The two above: a read-ahead part's voice group (channel + port % 16) in 1 byte, its copies in C (2026-11-25,
+/// Shinki's read-ahead 3.0 -> ~2.2 GB in memory); what goes out (tr, cp) the same types and values as before.
+#[allow(clippy::too_many_arguments)]
+#[inline(always)]
+fn stamp_pre_of<C: Copy + Into<u32>>(ts: &[i32], ms: &[u32], trs: &[u8], cps: &[C], t0: i64, i0: i64, i1: i64,
+                 mt: &[i64], ms_: &[f64], mspt: &[f64], base: f64, rate: f64, least: f64, fr: &mut [u64],
+                 out: &mut [u32], tr: &mut [u16], cp: &mut [u32], counts: &mut [i64], dry: bool, head: &mut [i64],
                  tail: &mut [i64], val: &mut [i64], nxt: &mut [i64], st: &mut [i64]) -> i64 {
     let mut n: i64 = 0;
     let mut j = 0usize;
@@ -576,7 +599,7 @@ pub fn stamp_pre(ts: &[i32], ms: &[u32], trs: &[u16], cps: &[u32], t0: i64, i0: 
         let hi = (m & 0xFF) >> 4;
         if hi == 0x8 || hi == 0x9 {
             let q = u((((m >> 24) & 15) * 16 + (m & 15)) * 128 + ((m >> 8) & 127));
-            let mut c = cps[iu] as i64;
+            let mut c = Into::<u32>::into(cps[iu]) as i64;
             if hi == 0x9 && (m >> 16) & 127 > 0 {
                 counts[0] += c;
                 let sent = !dry && f >= least;
@@ -638,7 +661,7 @@ pub fn stamp_pre(ts: &[i32], ms: &[u32], trs: &[u16], cps: &[u32], t0: i64, i0: 
                     let nu = u(n);
                     fr[nu] = g;
                     out[nu] = m as u32;
-                    tr[nu] = trs[iu];
+                    tr[nu] = trs[iu] as u16;
                     cp[nu] = 1;
                     n += 1;
                 }
@@ -651,8 +674,8 @@ pub fn stamp_pre(ts: &[i32], ms: &[u32], trs: &[u16], cps: &[u32], t0: i64, i0: 
         let nu = u(n);
         fr[nu] = frame_u64(least, f);
         out[nu] = m as u32;
-        tr[nu] = trs[iu];
-        cp[nu] = cps[iu];
+        tr[nu] = trs[iu] as u16;
+        cp[nu] = cps[iu].into();
         n += 1;
     }
     n

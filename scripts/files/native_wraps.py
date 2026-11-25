@@ -34,7 +34,7 @@ NEEDS = {
     "midi_cover_many": ("midi_cover_many",), "loaded_pixels": ("loaded_pixels",), "all_tops": ("all_tops",),
     "play_read": ("play_read",), "play_programs": ("play_programs",), "play_order": ("play_order",),
     "play_order_count": ("play_order_count",), "play_order_place": ("play_order_place",), "play_hist": ("play_hist",),
-    "play_stamp": ("play_stamp",), "play_condense": ("play_condense",), "play_stamp_pre": ("play_stamp_pre",),
+    "play_stamp": ("play_stamp",), "play_condense": ("play_condense",), "play_stamp_pre": ("play_stamp_pre", "play_stamp_pre16"),
     "play_emit": ("play_emit",),
     "piece_track": ("piece_track",), "piece_held_ons": ("piece_held_ons",), "piece_held_head": ("piece_held_head",),
     "piece_note_ons": ("piece_note_ons",), "piece_runs_sort": ("piece_runs_sort",),
@@ -763,8 +763,10 @@ class Wraps:
                        dry, head, tail, val, nxt, st):
         args = (ts, ms, trs, cps, t0, i0, i1, mt, ms_, mspt, base, rate, least, fr, out, tr, cp, counts, dry, head,
                 tail, val, nxt, st)
-        got = self.x.play_stamp_pre(*args)
-        if got < 0 and (got := self._again("play_stamp_pre", got, args)) < 0:
+        # (a read-ahead part's copies: 2 bytes when all fit, else 4, play_dense.Part; 2026-11-25)
+        name = "play_stamp_pre16" if cps.dtype == np.uint16 else "play_stamp_pre"
+        got = getattr(self.x, name)(*args)
+        if got < 0 and (got := self._again(name, got, args)) < 0:
             return self.base.play_stamp_pre(*args)
         return got
 

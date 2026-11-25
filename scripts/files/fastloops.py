@@ -5668,10 +5668,11 @@ def warm():
     play_condense(i1, i32, i32, i1.copy(), 0, i1.copy(), np.zeros(1, np.uint32),
                   np.zeros(1, np.uint16), np.zeros(1, np.uint32), np.zeros(1, np.uint32), np.zeros(1, np.int64),
                   np.zeros(1, np.int64), np.zeros(4, np.int64), np.full(1 << 17, -1, np.int64))
-    play_stamp_pre(i32, np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(1, np.uint32), 0, 0, 0,
-                   i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0, np.zeros(1, np.uint64),
-                   np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(1, np.uint32), np.zeros(3, np.int64), False,
-                   *line.arrays())
+    for cps in (np.zeros(1, np.uint32), np.zeros(1, np.uint16)):  # (a read-ahead part's copies: 4 or 2 bytes)
+        play_stamp_pre(i32, np.zeros(1, np.uint32), np.zeros(1, np.uint8), cps, 0, 0, 0,
+                       i1.copy(), f1, f1.copy(), 0.0, 48000.0, 0.0, np.zeros(1, np.uint64),
+                       np.zeros(1, np.uint32), np.zeros(1, np.uint16), np.zeros(1, np.uint32), np.zeros(3, np.int64),
+                       False, *line.arrays())
     q = np.zeros(midi_piece.QS, np.int64)
     piece_track(np.array([0, 0x90, 60, 100, 0, 0xFF, 0x2F, 0], np.uint8), 0, 0, 0, 0, 10, i1[:0], q, q.copy(),
                 q.copy(), 0, -1, 0, np.zeros(32, np.uint8), 5, q.copy(), 0, 0, np.zeros(1, np.int64),

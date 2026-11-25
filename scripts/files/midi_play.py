@@ -274,7 +274,7 @@ def stamp(ms, trk, i0, i1, ticks, muted, tport, mt, ms_, mspt, base, rate, least
     group's node << 32), counts[2] = its generation. The line needs room for a node per note-on (Line.room)."""
     n = 0
     j = 0
-    while j + 1 < len(mt) and mt[j + 1] <= ticks[i0]:
+    while 0 <= i0 < len(ticks) and j + 1 < len(mt) and mt[j + 1] <= ticks[i0]:  # (nothing to read: as the Rust loop)
         j += 1
     last_t = -1
     for i in range(i0, i1):
@@ -454,7 +454,7 @@ def stamp_pre(ts, ms, trs, cps, t0, i0, i1, mt, ms_, mspt, base, rate, least, fr
     whose group (it + its copies, Line) ends there."""
     n = 0
     j = 0
-    while j + 1 < len(mt) and mt[j + 1] <= ts[i0] + t0:
+    while 0 <= i0 < len(ts) and j + 1 < len(mt) and mt[j + 1] <= ts[i0] + t0:  # (nothing to read: as the Rust loop)
         j += 1
     for i in range(i0, i1):
         t = ts[i] + t0

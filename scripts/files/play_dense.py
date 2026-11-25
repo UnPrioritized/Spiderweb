@@ -30,7 +30,7 @@ SAVED_VER = 3  # (a saved read-ahead: how parts are read / collapsed changed = a
 SAVED_END = ".dense.npz"  # (beside the saved index: <index name>.dense.npz)
 DECLINED_END = ".dense.no"  # (beside it: the user said No to keeping it)
 PART_ARRAYS = ("ts", "ms", "tr", "cp", "s0_q", "s0_n")  # (each part's, saved as <name><part number>)
-EVENT_BYTES = 14  # (ts int32 + ms uint32 + tr uint16 + cp uint32 an event, in memory)
+EVENT_BYTES = 9  # (ts int32 + ms uint32 + tr uint8 an event in memory, + cp's 2 or 4)
 BYTE_ROWS = ("ms", "cp")  # (saved as midi_saved.byte_rows, the head says so: older kept ones open as they are)
 
 
@@ -93,7 +93,8 @@ def key_of(lm):
 
 class Part:
     """One part read ahead: ticks t0..t1; ts (int32, from t0), ms (message, port in the top byte), tr (the note
-    budget's channel + port), cp (copies) as condense made them, every note-off kept (the feeder's line leaves out
+    budget's channel + port % 16, uint8), cp (copies, uint16 when all fit else uint32: narrow_cp) as condense made
+    them, every note-off kept (the feeder's line leaves out
     the ones of notes it left out); s0_q / s0_n = the file's notes sounding at t0 (their offs are in it)."""
 
     def __init__(self, t0, t1, ts, ms, tr, cp, s0=None, s0_q=None, s0_n=None):
@@ -118,6 +119,17 @@ class Part:
                          np.zeros(0, np.uint32), np.zeros(0, np.uint16), np.zeros(0, np.uint32),
                          np.zeros(3, np.int64), True, *line.arrays())
         return line.left_out()
+
+
+def narrow_tr(tr):
+    """A part's voice groups (channel + port % 16 < 256) in 1 byte (2026-11-25: Shinki's read-ahead 431 -> 216 MB)."""
+    return tr.astype(np.uint8)
+
+
+def narrow_cp(cp):
+    """A part's copy counts in 2 bytes when every one fits (Shinki's most: 36,806), else 4 as made: nothing is split,
+    so stamp_pre sends the very same events (2026-11-25: 863 -> 431 MB)."""
+    return cp.astype(np.uint16) if not len(cp) or int(cp.max()) <= 0xFFFF else cp.astype(np.uint32)
 
 
 def _stamp_pre():
@@ -287,8 +299,8 @@ class Dense:
             elif len(ts) < 1_000_000 and span < (1 << 21):
                 span *= 2
             w0 = w1
-        return Part(t0, t1, (out[0][:n] - t0).astype(np.int32), out[1][:n].copy(), out[2][:n].copy(),
-                    out[3][:n].copy(), s0)
+        return Part(t0, t1, (out[0][:n] - t0).astype(np.int32), out[1][:n].copy(), narrow_tr(out[2][:n]),
+                    narrow_cp(out[3][:n]), s0)
 
 
 def saved_file(index):
@@ -406,7 +418,8 @@ def save(d):
         ps = d.parts
         head = dict(_saved_head(lm), todo=[list(map(int, t)) for t in d.todo], failed=d.failed,
                     parts=[[int(p.t0), int(p.t1), len(p.ts), len(p.s0_q)] for p in ps],
-                    rows={k: str(getattr(ps[0], k).dtype) if ps else "" for k in BYTE_ROWS})
+                    rows={k: [str(getattr(p, k).dtype) for p in ps] for k in BYTE_ROWS})  # (each part's own: cp
+        # 2 or 4 bytes, narrow_cp)
         arrays = [("head", lambda: np.frombuffer(json.dumps(head).encode("utf-8"), np.uint8))]
         for i, p in enumerate(ps):  # (each part's own arrays: never all of them joined into one more copy; byte
             # rows made one array at a time while writing: all at once = 1.7 GB more for Shinki)
@@ -461,18 +474,23 @@ def _load(lm, todo):
             if {k: head.get(k) for k in ("ver", "size", "mtime", "layout", "rules")} != \
                     json.loads(json.dumps(_saved_head(lm))) or head.get("todo") != [list(map(int, t)) for t in todo]:
                 return None
+            # (byte rows since 2026-11-25, one type for all parts at first, then each part's own; older kept ones =
+            # plain arrays)
+            rows = {k: v if isinstance(v, list) else [v] * len(head["parts"]) for k, v in head.get("rows", {}).items()}
             from files.system import free_memory
             free = free_memory()  # (the same cap as reading it: over it = read again, densest first, hunt 11-25)
-            if free and sum(int(p[2]) for p in head["parts"]) * EVENT_BYTES > DENSE_SHARE * free:
+            cps = [np.dtype(t).itemsize for t in rows["cp"]] if "cp" in rows else [4] * len(head["parts"])
+            if free and sum(int(p[2]) * (EVENT_BYTES + c) for p, c in zip(head["parts"], cps)) > DENSE_SHARE * free:
                 return None
             parts = []
-            rows = head.get("rows", {})  # (byte rows since 2026-11-25; older kept ones = plain arrays)
             for i, (t0, t1, n, k) in enumerate(head["parts"]):
-                a = {key: midi_saved.from_rows(z[f"{key}{i}"], np.dtype(rows[key])) if key in rows else
+                a = {key: midi_saved.from_rows(z[f"{key}{i}"], np.dtype(rows[key][i])) if key in rows else
                      z[f"{key}{i}"] for key in PART_ARRAYS}
                 if any(len(a[key]) != n for key in ("ts", "ms", "tr", "cp")) or len(a["s0_q"]) != k:
                     return None
-                parts.append(Part(t0, t1, a["ts"], a["ms"], a["tr"], a["cp"], s0_q=a["s0_q"], s0_n=a["s0_n"]))
+                tr = a["tr"] if a["tr"].dtype == np.uint8 else narrow_tr(a["tr"])  # (kept before 2026-11-25)
+                cp = a["cp"] if a["cp"].dtype == np.uint16 else narrow_cp(a["cp"])
+                parts.append(Part(t0, t1, a["ts"], a["ms"], tr, cp, s0_q=a["s0_q"], s0_n=a["s0_n"]))
     except Exception:  # (none, or damaged: read again)
         return None
     return parts, head["failed"]

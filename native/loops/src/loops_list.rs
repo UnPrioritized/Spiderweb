@@ -234,10 +234,14 @@ py_loops! {
     play_condense(ts: &[i64], ms: &[i32], ks: &[i32], tport: &[i64], n: i64, out_t: &mut [i64], out_m: &mut [u32],
                   out_tr: &mut [u16], out_cp: &mut [u32], tab_key: &mut [u32], tab_gen: &mut [i64],
                   tab_at: &mut [i64], counts: &mut [i64], last_on: &mut [i64]) => crate::play::condense;
-    play_stamp_pre(ts: &[i32], ms: &[u32], trs: &[u16], cps: &[u32], t0: i64, i0: i64, i1: i64, mt: &[i64],
+    play_stamp_pre(ts: &[i32], ms: &[u32], trs: &[u8], cps: &[u32], t0: i64, i0: i64, i1: i64, mt: &[i64],
                    ms_: &[f64], mspt: &[f64], base: f64, rate: f64, least: f64, fr: &mut [u64], out: &mut [u32],
                    tr: &mut [u16], cp: &mut [u32], counts: &mut [i64], dry: bool, head: &mut [i64],
                    tail: &mut [i64], val: &mut [i64], nxt: &mut [i64], st: &mut [i64]) => crate::play::stamp_pre;
+    play_stamp_pre16(ts: &[i32], ms: &[u32], trs: &[u8], cps: &[u16], t0: i64, i0: i64, i1: i64, mt: &[i64],
+                     ms_: &[f64], mspt: &[f64], base: f64, rate: f64, least: f64, fr: &mut [u64], out: &mut [u32],
+                     tr: &mut [u16], cp: &mut [u32], counts: &mut [i64], dry: bool, head: &mut [i64],
+                     tail: &mut [i64], val: &mut [i64], nxt: &mut [i64], st: &mut [i64]) => crate::play::stamp_pre16;
     play_emit(ms: &[i32], trk: &[i32], i0: i64, i1: i64, ticks: &[i64], t_late: i64, muted: &[u16], tport: &[i64],
               ports: i64, synths: i64, thr: &[i64], room: &mut [i64], out: NdMut<u8, 2>, lens: &mut [i64],
               three: bool, head: &mut [i64], tail: &mut [i64], val: &mut [i64], nxt: &mut [i64], st: &mut [i64])
