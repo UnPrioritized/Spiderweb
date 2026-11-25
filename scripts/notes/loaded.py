@@ -18,7 +18,7 @@ from files import midi_index, midi_scan, speed
 from files.midi_index import (CC_KINDS, CC_MOST, CP_LEAST, GO, GRID_MOST, MORE_CC, MORE_CP, MORE_ENT, MORE_GRID, MORE_KEYS,
                               MORE_META, MORE_POOL, META_KEEP, QS, X_CCOVER, X_END, X_FIRST, X_GHI, X_GLO, X_HANG, X_KHI,
                               X_KLO, X_LONG, X_NCC, X_NCP, X_NENT, X_NMETA, X_NOTES, X_ORPHAN, X_STOP, X_TICK, X_ZERO)
-from files.midi_read import PIECE, Cancelled, MidiError, MidiFile
+from files.midi_read import HASH_KIND, PIECE, Cancelled, MidiError, MidiFile
 from notes import loaded_map
 
 PIC_COLS = 1024  # a track's own picture: this many columns at most across its notes (+ its key range)
@@ -1075,10 +1075,26 @@ def levels_of(cnt, top, etop):
 def file_hash(mf):
     """One short code for every byte of a scanned file (its tracks' hashes + the rest's): a project knows the file
     again by it, wherever it's moved."""
+    return HASH_KIND + _joined([t.hash for t in mf.tracks], mf.raw_hash)
+
+
+def old_file_hash(mf):
+    """file_hash as projects saved before 2026-11-25 kept it (blake2b; mf scanned with mf.old = True), or None."""
+    if mf.old_raw_hash is None or any(t.old_hash is None for t in mf.tracks):
+        return None
+    return _joined([t.old_hash for t in mf.tracks], mf.old_raw_hash)
+
+
+def is_old_hash(h):
+    """A project link's hash from before 2026-11-25 (blake2b of the old track hashes)."""
+    return bool(h) and not h.startswith(HASH_KIND)
+
+
+def _joined(hashes, rest):
     h = hashlib.blake2b(digest_size=16)
-    for t in mf.tracks:
-        h.update(t.hash.encode())
-    h.update(str(mf.raw_hash).encode())
+    for x in hashes:
+        h.update(x.encode())
+    h.update(str(rest).encode())
     return h.hexdigest()
 
 
@@ -1186,7 +1202,8 @@ class Loader:
             raise MidiError("load.needs_speed")
         self.started = time.perf_counter()  # (the reading's time only: never the wait above, hunt 2026-10-25)
         self.stage = "read"
-        if not self.keep:  # (its index saved by an earlier load: a moment, no read of the file, step 12)
+        if not self.keep and not self.mf.old:  # (its index saved by an earlier load: a moment, no read of the
+            # file, step 12; mf.old = an older project's link wants the old hashes: only a read makes them)
             from files.midi_saved import load_index
             lm = load_index(self.mf)
             if lm is not None:

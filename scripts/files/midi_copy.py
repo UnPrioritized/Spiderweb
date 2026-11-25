@@ -4,7 +4,6 @@ file had can go missing. Written through safefile (temp file, then put in place)
 track's bytes against the hash taken when the file was loaded, so a file changed since, or a copy that came out
 different, is never put in place."""
 
-import hashlib
 import os
 import queue
 import shutil
@@ -15,7 +14,7 @@ import numpy as np
 from files import midi_scan, safefile, speed
 from files.midi_bytes import vlq
 from files.midi_out import name_event
-from files.midi_read import BIGGEST_EVENT, PIECE, SCAN_WORKERS, Cancelled, FileChanged, MidiError
+from files.midi_read import BIGGEST_EVENT, PIECE, SCAN_WORKERS, Cancelled, FileChanged, MidiError, TrackHash
 from files.own_tracks import PART, key_track
 
 NAME = 0x03  # a track name's meta event type (Track Properties' new name goes in its place)
@@ -162,7 +161,7 @@ class _Work:
     def _all(self):
         mf = self.mf
         self.watch = mf.watch()
-        rest = hashlib.blake2b(digest_size=16)  # (everything but the tracks' events, as read: = mf.raw_hash)
+        rest = TrackHash()  # (everything but the tracks' events, as read: = mf.raw_hash)
         added = self.added
         last = max(i for i, (kind, *_) in enumerate(mf.pieces) if kind == "track")
         if self.order is not None:  # (tracks written in another order: the hash goes in the file's, read first)
@@ -232,7 +231,7 @@ class _Work:
                                or len(self.hidden(t.number)) > 0 or key in self.props)
         if (self.walk or changed) and t.whole:
             # a changed track: its bytes READ are checked (it comes out different); else what's written
-            h = hashlib.blake2b(digest_size=16)
+            h = TrackHash()
             hin = h if changed else None
             if t.size <= HELD_TRACK:  # (written into memory once: its length known)
                 pieces = list(self.rewritten(f, t, key, None if changed else h, hin))
@@ -253,7 +252,7 @@ class _Work:
         yield head
         self.written += 8
         if t.size < CHECK_APART:  # (handing a tiny track over costs more than its hash)
-            h = hashlib.blake2b(digest_size=16)
+            h = TrackHash()
             for piece in self.raw(f, t.start, t.size):
                 h.update(piece)
                 yield piece
@@ -386,7 +385,7 @@ class _Work:
 
 
 class _Checks:
-    """Each copied track's hash worked out on DAEMON threads while the copy goes on (hashlib lets go of the GIL:
+    """Each copied track's hash worked out on DAEMON threads while the copy goes on (zlib / hashlib let go of the GIL:
     one core did ~850 MB/s, most of a plain export's time). The very bytes written are hashed, in order, one
     thread per track; bad = numbers of the tracks that came out different."""
 
@@ -419,7 +418,7 @@ class _Checks:
             if job is None:
                 return
             t, pieces = job
-            h = hashlib.blake2b(digest_size=16)
+            h = TrackHash()
             while True:
                 piece = pieces.get()
                 if piece is None:

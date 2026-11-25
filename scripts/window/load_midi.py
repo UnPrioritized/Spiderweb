@@ -291,6 +291,8 @@ class LoadWindow(tk.Toplevel):
         self.info = ttk.Label(self.body, text="", foreground=look.HINT)
         self.info.pack(anchor="w")
         ttk.Button(self.buttons, text=tr("load.cancel"), command=self.cancel).pack(side="right")
+        # (a project saved before 2026-11-25 knows its MIDI by the old blake2b hash: made too, this load only)
+        self.mf.old = self.link is not None and L.is_old_hash(self.link["hash"])
         self.loader = L.Loader(self.mf, keep)
         self.thread = threading.Thread(target=self.loader.run, daemon=True, name="load midi")
         self.thread.start()
@@ -364,7 +366,8 @@ class LoadWindow(tk.Toplevel):
         app, link = self.app, self.link
         if app.midi_link is not link or app.loaded is not None:  # (another project opened meanwhile)
             return
-        if not link["hash"] or lm.link()["hash"] == link["hash"]:  # (the same file, moved or not)
+        if (not link["hash"] or lm.link()["hash"] == link["hash"]  # (the same file, moved or not)
+                or L.old_file_hash(lm.mf) == link["hash"]):  # (an older project's hash: the next save keeps the new)
             app.reattach_midi(lm)
             app.after_idle(lambda: offer_index(app, lm))
             return

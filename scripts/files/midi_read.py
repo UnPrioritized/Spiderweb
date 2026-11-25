@@ -10,6 +10,7 @@ import hashlib
 import os
 import struct
 import threading
+import zlib
 
 import numpy as np
 
@@ -51,9 +52,45 @@ class Cancelled(Exception):
     pass
 
 
+class TrackHash:
+    """A track's (or the rest's) fingerprint: CRC-32 + Adler-32 + length of its bytes, like hashlib's update /
+    hexdigest. Knows a file again and checks an export's bytes; never against tampering. zlib's sums let go of the
+    GIL like hashlib (pieces over 5 KB) and ran ~30x quicker than the blake2b before it (2026-11-25: 0.9 GB/s a
+    thread, ~23 % of a big load). Hex strings start with HASH_KIND, so a project saved before it is told apart
+    (old_file_hash)."""
+    __slots__ = ("c", "a", "n")
+
+    def __init__(self):
+        self.c, self.a, self.n = 0, 1, 0
+
+    def update(self, b):
+        self.c = zlib.crc32(b, self.c)
+        self.a = zlib.adler32(b, self.a)
+        self.n += len(b)
+
+    def hexdigest(self):
+        return f"{HASH_KIND}{self.c:08x}{self.a:08x}{self.n:x}"
+
+
+HASH_KIND = "z."  # (blake2b hashes before 2026-11-25 are plain hex: no ".")
+
+
+class _BothHash:
+    """TrackHash + the blake2b used before (MidiFile.old: a project saved before compares its MIDI by the old one)."""
+    __slots__ = ("new", "old")
+
+    def __init__(self):
+        self.new, self.old = TrackHash(), hashlib.blake2b(digest_size=16)
+
+    def update(self, b):
+        self.new.update(b)
+        self.old.update(b)
+
+
 class Track:
     """One MTrk chunk: where its bytes are, what reading it found."""
-    __slots__ = ("number", "head", "start", "size", "declared", "flags", "counts", "last_tick", "after", "hash")
+    __slots__ = ("number", "head", "start", "size", "declared", "flags", "counts", "last_tick", "after", "hash",
+                 "old_hash")
 
     def __init__(self, number, head, start, size, declared):
         self.number = number
@@ -64,7 +101,8 @@ class Track:
         self.counts = None  # (midi_scan.C_*), after scan()
         self.last_tick = 0
         self.after = 0  # bytes after End of Track
-        self.hash = None  # blake2b of its events' bytes
+        self.hash = None  # TrackHash of its events' bytes
+        self.old_hash = None  # (blake2b, only when MidiFile.old)
 
     @property
     def whole(self):
@@ -81,6 +119,8 @@ class MidiFile:
         self.pieces = []  # [("raw", start, size) / ("track", Track)] in file order
         self.scanned = False
         self.raw_hash = None  # (scan(): one hash of the header, track heads and other bytes)
+        self.old = False  # (set before scan(): also the old blake2b hashes, t.old_hash / old_raw_hash)
+        self.old_raw_hash = None
         try:
             stat = os.stat(self.path)
         except OSError as e:
@@ -286,7 +326,10 @@ class MidiFile:
                 one(job)
         else:
             _side_by_side(jobs, one, n, stop)
-        self.raw_hash = self._hash_raw()
+        h = self._hash_raw()
+        self.raw_hash = self._digest(h)
+        if self.old:
+            self.old_raw_hash = h.old.hexdigest()
         self.same()
         self.scanned = True
         return self
@@ -294,7 +337,7 @@ class MidiFile:
     def _scan_track(self, f, t, walk, compiled, step, watch, more=None):
         st = np.zeros(ST_SIZE, np.int64)
         cnt = np.zeros(C_SIZE, np.int64)
-        h = hashlib.blake2b(digest_size=16)
+        h = self._hasher()
         buf = bytearray(max(1, min(PIECE, t.size)))
         reader = self.pieces_of(f, t.start, t.size, buf, watch)
         filled, final = next(reader) if t.size else (0, True)
@@ -333,13 +376,22 @@ class MidiFile:
         t.counts = cnt
         t.last_tick = int(st[ST_TICK])
         t.after = int(st[ST_AFTER])
-        t.hash = h.hexdigest()
+        t.hash = self._digest(h)
+        if self.old:
+            t.old_hash = h.old.hexdigest()
         if more is not None:
             more.done()
 
+    def _hasher(self):
+        return _BothHash() if self.old else TrackHash()
+
+    @staticmethod
+    def _digest(h):
+        return (h.new if isinstance(h, _BothHash) else h).hexdigest()
+
     def _hash_track(self, f, t, buf):
         """The whole track's hash, read again through buf (a damaged track: its reading stopped part way)."""
-        h = hashlib.blake2b(digest_size=16)
+        h = self._hasher()
         done = 0
         with memoryview(buf) as m:
             while done < t.size:
@@ -354,7 +406,7 @@ class MidiFile:
 
     def _hash_raw(self):
         """One hash of every byte that isn't a track's events (header, track heads, other chunks, junk)."""
-        h = hashlib.blake2b(digest_size=16)
+        h = self._hasher()
         watch = self.watch()
         with open(self.path, "rb") as f:
             for kind, *what in self.pieces:
@@ -368,7 +420,7 @@ class MidiFile:
                         raise FileChanged()
                     h.update(piece)
                     done += len(piece)
-        return h.hexdigest()
+        return h
 
     # ------------------------------------------------------------------ summary
 
