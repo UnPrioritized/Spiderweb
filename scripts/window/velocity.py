@@ -623,6 +623,10 @@ class VelocityPane(KeepsItems, tk.Canvas):
             # its own made it a piece with pages of its own (Gate subtract done on it alone again, case 73407007))
             whole_paged = sh["kind"] == "custom" and isinstance(sh.get("cut"), dict) and not pages(fx) and pages(
                 ((sh["cut"].get("whole") or {}).get("fx")))
+            # (notes holding a velocity step already, a merged shape's handed on by Properties' "Make the others like
+            # this": that step wins over the notes, so the line goes on as a step too, else it did nothing; 2026-11-26)
+            stepped = "notes" in sh and any(st.get("tool") == "vel" for st in fx or ())
+            merged = merged or stepped
             if pages(fx) or merged or whole_paged:
                 # note tool pages: only a velocity step after them, on the notes as they show (user 2026-11-02: a
                 # Chop piece past the line kept its velocity; the notes under the pages are left as they are); a

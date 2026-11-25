@@ -331,6 +331,13 @@ def clean_shape(sh):
         if out.get("vel_env"):  # (older files: every earlier cut's point on the line before its start)
             from notes.joined import thin_lead
             out["vel_env"] = thin_lead(out["vel_env"])
+    elif isinstance(sh.get("cut_of"), str):  # (a piece made complete / turned plain: its fellow pieces' key, so they
+        out["cut_of"] = sh["cut_of"][:64]   # keep their channels together, sliced.cut_group; dropped on open
+    # before 2026-11-26) + a stirred one's cut it still takes its colours from (sliced.completed: a flipped completed
+    # piece's colours all changed after Save + open)
+    ccut = clean_cut(sh["colour_cut"]) if not cut and isinstance(sh.get("colour_cut"), dict) else None
+    if ccut:
+        out["colour_cut"] = ccut
     fx = clean_fx(sh, steps=bool(cut) and (whole_made(cut) or bool(sh.get("ripples"))))  # (sliced.steps_kept)
     if fx:  # Chop / Claw machine / Strum pages, flips and velocities after them (fx.py)
         out["fx"] = fx

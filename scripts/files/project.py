@@ -209,24 +209,24 @@ def output_path(typed):
 
 
 def short_num(x, digits=12):
-    """A float with the noise digits dropped (4.0 -> 4, 0.1000000000000001 -> 0.1)."""
+    """A float as it is saved: a whole one as an int (4.0 -> 4), any other EXACT (json writes the shortest form that
+    reads back the same). Trimming to 12 digits (as until 2026-11-26) moved a dragged point by ~1e-12 beats, enough
+    to change notes on Save + open (a curve's 84 notes, an arc's 6: the save-then-open safety test); a beat far out
+    (a huge-tick MIDI's Extract at 8.6e9) was already kept exact. digits: unused, kept for old callers."""
     if not isinstance(x, float):
         return x
-    if abs(x) >= 1e6:  # (a beat this far out, a huge-tick MIDI's Extract at 8.6e9: 12 digits moved it by 24 ticks;
-        return int(x) if x.is_integer() else x  # kept exact: json writes the shortest exact form)
-    x = float(f"{x:.{digits}g}")
-    return int(x) if x.is_integer() else x
+    return int(x) if x.is_integer() and abs(x) < 2 ** 53 else x
 
 
 def short_env(env):
-    """Envelope for saving: velocities to 4 decimals, u to 12 digits unless that would merge two different
-    points (a jump is two points 1e-9 beats apart, and which side a note lands on matters)."""
+    """Envelope for saving: every number exact (short_num; a jump is two points 1e-9 beats apart, and which side a
+    note lands on matters)."""
     out = []
     for u, v in env:
         su = short_num(u)
         if out and su == out[-1][0] and u != prev:
             su = u
-        out.append([su, short_num(round(v, 4))])
+        out.append([su, short_num(v)])  # (exact: 4 decimals turned a note's 103 into 104 on Save + open, 2026-11-26)
         prev = u
     return out
 
@@ -246,7 +246,7 @@ def short_shape(sh):
     def short(k, v):
         if k == "vel_env":
             return short_env(v)
-        if k == "cut":  # (what a piece remembers of itself, trimmed as it is: still the same after loading)
+        if k in ("cut", "colour_cut"):  # (what a piece remembers of itself, trimmed as it is: the same after loading)
             return {a: {n: short(n, x) for n, x in b.items()} if a in ("was", "vel", "gate") and b else b
                     for a, b in v.items()}
         if k == "pts":

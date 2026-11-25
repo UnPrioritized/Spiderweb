@@ -1871,22 +1871,27 @@ def pack_wholes(shapes):
     with every piece): cut["whole"] = {"ref": n} -> (shapes, the wholes)."""
     table, out = {}, []
     for sh in shapes:
-        cut = sh.get("cut")
-        if cut and isinstance(cut.get("whole"), dict):
-            n = table.setdefault(json.dumps(cut["whole"], sort_keys=True), len(table))
-            sh = dict(sh, cut=dict(cut, whole={"ref": n}))
+        for key in CUT_KEYS:  # (a completed stirred piece's "colour_cut" too: the same whole as its fellow pieces)
+            cut = sh.get(key)
+            if cut and isinstance(cut.get("whole"), dict):
+                n = table.setdefault(json.dumps(cut["whole"], sort_keys=True), len(table))
+                sh = dict(sh, **{key: dict(cut, whole={"ref": n})})
         out.append(sh)
     return out, [json.loads(k) for k in table]
 
 
+CUT_KEYS = ("cut", "colour_cut")
+
+
 def unpack_wholes(sh, wholes):
     """A shape read from a project file with its piece's whole put back (pack_wholes)."""
-    cut = sh.get("cut") if isinstance(sh, dict) else None
-    if isinstance(cut, dict) and isinstance(cut.get("whole"), dict) and "ref" in cut["whole"]:
-        n = cut["whole"]["ref"]
-        whole = wholes[n] if isinstance(n, int) and 0 <= n < len(wholes) else None
-        sh = dict(sh, cut=dict(cut, whole=whole)) if isinstance(whole, dict) else {k: v for k, v in sh.items()
-                                                                                    if k != "cut"}
+    for key in CUT_KEYS:
+        cut = sh.get(key) if isinstance(sh, dict) else None
+        if isinstance(cut, dict) and isinstance(cut.get("whole"), dict) and "ref" in cut["whole"]:
+            n = cut["whole"]["ref"]
+            whole = wholes[n] if isinstance(n, int) and 0 <= n < len(wholes) else None
+            sh = dict(sh, **{key: dict(cut, whole=whole)}) if isinstance(whole, dict) else {
+                k: v for k, v in sh.items() if k != key}
     return sh
 
 

@@ -60,7 +60,9 @@ def clean_fx(sh, steps=False):
     """sh["fx"] from a file -> a valid step list, or None. Without one: the old chop / claw / strum as pages.
     steps: flips / turns / velocities before any page count too (a sliced piece's, see flipped). A merged shape's
     velocity steps always count (with_velocity always)."""
-    vels = bool(sh.get("merge"))
+    # (a shape holding its own notes too: Properties' "Make the others like this" hands a merged shape's velocity
+    # step to Merge leftovers; the notes take it, so it was lost on Save + open, 2026-11-26)
+    vels = bool(sh.get("merge")) or isinstance(sh.get("notes"), str)
     fx = sh.get("fx")
     if not isinstance(fx, list):
         fx = [{"tool": k, "cfg": sh[k]} for k in TOOLS[:3] if sh.get(k)]

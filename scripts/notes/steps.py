@@ -551,11 +551,20 @@ def clean_off(o):
     return out or None
 
 
+def names_whole_pages(sh, kinds):
+    """Is kinds (a saved order, as kinds) a sliced piece sh's order naming its WHOLE's pages? Such an order is kept as
+    it is (in_whole / expanded read it): sh's own order_of knows no pages, so it came out as the default and was
+    dropped (2026-11-26: channels changed after Save + open, Glue in a box changed notes outside it)."""
+    return bool(kinds) and FX in kinds and not sh.get("fx") and isinstance(sh.get("cut"), dict)
+
+
 def kept_in(out, sh):
     """clean_shape's part: sh's order and off list put into out (the shape being cleaned; its steps already in),
     the order only when it still differs from the default there."""
     o = clean_order(sh.get("order"))
-    if o:
+    if names_whole_pages(out, o):
+        out["order"] = o
+    elif o:
         with_order(out, order_of(out, tags_of(o)))
     off = clean_off(sh.get("off"))
     if off:
@@ -678,6 +687,11 @@ def after_change(sh, before):
         return sh
     if not (added or gone or grew or shrank or lost):
         return sh
+    if s is not None and not fx_new and names_whole_pages(sh, [k for k, _ in s]):
+        # (its whole's pages named: OWN steps taken away leave, new ones go at the end, the rest as it is)
+        kinds = [k for k, _ in s if k not in gone]
+        sh["order"] = kinds + [k for k in added if k not in kinds]
+        return sh
     if lost:  # (a Stir tab / Reverse taken out: its own entry leaves, so the later ones keep their places)
         s = tags_of([k for k, n in s if (k, n) not in lost])
     if s is None:
@@ -741,7 +755,9 @@ def carried(sh, src):
         else:
             sh.pop(key, None)
     o = clean_order(sh.get("order"))
-    if o:
+    if names_whole_pages(sh, o):
+        sh["order"] = o
+    elif o:
         with_order(sh, order_of(sh, tags_of(o)))
     if sh.get("off"):  # (only the steps sh has: an Add between step without a step only one end had)
         have = set(order_of(sh))
