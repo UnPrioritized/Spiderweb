@@ -16,17 +16,19 @@ Warnings for the export message: notes starting inside a jump (they play off tim
 really heard isn't the project's BPM (their tone is worked out from it)."""
 
 import bisect
+from collections import namedtuple
 
 import numpy as np
 
 from files import speed
 from files.midi_scan import MOST_TICK
 from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of, where as meter_where
-from notes.tempo import (CATCH_TICKS_MOST, EVERY, _put_all, _put_many, base_us, beat_tick,
+from notes.tempo import (CATCH_STEPS_MOST, CATCH_TICKS_MOST, EVERY, _put_all, _put_many, base_us, beat_tick,
                          typed_bpms, step_of,
                          file_segments, has_tempo, keep_heard, known_key, layout, segs_end, tempo_key)
-from notes.tempo_ramp import Ramp
-from notes.tempo_safe import PAIR_REACH, SAFE_REACH, _fit_blocks, _fit_exact, _flat_pair, _runs, domino_safe
+from notes.tempo_ramp import Ramp, fixed_ramp
+from notes.tempo_safe import (PAIR_REACH, SAFE_REACH, _fit_blocks, _fit_exact, _flat_pair, _runs, domino_safe,
+                              fit_block_runs, flat_pair_runs)
 
 MAX_US = 0xFFFFFF  # the slowest tempo a file holds, in microseconds per beat
 PAIR_CACHE = 4096  # gaps up to this many ticks have their tempo pair remembered (black MIDI repeats the same gaps)
@@ -95,9 +97,9 @@ def bar_line(sigs, tick, ppq, after=False):
     return line
 
 
-KEEP_TICKS_MOST = 1 << 30  # a Keep timing part's ticks at most (its tempo worked out on every tick; a huge-tick MIDI's
-# parts run to trillions: refused with load.keep_too_long, never the memory; 2^27 refused normal PPQ 65535 songs of
-# 2,500 beats that worked before, hunt 2026-11-26: a 2-hour part at PPQ 65535, 120 BPM still passes)
+KEEP_TICKS_MOST = 1 << 30  # a Keep timing part up to this many ticks is worked out on every tick (the compiled loops:
+# gap_ticks / gap_plan); a longer one by runs (_keep_long / _long_gaps, PLAN stage E 2026-11-26: a huge-tick MIDI's
+# parts run to trillions). load.keep_too_long only when its sums pass 64 bits
 BARS_MOST = 1 << 20  # Fit bar lines works on songs of at most this many bars (bar by bar: a huge-tick MIDI, 60 M BPM
 # at PPQ 32767, has billions and its export took 20 GB; past it the bars are written unfitted: the sound is the same)
 
@@ -406,11 +408,9 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     own = [lay["own_line"][n] for n, a, e in keeps if e > a]  # (a part with its own heard line: that, always)
     known = None if heard is None else FileTempo(heard, lay)
     files = [None if heard is None else known.part(n, e) for n, a, e in keeps if e > a]
-    longest = max([e - a for _, a, e in keeps if e > a] + [0])
-    if longest > KEEP_TICKS_MOST:  # (worked out tick by tick: a part over a huge-tick MIDI took terabytes)
-        from files.midi_read import MidiError
-        raise MidiError("load.keep_too_long", ticks=f"{longest:,}", most=f"{KEEP_TICKS_MOST:,}")
-    keeps = [(a, e, keep_heard(lay, n, a, e)) for n, a, e in keeps if e > a]
+    # (a part past KEEP_TICKS_MOST: its heard tempo as runs, never one value a tick: PLAN stage E, _keep_long)
+    keeps = [(a, e, _heard_long(lay, n, a, e) if e - a > KEEP_TICKS_MOST else keep_heard(lay, n, a, e))
+             for n, a, e in keeps if e > a]
     fit_bars = bars_fit(tempo, ppq, max([last_tick] + [e for _, e, _ in keeps]))
     if fit_bars and bars is None:  # (bar lines by the time signatures: fitting works inside each one, user)
         bars = bar_ticks(tempo, ppq, max([last_tick] + [e for _, e, _ in keeps]))
@@ -427,6 +427,13 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
         bs_c = np.ascontiguousarray(bs, np.int64) if fit_bars else np.zeros(0, np.int64)
         none = np.zeros(0, np.int64)
     for (a, e, u), mine, part in zip(keeps, own, files):
+        if e - a > KEEP_TICKS_MOST:  # (a huge-tick song's part: by runs; the compiled loops' per-tick way below)
+            gap, heard_t, d_, g_ = _keep_long(a, e, u, mine, part, segs, starts, ts, bs if fit_bars else None, ls)
+            gaps.append(gap)
+            times.append(heard_t)
+            dense += (np.asarray(d_, np.int64) / ppq).tolist()
+            gave += (np.asarray(g_, np.int64) / ppq).tolist()
+            continue
         drawn = _per_tick(segs, a, e, starts)
         was = None if part is None else np.concatenate([[0], np.cumsum(_per_tick(part, a, e))])
         if mine:  # (its own heard tempo line: that, also over a loaded MIDI's own tempo, even one steady value:
@@ -472,6 +479,135 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
         gaps.append([n, total, k, drawn])
         times.append(was if was is not None else int(u))
     return lay, segs, bad, keeps, gaps, dense, sorted(gave), times
+
+
+RunSet = namedtuple("RunSet", "s e u")  # a long Keep timing part's tempo as runs (starts, ends, us int64 arrays)
+
+
+def _heard_long(lay, n, a, e):
+    """keep_heard for a part past KEEP_TICKS_MOST: one whole number, or its heard tempo line as a Ramp of runs."""
+    segs = lay["keep_segs"](n, a, e)
+    if len(segs) == 1 and isinstance(segs[0][2], int):
+        return segs[0][2]
+    s, _, u = _runs_arrays(segs)
+    return fixed_ramp(a, e, (s - a).tolist(), u.tolist())
+
+
+def _prefix(runs, x, exact):
+    """Ticks x us from the runs' first tick up to each tick x (array inside them): exact int64 (exact; an overflow
+    = OverflowError) or float64."""
+    s, t, u = runs
+    w = (t - s) * u if exact else (t - s).astype(np.float64) * u
+    if exact and len(u) and (int(t[-1]) - int(s[0])) * int(u.max()) >= 1 << 62:
+        raise OverflowError
+    cum = np.concatenate([[0], np.cumsum(w)])
+    x = np.asarray(x, np.int64)
+    i = np.clip(np.searchsorted(s, x, "right") - 1, 0, len(s) - 1)
+    return cum[i] + (x - s[i]) * (u[i] if exact else u[i].astype(np.float64))
+
+
+def _keep_long(a, e, u, mine, part, segs, seg_starts, ts, bs, ls):
+    """keep_gaps' NumPy way for one part past KEEP_TICKS_MOST ticks, by runs: (gap [n, total, k, drawn RunSet],
+    heard time (us or RunSet), dense ticks, gave ticks). The same steps: anchors, loose ones giving way, file ticks
+    rounded on a running total."""
+    drawn = RunSet(*_runs_arrays(_cut(segs, a, e, seg_starts)))
+    src = u if mine or part is None else _cut(part, a, e)
+    heard = None if isinstance(src, int) else RunSet(*_runs_arrays([(a, e, src)] if isinstance(src, Ramp) else src))
+    try:
+        if heard is None:
+            if (e - a) * int(u) >= 1 << 62:
+                raise OverflowError
+        else:
+            _prefix(heard, [a], True)
+    except OverflowError:
+        from files.midi_read import MidiError
+        raise MidiError("load.keep_too_long", ticks=f"{e - a:,}", most=f"{KEEP_TICKS_MOST:,}") from None
+    near = ts[np.searchsorted(ts, a, "left"):np.searchsorted(ts, e, "right")]
+    inside = near[(near > a) & (near < e)]
+    marks = [np.array([a, e], np.int64), inside]
+    if bs is not None:
+        marks.append(bs[np.searchsorted(bs, a, "right"):np.searchsorted(bs, e, "left")])
+    lo = ls[np.searchsorted(ls, a, "right"):np.searchsorted(ls, e, "left")]
+    gave = []
+    while True:
+        n = sorted_union(marks + [lo])
+        d = np.diff(n)
+        total = d * int(u) if heard is None else np.diff(_prefix(heard, n, True))
+        exact = total / (np.diff(_prefix(drawn, n, False)) / d)
+        note = _member(n, near)
+        real = note | _member(n, lo)
+        close = real[:-1] & real[1:] & (exact < 1)
+        if not len(lo):
+            break
+        j = np.flatnonzero(close)
+        drop = np.where(~note[j + 1], n[j + 1], np.where(~note[j], n[j], -1))
+        drop = drop[drop >= 0]
+        if not len(drop):
+            break
+        lo = np.setdiff1d(lo, drop)
+        gave += np.unique(drop).tolist()
+    dense = n[:-1][close & note[:-1] & note[1:]].tolist()
+    k = np.diff(np.concatenate([[0], np.rint(np.cumsum(exact))])).astype(np.int64)
+    k = np.clip(k, _least(total), total)
+    return [n, total, k, drawn], (int(u) if heard is None else heard), dense, gave
+
+
+def _long_gaps(buf, n, total, k, drawn, every):
+    """file_plan's gap fitting for a part past KEEP_TICKS_MOST (drawn = RunSet), by runs: a gap over a steady drawn
+    tempo (or no longer than `every` file ticks) = its flat pair (or a tick more / fewer, like the per-tick way, or
+    the nearest values), a gap over a curve = fit_block_runs on `every` file ticks (made longer past
+    tempo.CATCH_STEPS_MOST), ideal = the drawn tempo where each step reads it. k may change (a tick more / fewer)."""
+    s, _, du = drawn
+    i0 = np.searchsorted(s, n[:-1], "right") - 1
+    i1 = np.searchsorted(s, n[1:] - 1, "right") - 1
+    curved = (i1 > i0) & (k > every)
+    # (the part's curved gaps: at most CATCH_STEPS_MOST steps all told, else every step longer by one factor;
+    # a value an Interval step over billions of ticks is billions of values: user 2026-11-26, like catch-ups)
+    steps = int((-(-k[curved] // every)).sum())
+    ev = every if steps <= CATCH_STEPS_MOST else every * -(-steps // CATCH_STEPS_MOST)
+    curved = curved.tolist()
+    least = _least(total).tolist()
+    last = None
+    for j in range(len(k)):
+        kj, tj = int(k[j]), int(total[j])
+        if curved[j]:
+            n0, n1 = int(n[j]), int(n[j + 1])
+            blk = np.arange(0, kj, ev, dtype=np.int64)
+            at = n0 + (blk * (n1 - n0)) // kj  # (file ticks read back to Spiderweb's: where the drawn tempo is read)
+            ideal = du[np.clip(np.searchsorted(s, at, "right") - 1, 0, len(s) - 1)].astype(np.float64)
+            lens = np.diff(np.append(blk, kj))
+            got = fit_block_runs(ideal, lens.tolist(), tj) if len(blk) > 1 else None
+            if got is not None:
+                vals, (a, b, ka) = got
+                m = len(vals)
+                rest = kj - int(lens[:m].sum())
+                tail = [(ka, a), (rest - ka, b)]
+                tail = [(x, y) for x, y in tail if x > 0]
+                buf.add_runs(np.concatenate([lens[:m], [x for x, _ in tail]]).astype(np.int64),
+                             np.array(vals + [y for _, y in tail], np.int64))
+                last = tail[-1][1] if tail else (vals[-1] if vals else last)
+                continue
+        pair = None
+        for kk in [kj] + [kj + st * w for st in range(1, 9) for w in (1, -1)]:
+            if least[j] <= kk <= tj:
+                pair = flat_pair_runs(kk, tj)
+                if pair is not None:
+                    kj = kk
+                    k[j] = kk
+                    break
+        if pair is None:  # (nothing near: the nearest values, not Domino-safe)
+            q, r = divmod(tj, kj)
+            pair = (q, q + 1, kj - r)
+        a, b, ka = pair
+        if 0 < ka < kj and last is not None and a != last and b == last:
+            buf.add(kj - ka, b)  # (the run goes on from the gap before: one change fewer)
+            buf.add(ka, a)
+            last = a
+        else:
+            buf.add(ka, a)
+            buf.add(kj - ka, b)
+            last = b if ka < kj else a
+    return ev != every
 
 
 def dense_spots(tempo, base, ppq, beats, ticks, heard=None):
@@ -538,6 +674,11 @@ def finer_parts(tempo, base, ppq, last):
         e = last + 1 if e is None else e
         if e <= a:
             continue
+        if min(e, segs[-1][1]) - a > KEEP_TICKS_MOST:  # (a huge-tick song's part: by runs)
+            got = _finer_long(lay, n, a, min(e, segs[-1][1]), segs, starts, ppq)
+            if got > 1:
+                out.append((a, e, got))
+            continue
         drawn = _per_tick(segs, a, min(e, segs[-1][1]), starts)
         u = keep_heard(lay, n, a, a + len(drawn))  # (the heard tempo: one, or per tick from its heard line)
         if len(drawn) and np.all(drawn <= u):
@@ -545,6 +686,23 @@ def finer_parts(tempo, base, ppq, last):
             if times > 1:
                 out.append((a, e, int(times)))
     return out
+
+
+def _finer_long(lay, n, a, e, segs, starts, ppq):
+    """finer_parts' "times finer" for a part past KEEP_TICKS_MOST, by runs: drawn and heard read on every run edge
+    of either (both hold between edges); 1 = not finer."""
+    ds, _, du = _runs_arrays(_cut(segs, a, e, starts))
+    h = _heard_long(lay, n, a, e)
+    if isinstance(h, int):
+        hs, hu = np.array([a], np.int64), np.array([h], np.int64)
+    else:
+        hs, _, hu = _runs_arrays([(a, e, h)])
+    at = np.union1d(ds, hs)
+    d = du[np.clip(np.searchsorted(ds, at, "right") - 1, 0, len(ds) - 1)]
+    u = hu[np.clip(np.searchsorted(hs, at, "right") - 1, 0, len(hs) - 1)]
+    if not len(at) or not np.all(d <= u):
+        return 1
+    return min(int(np.max(-(-u // d))), FINE_MOST, max(1, FINE_TICKS // ppq))
 
 
 def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(), heard=None):
@@ -578,6 +736,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     end = segs[-1][1]
     # (long curved catch-ups stepped longer than their Interval: the export says so, user 2026-11-26)
     out["coarse"] = [st["line"] for st, cp in lay["worked"] if cp.get("ok") and cp.get("coarse")]
+    out["coarse_keep"] = []  # (Keep timing parts whose curve steps longer than their Interval: _long_gaps)
     every_all = tempo.get("every", EVERY)
     # (each Keep timing part's drawn ramp steps by its own Interval, point[8]: user 2026-11-12)
     every_at = {a: step_of(tempo["points"][i], every_all)[0] for i, a, _, _ in lay["keeps"]}
@@ -596,6 +755,10 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         buf = _RunBuf()
         pre = []
         every = every_at.get(a, every_all)
+        long_part = isinstance(drawn, RunSet)
+        if long_part:  # (a part past KEEP_TICKS_MOST: by runs, PLAN stage E)
+            if _long_gaps(buf, n, total, k, drawn, max(1, int(every))):
+                out["coarse_keep"].append(a / ppq)
 
         def slow(j, last, a=a, n=n, total=total, k=k, drawn=drawn, buf=buf, pre=pre, every=every):
             """Gap j's file tempo into buf the NumPy way (no compiled loops, or a gap gap_plan leaves to Python:
@@ -641,8 +804,10 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
             buf.add_array(got)
             return int(got[-1])
 
-        loops = speed.loops()
-        if loops is None:
+        loops = None if long_part else speed.loops()
+        if long_part:
+            pass
+        elif loops is None:
             last = None
             for j in range(len(k)):
                 last = slow(j, last)
@@ -706,7 +871,8 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
                 if not np.any(on):
                     continue
                 x = t[on] - a
-                want = heard_t[x] if isinstance(heard_t, np.ndarray) else x.astype(np.float64) * heard_t
+                want = (heard_t[x] if isinstance(heard_t, np.ndarray) else _prefix(heard_t, t[on], False)
+                        if isinstance(heard_t, RunSet) else x.astype(np.float64) * heard_t)
                 r = np.clip(np.searchsorted(clock, want, "right") - 1, 0, len(vals) - 1)
                 pos = (starts[r] - fa) + (want - clock[r]) / vals[r]  # (file ticks from the part's start)
                 share[on] = fa + np.ceil(pos - 0.5).astype(np.int64)  # (the nearer tick, the earlier on a tie)
@@ -773,26 +939,46 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     return _in_file(out)
 
 
-def _time_at(pieces, ticks):
-    """Ticks x us from the first piece's start up to each tick (sorted, inside the pieces), exact Python ints:
-    pieces [(a, b, us)] in order, us one number, one per tick or a Ramp (its runs)."""
-    starts, us = [], []
+def _runs_arrays(pieces):
+    """pieces [(a, b, us)] in order (us one number, one per tick, a Ramp, or file_plan's (run starts, values)) ->
+    (run starts, run ends, us) int64 arrays, never a value a tick for a Ramp."""
+    s_, e_, u_ = [], [], []
     for a, b, u in pieces:
+        if b <= a:
+            continue
         if isinstance(u, (int, np.integer)):
-            starts.append(np.array([a], np.int64))
-            us.append(np.array([u], np.int64))
+            s_.append(np.array([a], np.int64))
+            e_.append(np.array([b], np.int64))
+            u_.append(np.array([u], np.int64))
         elif isinstance(u, Ramp):
-            ra, _, ru = u.spans()
-            starts.append(ra + (a - u.a))
-            us.append(ru)
+            ra, rb, ru = u.spans()
+            s_.append(ra + (a - u.a))
+            e_.append(rb + (a - u.a))
+            u_.append(ru)
+        elif isinstance(u, tuple):
+            st, v = np.asarray(u[0], np.int64), np.asarray(u[1], np.int64)
+            s_.append(st)
+            e_.append(np.append(st[1:], b))
+            u_.append(v)
         else:
             v = np.asarray(u, np.int64)
             keep = np.ones(len(v), bool)
             keep[1:] = v[1:] != v[:-1]
-            starts.append(np.arange(a, b, dtype=np.int64)[keep])
-            us.append(v[keep])
-    s = np.concatenate(starts).tolist()
-    u = np.concatenate(us).tolist()
+            st = np.arange(a, b, dtype=np.int64)[keep]
+            s_.append(st)
+            e_.append(np.append(st[1:], b))
+            u_.append(v[keep])
+    if not s_:
+        z = np.zeros(0, np.int64)
+        return z, z, z
+    return np.concatenate(s_), np.concatenate(e_), np.concatenate(u_)
+
+
+def _time_at(pieces, ticks):
+    """Ticks x us from the first piece's start up to each tick (sorted, inside the pieces), exact Python ints:
+    pieces [(a, b, us)] in order, us one number, one per tick or a Ramp (its runs)."""
+    s, _, u = _runs_arrays(pieces)
+    s, u = s.tolist(), u.tolist()
     sums = [0]
     for i in range(len(s) - 1):
         sums.append(sums[-1] + (s[i + 1] - s[i]) * u[i])
@@ -1005,14 +1191,23 @@ def _fit_bar_lines(gaps, keeps, bars, lengths):
                 if cap.sum() < abs(delta):
                     continue
                 share = np.zeros(len(ks), np.int64)
+                # (one tick at a time round the longest gaps, up to each one's room = water filling, worked out at
+                # once: L whole rounds, then one more each to the first gaps still with room; the same shares as
+                # the round-by-round loop, which took minutes over a huge-tick song's bars, PLAN stage E)
                 left = abs(delta)
-                while left:  # (one tick at a time round the longest gaps, up to each one's room)
-                    for o, c in zip(order.tolist(), cap.tolist()):
-                        if not left:
-                            break
-                        if abs(share[o]) < c:
-                            share[o] += 1 if delta > 0 else -1
-                            left -= 1
+                lo_l, hi_l = 0, int(cap.max())
+                while lo_l < hi_l:
+                    mid = (lo_l + hi_l + 1) // 2
+                    if int(np.minimum(cap, mid).sum()) <= left:
+                        lo_l = mid
+                    else:
+                        hi_l = mid - 1
+                got = np.minimum(cap, lo_l)
+                rest = left - int(got.sum())
+                if rest:
+                    more = np.flatnonzero(cap > lo_l)[:rest]
+                    got[more] += 1
+                share[order] = got if delta > 0 else -got
                 for o in np.flatnonzero(share).tolist():
                     p, j = where[o]
                     gaps[p][2][j] += share[o]

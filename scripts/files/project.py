@@ -1867,6 +1867,8 @@ class ProjectFiles:
             note += tr("project.tempo_unfit", where=self.bar_text(plan["unfit"][0]))
         if plan.get("coarse"):  # (a long curved catch-up stepped longer than its Interval: tempo._catch_long)
             note += tr("project.tempo_catch_coarse", where=self.bar_text(plan["coarse"][0]))
+        if plan.get("coarse_keep"):  # (a long Keep timing part's curve stepped longer: tempo_file._long_gaps)
+            note += tr("project.tempo_keep_coarse", where=self.bar_text(plan["coarse_keep"][0]))
         if plan.get("moved"):  # (bar carry-over, user 2026-10-24: no surprises in the export)
             note += tr("project.tempo_moved", where=self.bar_text(plan["moved"][0]))
         if plan.get("gave"):  # (a heads-up only, user 2026-10-23)

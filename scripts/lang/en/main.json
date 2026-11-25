@@ -2955,6 +2955,7 @@
  "project.tempo_moved":"\n\nNo time signature fits some bars Keep timing changed, so other programs show a few bar lines a little off, first at {where}; the bars after put them back (the sound is right).",
  "project.tempo_dense": "\n\nNotes in the Keep timing part at {where} are too close together for its slower tempo, so the tempo there stays faster (the timing is still right). A higher PPQ gives them room.",
  "project.tempo_catch_coarse": "\n\nA catch-up is too long to change its tempo every Interval, so it changes in longer steps (same shape, and it still ends exactly on time), first at {where}.",
+ "project.tempo_keep_coarse": "\n\nA Keep timing part is too long to change its tempo every Interval, so it changes in longer steps (every note still sounds exactly on time), first at {where}.",
  "project.dms_tempo_thinned":"\n\nThe tempo has more than 1,000,000 changes, too many for Domino, so for Domino its fast-changing ramps change in longer steps (each step takes the same time as before). Export MIDI keeps every change.",
  "project.dms_tempo_slow":"\n\nSome tempos are slower than about 5.35 BPM. A Domino file can't hold those exactly, so a MIDI file Domino saves from it may be a microsecond or so off per beat there. Export MIDI keeps them exact.",
  "project.tempo_hz": "\n\nA Hz bass is out of tune (from {where}): the tempo under it changed since it was made. Pick it and press Update Hz bass.",
