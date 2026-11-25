@@ -79,6 +79,9 @@ def packed_guess(streams, slices=INDEX_SLICES, rows=()):
         if size <= GUESS_SLICES * GUESS_SLICE:  # (whole, as one run: saved joined)
             total += len(zlib.compress(b"".join((p.reshape(-1, w).T if w > 1 else p).tobytes() for p in parts), 6))
             continue
+        if len(parts) > 1 and size // len(parts) < GUESS_SLICE:  # (many small pieces, thousands of tracks: joined
+            # as saved; slices cut at each piece's end guessed 30x high, hunt 2026-11-25)
+            parts = [np.concatenate(parts)]
         ends = np.cumsum([len(p) for p in parts])
         packed = taken = 0
         for at in np.linspace(0, size - GUESS_SLICE, GUESS_SLICES).astype(np.int64).tolist():
@@ -95,10 +98,10 @@ def packed_guess(streams, slices=INDEX_SLICES, rows=()):
     return total
 
 
-def _arrays(lm, head):
-    """The arrays an index is saved as (head = its JSON)."""
+def _arrays(lm):
+    """The arrays an index is saved as."""
     level0 = lm._level0 if lm._level0 is not None else lm.levels[0]  # (as loaded: never the Extract one)
-    arrays = {"head": np.frombuffer(json.dumps(head).encode("utf-8"), np.uint8), "cnt": level0[0], "top": level0[1],
+    arrays = {"head": _head_bytes(lm), "cnt": level0[0], "top": level0[1],
               "edges": np.concatenate([e.reshape(-1) for e in lm.edges])}  # (every level: made from a grid not kept)
     for k in ARRAYS:
         parts = [getattr(i, k).reshape(-1) for i in lm.tracks]
@@ -106,18 +109,17 @@ def _arrays(lm, head):
     return arrays
 
 
-def disk_guess(lm):
-    """About the bytes Save Index writes for lm: its index compressed + Kestrel's read-ahead with it (asked first)."""
+def disk_guess(lm, ahead=True):
+    """About the bytes Save Index writes for lm: its index compressed (+ Kestrel's read-ahead with it, asked first)."""
     from files.play_dense import kept_bytes
     level0 = lm._level0 if lm._level0 is not None else lm.levels[0]
     streams = [[level0[0]], [level0[1]], list(lm.edges)] + [[getattr(i, k) for i in lm.tracks] for k in ARRAYS]
-    return packed_guess(streams) + kept_bytes(lm)
+    # (+ the head: its per-track text is most of it past thousands of tracks, hunt 2026-11-25)
+    return packed_guess(streams + [[_head_bytes(lm)]]) + (kept_bytes(lm) if ahead else 0)
 
 
-def save_index(lm):
-    """Writes lm's index (a loaded MIDI read from its file), compressed (user 2026-11-25: Shinki 121 -> 7.5 MB, saved
-    and read as quickly). Returns its size in bytes (+ the guess of Kestrel's read-ahead written with it, in the
-    background)."""
+def _head_bytes(lm):
+    """The index's head (JSON) as saved."""
     from notes.loaded import PAIRING
     mf = lm.mf
     head = {"ver": INDEX_VER, "pairing": PAIRING, "path": mf.path, "size": mf.size, "mtime": mf.mtime,
@@ -127,18 +129,32 @@ def save_index(lm):
                         "last_tick": int(t.last_tick), "after": int(t.after), "hash": t.hash} for t in mf.tracks],
             "infos": [{k: _plain(getattr(i, k)) for k in SCALARS} for i in lm.tracks],
             "shapes": {k: [list(getattr(i, k).shape) for i in lm.tracks] for k in ARRAYS}}
-    buf = io.BytesIO()
-    np.savez_compressed(buf, **_arrays(lm, head))  # (older uncompressed ones open the same way: kept, user)
-    data = buf.getvalue()
+    return np.frombuffer(json.dumps(head).encode("utf-8"), np.uint8)
+
+
+def save_index(lm, ahead=False):
+    """Writes lm's index (a loaded MIDI read from its file), compressed (user 2026-11-25: Shinki 121 -> 7.5 MB, saved
+    and read as quickly). ahead = the question said Kestrel's read-ahead's size too: it's written with it, in the
+    background (lm.dense_job = [thread, [bytes written or False] once done, index bytes]); else a read-ahead all read since is ASKED about on
+    its own (hunt 2026-11-25: written unasked). Returns the index's size (+ the read-ahead's guess when written)."""
+    data = io.BytesIO()
+    np.savez_compressed(data, **_arrays(lm))  # (older uncompressed ones open the same way: kept, user)
+    data = data.getvalue()
     os.makedirs(FOLDER, exist_ok=True)
-    write_bytes(index_file(mf.path, mf.size), data)
-    from files.play_dense import kept_bytes, save
-    more = kept_bytes(lm)
-    if more:  # (Kestrel's read-ahead, all read already: kept with it, written in the background: Shinki's ~3 GB
-        # held the window, hunt 2026-10-28; counted in the size said)
+    write_bytes(index_file(lm.mf.path, lm.mf.size), data)
+    from files.play_dense import kept_bytes, may_keep, save
+    d = getattr(lm, "dense", None)
+    more = kept_bytes(lm) if ahead else 0
+    lm.dense_job = None
+    if more:  # (all read already, written in the background: Shinki's ~3 GB held the window, hunt 2026-10-28)
         import threading
-        lm.dense.unsaved = False  # (the question said its size: asked)
-        threading.Thread(target=save, args=(lm.dense,), daemon=True, name="kestrel-dense-save").start()
+        d.unsaved = False
+        got = []
+        th = threading.Thread(target=lambda: got.append(save(d)), daemon=True, name="kestrel-dense-save")
+        lm.dense_job = [th, got, len(data)]
+        th.start()
+    elif d is not None and d.done() and may_keep(d):
+        d.unsaved = True  # (App.watch_ahead asks: "Keep it / Don't keep it / Not now")
     return len(data) + more
 
 

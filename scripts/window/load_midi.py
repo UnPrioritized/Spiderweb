@@ -99,8 +99,9 @@ def offer_index(app, lm):
     window (user 2026-10-25, picked A: deleting the index meant it was never offered again)."""
     if app.loaded is not lm or not saved.offer(lm):
         return
+    ahead = kept_bytes(lm) > 0  # (its size in the question: only then written with it, hunt 2026-11-25)
     answer = ask_choice(app, tr("load.title"), tr("load.index_ask", s=f"{lm.seconds:.0f}",
-                                                  size=size_text(saved.disk_guess(lm))),
+                                                  size=size_text(saved.disk_guess(lm, ahead))),
                         [("save", tr("load.index_save")), ("never", tr("load.index_never")),
                          ("later", tr("load.index_later"))])
     if answer == "never":
@@ -109,15 +110,36 @@ def offer_index(app, lm):
         app.config(cursor="watch")
         app.update_idletasks()
         try:
-            about = kept_bytes(lm) > 0  # (Kestrel's read-ahead goes with it, written in the background: guessed)
-            size = saved.save_index(lm)
+            size = saved.save_index(lm, ahead)
         except OSError as e:
             messagebox.showerror(tr("load.title"), tr("load.index_failed", why=e.strerror or str(e)), parent=app)
         else:
-            app.status.config(text=tr("load.index_saved_status_about" if about else "load.index_saved_status",
-                                      size=size_text(size)))
+            index_saved_said(app, app, lm, size, "load.index_saved_status",
+                             lambda text: app.status.config(text=text))
         finally:
             app.config(cursor="")
+
+
+def index_saved_said(app, w, lm, size, key, show):
+    """After Save Index: show(text) says it was saved; with Kestrel's read-ahead written in the background, "about"
+    until that ends, then the real size or that it couldn't be kept (hunt 2026-11-25: "still being written" stayed).
+    A read-ahead all read but not in the question is asked about on its own (App.watch_ahead)."""
+    job = getattr(lm, "dense_job", None)
+    if job is None:
+        show(tr(key, size=size_text(size)))
+        d = getattr(lm, "dense", None)
+        if d is not None and d.unsaved and app.loaded is lm:
+            app.watch_ahead()
+        return
+    show(tr(key + "_about", size=size_text(size)))
+    th, got, index_size = job
+
+    def check():
+        if th.is_alive():
+            w.after(500, check)
+        elif w.winfo_exists():
+            show(tr(key, size=size_text(index_size + got[0])) if got and got[0] else tr("ks.keep_failed"))
+    w.after(500, check)
 
 
 def use_changed(app, lm):
@@ -439,7 +461,8 @@ class LoadWindow(tk.Toplevel):
         """The summary's question: save the index (its size), or never ask for this file. Returns the tick's var."""
         box = ttk.Frame(self.body)
         box.pack(anchor="w", fill="x", pady=(12, 0))
-        ttk.Label(box, text=tr("load.index_ask", s=f"{lm.seconds:.0f}", size=size_text(saved.disk_guess(lm))),
+        ahead = kept_bytes(lm) > 0  # (its size in the question: only then written with it, hunt 2026-11-25)
+        ttk.Label(box, text=tr("load.index_ask", s=f"{lm.seconds:.0f}", size=size_text(saved.disk_guess(lm, ahead))),
                   wraplength=460, justify="left").pack(anchor="w")
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(6, 0))
@@ -449,12 +472,11 @@ class LoadWindow(tk.Toplevel):
             self.config(cursor="watch")
             self.update_idletasks()
             try:
-                about = kept_bytes(lm) > 0  # (Kestrel's read-ahead goes with it, written in the background: guessed)
-                size = saved.save_index(lm)
+                size = saved.save_index(lm, ahead)
             except OSError as e:
                 done.config(text=tr("load.index_failed", why=e.strerror or str(e)), foreground=look.WARN)
             else:
-                done.config(text=tr("load.index_saved_about" if about else "load.index_saved", size=size_text(size)))
+                index_saved_said(self.app, done, lm, size, "load.index_saved", lambda text: done.config(text=text))
                 for w in (button, tick):
                     w.state(["disabled"])
             finally:

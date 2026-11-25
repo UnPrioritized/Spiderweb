@@ -30,6 +30,7 @@ SAVED_VER = 3  # (a saved read-ahead: how parts are read / collapsed changed = a
 SAVED_END = ".dense.npz"  # (beside the saved index: <index name>.dense.npz)
 DECLINED_END = ".dense.no"  # (beside it: the user said No to keeping it)
 PART_ARRAYS = ("ts", "ms", "tr", "cp", "s0_q", "s0_n")  # (each part's, saved as <name><part number>)
+EVENT_BYTES = 14  # (ts int32 + ms uint32 + tr uint16 + cp uint32 an event, in memory)
 BYTE_ROWS = ("ms", "cp")  # (saved as midi_saved.byte_rows, the head says so: older kept ones open as they are)
 
 
@@ -301,13 +302,22 @@ def declined_file(index):
     return index[:-4] + DECLINED_END
 
 
+def keepable(d):
+    """d is all read, holds parts, none left out for the memory cap (kept, those would never be read ahead again
+    while it's used: hunt 2026-11-25) and lm is still as loaded."""
+    try:
+        return (d is not None and d.done() and d.error is None and bool(d.parts) and not getattr(d, "capped", 0)
+                and _as_loaded(d.lm) and d.key == key_of(d.lm))
+    except Exception:
+        return False
+
+
 def may_keep(d):
     """d (all read) may be offered for keeping: lm as loaded with a saved index, none kept yet, not declined."""
     lm = d.lm
     try:
         from files import midi_saved
-        if d.error is not None or not d.parts or not _as_loaded(lm) or d.key != key_of(lm) \
-                or not midi_saved.has_index(lm.mf):
+        if not keepable(d) or not midi_saved.has_index(lm.mf):
             return False
         index = midi_saved.index_file(lm.mf.path, lm.mf.size)
         # (one kept that couldn't be used, an older format: offered again, kept over it, hunt 2026-10-28)
@@ -346,9 +356,16 @@ def _saved_head(lm):
 def kept_bytes(lm):
     """About the bytes Save Index also writes for lm's read-ahead (all read, as loaded), compressed, else 0 (hunt
     2026-10-28: the question showed the index alone; Shinki's ~3 GB is ~290 MB compressed, user 2026-11-25: "about"
-    that, guessed from a sample, worked out once per set of parts)."""
+    that, guessed from a sample, worked out once per set of parts). 0 = Save Index writes none: not keepable, or
+    the user said not to keep this MIDI's (hunt 2026-11-25: Save Index wrote it anyway)."""
     d = getattr(lm, "dense", None)
-    if d is None or not d.done() or d.error is not None or not _as_loaded(lm) or d.key != key_of(lm):
+    if not keepable(d):
+        return 0
+    try:
+        from files import midi_saved
+        if os.path.exists(declined_file(midi_saved.index_file(lm.mf.path, lm.mf.size))):
+            return 0
+    except Exception:
         return 0
     ps = d.parts
     got = getattr(d, "_guess", None)
@@ -443,6 +460,10 @@ def _load(lm, todo):
             head = json.loads(bytes(z["head"]).decode("utf-8"))
             if {k: head.get(k) for k in ("ver", "size", "mtime", "layout", "rules")} != \
                     json.loads(json.dumps(_saved_head(lm))) or head.get("todo") != [list(map(int, t)) for t in todo]:
+                return None
+            from files.system import free_memory
+            free = free_memory()  # (the same cap as reading it: over it = read again, densest first, hunt 11-25)
+            if free and sum(int(p[2]) for p in head["parts"]) * EVENT_BYTES > DENSE_SHARE * free:
                 return None
             parts = []
             rows = head.get("rows", {})  # (byte rows since 2026-11-25; older kept ones = plain arrays)

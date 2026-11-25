@@ -981,15 +981,19 @@ class Playback:
             return
         if not d.unsaved:
             return
-        from files.play_dense import decline, kept_bytes, save
+        from files.play_dense import decline, kept_bytes, may_keep, save
         from window.load_midi import ask_choice, size_text
+        if not may_keep(d):  # (Extract, channels, removed tracks since it was read: never asked, hunt 2026-11-25 =
+            # "about 0.1 MB" then "couldn't be kept"; offered again at the next load)
+            d.unsaved = False
+            return
         size = kept_bytes(lm)
         answer = ask_choice(self, tr("ks.keep_title"),
                             tr("ks.keep_ask", name=os.path.basename(lm.path), size=size_text(size),
                                s=f"{d.took:.0f}"),
                             [("keep", tr("ks.keep_yes")), ("never", tr("ks.keep_never")),
                              ("later", tr("ks.keep_later"))], focus="later")  # (Space / Enter never keep 3 GB)
-        if self.loaded is not lm or lm.dense is not d or not d.unsaved:  # (changed while asked)
+        if self.loaded is not lm or lm.dense is not d or not d.unsaved or not may_keep(d):  # (changed while asked)
             return
         if answer == "keep":
             d.unsaved = False
