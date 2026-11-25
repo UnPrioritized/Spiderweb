@@ -15,6 +15,7 @@ piece (like a slide's square: sticks to straight within BEND_STICK px, Shift = f
 as the first point's third number (hz_lines.bent_part); double-click it = straight again."""
 
 import copy
+import math
 import tkinter as tk
 
 import numpy as np
@@ -721,7 +722,9 @@ def shaped(kind, length):
         pts += [[1.0 - RAMP[0], 0.0, -0.6], [1.0, end]] if end is not None else [[1.0, 0.0]]
         return pts
     rate, depth = WOBBLE  # wobble: quarter waves, each piece curved like a sine's (fast out of 0, slow at the tops)
-    count = min(WOBBLE_MOST, max(2, round(4 * rate * length)))  # (a note under a wave long: part of one)
+    # (a note under a wave long: part of one; WHOLE HALF WAVES so it ends on its line: an odd count of quarters ended
+    # on a peak, a 3/16-beat note half a key low)
+    count = min(WOBBLE_MOST, 2 * max(1, math.floor(2 * rate * length + 0.5)))
     return [[k / count, (0.0, depth, 0.0, -depth)[k % 4], 0.6 if k % 2 == 0 else -0.6] for k in range(count + 1)]
 
 
