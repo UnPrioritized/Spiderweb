@@ -339,6 +339,9 @@ class SettingsWindow(tk.Toplevel):
         self.build_domino(f)
         self.build_indexes(page("loaded", tr("settings.cat_loaded")))
         self.build_language(page("language", tr("settings.language_tab")))
+        for name, p in self.pages.items():  # (a page growing / shrinking: the defaults list follows at once)
+            if name != "defaults":
+                p.page.bind("<Configure>", lambda e: self.fit_defaults_list(), add="+")
         tabs.select(0)
         self.bind("<Escape>", lambda e: self.close())
         self.protocol("WM_DELETE_WINDOW", self.close)
@@ -715,7 +718,11 @@ class SettingsWindow(tk.Toplevel):
             too much empty space under them)."""
             if not box.winfo_exists():
                 return
-            room = page.winfo_height() - box.winfo_y() - row.winfo_reqheight() - round(12 * s)
+            # (sized from the OTHER pages, never this page's own height: that held the window at its old size and
+            # it crept down a few pixels a round after Kestrel -> Built-in BASSMIDI, user 2026-11-26)
+            tall = [min(p.page.winfo_reqheight(), p.most or 10 ** 6)
+                    for name, p in self.pages.items() if name != "defaults"]
+            room = max(tall, default=page.winfo_height()) - box.winfo_y() - row.winfo_reqheight() - round(12 * s)
             want = max(round(120 * s), room)
             if abs(box.winfo_reqheight() - want) > 1:
                 box.configure(height=want)
