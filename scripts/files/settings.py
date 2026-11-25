@@ -184,6 +184,7 @@ APP_KEYS = {
     "hidden_shade": ("look", "hidden_note_shade", bool),
     "space_keys": ("view", "space_past_the_keys", int),  # (keyboard heights; SPACE_KEYS)
     "space_bars": ("view", "space_before_the_start_bars", int),  # (SPACE_BARS)
+    "even_rows": ("view", "even_key_rows", bool),  # (roll_shared.even_rows)
     "keep_offrange": ("view", "keep_notes_made_there", bool),  # (App.offrange_tracks)
     "offrange_opacity": ("view", "kept_notes_opacity", int),  # (% 1-100; roll_draw.OFF_FADE)
     "wrap_offrange": ("view", "wrap_kept_notes_around", bool),  # (App.outgoing)

@@ -11,7 +11,7 @@ from files.mathexpr import fmt
 from notes.hzbass import (HZ_DEFAULTS, NOTE_BEND_MOST, all_tones, auto_state, bend_range, can_slide, glide, handle_u, heard, hz_of, layers_of,
                           bends, funnel_box, left_edge, links, pitch, slide_knob, slide_part, tone_keys)
 from roll.roll_shared import (ALT, CTRL, MAX_SX, MIN_SX, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name,
-                              recheck_pointer, ruler_boxes)
+                              recheck_pointer, ruler_boxes, even_rows, whole_fit, whole_row)
 from notes.custom import box_frame
 from notes.hzbass import sound_span
 from notes.meter import bar_lines, beat_lines, sigs_of
@@ -79,9 +79,25 @@ class HzView:
         if not all(map(math.isfinite, v.values())):
             return
         self.sx = min(MAX_SX, max(MIN_SX, v["sx"] * self.s))
-        self.sy = min(60.0 * self.s, max(1.0, v["sy"] * self.s))
+        self.sy = self.even_sy(min(60.0 * self.s, max(1.0, v["sy"] * self.s)))
         self.t0, self.top = v["t0"], v["top"]
         self.fitted = True
+
+    def even_sy(self, sy, old=None):
+        """sy as the row height this window uses: whole pixels with Settings → Piano roll "Even key rows" on (old:
+        the height before an up / down zoom step), else as it is (roll_shared.whole_row)."""
+        return whole_row(sy, 60.0 * self.s, old) if even_rows(self.app) else sy
+
+    def rows_changed(self):
+        """"Even key rows" was ticked / unticked: rows snapped to the nearest whole height (the middle key stays)."""
+        if not even_rows(self.app):
+            return
+        y = (self.ruler_h + self.canvas.winfo_height()) / 2
+        k = self.top - (y - self.ruler_h) / self.sy
+        self.sy = self.even_sy(self.sy)
+        self.top = k + (y - self.ruler_h) / self.sy
+        self.clamp_view()
+        self.redraw()
 
     def on_resize(self, e=None):
         """The canvas got its size or changed size: the notes in sight the first time, no empty space past the
@@ -174,6 +190,8 @@ class HzView:
             keys = [k for n in tones for k in tone_keys(n)]  # (bends too: they may go past keys 0 / 127)
             rows = math.ceil(max(keys) - min(keys)) + 1 + 4  # (two keys of room above and below)
             self.sy = min(12.0 * self.s, max(1.0, h / rows))  # (a few notes: not huge rows)
+            if even_rows(self.app):  # (the biggest whole row height where they all fit)
+                self.sy = whole_fit(h, rows, 12.0 * self.s)
             self.top = (max(keys) + min(keys)) / 2 + h / self.sy / 2
         self.clamp_view()
         self.redraw()
@@ -187,7 +205,7 @@ class HzView:
     def zoom_y(self, f, y):
         """Zoom the keys by f; the key at canvas y stays where it is."""
         k = self.top - (y - self.ruler_h) / self.sy
-        self.sy = min(60.0 * self.s, max(1.0, self.sy * f))
+        self.sy = self.even_sy(min(60.0 * self.s, max(1.0, self.sy * f)), self.sy)
         self.top = k + (y - self.ruler_h) / self.sy
 
     def bar_view(self, across):
@@ -222,7 +240,7 @@ class HzView:
             self.t0 = (a if which == "end" else b - px / self.sx) - 0.25
         else:
             px = max(1, c.winfo_height() - self.ruler_h)
-            self.sy = min(60.0 * self.s, max(1.0, px / (b - a)))
+            self.sy = self.even_sy(min(60.0 * self.s, max(1.0, px / (b - a))))
             self.top = self.key_room()[1] - (a if which == "end" else b - px / self.sy)
         self.clamp_view()
         self.redraw()

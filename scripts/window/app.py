@@ -349,6 +349,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         # start" (bars before beat 0, 0 = off): the main piano roll may scroll there (user 2026-11-06; roll limits)
         self.space_keys = tk.IntVar(self, value=0)
         self.space_bars = tk.IntVar(self, value=0)
+        # Settings → Piano roll "Even key rows" (off; user 2026-11-25): every key row the same whole number of pixels
+        # tall in both piano rolls (roll_shared.whole_row: up / down zoom + Fit view snap to it)
+        self.even_rows = tk.BooleanVar(self, value=False)
         # ... "Keep notes made there" (off; user 2026-11-08): shapes keep the notes they make in that space, kept
         # apart from the real notes (App.offrange_tracks), so nothing that leaves Spiderweb ever gets them
         self.keep_offrange = tk.BooleanVar(self, value=False)

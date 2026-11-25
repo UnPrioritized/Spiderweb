@@ -24,6 +24,31 @@ LONG_STROKE = 64  # a stroke with more points than this (freehand) shows only so
 VIEW_REST = 0.5  # seconds the view must rest (scrolled / zoomed by hand) before playing turns its page again
 
 
+def even_rows(app):
+    """Settings → Piano roll "Even key rows" (user 2026-11-25): every key row the same whole number of pixels tall,
+    in the main piano roll and the Hz window."""
+    return bool(getattr(getattr(app, "even_rows", None), "get", lambda: False)())
+
+
+def whole_row(sy, most, old=None):
+    """A key row height as a whole number of pixels, 1..most (rounded down). old = the height before an up / down
+    zoom: each zoom step then moves at least 1 px (more when the zoom jumps further: the nearest whole height)."""
+    top = max(1, math.floor(most + 1e-9))
+    h = round(sy)
+    if old is not None:
+        was = round(old)
+        if sy > old + 1e-9:
+            h = max(h, was + 1)
+        elif sy < old - 1e-9:
+            h = min(h, was - 1)
+    return float(max(1, min(top, h)))
+
+
+def whole_fit(px, rows, most):
+    """The biggest whole row height where rows rows fit in px pixels (at least 1 px, at most most)."""
+    return whole_row(max(1.0, math.floor(px / max(1, rows) + 1e-9)), most)
+
+
 class PlayFollow:
     """While playing, a view follows the play line only when the user isn't moving it (user 2026-10-23, like
     Domino: scrolled while playing, it fought the mouse; once they stop, it snaps back to the line). Any change of

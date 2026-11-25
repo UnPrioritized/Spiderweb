@@ -718,6 +718,7 @@ class ProjectFiles:
                               "loud_on_top": self.stack_order.get() == "loud",
                               "hidden_shade": self.hidden_shade.get(),
                               "space_keys": self.space_keys.get(), "space_bars": self.space_bars.get(),
+                              "even_rows": self.even_rows.get(),
                               "keep_offrange": self.keep_offrange.get(),
                               "offrange_opacity": self.offrange_opacity.get(),
                               "wrap_offrange": self.wrap_offrange.get(),
@@ -987,6 +988,11 @@ class ProjectFiles:
                 v = win.get(key)
                 getattr(self, key).set(v if v in steps and not isinstance(v, bool) else 0)
             self.keep_offrange.set(win.get("keep_offrange") is True)
+            if self.even_rows.get() != (win.get("even_rows") is True):
+                self.even_rows.set(win.get("even_rows") is True)
+                roll = getattr(self, "roll", None)  # (none yet at the start: its first Fit view snaps)
+                if roll is not None:
+                    roll.rows_changed()
             self.wrap_offrange.set(win.get("wrap_offrange") is True)
             from files.settings import OFFRANGE_OPACITY, WRAP_SHOWN
             shown = win.get("show_wrapped")

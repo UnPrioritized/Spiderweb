@@ -421,7 +421,15 @@ class SettingsWindow(tk.Toplevel):
         (and shapes go) past the lowest / highest key and before beat 0. No notes are made there. Read by place."""
         from files.settings import SPACE_BARS, SPACE_KEYS
         app = self.app
+
+        def even():  # ("Even key rows", user 2026-11-25: both piano rolls snap to whole row heights at once)
+            app.roll.rows_changed()
+            hz = getattr(app, "hz_window", None)
+            if hz is not None and hz.winfo_exists():
+                hz.rows_changed()
+            app.schedule_autosave()
         f.head(tr("settings.head_space"))
+        f.row(None, self.tick(f.page, "settings.even_rows", app.even_rows, even, tip=tr("settings.even_rows_tip")))
         self.space_boxes = []
         for var, steps, row, tip, word in ((app.space_keys, SPACE_KEYS, "settings.space_keys",
                                             "settings.space_keys_tip", "settings.space_keys_n"),

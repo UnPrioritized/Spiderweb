@@ -1,10 +1,10 @@
-Wheel = scroll up / down, Shift+wheel = sideways. Ctrl+Alt+wheel = zoom both ways, Ctrl+Shift+wheel = zoom time, Alt+wheel = zoom pitch. Ctrl+wheel = the next / previous track (shown alone, its name on the status line; down goes to the next one). Middle-drag scrolls. Fit view shows everything. The zoom and scroll are remembered.
+Wheel = scroll up / down, Shift+wheel = sideways. Ctrl+Alt+wheel = zoom both ways, Ctrl+Shift+wheel = zoom time, Alt+wheel = zoom pitch. Ctrl+wheel = the next / previous track (shown alone, its name on the status line; down goes to the next one). Middle-drag scrolls. Fit view shows everything. The zoom and scroll are remembered. [page:settings#Even key rows|Settings] → Piano roll → Even key rows keeps every key row the same number of pixels tall.
 
 Scrollbars (under and right of the piano roll): drag the bar to scroll, drag one of its two ends to zoom, click beside it to go one screen that way. The − and + buttons at the end of each scrollbar zoom out / in. The bar under the piano roll reaches 8 bars past the last note.
 
 Show lines / Show notes (top) hide the drawn lines or the notes. Keys outside a real 88-key piano are greyed on the keyboard (with 256 keys: the keys above the usual 128). A shape wholly above the top key shows a small red up arrow at the top of the piano roll: click it to grab the shape.
 
-Space past the edges ([page:settings#Piano roll: Space past|Settings] → Piano roll): "Space past the keys" lets the piano roll go 1 to 4 keyboard heights below the lowest key and above the highest one, and "Space before the start" up to 16 bars before the first beat. The extra space is drawn darker, with the key rows and bar lines going on.
+Space past the edges ([page:settings#Space past the keys / Space before|Settings] → Piano roll): "Space past the keys" lets the piano roll go 1 to 4 keyboard heights below the lowest key and above the highest one, and "Space before the start" up to 16 bars before the first beat. The extra space is drawn darker, with the key rows and bar lines going on.
 
 Scroll there, move shapes, points and handles there, draw there, or start a [page:select|Select] box there; no notes are made there (unless Keep notes made there is ticked: then they're kept see-through, see [page:offrange|Notes past the keys]). A shape partly out there makes its notes as a whole (velocity, note tool pages, [page:sustain|Sustain]…) and only the part inside the keys, from the first beat on, is kept; a note across the first beat starts on it.
 

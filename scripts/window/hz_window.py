@@ -114,6 +114,7 @@ class HzWindow(HzDraw, HzSketch, HzBox, HzBend, HzNoteTools, HzSimplify, HzLfo, 
         names = tkfont.Font(font=look.font(8, "bold"))  # the keys column: wide enough for the
         self.kb_w = max(self.kb_w, round(20 * s) + max(names.measure(tr("hz.fx_" + n)) for n in FX))  # effects' names
         self.sx, self.sy, self.t0, self.top = 80.0 * s, 12.0 * s, -0.25, 64.0
+        self.sy = self.even_sy(self.sy)  # (Settings → Piano roll "Even key rows": whole pixels)
         self.fitted = False
         self.homed = ()  # (the Hz bass with no notes the view last went back to the start for: sync)
         if app.hz_view:  # (as it was when last closed)

@@ -49,7 +49,7 @@ from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT,
                               RULER_TOP, VEL_TOP, bind_double_right, black_bands, box_kind, boxes_side, boxes_upright,
                               cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box, mouse_trail,
-                              note_name, ruler_boxes)
+                              note_name, ruler_boxes, even_rows, whole_fit, whole_row)
 from roll.roll_lasso import LassoDrawing
 from roll.roll_pen import PenCircle
 from notes.pen import ink_at
@@ -908,7 +908,26 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.sx = (w - self.kb_w) / (span * 1.06)
         self.view_t = max(0.0, lo - span * 0.03)
         self.sy = (h - self.ruler_h) / self.app.keys
+        if even_rows(self.app):  # (the biggest whole row height where every key fits; the rest left at the bottom)
+            self.sy = whole_fit(h - self.ruler_h, self.app.keys, 60 * self.scale)
         self.view_top = self.app.keys - 0.5
+        self.request_redraw()
+
+    def even_sy(self, sy, old=None):
+        """sy as the row height the piano roll uses: whole pixels with "Even key rows" on (old: the height before an
+        up / down zoom step), else as it is."""
+        return whole_row(sy, 60 * self.scale, old) if even_rows(self.app) else sy
+
+    def rows_changed(self):
+        """"Even key rows" was ticked / unticked: rows snapped to the nearest whole height (the key in the middle
+        stays where it is)."""
+        if self.sy is None or not even_rows(self.app):
+            return
+        y = (self.ruler_h + self.winfo_height()) / 2
+        p = self.y2p(y)
+        self.sy = self.even_sy(self.sy)
+        self.view_top = p + (y - self.ruler_h) / self.sy
+        self.clamp_view()
         self.request_redraw()
 
     def view_state(self):
@@ -931,7 +950,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     def apply_saved_view(self):
         v, self._saved_view = self._saved_view, None
         self.sx = min(MAX_SX, max(MIN_SX, v["sx"] * self.scale))
-        self.sy = min(60 * self.scale, max(self.least_sy(), v["sy"] * self.scale))
+        self.sy = self.even_sy(min(60 * self.scale, max(self.least_sy(), v["sy"] * self.scale)))
         self.view_t, self.view_top = v["t"], v["top"]
         self.clamp_view()
         self.request_redraw()
@@ -998,7 +1017,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.view_t = a if which == "end" else b - px / self.sx
         else:
             px = max(1, self.winfo_height() - self.ruler_h)
-            self.sy = min(60 * self.scale, max(self.least_sy(), px / (b - a)))
+            self.sy = self.even_sy(min(60 * self.scale, max(self.least_sy(), px / (b - a))))
             self.view_top = self.app.keys - 0.5 - (a if which == "end" else b - px / self.sy)
         self.clamp_view()
         self.request_redraw()
@@ -1017,7 +1036,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     def zoom_y(self, f, y):
         """Zoom the keys by f; the key at canvas y stays where it is."""
         p = self.y2p(y)
-        self.sy = min(60 * self.scale, max(self.least_sy(), self.sy * f))
+        self.sy = self.even_sy(min(60 * self.scale, max(self.least_sy(), self.sy * f)), self.sy)
         self.view_top = p + (y - self.ruler_h) / self.sy
 
     def zoom_step(self, across, f):

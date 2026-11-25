@@ -8,6 +8,8 @@ What's new:
 
 • Copy along a path can turn the copies: the new Turn boxes under Size set the first and the last copy's angle, and the ones between turn step by step (0 → 360 spins them once along the path). Bigger, smaller and turned copies are now made again from your drawing, so their edges stay clean instead of being stretched into steps. See [page:path|Copy along a path].
 
+• Settings → Piano roll → Even key rows: every key row the same number of pixels tall, in the piano roll and the Hz bass window. Zooming up and down snaps to whole row heights, and Fit view picks the biggest one where every key fits.
+
 • Faster: editing a project with big drawn shapes, like Add between with hundreds of drawn steps, no longer slows down with their size (about 4 to 5 times faster with 500 steps).
 
 • Faster: the outline of any drawn shape makes its notes much faster, so Copy along a path's grown and turned copies of a drawing are made about twice as fast.
