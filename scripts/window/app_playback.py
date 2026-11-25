@@ -16,7 +16,7 @@ from files.lang import tr, trn
 from files.mathexpr import calc
 from files.ahead_play import FOLLOW_S
 from files.playback import AHEAD, BUILTIN, EDO_LANE, KESTREL, MAESTRO, cc_list
-from files.synth import FONT_TYPES, LIVE_DRUMS_CODE, LIVE_PORTS, RATE, Live, Synth, SynthError, silent_list
+from files.synth import FONT_TYPES, LIVE_DRUMS_CODE, LIVE_PORTS, Live, Synth, SynthError, silent_list
 from notes.engine import channels_of, slot_track_channel
 from notes.hz_cc import cc_apart, set_auto_ring, typed_ring
 from notes.hzbass import RING_MOST, has_cc
@@ -645,12 +645,12 @@ class Playback:
                 self.stop_play()
                 self.stopped_back()
                 return
-            sec = self.ahead_play.heard_sec()
             pmap = self.player.map
             if pmap is not None:
+                sec = self.ahead_play.heard_sec(pmap)
                 # (the line = the heard sound; silence while waiting = the line held where the sound waits: the
                 # frame handed out next. Held at "where it is now" it crept on a tick at a time, user 2026-11-03)
-                now_sec = self.ahead_play.play_at / RATE if sec is None else sec
+                now_sec = self.ahead_play.sec_on(self.ahead_play.play_at, pmap) if sec is None else sec
                 if sec is None or abs(pmap.sec(self.playhead * self.player.ppq) - sec) > FOLLOW_S:
                     self.player.follow(now_sec)
         self.pace_play(now)

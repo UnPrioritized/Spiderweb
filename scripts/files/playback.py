@@ -589,16 +589,128 @@ def cc_reset(kinds):
     return out
 
 
+# (song seconds past which a TimeMap counts from an origin near where it plays, see TimeMap; 2^30 s = 34 years,
+# where a decimal second is still exact to ~0.0001 frame)
+FAR_S = float(1 << 30)
+
+
+def _whole(us):
+    """Microseconds a beat (ints, or floats: a speed's u / v) as whole numbers over one shared power of two:
+    (numerators, the power). Exact: a float is a whole number over a power of two."""
+    if all(type(u) is int for u in us):
+        return list(us), 0
+    pairs = [(u, 1) if type(u) is int else float(u).as_integer_ratio() for u in us]
+    p = max(d.bit_length() - 1 for _, d in pairs)
+    return [n << (p - (d.bit_length() - 1)) for n, d in pairs], p
+
+
+_EXACT_FLOAT = 1 << 53
+
+
+def _sums(ticks, whole):
+    """[0, span x microseconds summed ...] in whole numbers: NumPy when every sum fits a decimal exactly (normal
+    songs; 200 k tempo changes summed one by one took ~60 ms), else Python's unbounded ints (huge-tick songs)."""
+    n = len(ticks)
+    if n > 64 and all(type(t) is int for t in (ticks[0], ticks[-1])):
+        try:
+            tk = np.asarray(ticks, np.int64)
+            wh = np.asarray(whole, np.int64)
+        except (OverflowError, TypeError, ValueError):
+            tk = wh = None
+        if tk is not None and tk.dtype == np.int64 and wh.dtype == np.int64 and int(tk[-1]) - int(tk[0]) < _EXACT_FLOAT:
+            dt = np.diff(tk)
+            # (the whole sum as a decimal first: under 2^52 = every partial sum fits, each product too)
+            if float(np.dot(dt.astype(np.float64), wh[:-1].astype(np.float64))) < _EXACT_FLOAT / 2:
+                out = np.zeros(n, np.int64)
+                np.cumsum(dt * wh[:-1], out=out[1:])
+                return out.tolist()
+    from itertools import accumulate
+    from operator import mul, sub
+    return list(accumulate(map(mul, map(sub, ticks[1:], ticks[:-1]), whole), initial=0))
+
+
+def _quick(ppq, changes, v):
+    """(ticks, whole us, sums, seconds a tick) as lists in one NumPy pass, when every tick and us is a whole number
+    and the sums fit a decimal exactly (normal songs with many tempo changes); None = the plain way."""
+    if len(changes) <= 64:
+        return None
+    try:
+        a = np.asarray(changes)
+    except (OverflowError, ValueError):
+        return None
+    if a.ndim != 2 or a.dtype.kind not in "iu" or a.dtype.itemsize > 8:
+        return None
+    tk, us = a[:, 0].astype(np.int64), a[:, 1].astype(np.int64)
+    dt = np.diff(tk)
+    if int(tk[-1]) - int(tk[0]) >= _EXACT_FLOAT or \
+            float(np.dot(dt.astype(np.float64), us[:-1].astype(np.float64))) >= _EXACT_FLOAT / 2:
+        return None
+    sums = np.zeros(len(tk), np.int64)
+    np.cumsum(dt * us[:-1], out=sums[1:])
+    spt = us / 1e6 / ppq
+    return tk.tolist(), us.tolist(), sums.tolist(), (spt / v if v != 1.0 else spt).tolist()
+
+
+def _secs(sums, den, v):
+    """Each whole-number sum in seconds (divided once; a speed v divides once more)."""
+    if len(sums) > 64 and den < _EXACT_FLOAT and max(sums[-1], -sums[0]) < _EXACT_FLOAT \
+            and min(sums[0], sums[-1]) > -_EXACT_FLOAT:
+        out = np.asarray(sums, np.float64) / den  # (exact sums as decimals: one rounding, the same as int / int)
+        return (out / v if v != 1.0 else out).tolist()
+    return [s / den / v for s in sums] if v != 1.0 else [s / den for s in sums]
+
+
 class TimeMap:
     """Seconds into the song at each tick, from tempo changes [(tick, microseconds a beat)] (tick 0 first): one BPM
-    is one change; the Tempo pane's line = tempo_file.heard_tempo."""
+    is one change; the Tempo pane's line = tempo_file.heard_tempo.
+    EXACT FAR OUT (huge-tick MIDIs): the sums are whole numbers (tick span x microseconds), each change's seconds
+    rounded once. A song whose seconds at `near` (a tick, e.g. the play start) pass FAR_S counts its seconds from
+    the ORIGIN tick `near` instead of tick 0 (self.origin; a change put there), so the seconds handed to the players
+    and loops stay small and exact (decimals from tick 0 drifted ~68 ms at 2^52 ticks). Everything else: origin 0,
+    the same seconds as ever."""
 
-    def __init__(self, ppq, changes):
-        self.ticks = [t for t, _ in changes]
-        self.spt = [u / 1e6 / ppq for _, u in changes]  # seconds a tick
-        self.secs = [0.0]
-        for i in range(1, len(changes)):
-            self.secs.append(self.secs[-1] + (self.ticks[i] - self.ticks[i - 1]) * self.spt[i - 1])
+    def __init__(self, ppq, changes, near=0, back=0.0, speed=1.0):
+        """back = seconds before near the origin goes (Rendered ahead: room for pieces made a little earlier).
+        speed = the song played that many times as fast (Player.speed: every second / speed)."""
+        v = float(speed)
+        got = _quick(ppq, changes, v)  # (normal songs: one NumPy pass, the same numbers)
+        if got is not None:
+            ticks, whole, sums, self.spt = got
+            p = 0
+        else:
+            # (NumPy whole numbers as Python's: theirs overflow past 2^63 in the sums)
+            ticks = [int(t) if isinstance(t, np.integer) else t for t, _ in changes]
+            us = [int(u) if isinstance(u, np.integer) else u for _, u in changes]
+            self.spt = [u / 1e6 / ppq / v for u in us] if v != 1.0 else [u / 1e6 / ppq for u in us]  # s a tick
+            whole, p = _whole(us)
+            sums = _sums(ticks, whole)  # (tick span x whole microseconds from tick 0, exact)
+        den = ppq * 1_000_000 << p
+        self.origin = 0
+        near = int(near)  # (a whole tick: a beat x PPQ may come with decimals)
+        if near > 0:
+            i = max(0, bisect.bisect_right(ticks, near) - 1)
+            at = sums[i] + (near - ticks[i]) * whole[i]
+            if at / den > FAR_S:  # (far out: the origin at near, a change put there so its run starts at it)
+                if back > 0:  # (the tick `back` seconds earlier: whole numbers again)
+                    at = max(0, at - int(back * den))
+                    i = max(0, bisect.bisect_right(sums, at) - 1)
+                    near = ticks[i] + (at - sums[i]) // whole[i]
+                    at = sums[i] + (near - ticks[i]) * whole[i]
+                self.origin = near
+                if ticks[i] != near:
+                    ticks.insert(i + 1, near)
+                    sums.insert(i + 1, at)
+                    self.spt.insert(i + 1, self.spt[i])
+                    whole.insert(i + 1, whole[i])
+                sums = [s - at for s in sums]
+        self.ticks = ticks
+        self.secs = _secs(sums, den, v)  # (whole numbers divided once: rounded once, exact sums)
+
+    def far_from(self, tick):
+        """True when seconds at tick would no longer be exact on this map (before its origin, or more than FAR_S
+        from it): a map made with near=tick is needed there (that one never is far from tick). Never on normal
+        songs."""
+        return tick < self.origin or abs(self.sec(tick)) > FAR_S
 
     def sec(self, tick):
         i = max(0, bisect.bisect_right(self.ticks, tick) - 1)
@@ -728,7 +840,9 @@ class Player:
         """The TimeMap played: the tempo handed over (kept for set_speed), each beat 1 / speed as long."""
         self._tempo = (bpm, tempo)
         v = self.speed
-        return TimeMap(self.ppq, [(t, u / v) for t, u in tempo or [(0, 60_000_000 / bpm)]])
+        # (near = where this play started: far into a huge-tick song the seconds count from there, TimeMap; the same
+        # tick for every map of one play, so a later map's seconds line up with the clock's)
+        return TimeMap(self.ppq, tempo or [(0, 60_000_000 / bpm)], near=self.start_beat * self.ppq, speed=v)
 
     def set_speed(self, v):
         """13f: play on from the same spot at v times the song's speed (1 = as written), the pitch unchanged. Goes

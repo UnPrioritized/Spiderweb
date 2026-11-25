@@ -136,6 +136,9 @@ PRE = 1.0  # seconds a piece starts early (dropped)
 POST_S = 0.3  # ... and its events go this far past its end: Merlin looks ahead (vs its render of the whole file,
 # Cats Dance 2026-11-03: 0.1 s = -43 dB in the last 10 ms, 0.3 s = -126 dB, 1 s = the same to the bit)
 HELD_PRE = 30.0  # ... at most, for a note still held there (8 s: an 18 s held note was -14 dB off at 12 s)
+# (far into a huge-tick song a Song's frames count from an origin this many seconds before where it plays:
+# playback.TimeMap near / back; pieces reach back HELD_PRE + hand-overs, far less)
+ORIGIN_BACK_S = 3600.0
 TAIL = 30.0  # seconds of ring after the last note at most (a piece finding the sound died away ends it sooner)
 BEHIND = 10.0  # seconds of made blocks kept behind the play line (further back = thrown away when over KEPT_MOST_S)
 KEPT_MOST_S = 600.0  # made sound kept outside what's wanted (M2, user 2026-11-03: the play line moved back plays at
@@ -301,9 +304,11 @@ class Song:
     channel of their group."""
 
     def __init__(self, notes, ccs, ports, use10, ppq, bpm, tempo=None, edo_first=None, one_sound=False,
-                 drums=False):
+                 drums=False, near=0):
         """one_sound (31-EDO on BASSMIDI): a row sounds ONE note at a time, like live play (_one_sound). drums
-        (31-EDO): channel 10's notes are drums (EDO_DRUMS), else rows too."""
+        (31-EDO): channel 10's notes are drums (EDO_DRUMS), else rows too. near = the tick it plays from: far into a
+        huge-tick song its frames count from an origin before it (self.map.origin; 0 = from tick 0, every normal
+        song)."""
         from notes.engine import channels_of, ports_of
         notes = np.asarray(notes)
         self.edo_first = edo_first
@@ -312,7 +317,7 @@ class Song:
             notes = notes[notes[:, 2] <= 127]
         self.ppq = ppq
         self.tempo = list(tempo) if tempo else [(0, int(round(60e6 / bpm)))]
-        self.map = TimeMap(ppq, self.tempo)
+        self.map = TimeMap(ppq, self.tempo, near, ORIGIN_BACK_S)
         # MEMORY (user 2026-11-03: keep it in check): only what pieces need, small types (~20 bytes a note;
         # 1 M notes = 20 MB), in start order; App's own note table is not kept
         n = len(notes)
@@ -371,7 +376,7 @@ class Song:
         self.key, self.vel, self.chan, self.port = self.key[idx], self.vel[idx], self.chan[idx], self.port[idx]
 
     @classmethod
-    def joined(cls, notes, part, ccs, ports, use10, ppq, bpm, tempo, edo_first, one=False, drums=False):
+    def joined(cls, notes, part, ccs, ports, use10, ppq, bpm, tempo, edo_first, one=False, drums=False, near=0):
         """The same Song as Song(own notes + part's rows after them, ...) in 31-EDO, without sorting the loaded
         MIDI's millions of notes again (part = an EdoPart made once): your own notes merged into its start order
         (before a loaded note starting at the same tick, as a stable sort puts them), one = one sound a row, worked
@@ -380,7 +385,7 @@ class Song:
         self = cls.__new__(cls)
         self.edo_first, self.ppq, self.drums = edo_first, ppq, bool(drums)
         self.tempo = list(tempo) if tempo else [(0, int(round(60e6 / bpm)))]
-        self.map = TimeMap(ppq, self.tempo)
+        self.map = TimeMap(ppq, self.tempo, near, ORIGIN_BACK_S)
         own = list(edo_columns(notes, edo_first, use10, drums))
         if one and part.one is None:  # (made without: made now, kept)
             part.__init__(part.rows, edo_first, True, part.drums)
@@ -622,7 +627,10 @@ def _ends_tick(song):
 
 def same_tempo(a, b):
     """True when two Songs' tempo is the same up to where either one's notes end (the heard tempo list is cut at the
-    song's end, which moves with edits: points past both songs' notes don't count)."""
+    song's end, which moves with edits: points past both songs' notes don't count). Frames counted from another
+    origin (a far jump in a huge-tick song) = not the same: every frame moved."""
+    if a.map.origin != b.map.origin:
+        return False
     if a.tempo == b.tempo:
         return True
     far = max(_ends_tick(a), _ends_tick(b))

@@ -225,6 +225,9 @@ class AheadPlay:
         self.idle_anchor = None
         self._failed_at = None
         self._edo_part = None  # (31-EDO's Loaded MIDI tick: its notes as Song columns, made once: Song.joined)
+        # (the tick Songs are made near: far into a huge-tick song their frames count from just before it; moved
+        # only when playing / the line goes where that clock isn't exact any more, then everything is made again)
+        self.near = 0
 
     # ------------------------------------------------------------ settings
 
@@ -255,9 +258,23 @@ class AheadPlay:
             why = None
         return ("kestrel", why) if why else (engine, None)
 
-    def song(self, rendered, ccs, ports, ppq, bpm, tempo, engine):
+    def song(self, rendered, ccs, ports, ppq, bpm, tempo, engine, at=None):
         """What the pieces are made of: your shapes (a Song), with the loaded MIDI along (a LoadedSong: its tracks
-        as the track list mutes them) when one is loaded."""
+        as the track list mutes them) when one is loaded. at = the tick it will play from: a huge-tick song whose
+        clock isn't exact there gets one counted from just before it (self.near; playback.TimeMap)."""
+        song = self._song(rendered, ccs, ports, ppq, bpm, tempo, engine)
+        if at is not None and song.map.far_from(int(at)):
+            self.near = int(at)
+            song = self._song(rendered, ccs, ports, ppq, bpm, tempo, engine)
+        return song
+
+    def far_off(self, at):
+        """True when the made song's clock isn't exact at tick `at` (a far jump in a huge-tick song): the song is
+        made again near it (idle)."""
+        song = self.maker.song if self.maker is not None else None
+        return song is not None and song.map.far_from(int(at))
+
+    def _song(self, rendered, ccs, ports, ppq, bpm, tempo, engine):
         from files.ahead_loaded import song_for
         edo = self._edo_first(engine)  # (BASSMIDI: one sound a row, as live Built-in play; hunt 2026-11-07)
         one = edo is not None and engine == "bassmidi"
@@ -269,10 +286,10 @@ class AheadPlay:
                 self._edo_part = None  # (the old one let go first: memory)
                 self._edo_part = EdoPart(rows, edo, one, drums)
             own = Song.joined(np.asarray(rendered)[:len(rendered) - n], self._edo_part, ccs, ports,
-                              self.app.picture_use10, ppq, bpm, tempo, edo, one, drums)
+                              self.app.picture_use10, ppq, bpm, tempo, edo, one, drums, near=self.near)
         else:
             own = Song(rendered, ccs, ports, self.app.picture_use10, ppq, bpm, tempo, edo, one_sound=one,
-                       drums=drums)
+                       drums=drums, near=self.near)
         lm = self._loaded()
         from notes.loaded_map import links
         return song_for(lm, own, self.app.track_list.loaded_mutes() if lm is not None else (),
@@ -370,7 +387,7 @@ class AheadPlay:
         if err:
             return err
         self.maker.error = None  # (each Play tries again: a failed piece's cause may be gone, hunt 2026-11-03)
-        self.maker.update_song(self.song(rendered, ccs, ports, ppq, bpm, tempo, engine))
+        self.maker.update_song(self.song(rendered, ccs, ports, ppq, bpm, tempo, engine, at=start_beat * ppq))
         song = self.maker.song
         self._say_why(why)
         try:
@@ -524,7 +541,8 @@ class AheadPlay:
             self._seen, self._rest_since = seen, now
         if now - self._rest_since < REST_S or self._failed_at == seen:
             return True
-        if self._dirty or self.maker is None or self.maker.song is None:
+        at = app.playhead * (self.maker.song.ppq if self.maker is not None and self.maker.song is not None else 1)
+        if self._dirty or self.maker is None or self.maker.song is None or self.far_off(at):
             parts = app.ahead_parts()  # (rendered, ccs, ports, ppq, bpm, tempo) or None (a number being typed)
             if parts is None:
                 return True
@@ -536,7 +554,7 @@ class AheadPlay:
                 app.status.config(text=err)
                 return True
             self.maker.error = None
-            self.maker.update_song(self.song(rendered, ccs, ports, ppq, bpm, tempo, engine))
+            self.maker.update_song(self.song(rendered, ccs, ports, ppq, bpm, tempo, engine, at=app.playhead * ppq))
             if why != self._why_said:  # (said once, when it's news: hunt 2026-11-03, it replaced every edit's text)
                 self._say_why(why)
             self._why_said = why
@@ -659,12 +677,21 @@ class AheadPlay:
         key = "ra.buffer_end" if rest < ahead and made >= rest - 1e-6 else "ra.buffer"
         return tr(key, n=f"{made:.1f}", m=f"{ahead:,}")
 
-    def heard_sec(self):
-        """Song seconds heard right now (None: silence while waiting for the first / next block)."""
+    def heard_sec(self, tmap=None):
+        """Seconds on tmap (the play line's TimeMap; None = the Song's own) of the sound heard right now (None:
+        silence while waiting for the first / next block). Through the tick: far into a huge-tick song the two
+        clocks count from different origins."""
         if self.audio is None:
             return None
         f = self.audio.position()
-        return None if f is None else f / RATE
+        return None if f is None else self.sec_on(f, tmap)
+
+    def sec_on(self, f, tmap=None):
+        """The song frame f in seconds on tmap (the same as f / RATE when both count from tick 0)."""
+        song = self.maker.song if self.maker is not None else None
+        if song is None or tmap is None or (song.map.origin == 0 and tmap.origin == 0):
+            return f / RATE
+        return tmap.sec(song.map.tick(f / RATE))
 
     def stop(self):
         if self.audio is not None:
