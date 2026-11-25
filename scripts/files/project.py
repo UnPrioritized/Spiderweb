@@ -1830,7 +1830,14 @@ class ProjectFiles:
                 tr("project.spiderweb"), tr("project.long_silences", ppq=ppq, beats=MAX_DELTA // ppq), icon="warning"):
             return
         cc = self.cc_messages(ppq, bpm)
-        notes, cc, plan = self.tempo_timed(ppq, bpm, beats, cc)
+        try:  # (the tempo worked out before writing: its own plain message, never a crash; hunt 2026-11-26)
+            notes, cc, plan = self.tempo_timed(ppq, bpm, beats, cc)
+        except MemoryError:
+            messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"), parent=self)
+            return
+        except MidiError as e:
+            messagebox.showerror(tr("project.spiderweb"), tr(e.key, **e.info), parent=self)
+            return
         if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
                               lambda: write_midi(path, ppq, bpm, beats, notes, self.picture_use10,
                                                  self.pad_tracks(), cc, plan["events"], plan["sigs"], plan["keys"],
@@ -2564,8 +2571,19 @@ class ProjectFiles:
         """tempo_ramp.slow_hook: a giant tempo ramp / long catch-up (what = "catch") being worked out (seconds, once
         per line): "Working out the tempo ramp…" / "…catch-up…" + the busy pointer while it is, on the window's
         thread only (pieces made on other threads say nothing)."""
-        if threading.current_thread() is threading.main_thread():
-            self.busy(tr("app.working_catch" if what == "catch" else "app.working_ramp") if on else None)
+        if threading.current_thread() is not threading.main_thread():
+            return
+        saved = self.__dict__.setdefault("_ramp_saved", [])
+        if on:  # (what showed before: an export's own busy text + pointer come back after, hunt 2026-11-26)
+            saved.append((self.status.cget("text"), str(self.cget("cursor"))))
+            self.busy(tr("app.working_catch" if what == "catch" else "app.working_ramp"))
+            return
+        text, cursor = saved.pop() if saved else ("", "")
+        if cursor == "watch":  # (inside another busy step: its text and pointer back)
+            self.status.config(text=text)
+            self.update_idletasks()
+        else:
+            self.busy(None)
 
     def domino_start(self):
         """The start dropdown above the Domino buttons: "box" (from the select box: the earliest kept box's left

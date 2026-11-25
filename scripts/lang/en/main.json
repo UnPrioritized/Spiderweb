@@ -3509,7 +3509,7 @@
  "load.sum_damaged": "Track {tracks} is damaged: its notes are shown up to where the damage starts. Exporting keeps its bytes exactly as they are.",
  "load.file_changed": "The loaded MIDI file was changed, moved or deleted since it was loaded. The notes already drawn stay, but no more are read from it.\n\nLoad it again with File → Load MIDI… to see it as it is now.",
  "load.export_gone": "The loaded MIDI file was changed, moved or deleted since it was loaded, so it can't be copied. Nothing was saved.\n\nPut it back, or load it again with File → Load MIDI…:\n{path}",
- "load.keep_too_long": "A Keep timing part is too long to work out: {ticks} ticks, and it can be at most {most}. Nothing was saved.\n\nUntick Keep timing on that part, or add a tempo point inside it so each part is shorter.",
+ "load.keep_too_long": "A Keep timing part is too long to work out: over its {ticks} ticks its time adds up to more than Spiderweb can count. Nothing was saved.\n\nUntick Keep timing on that part, or add a tempo point inside it so each part is shorter.",
  "load.close_exporting": "The loaded MIDI is still being exported. Stop the export and close Spiderweb?\n\nNothing of the export is kept.",
  "load.new_closes": "The loaded MIDI is closed too.",
  "load.step_again": "Putting it back under the project's shapes",

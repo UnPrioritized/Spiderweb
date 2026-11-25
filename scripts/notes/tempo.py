@@ -1422,8 +1422,10 @@ def _lazy_ramp(tempo, near, arrays, i, part, every, origin, jump, base, base_u, 
         k_hi = min(len(pb), int(np.searchsorted(pb, part[1] / ppq, "right")) + 1)
         own = {"points": copy.deepcopy(near["points"][k_lo:k_hi])}
     key = repr((own["points"], jump, part, every, origin, base, base_u, ppq, one_way))
-    rule = _RULES.get(key)
-    if rule is None:
+    rule = _RULES.pop(key, None)
+    if rule is not None:
+        _RULES[key] = rule  # (the newest used last: the least used goes first when full)
+    else:
         if jump:
             def fn(starts):
                 return part_bpm(own, 0, step_shares(*part, starts, every))
@@ -1438,17 +1440,18 @@ def _lazy_ramp(tempo, near, arrays, i, part, every, origin, jump, base, base_u, 
             us = nearest_safe(6e7 / bpm)
             us[bpm == base] = base_u
             return us
-        if len(_RULES) >= RULES_KEPT:
-            _RULES.clear()
+        while len(_RULES) >= RULES_KEPT:  # (only the least used one goes: clearing all made a line with 33+ long
+            _RULES.pop(next(iter(_RULES)))  # ramps work every one out again on each read, hunt 2026-11-26)
         rule = _RULES[key] = RampRule(read, origin, every, part[0], part[1], one_way)
     return Ramp(a, b, rule)
 
 
-RULES_KEPT = 32  # long ramps' rules remembered (their runs: a giant ramp's are worked out once)
+RULES_KEPT = 256  # long ramps' rules remembered (their runs: a giant ramp's are worked out once)
 _RULES = {}
 
 
-CATCH_TICKS_MOST = 1 << 27  # a catch-up's stretch at most (its time worked out on every tick: "Not possible: too long")
+CATCH_TICKS_MOST = 1 << 24  # a catch-up's stretch up to this is worked out on every tick; longer = _catch_long by runs
+# (2^27 left stretches just under it needing GBs, hunt 2026-11-26, user took A)
 
 
 def _us_sum(segs):

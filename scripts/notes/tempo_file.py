@@ -97,9 +97,10 @@ def bar_line(sigs, tick, ppq, after=False):
     return line
 
 
-KEEP_TICKS_MOST = 1 << 30  # a Keep timing part up to this many ticks is worked out on every tick (the compiled loops:
+KEEP_TICKS_MOST = 1 << 24  # a Keep timing part up to this many ticks is worked out on every tick (the compiled loops:
 # gap_ticks / gap_plan); a longer one by runs (_keep_long / _long_gaps, PLAN stage E 2026-11-26: a huge-tick MIDI's
-# parts run to trillions). load.keep_too_long only when its sums pass 64 bits
+# parts run to trillions). 2^30 left parts just under it needing ~8 GB (hunt 2026-11-26, user took A: 2^24; very long
+# high-PPQ parts may pick other exact tempo pairs). load.keep_too_long only when its sums pass 64 bits
 BARS_MOST = 1 << 20  # Fit bar lines works on songs of at most this many bars (bar by bar: a huge-tick MIDI, 60 M BPM
 # at PPQ 32767, has billions and its export took 20 GB; past it the bars are written unfitted: the sound is the same)
 
@@ -573,7 +574,12 @@ def _long_gaps(buf, n, total, k, drawn, every):
         if curved[j]:
             n0, n1 = int(n[j]), int(n[j + 1])
             blk = np.arange(0, kj, ev, dtype=np.int64)
-            at = n0 + (blk * (n1 - n0)) // kj  # (file ticks read back to Spiderweb's: where the drawn tempo is read)
+            # (file ticks read back to Spiderweb's: where the drawn tempo is read; past 64 bits in Python's whole
+            # numbers: it wrapped round into a sawtooth, hunt 2026-11-26)
+            if kj * (n1 - n0) < 1 << 62:
+                at = n0 + (blk * (n1 - n0)) // kj
+            else:
+                at = np.array([n0 + b * (n1 - n0) // kj for b in blk.tolist()], np.int64)
             ideal = du[np.clip(np.searchsorted(s, at, "right") - 1, 0, len(s) - 1)].astype(np.float64)
             lens = np.diff(np.append(blk, kj))
             got = fit_block_runs(ideal, lens.tolist(), tj) if len(blk) > 1 else None
@@ -1115,6 +1121,9 @@ def _fit_length(d, lengths):
     return base + min(near, key=lambda x: (abs(x - d), x))
 
 
+CARRY_MOST = 64  # BAR CARRY-OVER: a carry not settled within this many bars is given up (that bar left with none)
+
+
 def _written_lines(fl, lengths):
     """BAR CARRY-OVER (user 2026-10-24): the file's bar lines fl (ticks, in order) as time signatures can write them:
     each bar the length nearest to reaching its true line, so a bar no signature fits is written a little off and
@@ -1129,20 +1138,24 @@ def _written_lines(fl, lengths):
         if _fit_length(int(fl[m + 1] - w[m]), lengths) == fl[m + 1] - w[m]:
             m += 1
             continue
-        k, trial, chain = m, w.copy(), []  # (carried on bar by bar until a bar lands on its line)
-        while k < last - 1:
-            trial[k + 1] = trial[k] + _fit_length(int(fl[k + 1] - trial[k]), lengths)
+        # (carried on bar by bar until a bar lands on its line, at most CARRY_MOST bars: a carry that never settles
+        # tried to the song's end from every bar = minutes over a huge-tick song's Keep timing part, hunt
+        # 2026-11-26; only the bars it moves kept, never a copy of every line per try)
+        k, prev, chain, vals, landed = m, int(w[m]), [], [], False
+        while k < last - 1 and len(chain) < CARRY_MOST:
+            prev += _fit_length(int(fl[k + 1] - prev), lengths)
+            vals.append(prev)
             chain.append(k)
             k += 1
-            if _fit_length(int(fl[k + 1] - trial[k]), lengths) == fl[k + 1] - trial[k]:
+            if _fit_length(int(fl[k + 1] - prev), lengths) == fl[k + 1] - prev:
+                landed = True
                 break
-        else:
-            k = None
-        if k is None or k >= last:
+        if not landed:
             unfit.append(m)  # (never settles: the old way, this bar alone without one)
             m += 1
             continue
-        w, moved = trial, moved + chain
+        w[m + 1:m + 1 + len(vals)] = vals
+        moved += chain
         m = k
     return w, moved, unfit
 
