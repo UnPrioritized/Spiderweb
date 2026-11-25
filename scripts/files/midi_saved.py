@@ -1,6 +1,6 @@
 """Saved indexes of loaded MIDIs (Load MIDI group E step 12; user 2026-10-23: asked first, user/midi-index/).
 Loading reads a whole file once to learn where everything is (Shinki: ~30 s, the disk); the index it leaves
-(checkpoints, meta events, small pictures, the overview: Shinki ~130 MB) can be kept, so opening the same file
+(checkpoints, meta events, small pictures, the overview: Shinki ~7.5 MB compressed, 121 MB not) can be kept, so opening the same file
 again ("Read it from the MIDI file") takes a moment. Never the notes themselves.
 
 One .npz per MIDI (name from its path + size), its "head" = JSON: the MIDI's path, size, time, the layout of its
@@ -46,8 +46,61 @@ def _layout(mf):
     return [[t.head, t.start, t.size, t.declared] for t in mf.tracks]
 
 
+# (a size guess compresses this many slices of this many bytes a stream, measured on Shinki: its index's numbers
+# change a lot along the song = many small slices (7.7 MB guessed, 7.5 real; 1 MB slices said 11.8); its read-ahead
+# has long repeats = big slices (292 MB guessed, 292 real; 16 KB slices said 471))
+INDEX_SLICES, AHEAD_SLICES = (256, 1 << 14), (16, 1 << 20)
+
+
+def packed_guess(streams, slices=INDEX_SLICES):
+    """About the bytes streams (lists of arrays, each list read as one run of bytes) take compressed as np.savez_
+    compressed writes them: small ones compressed whole, big ones from slices (how many, bytes) spread over them
+    (Shinki's read-ahead: 3 GB, ~290 MB compressed; the question asks before saving, user 2026-11-25: "about")."""
+    import zlib
+    GUESS_SLICES, GUESS_SLICE = slices
+    total = 0
+    for parts in streams:
+        parts = [np.ascontiguousarray(a).reshape(-1).view(np.uint8) for a in parts]
+        size = sum(len(p) for p in parts)
+        if size <= GUESS_SLICES * GUESS_SLICE:  # (whole, as one run: saved joined)
+            total += len(zlib.compress(b"".join(p.tobytes() for p in parts), 6))
+            continue
+        ends = np.cumsum([len(p) for p in parts])
+        packed = taken = 0
+        for at in np.linspace(0, size - GUESS_SLICE, GUESS_SLICES).astype(np.int64).tolist():
+            n = int(np.searchsorted(ends, at, "right"))  # (the part holding at; a slice stops at its end)
+            p = parts[n]
+            a = at - (int(ends[n - 1]) if n else 0)
+            piece = p[a:a + GUESS_SLICE]
+            packed += len(zlib.compress(piece, 6))
+            taken += len(piece)
+        total += int(size * packed / max(1, taken))
+    return total
+
+
+def _arrays(lm, head):
+    """The arrays an index is saved as (head = its JSON)."""
+    level0 = lm._level0 if lm._level0 is not None else lm.levels[0]  # (as loaded: never the Extract one)
+    arrays = {"head": np.frombuffer(json.dumps(head).encode("utf-8"), np.uint8), "cnt": level0[0], "top": level0[1],
+              "edges": np.concatenate([e.reshape(-1) for e in lm.edges])}  # (every level: made from a grid not kept)
+    for k in ARRAYS:
+        parts = [getattr(i, k).reshape(-1) for i in lm.tracks]
+        arrays[k] = np.concatenate(parts) if parts else np.zeros(0, np.int64)
+    return arrays
+
+
+def disk_guess(lm):
+    """About the bytes Save Index writes for lm: its index compressed + Kestrel's read-ahead with it (asked first)."""
+    from files.play_dense import kept_bytes
+    level0 = lm._level0 if lm._level0 is not None else lm.levels[0]
+    streams = [[level0[0]], [level0[1]], list(lm.edges)] + [[getattr(i, k) for i in lm.tracks] for k in ARRAYS]
+    return packed_guess(streams) + kept_bytes(lm)
+
+
 def save_index(lm):
-    """Writes lm's index (a loaded MIDI read from its file). Returns its size in bytes."""
+    """Writes lm's index (a loaded MIDI read from its file), compressed (user 2026-11-25: Shinki 121 -> 7.5 MB, saved
+    and read as quickly). Returns its size in bytes (+ the guess of Kestrel's read-ahead written with it, in the
+    background)."""
     from notes.loaded import PAIRING
     mf = lm.mf
     head = {"ver": INDEX_VER, "pairing": PAIRING, "path": mf.path, "size": mf.size, "mtime": mf.mtime,
@@ -57,14 +110,8 @@ def save_index(lm):
                         "last_tick": int(t.last_tick), "after": int(t.after), "hash": t.hash} for t in mf.tracks],
             "infos": [{k: _plain(getattr(i, k)) for k in SCALARS} for i in lm.tracks],
             "shapes": {k: [list(getattr(i, k).shape) for i in lm.tracks] for k in ARRAYS}}
-    level0 = lm._level0 if lm._level0 is not None else lm.levels[0]  # (as loaded: never the Extract one)
-    arrays = {"head": np.frombuffer(json.dumps(head).encode("utf-8"), np.uint8), "cnt": level0[0], "top": level0[1],
-              "edges": np.concatenate([e.reshape(-1) for e in lm.edges])}  # (every level: made from a grid not kept)
-    for k in ARRAYS:
-        parts = [getattr(i, k).reshape(-1) for i in lm.tracks]
-        arrays[k] = np.concatenate(parts) if parts else np.zeros(0, np.int64)
     buf = io.BytesIO()
-    np.savez(buf, **arrays)
+    np.savez_compressed(buf, **_arrays(lm, head))  # (older uncompressed ones open the same way: kept, user)
     data = buf.getvalue()
     os.makedirs(FOLDER, exist_ok=True)
     write_bytes(index_file(mf.path, mf.size), data)

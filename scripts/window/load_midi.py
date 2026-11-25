@@ -100,7 +100,7 @@ def offer_index(app, lm):
     if app.loaded is not lm or not saved.offer(lm):
         return
     answer = ask_choice(app, tr("load.title"), tr("load.index_ask", s=f"{lm.seconds:.0f}",
-                                                  size=size_text(lm.index_bytes() + kept_bytes(lm))),
+                                                  size=size_text(saved.disk_guess(lm))),
                         [("save", tr("load.index_save")), ("never", tr("load.index_never")),
                          ("later", tr("load.index_later"))])
     if answer == "never":
@@ -109,11 +109,13 @@ def offer_index(app, lm):
         app.config(cursor="watch")
         app.update_idletasks()
         try:
+            about = kept_bytes(lm) > 0  # (Kestrel's read-ahead goes with it, written in the background: guessed)
             size = saved.save_index(lm)
         except OSError as e:
             messagebox.showerror(tr("load.title"), tr("load.index_failed", why=e.strerror or str(e)), parent=app)
         else:
-            app.status.config(text=tr("load.index_saved_status", size=size_text(size)))
+            app.status.config(text=tr("load.index_saved_status_about" if about else "load.index_saved_status",
+                                      size=size_text(size)))
         finally:
             app.config(cursor="")
 
@@ -437,7 +439,7 @@ class LoadWindow(tk.Toplevel):
         """The summary's question: save the index (its size), or never ask for this file. Returns the tick's var."""
         box = ttk.Frame(self.body)
         box.pack(anchor="w", fill="x", pady=(12, 0))
-        ttk.Label(box, text=tr("load.index_ask", s=f"{lm.seconds:.0f}", size=size_text(lm.index_bytes() + kept_bytes(lm))),
+        ttk.Label(box, text=tr("load.index_ask", s=f"{lm.seconds:.0f}", size=size_text(saved.disk_guess(lm))),
                   wraplength=460, justify="left").pack(anchor="w")
         row = ttk.Frame(box)
         row.pack(anchor="w", pady=(6, 0))
@@ -447,11 +449,12 @@ class LoadWindow(tk.Toplevel):
             self.config(cursor="watch")
             self.update_idletasks()
             try:
+                about = kept_bytes(lm) > 0  # (Kestrel's read-ahead goes with it, written in the background: guessed)
                 size = saved.save_index(lm)
             except OSError as e:
                 done.config(text=tr("load.index_failed", why=e.strerror or str(e)), foreground=look.WARN)
             else:
-                done.config(text=tr("load.index_saved", size=size_text(size)))
+                done.config(text=tr("load.index_saved_about" if about else "load.index_saved", size=size_text(size)))
                 for w in (button, tick):
                     w.state(["disabled"])
             finally:

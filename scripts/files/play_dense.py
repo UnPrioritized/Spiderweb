@@ -291,7 +291,7 @@ class Dense:
 
 def saved_file(index):
     """The saved read-ahead kept beside a MIDI's saved index file (user 2026-10-27: read once per MIDI, not once
-    each time it's loaded; Shinki ~20 s, ~210 MB)."""
+    each time it's loaded; Shinki ~57 s, ~290 MB compressed)."""
     return index[:-4] + SAVED_END
 
 
@@ -328,8 +328,11 @@ def decline(d):
 
 
 def _as_loaded(lm):
-    """Nothing hidden, removed or put on other channels since loading (only then is a read-ahead saved / used)."""
-    return lm.mode == "file" and key_of(lm) == (0, frozenset(), None)
+    """Nothing hidden, removed or put on other channels / ports since loading (only then is a read-ahead saved /
+    used). Every key_of part past the first two = None as loaded (2026-11-25: port_moved joined key_of, this still
+    wanted 3 parts, so no read-ahead was kept or used since 10-30)."""
+    k = key_of(lm)
+    return lm.mode == "file" and k[0] == 0 and not k[1] and all(x is None for x in k[2:])
 
 
 def _saved_head(lm):
@@ -340,12 +343,18 @@ def _saved_head(lm):
 
 
 def kept_bytes(lm):
-    """About the bytes Save Index also writes for lm's read-ahead (all read, as loaded), else 0 (hunt 2026-10-28: the
-    question showed the index alone, ~120 MB of Shinki's ~3.1 GB)."""
+    """About the bytes Save Index also writes for lm's read-ahead (all read, as loaded), compressed, else 0 (hunt
+    2026-10-28: the question showed the index alone; Shinki's ~3 GB is ~290 MB compressed, user 2026-11-25: "about"
+    that, guessed from a sample, worked out once per set of parts)."""
     d = getattr(lm, "dense", None)
     if d is None or not d.done() or d.error is not None or not _as_loaded(lm) or d.key != key_of(lm):
         return 0
-    return sum(getattr(p, k).nbytes for p in d.parts for k in PART_ARRAYS)
+    ps = d.parts
+    got = getattr(d, "_guess", None)
+    if got is None or got[0] is not ps:
+        from files.midi_saved import AHEAD_SLICES, packed_guess
+        got = d._guess = (ps, packed_guess([[getattr(p, k) for p in ps] for k in PART_ARRAYS], AHEAD_SLICES))
+    return got[1]
 
 
 def leftovers(folder):
@@ -368,8 +377,8 @@ SAVING = set()  # (temp files being written now: never deleted as leftovers)
 
 
 def save(d):
-    """Keeps d (all read) beside lm's saved index, when it has one and lm is as loaded. True when kept; quiet when it
-    can't (errors.log)."""
+    """Keeps d (all read) beside lm's saved index, when it has one and lm is as loaded. The bytes written when kept,
+    else False; quiet when it can't (errors.log)."""
     lm = d.lm
     try:
         from files import midi_saved
@@ -389,10 +398,11 @@ def save(d):
         tmp = path + ".tmp"
         SAVING.add(tmp)
         try:
-            with open(tmp, "wb") as f:
-                np.savez(f, **arrays)
+            with open(tmp, "wb") as f:  # (compressed, user 2026-11-25: Shinki 3 GB -> ~290 MB, ~21 s here)
+                np.savez_compressed(f, **arrays)
                 f.flush()
                 os.fsync(f.fileno())
+                size = f.tell()
             if not os.path.exists(index):  # (its index deleted meanwhile: kept, it was a hidden 3 GB, hunt 10-28)
                 os.remove(tmp)
                 return False
@@ -405,7 +415,7 @@ def save(d):
             raise
         finally:
             SAVING.discard(tmp)
-        return True
+        return size
     except Exception:  # (disk full, the folder gone: read again next time)
         import sys
         from files.errors import write_log

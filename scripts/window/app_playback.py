@@ -998,12 +998,13 @@ class Playback:
             th.start()
             self.status.config(text=tr("ks.keeping_status", size=size_text(size)))
 
-            def said():  # (the line says how it ended: "kept" showed before the writing was done, hunt 10-28)
+            def said():  # (the line says how it ended: "kept" showed before the writing was done, hunt 10-28; the
+                # real size written, the question's was a guess, user 2026-11-25)
                 if th.is_alive():
                     self.after(500, said)
                 elif self.winfo_exists():
                     self.status.config(text=tr("ks.kept_status" if got and got[0] else "ks.keep_failed",
-                                               size=size_text(size)))
+                                               size=size_text(got[0] if got and got[0] else size)))
             self.after(500, said)
         elif answer == "never":
             decline(d)
