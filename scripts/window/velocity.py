@@ -163,7 +163,9 @@ def _own_places(sh, rows, ppq, way=None):
     t_all, k_all = float(rows[:, 1].max()), float(rows[:, 2].max() + 1)
     v = (rows[:, 2] + 0.5) / k_all
     a, b = ((b0 + (rows[:, c] / t_all) * (b1 - b0) + v * (b2 - b0)) * ppq for c in (0, 1))
-    start, end = np.rint(np.minimum(a, b)), np.rint(np.maximum(a, b))
+    # (halves up like the notes are made, never NumPy's halves-to-even: a stretched paste's note on x.5 was read a
+    # tick off)
+    start, end = np.floor(np.minimum(a, b) + 0.5), np.floor(np.maximum(a, b) + 0.5)
     if way and len(rows) > 1:
         return heard_places(sh, rows, start, end, way, ppq)
     if flip_runs(sh):  # (each run on a key mirrored inside itself: a note shows where its partner was)
