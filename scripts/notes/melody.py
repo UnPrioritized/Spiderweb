@@ -130,6 +130,7 @@ def heard_points(tempo, base, ppq, a, b):
     microseconds (so it plays back exactly). Keep the audio's runs play it (hunt 2026-10-29: the area's own tempo
     changes were lost, notes after it moved)."""
     from notes.tempo import BEND, _put_many, base_us, beat_tick, file_segments, layout
+    from notes.tempo_ramp import Ramp
     ta, tb = beat_tick(a, ppq), max(beat_tick(b, ppq), beat_tick(a, ppq) + 1)
     if not tempo["points"] and not tempo["catch"]:  # (no tempo line: the project's BPM all along)
         return [[ta / ppq, 60_000_000 / base_us(base), "hold", "", "lin", False, list(BEND)]]
@@ -148,6 +149,10 @@ def heard_points(tempo, base, ppq, a, b):
             continue
         if isinstance(u, (int, np.integer)):
             spots = [(s, int(u))]
+        elif isinstance(u, Ramp):  # (a long ramp: its changes step by step)
+            part = u[s - a0:e - a0]
+            t, v = part.changes()
+            spots = list(zip((t + (s - part.a)).tolist(), v.tolist()))
         else:  # (one value per tick: a point where it changes)
             vals = np.asarray(u, np.int64)[s - a0:e - a0]
             change = np.flatnonzero(np.diff(vals)) + 1

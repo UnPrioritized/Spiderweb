@@ -196,6 +196,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     strips.py        separate strips: each strip of a pasted track guessed key by key, its own channels
     tempo.py         the project's tempo line: curves, catch-ups, exact Domino-safe tempo changes for the MIDI
     tempo_safe.py    Domino-safe tempo values: which ones survive Domino's save, whole values adding up exactly
+    tempo_ramp.py    a long tempo ramp worked out step by step when read, never every step kept
     loaded.py        a loaded MIDI file (Load MIDI): the loading pass's results, run on several cores
     loaded_map.py    a loaded MIDI's ticks as shown after Change visual time signature (export writes the same)
     loaded_shown.py  what every reader of a loaded MIDI shares for those moved ticks (there and back)

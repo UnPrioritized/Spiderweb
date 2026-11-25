@@ -25,6 +25,7 @@ from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines
 from notes.tempo import (EVERY, _put_all, _put_many, base_us, beat_tick,
                          typed_bpms, step_of, coarse_ramps,
                          file_segments, has_tempo, keep_heard, known_key, layout, segs_end, tempo_key)
+from notes.tempo_ramp import Ramp
 from notes.tempo_safe import PAIR_REACH, SAFE_REACH, _fit_blocks, _fit_exact, _flat_pair, _runs, domino_safe
 
 MAX_US = 0xFFFFFF  # the slowest tempo a file holds, in microseconds per beat
@@ -170,6 +171,10 @@ def _seg_events(segs):
         elif isinstance(u, (int, np.integer)):
             ticks.append(np.array([a], np.int64))
             vals.append(np.array([u], np.int64))
+        elif isinstance(u, Ramp):  # (a long ramp: its changes step by step; the piece may sit shifted from the
+            t, v = u.changes()     # ticks it was read on, after a Keep timing part)
+            ticks.append(t + (a - u.a))
+            vals.append(v)
         else:
             ticks.append(np.arange(a, b, dtype=np.int64))
             vals.append(np.asarray(u, np.int64))
@@ -272,6 +277,13 @@ def _spans_off(segs, keeps, start_u):
                 if v != start_u:
                     lo.append(x)
                     hi.append(y)
+            elif isinstance(v, Ramp):  # (a long ramp: step by step; touching steps joined like the ticks were)
+                for s, e, w in v.steps():
+                    off = w != start_u
+                    edge = np.concatenate([[False], off, [False]])
+                    ch = np.flatnonzero(edge[1:] != edge[:-1])
+                    lo += (s[ch[0::2]] + (x - v.a)).tolist()
+                    hi += (e[ch[1::2] - 1] + (x - v.a)).tolist()
             else:
                 off = np.concatenate([[False], np.asarray(v) != start_u, [False]])
                 edges = np.flatnonzero(off[1:] != off[:-1])

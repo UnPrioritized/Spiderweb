@@ -7,6 +7,8 @@ import struct
 
 import numpy as np
 
+from notes.tempo_ramp import Ramp
+
 SAFE_REACH = 8192  # the farthest a Domino-safe value is from any value (measured: 5212 at the slowest tempos)
 
 
@@ -203,6 +205,9 @@ def _runs(segs):
     for a, b, u in segs:
         if isinstance(u, int):
             vals, ticks = [u], [a]
+        elif isinstance(u, Ramp):  # (a long ramp: its changes step by step, never one value a tick)
+            t, v = u.changes()
+            ticks, vals = (t + (a - u.a)).tolist(), v.tolist()  # (the piece's own ticks, even if shifted)
         else:
             keep = np.concatenate([[True], u[1:] != u[:-1]])
             vals, ticks = u[keep].tolist(), np.arange(a, b)[keep].tolist()

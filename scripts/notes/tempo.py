@@ -52,6 +52,7 @@ import numpy as np
 from files.mathexpr import fmt, formula
 from files.midi_scan import MOST_TICK
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_keysigs, clean_sigs
+from notes.tempo_ramp import Ramp
 from notes.tempo_safe import (PAIR_REACH, SAFE_REACH, _FAR, _WINDOW, _fit_blocks, _fit_exact, _first_safe, _flat_pair,  # (moved)
                               _flat_pair_search, _near_pair, _nearest1, _next1, _next_by_bpm, _next_small, _pairs, _runs,
                               _safe1, _safe_side, PAIRS_KEPT, domino_safe, nearest_safe, next_safe)
@@ -1372,6 +1373,10 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
             part = (edges[j], edges[j + 1])
             jump = to_jump(pts, i)
             every = ramp_step(every, part[1] - part[0])  # (a huge-tick song's ramp: longer steps, the same glide)
+            if (-(-(b - a) // every) if every >= BLOCKS_FROM else b - a) > RAMP_LAZY:  # (worked out when read)
+                out.append((a, b, _lazy_ramp(tempo, near, arrays, i, part, every, origin, jump, base, base_u,
+                                             a, b, ppq)))
+                continue
 
             def read(starts):
                 if jump:
@@ -1395,6 +1400,37 @@ def _segments(tempo, base, base_u, ppq, t0, t1, ordered=None):
             us[bpm == base] = base_u  # (the project's own tempo, exactly as the file starts)
             out.append((a, b, us))
     return out
+
+
+RAMP_LAZY = 1 << 16  # a gliding piece with more steps than this (ticks, for an Interval under BLOCKS_FROM) comes as a
+# tempo_ramp.Ramp: worked out when read, never every step kept (PLAN "Tempo ramps step by step")
+
+
+def _lazy_ramp(tempo, near, arrays, i, part, every, origin, jump, base, base_u, a, b, ppq):
+    """_segments' gliding piece a..b of point i's part as a Ramp: the same values its step list would have, read
+    from its OWN copy of the few points it reads (the line edited later never changes it)."""
+    if jump:
+        own = {"points": copy.deepcopy(tempo["points"][i:i + 2])}
+
+        def fn(starts):
+            return part_bpm(own, 0, step_shares(*part, starts, every))
+    else:
+        pb = arrays[0]
+        lo = origin + (a - origin) // every * every  # (the earliest step start any slice of it reads)
+        k_lo = max(0, int(np.searchsorted(pb, lo / ppq, "right")) - 1)
+        k_hi = min(len(pb), int(np.searchsorted(pb, b / ppq, "right")) + 1)
+        own = {"points": copy.deepcopy(near["points"][k_lo:k_hi])}
+        own_arr = point_arrays(own["points"])
+
+        def fn(starts):
+            return drawn_bpm(own, base, np.asarray(starts) / ppq, own_arr)
+
+    def read(starts):
+        bpm = fn(starts)
+        us = nearest_safe(6e7 / bpm)
+        us[bpm == base] = base_u
+        return us
+    return Ramp(a, b, origin, every, read)
 
 
 CATCH_TICKS_MOST = 1 << 27  # a catch-up's stretch at most (its time worked out on every tick: "Not possible: too long")
