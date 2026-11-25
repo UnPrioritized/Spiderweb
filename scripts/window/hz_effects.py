@@ -247,12 +247,14 @@ class FxPane:
         """The number of the repeat of a repeating effect that beat is in."""
         win, every = self.win, self.win.loops[name]
         mode = win.froms.get(name)
+        # (+ 1e-9 like the note starts below: beat 7/3 on a 1/3 repeat is 6.999... repeats, so a paste snapped onto
+        # repeat 7's start went to the end of repeat 6 and its points were dropped)
         if not mode:
-            return math.floor(beat / every)
+            return math.floor(beat / every + 1e-9)
         st = self.note_starts(every, name in win.fits)
         i = max(0, sum(1 for s, _ in st if s <= beat + 1e-9) - 1)
         s, sc = st[i]
-        return i, (math.floor(max(0.0, beat - s) / (every * sc)) if mode == "restart" else 0)
+        return i, (math.floor(max(0.0, beat - s) / (every * sc) + 1e-9) if mode == "restart" else 0)
 
     def local(self, name, beat, k):
         """beat as beats into repeat k of a repeating effect (its points' beats), within the repeat."""
