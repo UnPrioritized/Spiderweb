@@ -2218,9 +2218,46 @@ class RollDrawing:
             got.add((round((b - b0) * self.sx), round((p0 - p) * self.sy)))
         if not got:
             return None
+        if not (self.drag and self.drag[0] == "move") and self.turned_since():
+            return 0, 0, "hide"  # (turned / skewed: neither sliding nor stretching the old notes fits; user 2026-11-25
+            # picked none shown until the new ones come, resizes keep the stretched picture)
         if not (self.drag and self.drag[0] == "move") and (len(got) > 1 or self.stretched()):
             return 0, 0, "stretch"  # (made in the background, resized / moved apart: stretched_pic, rough)
         return (*min(got), len(got) > 1)
+
+    def turned_since(self):
+        """A carried shape was turned or skewed since its notes on screen were made: its points can't be had from the
+        old ones by moving and stretching each way on its own (beats from beats, keys from keys; flips included)."""
+        app = self.app
+        key = (app.shapes_gen, id(getattr(app, "rendered_frames", None)), frozenset(app.sels))
+        got = getattr(self, "_turned_memo", None)
+        if got is None or got[0] != key:  # (asked at every redraw while notes are made: once per change)
+            got = self._turned_memo = (key, self._turned_since())
+        return got[1]
+
+    def _turned_since(self):
+        app = self.app
+        frames = getattr(app, "rendered_frames", None) or []
+        for j in self.carry_from():
+            r = self.carry_ref(j)
+            if j >= len(app.shapes) or r >= len(frames):
+                return False
+            old, new = frames[r], app.shapes[j].get("pts") or ()
+            if len(old) != len(new):
+                return True
+            if len(old) < 2:
+                continue
+            o, n = np.asarray(old, np.float64), np.asarray(new, np.float64)
+            for axis in (0, 1):
+                a, b = o[:, axis], n[:, axis]
+                if np.ptp(a) < 1e-12:  # (all on one line that way: still one after a move / resize)
+                    if np.ptp(b) > 1e-9:
+                        return True
+                    continue
+                k = np.ptp(b) / np.ptp(a) * (1 if (b[np.argmax(a)] - b[np.argmin(a)]) >= 0 else -1)
+                if np.abs(b - (b[0] + (a - a[0]) * k)).max() > 1e-6 * max(1.0, np.ptp(b)):
+                    return True
+        return False
 
     def stretched(self):
         """A carried shape's points' box changed size since its notes on screen were made (resized)."""

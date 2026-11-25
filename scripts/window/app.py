@@ -479,6 +479,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         self._trimmed = None  # the oldest steps the 300 limit dropped for the last step (add_undo_step)
         self.rendered_pts = []  # each shape's first point when rendered was made
         self.rendered_boxes = []  # each shape's points' box (b0, b1, p0, p1) then (roll_draw.stretched_pic)
+        self.rendered_frames = []  # each shape's points then, copied (roll_draw.turned_since)
         self.ppq = 960
         self.undo_stack, self.redo_stack = [], []
         self._redo_kept = None  # (push_undo)
@@ -2365,6 +2366,8 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
             self.remake_pictures()
         self.rendered_pts = [list(sh["pts"][0]) for sh in self.shapes]  # (where each shape is in these notes)
         self.rendered_boxes = [pts_box(sh) for sh in self.shapes]
+        self.rendered_frames = [[list(p) for p in sh.get("pts") or ()] for sh in self.shapes]  # (turned / skewed
+        # since: roll_draw.carried)
         self.roll.copy_src = None  # (Ctrl+drag copies: their own notes now, roll_draw.on_top)
         started, worked = time.perf_counter(), self._notes_worked
         self.channel_split = SPLIT_CHOICES[max(self.split_box.current(), 0)][0]
@@ -3358,6 +3361,9 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
         boxes = self.rendered_boxes
         self.rendered_boxes = [boxes[back[j]] if j in back and back[j] < len(boxes) else pts_box(shapes[j])
                                for j in range(len(shapes))]
+        frames = self.rendered_frames
+        self.rendered_frames = [frames[back[j]] if j in back and back[j] < len(frames) else
+                                [list(p) for p in shapes[j].get("pts") or ()] for j in range(len(shapes))]
         self.picture_owners_all = np.array([picture_like(sh) for sh in shapes], bool)
         self.picture_owners = self.picture_owners_all if self.behind_owner is None else np.append(
             self.picture_owners_all, False)  # (as track_view)
