@@ -90,9 +90,9 @@ What's new:
 
 • The settings backups made when you update now go into the user folder's backups\settings folder (older ones are moved there).
 
-• Before you update: saved indexes of loaded MIDI files are made again, so the first load of each big MIDI after updating takes its full time once (and offers Save Index again). Projects with a loaded MIDI still find their file.
+• Before you update: saved indexes of loaded MIDI files are made again, so the first load of each big MIDI after updating takes its full time once (and offers Save Index again). Projects with a loaded MIDI still find their file. A project with a loaded MIDI saved in this version and opened in an older one says its MIDI file changed, even though it didn't.
 
-• Before you update: shapes with Gate Range across the keys (on a frame on the key lines) now run from the first gate on their lowest key to the last on their highest, so their gates can change a little. A few Hz bass notes, Notes by snap lines and Wrapped slices in older projects can lose an extra note or change one tick's colour where the rounding fixes above apply.
+• Before you update: shapes with Gate Range across the keys (on a frame on the key lines) now run from the first gate on their lowest key to the last on their highest, so their gates can change a little. A few Hz bass notes, Notes by snap lines and Wrapped slices in older projects can lose an extra note or change one tick's colour where the rounding fixes above apply. Chop with step Off now keeps rhythm pieces shorter than a tick as 1-tick notes (they used to vanish, e.g. "half" left only every other tick), and Add between steps whose blended Gate subtract lands on half a tick now round up, like Gate extend.
 
 • Before you update: Gate extend's box now reads a plain number as ticks. Type 50% for percent (it used to follow the Ticks / % choice). Projects open with the same notes as before.
 

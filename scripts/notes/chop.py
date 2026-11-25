@@ -192,8 +192,13 @@ def _pieces(a, chop, pieces, ps, pe, cycle, origin, k0, reps):
     base = np.repeat(origin[nk] + k * cycle, len(pieces))
     note = np.repeat(nk, len(pieces))
     which = np.tile(np.arange(len(pieces)), len(nk))
-    lo = np.rint(np.maximum(base + ps[which], s[note])).astype(np.int64)
-    hi = np.rint(np.minimum(base + pe[which], e[note])).astype(np.int64)
+    rlo = np.maximum(base + ps[which], s[note])
+    rhi = np.minimum(base + pe[which], e[note])
+    lo, hi = np.rint(rlo).astype(np.int64), np.rint(rhi).astype(np.int64)
+    # a piece shorter than a tick (step Off + "half" / triplets) is kept as a 1-tick note, never dropped (user
+    # 2026-11-26 took A); pages.rs chop_inner the same
+    tiny = (hi <= lo) & (rhi > rlo) & (lo < e[note])
+    hi[tiny] = lo[tiny] + 1
     keep = hi > lo
     out = a[note[keep]].copy()
     out[:, 0], out[:, 1] = lo[keep], hi[keep]

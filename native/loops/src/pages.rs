@@ -39,8 +39,13 @@ fn chop_inner(a: &[i64], nc: usize, origin: &[f64], k0: &[i64], reps: &[i64], ps
         for r in 0..rd(reps, i) {
             let base = o + ((k0i + r) as f64) * cycle;
             for w in 0..np_ {
-                let lo = rint(fmax(base + rd(ps, w), s));
-                let hi = rint(fmin(base + rd(pe, w), e));
+                let rlo = fmax(base + rd(ps, w), s);
+                let rhi = fmin(base + rd(pe, w), e);
+                let lo = rint(rlo);
+                let mut hi = rint(rhi);
+                if hi <= lo && rhi > rlo && lo < e {
+                    hi = lo + 1.0; // (a piece under a tick = a 1-tick note: chop._pieces' tiny)
+                }
                 if !(hi > lo) {
                     continue;
                 }

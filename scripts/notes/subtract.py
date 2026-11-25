@@ -200,8 +200,9 @@ def mixed_subtract(x, y, f, mix):
 
 
 def ticks_of(beats, ppq):
-    """An amount in whole ticks (at least 1 unless it's 0)."""
-    return max(1, int(round(beats * ppq))) if beats > 0 else 0
+    """An amount in whole ticks (at least 1 unless it's 0); halves UP like Gate extend (user 2026-11-26: Add between's
+    blended 2.5 ticks gave 2, 3.5 gave 4)."""
+    return max(1, math.floor(beats * ppq + 0.5 + 1e-9)) if beats > 0 else 0
 
 
 def touching(notes):
