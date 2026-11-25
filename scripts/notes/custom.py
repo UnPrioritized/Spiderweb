@@ -26,7 +26,7 @@ from notes.polygon import MIXES, clean_corners, formed_sides
 from notes.smooth import clean_level, smooth_path
 from notes.pen import THICK_MIN, band_of, clean_pen, clean_thick, clean_ink, joined_rows, pen_k
 from notes.paths import (ROW_EDGE, top_key, dedupe, keep_longest, line_notes, loop_from_left, parts_notes, pitch_of,
-                         stretch_ends)
+                         stop_point, stretch_ends)
 from notes.hzbass import (HZ_DEFAULTS, KeyGrid, even_squares, heard_layers, left_edge, off_cents, own_channels,
                           shifted_hz, squares, threshold)  # (Hz bass: hzbass.py)
 from notes.shrink import (SAMPLES, inner_lines, inner_rows, merge as shrink_merge, minus as shrink_minus,
@@ -2467,6 +2467,7 @@ def find_area_spans(sh, ppq):
     # (every row's spots asked at once: one row at a time, asking took most of the time)
     asked = []
     for i in (1, 2):  # the pieces' spots (+ their areas' sizes), the spots on the rows' middle lines
+        stop_point()
         x = np.concatenate([cut[i][0] for _, cut in rows]) if rows else np.zeros((0, 3))
         y = np.concatenate([cut[i][1] for _, cut in rows]) if rows else np.zeros((0, 3))
         got = (np.zeros(0, np.int64), None, None)
@@ -2477,6 +2478,7 @@ def find_area_spans(sh, ppq):
         asked.append([np.split(a, ends) if a is not None else [None] * len(rows) for a in got])
     out = []
     for j, (q, cut) in enumerate(rows):
+        stop_point()  # (a background job not wanted any more: stops here, not after the whole shape)
         row = [(math.floor(s * ppq + 0.5), math.floor(e * ppq + 0.5), g)
                for s, e, g in row_done(cut, asked[0][0][j], asked[0][1][j], asked[1][0][j], asked[1][1][j],
                                        asked[0][2][j])]

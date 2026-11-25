@@ -29,6 +29,34 @@ def top_key():
     return getattr(_rows, "top", TOP_KEY)
 
 
+class MakingStopped(BaseException):
+    """A background notes job (App._start_coming) was told to stop: raised at a stop_point mid-shape. BaseException
+    so no "except Exception" on the way can take it for a broken shape and keep going (or remember half a result)."""
+
+
+_job = threading.local()
+
+
+@contextmanager
+def stoppable(job):
+    """Inside this (on this thread), stop_point raises MakingStopped once job["stop"] is set."""
+    old = getattr(_job, "job", None)
+    _job.job = job
+    try:
+        yield
+    finally:
+        _job.job = old
+
+
+def stop_point():
+    """In long loops of one shape's making (sample15.spwb: one shape 1.6 s): a background job that isn't wanted any
+    more stops here instead of at its next shape (a drag's rests started 5 jobs, all running to the end side by side:
+    the last one took 3x as long). Nothing anywhere else (the window's own making never stops)."""
+    j = getattr(_job, "job", None)
+    if j is not None and j["stop"]:
+        raise MakingStopped
+
+
 @contextmanager
 def rows_up_to(top):
     """Fills make rows up to top (at least TOP_KEY) inside this, on this thread (a shape lifted far up: its rows

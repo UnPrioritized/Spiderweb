@@ -37,7 +37,7 @@ from notes.engine import (BEATS_FAR, CLASH, aligned_ch, rest_ch, KINDS, NO_NOTES
                           track_ids,
                           auto_count, PORTS, pasted_notes, edge_made, past_edges, SPACE_KEYS,
                           off_part)
-from notes.paths import rows_up_to
+from notes.paths import MakingStopped, rows_up_to, stoppable
 from files.own_tracks import FILE0, HAND, file_order, key_track, free_channel, full_plan, into_ids, new_id, with_port
 from notes.loaded import port_numbers
 from notes.funnel import FUNNEL_DEFAULTS, funnel_note_count, funnel_strokes, inside_out, turned_curve
@@ -3082,8 +3082,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                     [json.loads(t) if t else {} for t in key[9][1]], key[1], key[4])
                 own = Channels(key[11])  # (as own_channels: the loaded tracks given a channel too)
                 own.fixed = frozenset(key[12])
-                got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6], order=key[7], keep=key[8],
-                                busy=busy, own=own, overlaps=dict(key[13]) or None, stash=job["stash"], kept=key[14])
+                with stoppable(job):  # (a newer job's start stops this one mid-shape too: paths.stop_point)
+                    got = all_notes(shapes, *key[1:6], notes_tracks, rounds=key[6], order=key[7], keep=key[8],
+                                    busy=busy, own=own, overlaps=dict(key[13]) or None, stash=job["stash"],
+                                    kept=key[14])
                 # (the same time as shapes_changed's: making the notes only, not the orders below)
                 job["time"] = time.perf_counter() - started
                 if job["stop"]:
@@ -3098,7 +3100,7 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
                 job["drawn"] = (start, order)
                 job["pairs"] = note_pairs(rendered)  # (App.slot_pairs: the counts after they're taken in)
                 job["got"] = got
-            except Exception:  # (MemoryError too: made again the normal way, which tells about it; Stopped)
+            except (Exception, MakingStopped):  # (MemoryError too: made again the normal way, which tells; Stopped)
                 job["got"] = None
             job["done"] = True
         job["thread"] = threading.Thread(target=work, daemon=True, name="notes")
@@ -4003,9 +4005,10 @@ class App(ProjectFiles, CustomPanel, NestedPanel, TilesPanel, RipplesPanel, Colo
 
         def work():
             try:
-                for s in trials:
-                    make(s)
-            except Exception:  # (Stopped; MemoryError: then() makes them the usual way, which tells about it)
+                with stoppable(job):  # (stopped mid-shape too: paths.stop_point)
+                    for s in trials:
+                        make(s)
+            except (Exception, MakingStopped):  # (Stopped; MemoryError: then() makes them the usual way, which tells)
                 pass
             job["done"] = True
 
