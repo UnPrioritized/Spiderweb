@@ -52,6 +52,63 @@ def _layout(mf):
 INDEX_SLICES, AHEAD_SLICES = (256, 1 << 14), (16, 1 << 20)
 
 
+PACK_PIECE = 4 << 20  # (bytes of an array compressed as one piece on its own thread)
+
+
+def write_npz(f, items, workers=None):
+    """What np.savez_compressed writes (a zip of .npy files, deflated; np.load reads it) into the open file f, each
+    array's PACK_PIECE pieces compressed side by side on half the cores (user 2026-11-25: Kestrel's read-ahead ~13.5 s
+    on one). items = [(name, make)], make() = the array (made one at a time: byte rows, never all at once). The pieces
+    join into one deflate stream (each ends on a byte boundary, Z_SYNC_FLUSH; the last finishes it): a few bytes more
+    per piece. Every size in the zip64 form."""
+    import struct
+    import time
+    import zlib
+    from concurrent.futures import ThreadPoolExecutor
+    workers = workers or max(1, (os.cpu_count() or 2) // 2)
+    t = time.localtime()
+    when = ((t.tm_hour << 11) | (t.tm_min << 5) | (t.tm_sec // 2), ((t.tm_year - 1980) << 9) | (t.tm_mon << 5) | t.tm_mday)
+
+    def pack(piece, last):
+        c = zlib.compressobj(6, zlib.DEFLATED, -15)
+        return c.compress(piece) + c.flush(zlib.Z_FINISH if last else zlib.Z_SYNC_FLUSH)
+    central = []
+    start = f.tell()
+    with ThreadPoolExecutor(workers, thread_name_prefix="npz-pack") as pool:
+        for name, make in items:
+            a = np.ascontiguousarray(make())
+            hb = io.BytesIO()
+            np.lib.format.write_array_header_1_0(hb, np.lib.format.header_data_from_array_1_0(a))
+            raw = [hb.getvalue()]
+            body = memoryview(a.reshape(-1).view(np.uint8)) if a.size else memoryview(b"")
+            raw += [body[i:i + PACK_PIECE] for i in range(0, len(body), PACK_PIECE)]
+            jobs = [pool.submit(pack, p, k == len(raw) - 1) for k, p in enumerate(raw)]
+            crc = 0
+            for p in raw:  # (meanwhile, on this thread)
+                crc = zlib.crc32(p, crc)
+            packed = [j.result() for j in jobs]
+            plain, size = sum(len(p) for p in raw), sum(len(p) for p in packed)
+            nm = (name + ".npy").encode("utf-8")
+            at = f.tell() - start
+            f.write(struct.pack("<IHHHHHIIIHH", 0x04034B50, 45, 0, 8, when[0], when[1], crc, 0xFFFFFFFF, 0xFFFFFFFF,
+                                len(nm), 20) + nm + struct.pack("<HHQQ", 1, 16, plain, size))
+            for p in packed:
+                f.write(p)
+            central.append(struct.pack("<IHHHHHHIIIHHHHHII", 0x02014B50, 45, 45, 0, 8, when[0], when[1], crc,
+                                       0xFFFFFFFF, 0xFFFFFFFF, len(nm), 28, 0, 0, 0, 0, 0xFFFFFFFF) + nm
+                           + struct.pack("<HHQQQ", 1, 24, plain, size, at))
+            del a, raw, packed, body
+    cd_at = f.tell() - start
+    for c in central:
+        f.write(c)
+    cd_size = f.tell() - start - cd_at
+    end64 = f.tell() - start
+    n = len(central)
+    f.write(struct.pack("<IQHHIIQQQQ", 0x06064B50, 44, 45, 45, 0, 0, n, n, cd_size, cd_at))
+    f.write(struct.pack("<IIQI", 0x07064B50, 0, end64, 1))
+    f.write(struct.pack("<IHHHHIIH", 0x06054B50, 0, 0, min(n, 0xFFFF), min(n, 0xFFFF), 0xFFFFFFFF, 0xFFFFFFFF, 0))
+
+
 def byte_rows(a):
     """a's numbers as rows of bytes (every number's 1st byte, then every 2nd...): Kestrel's read-ahead messages + copy
     counts compress far better so (PLAN stage C 2026-11-25, Shinki 292 -> 178 MB, quicker too)."""
@@ -138,7 +195,8 @@ def save_index(lm, ahead=False):
     background (lm.dense_job = [thread, [bytes written or False] once done, index bytes]); else a read-ahead all read since is ASKED about on
     its own (hunt 2026-11-25: written unasked). Returns the index's size (+ the read-ahead's guess when written)."""
     data = io.BytesIO()
-    np.savez_compressed(data, **_arrays(lm))  # (older uncompressed ones open the same way: kept, user)
+    write_npz(data, [(k, lambda a=a: a) for k, a in _arrays(lm).items()])  # (older uncompressed ones open the
+    # same way: kept, user)
     data = data.getvalue()
     os.makedirs(FOLDER, exist_ok=True)
     write_bytes(index_file(lm.mf.path, lm.mf.size), data)

@@ -433,13 +433,8 @@ def save(d):
         tmp = path + ".tmp"
         SAVING.add(tmp)
         try:
-            with open(tmp, "wb") as f:  # (compressed as np.savez_compressed writes it, user 2026-11-25: Shinki
-                # 3 GB -> ~180 MB)
-                import zipfile
-                with zipfile.ZipFile(f, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as zf:
-                    for name, make in arrays:
-                        with zf.open(name + ".npy", "w", force_zip64=True) as out:
-                            np.lib.format.write_array(out, make(), allow_pickle=False)
+            with open(tmp, "wb") as f:  # (compressed on half the cores, user 2026-11-25: Shinki 3 GB -> ~180 MB)
+                midi_saved.write_npz(f, arrays)
                 f.flush()
                 os.fsync(f.fileno())
                 size = f.tell()
