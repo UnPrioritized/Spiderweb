@@ -33,7 +33,9 @@ RUN_AFTER_META = 16  # running status right after a meta / sysex event (programs
 AFTER_EOT = 32  # bytes after End of Track
 ODD_TEMPO = 64  # a tempo event that isn't 3 bytes long
 HIGH_DATA = 128  # a data byte over 127 (keys 128-255 of 256 keys MIDIs)
-MOST_TICK = 1 << 48  # a track reaching a later tick is damaged (BAD)
+# a track reaching a later tick is damaged (BAD). 2^52: ticks stay exact as decimals (2^53) with room to spare; the
+# song clock is exact that far (playback.TimeMap's origin)
+MOST_TICK = 1 << 52
 # cnt: counts of each kind
 C_EVENTS, C_ON, C_OFF, C_ON0, C_POLY, C_CC, C_PROG, C_PRESS, C_BEND, C_TEMPO, C_META, C_SYSEX, C_CHANNELS = range(13)
 C_ADDED = 12  # (counts before this one add up over tracks; the rest are bits / states)

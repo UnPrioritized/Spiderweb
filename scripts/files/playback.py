@@ -690,9 +690,11 @@ class TimeMap:
         if near > 0:
             i = max(0, bisect.bisect_right(ticks, near) - 1)
             at = sums[i] + (near - ticks[i]) * whole[i]
-            if at / den > FAR_S:  # (far out: the origin at near, a change put there so its run starts at it)
+            # (far out, in played seconds like far_from: the origin at near, a change put there so its run starts
+            # at it)
+            if at / den / v > FAR_S:
                 if back > 0:  # (the tick `back` seconds earlier: whole numbers again)
-                    at = max(0, at - int(back * den))
+                    at = max(0, at - int(back * v * den))  # (played seconds: a speed v stretches them)
                     i = max(0, bisect.bisect_right(sums, at) - 1)
                     near = ticks[i] + (at - sums[i]) // whole[i]
                     at = sums[i] + (near - ticks[i]) * whole[i]

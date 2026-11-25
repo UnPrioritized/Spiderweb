@@ -453,6 +453,23 @@ def retime_for(lm, tempo, plan, targets, bp=False):
     return Retime(bp if keep_map else None, drop, inserts, tempo_tracks(lm, tuple(drop)) if drop else [])
 
 
+def _lane_tops(e, lane):
+    """Each lane's latest end so far (e, lane: int64, sorted by lane): ends counted from the earliest + lane x 2^50
+    in one go when they span under 2^50 ticks (lanes < 4096: inside 64 bits), else lane by lane (huge-tick songs:
+    ticks up to 2^52)."""
+    if not len(e):
+        return e.copy()
+    lo = int(e.min())
+    if int(e.max()) - lo < 1 << 50:
+        shift = lane << 50
+        return np.maximum.accumulate(e - lo + shift) - shift + lo
+    top = np.empty_like(e)
+    cut = np.flatnonzero(np.diff(lane)) + 1
+    for a, b in zip(np.concatenate([[0], cut]).tolist(), np.concatenate([cut, [len(e)]]).tolist()):
+        top[a:b] = np.maximum.accumulate(e[a:b])
+    return top
+
+
 def own_hits(lm, s, e, lane, cancel=None, progress=None, bp=None):
     """How many of Spiderweb's own notes (starts s, ends e, lanes = channel x 256 + key; the file's ticks) sound at
     the same time as a loaded note on the same channel + key (the export's heads-up: players can cut those, plan
@@ -479,8 +496,7 @@ def own_hits(lm, s, e, lane, cancel=None, progress=None, bp=None):
         order = np.lexsort((s, lane))
         s, e, lane = (np.ascontiguousarray(a[order], np.int64) for a in (s, e, lane))
         lane_at = np.searchsorted(lane, np.arange(QS + 1)).astype(np.int64)
-        shift = lane << 50  # (ticks < 2^48: each lane's latest end so far in one go)
-        top = np.maximum.accumulate(e + shift) - shift
+        top = _lane_tops(e, lane)
         return s, e, lane, lane_at, top, order
     s, e, lane = (np.asarray(a, np.int64) for a in (s, e, lane))
     whole = prepared(s, e, lane)

@@ -8,7 +8,6 @@ placed off a bar line cuts the bar before it short. Domino's limits: top 1-255, 
 import bisect
 import math
 
-from files.midi_scan import MOST_TICK
 
 DEFAULT = [0.0, 4, 4]
 TOPS = (1, 255)
@@ -17,7 +16,8 @@ SHARPS = ("C", "G", "D", "A", "E", "B", "F#", "C#")  # (major keys by sharps; mi
 FLATS = ("C", "F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb")
 MINOR_SHARPS = ("A", "E", "B", "F#", "C#", "G#", "D#", "A#")
 MINOR_FLATS = ("A", "D", "G", "C", "F", "Bb", "Eb", "Ab")
-FAR = float(MOST_TICK >> 2)  # beats: past this a mark is left out (= tempo.FAR, 2^46: a loaded MIDI's farthest)
+# beats: past this a mark is left out (= tempo.FAR, 2^46: x PPQ 65535 stays inside 64 bits)
+FAR = float(1 << 46)
 EPS = 1e-9
 
 
