@@ -247,6 +247,10 @@ def load_index(mf):
             head = json.loads(bytes(z["head"]).decode("utf-8"))
             if not _fits(head, mf):
                 return None
+            from files.midi_index import GRID_MOST
+            far = max([s["last_tick"] for s in head["tracks"]] + [0])
+            if far // max(1, int(head["G"])) >= GRID_MOST - 2:  # (saved before the overview widened for songs past
+                return None  # its reach (Loader._wider): read again)
             arrays = {k: z[k] for k in ARRAYS}
             cnt, top, edges = z["cnt"], z["top"], z["edges"]
     except Exception:  # (damaged too: read the usual way)

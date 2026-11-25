@@ -20,7 +20,7 @@ import time
 import numpy as np
 
 from files import midi_index, speed
-from files.midi_index import C_SIZE, C_STOP, C_TICK, C_RUN, QS
+from files.midi_index import C_SIZE, C_STOP, C_TICK, C_RUN, QS, SlotTicks
 from files.midi_read import MidiError
 from files.own_tracks import key_track
 from notes import loaded_shown as LS, loaded_view as LV
@@ -41,7 +41,6 @@ RATE_PLAIN = 0.5e6  # ... without the speed-ups (plain Python)
 TIMED_LEAST = 4 << 20  # pictures reading fewer bytes don't time the rate (their fixed costs would)
 SMALL_TRACK = 1 << 20  # tracks this small read many in one compiled call (read_small: per track costs ruled there)
 SMALL_BATCH = 4 << 20  # ... this many bytes a call at most (a stop asked between calls)
-_BIG = 1 << 40  # (small_tables' search keys: track place x this + tick)
 
 SHOWN_POLL_MS = 200  # how often the moved overview's making is looked at
 
@@ -993,7 +992,7 @@ def small_tables(lm):
     sm = {"at": at, "cp0": np.concatenate([[0], np.cumsum(ncp)]).astype(np.int64),
           "ent0": np.concatenate([[0], np.cumsum(ncp + 1)[:-1]]).astype(np.int64),
           "e0": np.concatenate([[0], np.cumsum(ne)[:-1]]).astype(np.int64),
-          "key": np.repeat(np.arange(len(sel), dtype=np.int64), ncp) * _BIG + cp_tick, "cp_tick": cp_tick,
+          "key": SlotTicks(np.repeat(np.arange(len(sel), dtype=np.int64), ncp), cp_tick), "cp_tick": cp_tick,
           "cp_off": cat("cp_off", np.int64), "cp_run": cat("cp_run", np.int64), "cp_ent": cat("cp_ent", np.int64),
           "eq": cat("e_q", np.int16), "ec": cat("e_cnt", np.int64), "ev": cat("e_vel", np.uint8)}
     for name, get in (("limit", lambda n, t: t.limit), ("last", lambda n, t: t.last_tick), ("klo", lambda n, t: t.klo),
@@ -1020,9 +1019,8 @@ def read_small(rd, ns, tab, nx, filled, marks, stop, covered):
     ns = np.asarray(ns, np.int64)
     ii = sm["at"][ns]
     k0, k1 = sm["cp0"][ii], sm["cp0"][ii + 1]
-    t0, t1 = max(rd.t0, -1), min(rd.t1, _BIG - 1)  # (checkpoint ticks are 0 .. below _BIG)
-    j = np.maximum(np.searchsorted(sm["key"], ii * _BIG + t0, "right") - 1, k0)
-    j2 = np.searchsorted(sm["key"], ii * _BIG + t1, "right")
+    j = np.maximum(sm["key"].find(ii, rd.t0, "right") - 1, k0)  # (by tick rank: track x 2^40 + tick drew nothing past
+    j2 = sm["key"].find(ii, rd.t1, "right")  # tick 2^40, huge-tick MIDIs)
     cpo = sm["cp_off"]
     starts = cpo[j]
     ends = np.where(j2 < k1, cpo[np.minimum(j2, len(cpo) - 1)], sm["limit"][ii])

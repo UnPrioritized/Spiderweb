@@ -38,6 +38,26 @@ GRID_MOST = 1 << 18  # the overview's buckets at most (16,384 beats; notes past 
 FAR = 1 << 62
 
 
+class SlotTicks:
+    """Every track's checkpoint ticks as ONE sorted list searched for (track place, tick) at once, like keys
+    place x BIG + tick but never too big for 64 bits (huge-tick MIDIs: ticks up to midi_scan.MOST_TICK, 65,535
+    tracks): each tick stands in by its rank among all of them. place: non-decreasing; ticks sorted within each."""
+
+    def __init__(self, place, tick):
+        self.u = np.unique(tick)
+        self.n = len(self.u) + 1
+        self.key = np.asarray(place, np.int64) * self.n + np.searchsorted(self.u, tick)
+
+    def __len__(self):
+        return len(self.key)
+
+    def find(self, place, t, side="left"):
+        """Where (place, t) goes in the list, as np.searchsorted(place x BIG + tick, place x BIG + t, side) would:
+        "left" = the place's first checkpoint at or past t, "right" = its first past t."""
+        return np.searchsorted(self.key, np.asarray(place, np.int64) * self.n + np.searchsorted(self.u, t, side),
+                               "left")
+
+
 def new_state():
     ix = np.zeros(X_SIZE, np.int64)
     ix[X_FREE] = -1

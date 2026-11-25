@@ -8,6 +8,8 @@ placed off a bar line cuts the bar before it short. Domino's limits: top 1-255, 
 import bisect
 import math
 
+from files.midi_scan import MOST_TICK
+
 DEFAULT = [0.0, 4, 4]
 TOPS = (1, 255)
 BOTTOMS = (1, 2, 4, 8, 16, 32, 64, 128)
@@ -15,7 +17,7 @@ SHARPS = ("C", "G", "D", "A", "E", "B", "F#", "C#")  # (major keys by sharps; mi
 FLATS = ("C", "F", "Bb", "Eb", "Ab", "Db", "Gb", "Cb")
 MINOR_SHARPS = ("A", "E", "B", "F#", "C#", "G#", "D#", "A#")
 MINOR_FLATS = ("A", "D", "G", "C", "F", "Bb", "Eb", "Ab")
-FAR = 1e7  # beats: past this a mark is left out (as the tempo line's points)
+FAR = float(MOST_TICK)  # beats: past this a mark is left out (as the tempo line's points: a loaded MIDI's farthest)
 EPS = 1e-9
 
 
@@ -141,13 +143,18 @@ def bar_lines(sigs, lo, hi, gap=0.0):
         while n * every < gap:
             every *= 2
         k = max(0, math.floor((lo - start) / n))
+        if k == 0:  # (where the signature starts: always)
+            if start <= hi and start < end - EPS and start >= lo - EPS:
+                out.append((start, first))
+            k = 1
+        k += -(first + k) % every  # (straight to the kept bars: zoomed far out, billions of bars in view froze it)
         while True:
             b = start + k * n
             if b > hi or b >= end - EPS:
                 break
-            if b >= lo - EPS and ((first + k) % every == 0 or k == 0):
+            if b >= lo - EPS:
                 out.append((b, first + k))
-            k += 1
+            k += every
     return out
 
 

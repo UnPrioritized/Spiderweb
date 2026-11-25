@@ -29,7 +29,7 @@ from files import midi_play, play_map, speed
 from files.synth import GROUP_BUFFER, RATE
 from files.midi_scan import (C_BANK, C_BEND, C_BTICK, C_CC, C_CHANNELS, C_OFF, C_ON, C_ON0, C_POLY, C_PRESS,
                              C_PROG, C_PTICK, C_PVAL)
-from files.midi_index import CC_KINDS, K_BEND, K_POLY, K_PRESSURE, K_PROGRAM
+from files.midi_index import CC_KINDS, K_BEND, K_POLY, K_PRESSURE, K_PROGRAM, SlotTicks
 
 STEP_S = 0.003  # the feeder's beat
 AHEAD_S = 1.0  # read this far ahead of the play line at most
@@ -43,7 +43,7 @@ BACKLOG = 1 << 20  # bytes waiting in a synth past which it gets no new notes (i
 # bursts, so 256 KB was passed in normal playing)
 WANT = 4_000_000  # events a reading window aims at (its length in ticks follows)
 WINDOW_S = 0.25  # a reading window is this much of the song at most
-SPAN_MOST = 1 << 22  # a window's ticks at most (the counting sort's table)
+SPAN_MOST = 1 << 22  # a window's ticks at most for the counting sort's table (wider = a stable sort, _sorted)
 BUDGET_SYNTH = 200_000  # note-ons a second to start from on each of Built-in BASSMIDI's synths (then by its load)
 BUDGET_KDMAPI = 200_000  # ... OmniMIDI (KDMAPI): one message per call from Python
 BUDGET_DEVICE = 30_000  # ... a Windows MIDI device
@@ -233,7 +233,7 @@ class LoadedPlayer:
 
     def _table(self):
         """Every playable track's arrays, one place per track ("slot"): number, bytes, checkpoints put together
-        (cp_key = slot x M + tick, so one search finds each track's own)."""
+        (cp_key = midi_index.SlotTicks of (slot, tick), so one search finds each track's own)."""
         lm = self.lm
         # (removed in the track list: none of its events, like the export)
         num = [n for n, (t, mt) in enumerate(zip(lm.tracks, lm.mf.tracks)) if playable(mt) and t.limit > 0
@@ -241,7 +241,6 @@ class LoadedPlayer:
         self.num = np.array(num, np.int64)
         self.start_of = np.array([lm.mf.tracks[n].start for n in num], np.int64)
         self.limit = np.array([lm.tracks[n].limit for n in num], np.int64)
-        self.M = max([int(lm.tracks[n].last_tick) for n in num] + [0]) + 2
         self.num32 = self.num.astype(np.int32)
         cps = [lm.tracks[n].cp_tick for n in num]
         counts = np.array([len(c) for c in cps], np.int64)
@@ -250,7 +249,7 @@ class LoadedPlayer:
         slot = np.repeat(np.arange(len(num), dtype=np.int64), counts)
         cat = (lambda a: np.concatenate(a).astype(np.int64)) if len(num) else (lambda a: np.zeros(0, np.int64))
         self.cp_tick = cat(cps)
-        self.cp_key = slot * self.M + self.cp_tick
+        self.cp_key = SlotTicks(slot, self.cp_tick)  # (slot x M + tick ran past 64 bits: 2^48 ticks x 32 k tracks)
         self.cp_off = cat([lm.tracks[n].cp_off for n in num])
         self.cp_run = cat([lm.tracks[n].cp_run for n in num])
         self.mode_file = lm.mode != "memory"
@@ -300,7 +299,7 @@ class LoadedPlayer:
         t1 = self.shown.file_start(t1)  # (moved time signature: the file ticks shown before t1 are the ones before this)
         while len(slots):
             # (up to the first checkpoint at or past t1: every event before t1 is before it)
-            j2 = np.searchsorted(self.cp_key, slots * self.M + t1, "left")
+            j2 = self.cp_key.find(slots, t1, "left")
             end = np.where(j2 < self.seg1[slots], self.cp_off[np.minimum(j2, len(self.cp_off) - 1)]
                            if len(self.cp_off) else 0, self.limit[slots])
             size = np.minimum(np.maximum(np.maximum(end - self.pos[slots], 256), self.want[slots]),
@@ -359,8 +358,7 @@ class LoadedPlayer:
         if len(slots) < 64 or not helpers:
             got = self._read(slots, t1, most)
             return None if got is None else [got]
-        j2 = (np.searchsorted(self.cp_key, slots * self.M + self.shown.file_start(t1), "left")
-              if len(self.cp_key) else None)
+        j2 = self.cp_key.find(slots, self.shown.file_start(t1), "left") if len(self.cp_key) else None
         end = (np.where(j2 < self.seg1[slots], self.cp_off[np.minimum(j2, len(self.cp_off) - 1)], self.limit[slots])
                if j2 is not None else self.limit[slots])
         left = np.cumsum(np.maximum(end - self.pos[slots], 256))
@@ -398,7 +396,11 @@ class LoadedPlayer:
         span = max(1, w1 - w0)
         if len(parts) == 1 or span > SIDE_SPAN:
             ts, ms, ks = parts[0] if len(parts) == 1 else (np.concatenate(a) for a in zip(*parts))
-            _loops()[1](ts, ms, ks, w0, span, got[0], got[1], got[2])
+            if span > SPAN_MOST:  # (a quiet window wider than the counting sort's table, huge-tick MIDIs: a stable
+                o = np.argsort(ts, kind="stable")  # sort, the same order: by tick, then as read)
+                got[0][:n], got[1][:n], got[2][:n] = ts[o], ms[o], ks[o]
+            else:
+                _loops()[1](ts, ms, ks, w0, span, got[0], got[1], got[2])
             return got[0][:n], got[1][:n], got[2][:n], got
         count, place = _loops()[6], _loops()[7]
         h = np.zeros((len(parts), span), np.int64)
@@ -448,7 +450,7 @@ class LoadedPlayer:
         if len(self.cp_key):
             # (the last checkpoint BEFORE t0: one on t0 itself can sit amid that tick's events, the ones before it
             # were lost: Shinki's beat 340, ~500 note-offs a key, 2026-10-27)
-            j = np.searchsorted(self.cp_key, slots * self.M + self.shown.file_start(t0), "left") - 1
+            j = self.cp_key.find(slots, self.shown.file_start(t0), "left") - 1
             has = (j >= self.seg0[slots]) & (j < self.seg1[slots])
             jj, sh = j[has], slots[has]
             self.pos[sh], self.tick[sh], self.run[sh] = self.cp_off[jj], self.cp_tick[jj], self.cp_run[jj]
@@ -872,8 +874,8 @@ class LoadedPlayer:
                     span = w1 - w0
                     if len(ts) > 2 * WANT:
                         span = max(1, span // 2)
-                    elif len(ts) < WANT // 4 and span < SPAN_MOST // 2:
-                        span *= 2
+                    elif len(ts) < WANT // 4:  # (no tick limit: WINDOW_S holds it; at 60 M BPM 2^22 ticks are 0.13 ms
+                        span *= 2  # of song, the reading fell 50x behind)
                     w0 = w1
                 if self._jump is not None:
                     start = self._jump

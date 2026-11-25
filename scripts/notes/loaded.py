@@ -1206,6 +1206,7 @@ class Loader:
         self.stage = "wait"  # "wait" (speed-ups) / "read" / "overview" / "done"
         self.done = 0
         self.total = sum(t.size for t in mf.tracks)
+        self._base = 0  # (bytes read before this read: a second read for wider overview buckets, _wider)
         self.notes_found = 0
         self.tracks_done = 0
         self.cancelled = False
@@ -1251,6 +1252,11 @@ class Loader:
         self._close = loops.midi_close if loops else midi_index.close
         self._grid = loops.midi_grid if loops else midi_index.grid
         self.mf.scan(progress=self._progress, cancel=lambda: self.cancelled, each=self._each)
+        far = max((t.last_tick for t in self.mf.tracks), default=0)
+        if far // self.G >= GRID_MOST - 2 and not self.cancelled:  # (a song past the overview's reach, 16,384 beats:
+            # huge-tick MIDIs (60 M BPM at PPQ 32767 = 16 ms) showed nothing zoomed out: read again with wider buckets)
+            self._wider(far)
+            self.mf.scan(progress=self._progress, cancel=lambda: self.cancelled, each=self._each)
         self.stage = "overview"
         if self.cancelled:
             raise Cancelled()
@@ -1261,8 +1267,22 @@ class Loader:
         return LoadedMidi(self.mf, "memory" if self.keep else "file", self.G, self._infos, levels,
                           time.perf_counter() - self.started, edges)
 
+    def _wider(self, far):
+        """The overview's buckets made wide enough for ticks up to far (a whole number of the usual 1/16 beat each),
+        everything the first read made thrown away (read again: _run)."""
+        step = -(-(far + 1) // (GRID_MOST - 4))
+        self.G *= -(-step // self.G)
+        self._base, self.total = self.total, 2 * self.total  # (the bar goes on, never back)
+        self._infos = [None] * len(self.mf.tracks)
+        self.cnt = np.zeros((128, 1024), np.int32)
+        self.top = np.full((128, 1024), -1, np.int32)
+        self.etop = np.full((128, 1024), -1, np.int32)
+        self._local = threading.local()
+        self.notes_found = self.tracks_done = self.cc_kept = 0
+        self.cc_over = False
+
     def _progress(self, done, total):
-        self.done = done
+        self.done = self._base + done
 
     def _each(self, t):
         th = getattr(self._local, "th", None)

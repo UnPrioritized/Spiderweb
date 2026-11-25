@@ -27,7 +27,8 @@ from files.own_tracks import (COUNT_MOST, HAND, ID_MOST, PART, add_tracks, key_p
                               new_id, plan, port_letter, with_port)
 from files.snap import clean_snap, snap_beats
 from files.speed import Photo
-from notes.engine import BEATS_FAR, OWN0, channels_of, pasted_notes, slot_track_channel, track_ids
+from files.midi_scan import MOST_TICK
+from notes.engine import OWN0, channels_of, pasted_notes, slot_track_channel, track_ids
 from notes.loaded import KEY_SIG, TEMPO, TIME_SIG, tempo_tracks, track_port as file_port
 from notes.mask import pinned_slots
 from notes.meter import bar_line, bar_lines, key_name, sig_text, sigs_of, where
@@ -47,6 +48,7 @@ from window.track_pictures import (SQUARE, TILE, BehindWindow, RowJob, build_oni
                                     moved_to, notes_on, old_owners, row_mask, shape_ids, small_mask, squares, sync_onion)
 from window.widgets import Scrub, Tooltip, bad, good, read_number, remember_place
 
+VIEW_FAR = float(MOST_TICK)  # beats: the list's view never past this (a loaded MIDI's farthest tick at PPQ 1)
 NAME_W = 150    # the names' column (x scale)
 RULER_H = 28    # the ruler: signatures on top, bar numbers under them
 ROW_H = 26      # a row's height at first; zoomed up / down between ROW_LEAST and ROW_MOST
@@ -743,7 +745,7 @@ class TrackList(tk.Canvas):
         if num(data.get("sx")) and MIN_SX <= data["sx"] <= MAX_SX:
             self.sx = float(data["sx"])
             # (past the piano roll's far limit = a damaged file: the bar lines' loop never ended there, hunt 10-23)
-            self.view_t = min(BEATS_FAR, max(0.0, float(data["t"]))) if num(data.get("t")) else 0.0
+            self.view_t = min(VIEW_FAR, max(0.0, float(data["t"]))) if num(data.get("t")) else 0.0
             self.top = min(10 ** 9, max(0, round(data["top"] * self.scale))) if num(data.get("top")) else 0
         if isinstance(data.get("open"), list):
             self.open = {v for v in data["open"][:OPEN_MOST]  # (parts' ids too, E3 hunt)
@@ -1077,7 +1079,7 @@ class TrackList(tk.Canvas):
         h = self.winfo_height() - self.area()[1]
         self.top = max(0, min(self.top, self.rows_height() - max(h, self.row_h)))
         if self.sx:  # (whole pixels: the kept picture moves by whole pixels, paint)
-            self.view_t = max(0, round(min(self.view_t, BEATS_FAR) * self.sx)) / self.sx
+            self.view_t = max(0, round(min(self.view_t, VIEW_FAR) * self.sx)) / self.sx
 
     def bar_view(self, across):
         """zoombar's: (start, end, total) of what's seen."""
@@ -2766,7 +2768,7 @@ class TrackList(tk.Canvas):
         rows = sorted(r for r in map(self.row_of_id, ss) if r is not None)
         if not rows:
             return
-        boxes = [{"t0": 0.0, "t1": float(BEATS_FAR), "rows": (r, r)} for r in rows]
+        boxes = [{"t0": 0.0, "t1": VIEW_FAR, "rows": (r, r)} for r in rows]
         own = {self.own_track(s)["id"] for s in ss if self.own_track(s) is not None}
         files = [-1 - s for s in ss if s < 0]
         box_job(self.app, boxes, "remove", extra={"ids": list(ss), "own": own, "files": files})

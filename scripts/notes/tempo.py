@@ -50,6 +50,7 @@ import threading
 import numpy as np
 
 from files.mathexpr import fmt, formula
+from files.midi_scan import MOST_TICK
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_keysigs, clean_sigs
 from notes.tempo_safe import (PAIR_REACH, SAFE_REACH, _FAR, _WINDOW, _fit_blocks, _fit_exact, _first_safe, _flat_pair,  # (moved)
                               _flat_pair_search, _near_pair, _nearest1, _next1, _next_by_bpm, _next_small, _pairs, _runs,
@@ -69,7 +70,8 @@ FORMULA = "x^3"  # a new formula part's / catch-up's starting formula
 SCALES = ("lin", "exp")  # a part's BPM change: linear (default, user) / exponential (straight on the doubling scale)
 EVERY = 24  # ticks between the tempo changes of a curved part (user: like Domino's default; 1 = every tick)
 BLOCKS_FROM = 8  # an interval this long or more: a curved part worked out step by step, not tick by tick
-FAR = 1e7  # beats: past this a point is left out (as shapes' points, engine.BEATS_FAR)
+FAR = float(MOST_TICK)  # beats: past this a point is left out (the farthest tick a loaded MIDI holds, at PPQ 1:
+# huge-tick MIDIs at 60 M BPM pass 10 M beats in 10 s, their tempo changes after it were dropped)
 SLOWEST = 16_777_211  # the slowest Domino-safe tempo (us per beat; a file holds up to 0xFFFFFF)
 
 
