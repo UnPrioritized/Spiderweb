@@ -16,6 +16,10 @@ What's new:
 
 • Faster: drawn shapes with many coloured areas make their notes up to 3 to 4 times faster, so projects holding them open sooner, and an edit's notes made in the background no longer wait for older ones that aren't wanted any more.
 
+• Smaller: a loaded MIDI's saved index now takes about 16 times less disk space, and Kestrel's kept read-ahead of its busiest parts about 17 times less (3 GB becomes under 200 MB on a very dense MIDI), and it saves faster. Indexes saved before keep working; delete one in Settings and save it again to shrink it.
+
+• Fixed: Kestrel (GPU)'s read-ahead of a loaded MIDI's busiest parts was never offered for keeping, so it was read again at every load.
+
 • Smoother: panning and dragging near a selected shape with many curves (its lines are drawn the quicker way, and its curves aren't worked out again at every step).
 
 • While notes are being made after you turn or slant a shape, it shows only its outline, not its old unturned notes.
