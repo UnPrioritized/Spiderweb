@@ -59,7 +59,7 @@ from notes.sustain import auto_gap, clean_sustain, cut_by, held, is_sustained, s
 from notes.bezier import anchor_count, sample
 from notes.paths import SNAP_ENDS, dedupe, dot_segment_notes, path_notes, rows_up_to, snap_steps
 from notes.pattern import FORMULA_KINDS, clean_pattern, clean_shape_formula, formed_paths
-from notes.custom import ROUND, block_shift, even_on, frame_upright, notes_resampled, pack_notes, path_colours, unpack_notes
+from notes.custom import ROUND, block_shift, strokes_json, even_on, frame_upright, notes_resampled, pack_notes, path_colours, unpack_notes
 from notes.picture import clean_picture, turned_notes
 from notes.polygon import clean_polygon, polygon_strokes
 from notes.mask import clean_mask, is_mask
@@ -780,7 +780,7 @@ def strokes_text(strokes):
         if got is not None and got[0] is strokes:
             return got[1]
     tok = strokes_token(strokes)
-    return STROKES_MARK + tok if tok else json.dumps(strokes)
+    return STROKES_MARK + tok if tok else strokes_json(strokes) if isinstance(strokes, list) else json.dumps(strokes)
 
 
 def _key_of(sh):

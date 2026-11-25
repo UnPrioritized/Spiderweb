@@ -40,6 +40,8 @@ CARRY_REST_S = 0.15  # notes made in the background: their carried picture waits
 MAKING_SHOW_S = 0.15  # notes made in the background this long: the "Making notes…" box shows (draw_making_label)
 MAKING_LOOK_MOST = 200  # nothing selected: up to this many shapes looked at for the ones being made (making_shapes)
 ROUGH_STRENGTH = 0.5  # the old notes stretched into a resized shape's new box: this much colour (stretched_pic)
+THICK_MOST = 200  # points: a thick line with this many or more = thin lines side by side (draw_path; 1000 before
+# 2026-11-25: sample15's selected shape, 31 curves of ~480 points, cost Tk 40 ms a pan step painted thick, 12 thin)
 
 
 def pts_box(sh):
@@ -2762,7 +2764,7 @@ class RollDrawing:
                 continue
             for coords, size in screen_lines(path, ax, bx, ay, by, view):
                 # (dashed: never one thick line, a thick dashed one reaching far off screen froze Windows)
-                if width == 1 or size < 1000 and not dash:
+                if width == 1 or size < THICK_MOST and not dash:
                     self.create_line(*coords, fill=color, width=width, dash=dash, tags=tags)
                     continue
                 # a long thick line: Windows paints thick lines with thousands of points very slowly (seconds),

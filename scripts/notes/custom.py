@@ -6,6 +6,7 @@ import functools
 import heapq
 import itertools
 import json
+import marshal
 import math
 import zlib
 
@@ -333,10 +334,60 @@ def ellipse_points(u0, v0, u1, v1):
     return tuple(pts + [pts[0]])
 
 
+_POINTS = {}  # id(stroke) -> (the stroke, a copy of it, its points): curves / formulas worked out once while unchanged
+POINTS_KEPT = 4096
+_JSON = {}  # id(strokes list) -> (the list, a copy of it, its JSON): strokes_json
+
+
+def strokes_json(strokes):
+    """json.dumps(strokes), remembered while the same list stays equal to a copy taken then (==, in C: much quicker
+    than writing it out; cache keys ask it at every drag step and redraw, sample15: 31 formula strokes ~3 ms a time)."""
+    k = _JSON.get(id(strokes))
+    if k is not None and k[0] is strokes:
+        try:
+            if strokes == k[1]:
+                return k[2]
+        except Exception:  # noqa: BLE001 (a value that can't be compared: written out)
+            pass
+    text = json.dumps(strokes)
+    try:
+        kept = marshal.loads(marshal.dumps(strokes))
+    except ValueError:  # (not plain data: not remembered)
+        return text
+    if len(_JSON) >= POINTS_KEPT:
+        _JSON.clear()
+    _JSON[id(strokes)] = (strokes, kept, text)
+    return text
+
+
 def stroke_points(st):
-    """A stroke as (u, v) points. An ellipse starts at its leftmost point and ends exactly where it started."""
+    """A stroke as (u, v) points. An ellipse starts at its leftmost point and ends exactly where it started.
+    Curves, arcs, made-perfect freehand and formula strokes are remembered while the stroke is the same (its own
+    points: moving / turning the shape changes none; sample15: 31 formula curves worked out again at every drag step
+    and redraw, ~12 ms a step): the same stroke object, equal to a copy taken then (==, in C)."""
     if st["kind"] == "ellipse":
         return list(ellipse_points(*st["box"]))
+    if not (st["kind"] in ("curve", "arc") or st.get("smooth") or has_formula(st)):
+        return [tuple(p) for p in st["pts"]]
+    k = _POINTS.get(id(st))
+    if k is not None and k[0] is st:
+        try:
+            if st == k[1]:
+                return list(k[2])
+        except Exception:  # noqa: BLE001 (a value that can't be compared: worked out again)
+            pass
+    got = tuple(tuple(p) for p in _stroke_points(st))  # (points as tuples: shared by every caller, never changed)
+    try:
+        kept = marshal.loads(marshal.dumps(st))
+    except ValueError:  # (not plain data: not remembered)
+        return list(got)
+    if len(_POINTS) >= POINTS_KEPT:
+        _POINTS.clear()
+    _POINTS[id(st)] = (st, kept, got)
+    return list(got)
+
+
+def _stroke_points(st):
     if st["kind"] == "curve":
         return formed_path(sample([tuple(p) for p in st["pts"]], CURVE_STEPS), st)
     if st["kind"] == "arc":
@@ -721,7 +772,7 @@ def fill_plan(sh):
     whose ends both land on a line (another one's, or partway along their own; user): not closed, they're walls
     between areas and keep their outline notes (fill_test; an end landing near a line, not on it, gets a short
     closer to it)."""
-    key = (json.dumps(sh["strokes"]), json.dumps(sh["pts"]))
+    key = (strokes_json(sh["strokes"]), json.dumps(sh["pts"]))
     got = _plans.get(key)
     if got is not None:
         return got
