@@ -2546,6 +2546,35 @@ def row_cut(edges, q):
     return pieces, (np.column_stack(xs), np.column_stack(ys)), (cxs, cys)
 
 
+def smallest_cover(nb, ia, ib, which, size, groups):
+    """(nb, groups): for each bit j and colour g, the smallest size of colour g's pieces covering it (ia <= j < ib),
+    inf where none. Each piece goes in as two blocks of a power-of-two length (together exactly its bits), then the
+    blocks are halved down to single bits: about (bits + pieces) x log(bits), not bits x pieces (a row of 9,400
+    pieces took 0.2 s that way, sample15)."""
+    out = np.full((nb, groups), np.inf)
+    ln = ib - ia
+    use = ln > 0
+    if nb == 0 or not use.any():
+        return out
+    ia, ib, which, size, ln = ia[use], ib[use], which[use], size[use], ln[use]
+    k = np.floor(np.log2(ln)).astype(np.int64)
+    k = np.where(np.left_shift(1, k + 1) <= ln, k + 1, k)  # (log2's float rounding either way)
+    k = np.where(np.left_shift(1, k) > ln, k - 1, k)
+    top = int(k.max())
+    tabs = [out] + [np.full((nb, groups), np.inf) for _ in range(top)]
+    for lv in range(top + 1):
+        s = k == lv
+        if s.any():
+            np.minimum.at(tabs[lv], (ia[s], which[s]), size[s])
+            np.minimum.at(tabs[lv], (ib[s] - (1 << lv), which[s]), size[s])
+    for lv in range(top, 0, -1):
+        h, n = 1 << (lv - 1), nb - (1 << lv) + 1  # (half a block; how many blocks of this length fit)
+        src = tabs[lv][:n]
+        np.minimum(tabs[lv - 1][:n], src, out=tabs[lv - 1][:n])
+        np.minimum(tabs[lv - 1][h:h + n], src, out=tabs[lv - 1][h:h + n])
+    return out
+
+
 def row_done(cut, c, wall, cpaint, cwall, size=None):
     """row_pieces from row_cut's cut and the answers: c = colour and wall = walled (None: even-odd) of the pieces'
     spots, cpaint / cwall the same of the middle line's, size: how big each piece's area is (None: all alike).
@@ -2603,9 +2632,7 @@ def row_done(cut, c, wall, cpaint, cwall, size=None):
         ok[ok] &= cfill[j[ok]]
         best = np.where(ok, cgroup[np.clip(j, 0, max(0, len(cgroup) - 1))], best)
     # the smaller area wins every bit it reaches (its pieces reach as far as the line does in the row)
-    cover = (lo_[None, :] <= m[:, None]) & (hi_[None, :] > m[:, None])
-    small = np.column_stack([np.where(cover[:, which == g], size[which == g], np.inf).min(1)
-                             for g in range(len(names))])
+    small = smallest_cover(len(m), ia, ib, which, size, len(names))
     if len(names) > 1:
         two = np.sort(small, 1)[:, :2]
         win = np.isfinite(two[:, 0]) & (two[:, 0] < two[:, 1] * SAME_SIZE)
