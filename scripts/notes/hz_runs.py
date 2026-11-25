@@ -339,7 +339,8 @@ def tone_runs(hz, left, ppq, keys=None):
                 starts = np.concatenate([p for p, _ in parts])
                 nexts = np.concatenate([p + g for p, g in parts])
             else:
-                starts = s + gate * np.arange(max(1, int(math.ceil((e - s) / gate))))
+                # (- 1e-9 as above: a tone exactly N waves long came out N + a hair and got a wave at its own end)
+                starts = s + gate * np.arange(max(1, int(math.ceil((e - s) / gate - 1e-9))))
                 nexts = starts + gate
             got = run(starts, nexts, (n, None))
             own.setdefault(id(n), []).append(got)
