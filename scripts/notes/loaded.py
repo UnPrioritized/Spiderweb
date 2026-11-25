@@ -926,15 +926,68 @@ def _bytes(got):
 def edge_levels(etop, levels):
     """Each overview level's edges (LoadedMidi.edges) from etop (level 0: the highest track with a note starting /
     ending in each bucket; halved by the highest of two, like top): 2 where that's the top track, 1 under it
-    (user 2026-10-25: far zoomed out a giant song's dense notes showed as one note running across)."""
-    out = []
-    for n, (cnt, top) in enumerate(levels):
+    (user 2026-10-25: far zoomed out a giant song's dense notes showed as one note running across). Big overviews:
+    key rows shared out on several cores (each row on its own: the very same arrays)."""
+    out = [np.empty(t.shape, np.uint8) for c, t in levels]
+    _by_rows(levels[0][1], lambda a, b: _edge_rows(etop[a:b], [t[a:b] for c, t in levels], [o[a:b] for o in out]),
+             True)
+    return out
+
+
+def _edge_rows(etop, tops, outs):
+    for n, (top, out) in enumerate(zip(tops, outs)):
         if n:
             if etop.shape[1] % 2:
                 etop = np.concatenate([etop, np.full((etop.shape[0], 1), -1, etop.dtype)], axis=1)
             etop = etop.reshape(etop.shape[0], -1, 2).max(axis=2)
-        out.append(np.where(etop < 0, 0, np.where(etop >= top, 2, 1)).astype(np.uint8))
-    return out
+        out[:] = np.where(etop < 0, 0, np.where(etop >= top, 2, 1))
+
+
+LEVELS_APART = 1 << 21  # overview cells (keys x buckets of level 0) from which its levels are made on several cores
+
+
+def _by_rows(grid, work, numpy_ok):
+    """work(a, b) for key rows a..b of grid: in one go, or (big grids) shared out on half the cores (load_rows'
+    threads: SCAN_WORKERS). numpy_ok = work lets go of the GIL without the own loops too (NumPy only)."""
+    from files.midi_read import SCAN_WORKERS
+    nk = grid.shape[0]
+    n = min(SCAN_WORKERS, nk) if grid.size >= LEVELS_APART and (numpy_ok or speed.loops()) else 1
+    if n <= 1:
+        work(0, nk)
+        return
+    cuts = [nk * j // n for j in range(n + 1)]
+    errors = []
+
+    def one(a, b):
+        try:
+            work(a, b)
+        except BaseException as e:  # (raised below, on the caller's thread)
+            errors.append(e)
+    threads = [threading.Thread(target=one, args=(a, b), daemon=True, name="overview")
+               for a, b in zip(cuts[:-1], cuts[1:])]
+    for th in threads:
+        th.start()
+    for th in threads:
+        th.join()
+    if errors:
+        raise errors[0]
+
+
+def halved_levels(cnt, top):
+    """The overview's levels from level 0 (cnt, top): each next one two buckets -> one (most sounding, highest
+    track). Big overviews: key rows shared out on several cores (rows never mix: the very same arrays)."""
+    loops = speed.loops()
+    halve = loops.midi_halve if loops else midi_index.halve
+    levels = [(cnt, top)]
+    while levels[-1][0].shape[1] > 1:
+        n2 = (levels[-1][0].shape[1] + 1) // 2
+        levels.append((np.zeros((cnt.shape[0], n2), np.int32), np.zeros((cnt.shape[0], n2), np.int32)))
+
+    def rows(a, b):
+        for (c, t), (c2, t2) in zip(levels[:-1], levels[1:]):
+            halve(c[a:b], t[a:b], c2[a:b], t2[a:b])
+    _by_rows(cnt, rows, False)
+    return levels
 
 
 def _hide_overview(lm, trk, s, e, lane):
@@ -963,16 +1016,7 @@ def hidden_levels(level0, G, s, e, lane):
         np.add.at(d, (k, np.minimum(z, ng)), -1)
         cnt = np.maximum(cnt - np.cumsum(d, axis=1)[:, :ng], 0).astype(cnt.dtype)
         top = np.where(cnt > 0, top, -1).astype(top.dtype)
-    loops = speed.loops()
-    halve = loops.midi_halve if loops else midi_index.halve
-    levels = [(cnt, top)]
-    while cnt.shape[1] > 1:
-        n2 = (cnt.shape[1] + 1) // 2
-        c2, t2 = np.zeros((cnt.shape[0], n2), np.int32), np.zeros((cnt.shape[0], n2), np.int32)
-        halve(cnt, top, c2, t2)
-        levels.append((c2, t2))
-        cnt, top = c2, t2
-    return levels
+    return halved_levels(cnt, top)
 
 
 SHOWN_BYTES = 16 << 20  # (shown_grid reads a track this many bytes at a time at most: the notes' arrays stay small)
@@ -1060,15 +1104,7 @@ def shown_grid(lm, chain, cancel=None):
 
 def levels_of(cnt, top, etop):
     """(levels, edges) of an overview from its level 0 (the loading pass's halving)."""
-    loops = speed.loops()
-    halve = loops.midi_halve if loops else midi_index.halve
-    levels = [(cnt, top)]
-    while cnt.shape[1] > 1:
-        n2 = (cnt.shape[1] + 1) // 2
-        c2, t2 = np.zeros((cnt.shape[0], n2), np.int32), np.zeros((cnt.shape[0], n2), np.int32)
-        halve(cnt, top, c2, t2)
-        levels.append((c2, t2))
-        cnt, top = c2, t2
+    levels = halved_levels(cnt, top)
     return levels, edge_levels(etop, levels)
 
 
@@ -1235,19 +1271,11 @@ class Loader:
         return _TrackPass(self, t, th)
 
     def _levels(self, loops):
-        halve = loops.midi_halve if loops else midi_index.halve
         with self._lock:
             ng = max(1, max((i.end for i in self._infos if i and i.notes), default=0) // self.G + 1)
             cnt, top, etop = self.cnt[:, :ng].copy(), self.top[:, :ng].copy(), self.etop[:, :ng].copy()
         self.cnt = self.top = self.etop = None
-        levels = [(cnt, top)]
-        while cnt.shape[1] > 1:
-            n2 = (cnt.shape[1] + 1) // 2
-            c2, t2 = np.zeros((cnt.shape[0], n2), np.int32), np.zeros((cnt.shape[0], n2), np.int32)
-            halve(cnt, top, c2, t2)
-            levels.append((c2, t2))
-            cnt, top = c2, t2
-        return levels, edge_levels(etop, levels)
+        return levels_of(cnt, top, etop)
 
     def grow_grid(self, nk, ng):
         """The overview grows to nk keys x ng buckets at least (under the lock)."""

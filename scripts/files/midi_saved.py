@@ -97,8 +97,7 @@ def has_index(mf):
 def load_index(mf):
     """The LoadedMidi of mf (laid out, not scanned) from its saved index, or None (none, or not this file as it is
     now: then the usual read)."""
-    from notes.loaded import LoadedMidi, TrackInfo
-    from files import midi_index, speed
+    from notes.loaded import LoadedMidi, TrackInfo, halved_levels
     path = index_file(mf.path, mf.size)
     try:
         with np.load(path, allow_pickle=False) as z:
@@ -128,15 +127,7 @@ def load_index(mf):
             at[k] += size
         i.data = None
         infos.append(i)
-    loops = speed.loops()
-    halve = loops.midi_halve if loops else midi_index.halve
-    levels = [(cnt, top)]
-    while cnt.shape[1] > 1:
-        n2 = (cnt.shape[1] + 1) // 2
-        c2, t2 = np.zeros((cnt.shape[0], n2), np.int32), np.zeros((cnt.shape[0], n2), np.int32)
-        halve(cnt, top, c2, t2)
-        levels.append((c2, t2))
-        cnt, top = c2, t2
+    levels = halved_levels(cnt, top)
     cut = np.cumsum([0] + [t.size for c, t in levels])
     if cut[-1] != edges.size:  # (damaged: read the usual way)
         return None

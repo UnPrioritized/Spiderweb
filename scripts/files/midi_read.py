@@ -312,20 +312,26 @@ class MidiFile:
                 if progress:
                     progress(now, total)
 
+        jobs = scan_jobs(self.tracks)
+        most = min(workers or SCAN_WORKERS, os.cpu_count() or 1)
+        n = 1 if not loops else min(most, len(jobs))
+        spare = _Spare(most - n if loops and each else 0)  # (threads left over for big tracks' Load MIDI pass)
+
         def one(job):
             watch = self.watch()
             with open(self.path, "rb") as f:
                 for t in job:
                     step(0)  # (Cancel / another job's error: no track started after it)
-                    self._scan_track(f, t, walk, bool(loops), step, watch, each and each(t))
+                    more = each and each(t)
+                    if more is not None and t.size >= AHEAD_BYTES and spare.take():
+                        more = _Ahead(more, spare)
+                    self._scan_track(f, t, walk, bool(loops), step, watch, more)
 
-        jobs = scan_jobs(self.tracks)
-        n = 1 if not loops else min(workers or SCAN_WORKERS, os.cpu_count() or 1, len(jobs))
         if n <= 1:
             for job in jobs:
                 one(job)
         else:
-            _side_by_side(jobs, one, n, stop)
+            _side_by_side(jobs, one, n, stop, spare)
         h = self._hash_raw()
         self.raw_hash = self._digest(h)
         if self.old:
@@ -335,6 +341,13 @@ class MidiFile:
         return self
 
     def _scan_track(self, f, t, walk, compiled, step, watch, more=None):
+        try:
+            self._scan_one(f, t, walk, compiled, step, watch, more)
+        finally:
+            if isinstance(more, _Ahead):
+                more.stop()  # (an error part way: its helper thread ends too)
+
+    def _scan_one(self, f, t, walk, compiled, step, watch, more):
         st = np.zeros(ST_SIZE, np.int64)
         cnt = np.zeros(C_SIZE, np.int64)
         h = self._hasher()
@@ -484,15 +497,85 @@ def scan_jobs(tracks):
     return jobs
 
 
-def _side_by_side(jobs, one, n, stop):
+class _Spare:
+    """Threads of the reading's share (SCAN_WORKERS) not reading a track now: a big track's Load MIDI pass may take
+    one (_Ahead) and gives it back at its end; a reading thread with no job left adds its own."""
+
+    def __init__(self, n):
+        self.n, self.lock = n, threading.Lock()
+
+    def take(self):
+        with self.lock:
+            if self.n <= 0:
+                return False
+            self.n -= 1
+            return True
+
+    def give(self):
+        with self.lock:
+            self.n += 1
+
+
+AHEAD_BYTES = 2 * PIECE  # a track this big may have its Load MIDI pass on a thread of its own (_Ahead)
+
+
+class _Ahead:
+    """A big track's Load MIDI pass (scan's each= object) on a thread of its own, one piece behind the reading:
+    the reading thread checks + hashes the next piece meanwhile (stage E 2026-11-25: one giant track read on one
+    core). Pieces are copied and handed over in order, so the pass sees exactly what it would have; done() waits
+    for it, then runs the pass's own done() here. An error on its thread is raised on the reading thread."""
+
+    def __init__(self, more, spare):
+        import queue
+        self.more, self.spare = more, spare
+        self.q = queue.Queue(2)  # (2 pieces waiting at most: memory stays a few PIECEs)
+        self.error = None
+        self.stopped = False
+        self.th = threading.Thread(target=self._run, daemon=True, name="midi pass")
+        self.th.start()
+
+    def _run(self):
+        while True:
+            got = self.q.get()
+            if got is None:
+                return
+            if self.error is None:
+                try:
+                    self.more.piece(*got)
+                except BaseException as e:
+                    self.error = e
+
+    def piece(self, view, used, at):
+        if self.error is not None:
+            raise self.error
+        self.q.put((np.array(view[:used]), used, at))
+
+    def stop(self):
+        if not self.stopped:
+            self.stopped = True
+            self.q.put(None)
+            self.th.join()
+            self.spare.give()
+
+    def done(self):
+        self.stop()
+        if self.error is not None:
+            raise self.error
+        self.more.done()
+
+
+def _side_by_side(jobs, one, n, stop, spare=None):
     """one(job) for every job on n DAEMON threads (closing Spiderweb never waits for them). The first error stops
-    the rest (each stops at its next piece) and is raised here once the running ones have stopped."""
+    the rest (each stops at its next piece) and is raised here once the running ones have stopped. A thread with
+    no job left gives itself to spare."""
     lock, errors, left = threading.Lock(), [], list(reversed(jobs))
 
     def work():
         while True:
             with lock:
                 if not left or stop.is_set():
+                    if spare is not None:
+                        spare.give()
                     return
                 job = left.pop()
             try:
