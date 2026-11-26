@@ -54,7 +54,7 @@ from files.midi_scan import MOST_TICK
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_keysigs, clean_sigs
 from notes import tempo_ramp
 from notes.tempo_ramp import Ramp, RampRule, fixed_ramp
-from notes.tempo_safe import fit_block_runs, flat_pair_runs
+from notes.tempo_safe import carry_compiled_there, fit_block_runs, flat_pair_runs
 from notes.tempo_safe import (PAIR_REACH, SAFE_REACH, _FAR, _WINDOW, _fit_blocks, _fit_exact, _first_safe, _flat_pair,  # (moved)
                               _flat_pair_search, _near_pair, _nearest1, _next1, _next_by_bpm, _next_small, _pairs, _runs,
                               _safe1, _safe_side, PAIRS_KEPT, domino_safe, nearest_safe, next_safe)
@@ -1644,9 +1644,15 @@ def catch_plan(tempo, base, st, ppq, real=None):
 
 
 CATCH_STEPS_MOST = 1 << 22  # a long curved catch-up's Interval steps at most: past it they're made longer (user
-# 2026-11-26: same shape, still lands exactly; the export says so: "coarse"). ~7 s at the most (fit_block_runs'
-# Domino-safe loop), said in the status line past CATCH_SAY_FROM steps
-CATCH_SAY_FROM = 1 << 19
+# 2026-11-26: same shape, still lands exactly; the export says so: "coarse"). ~7 s at the most in NumPy, ~0.7 s with
+# the compiled carry loop (fit_block_runs' Domino-safe loop); said in the status line past catch_say_from() steps
+CATCH_SAY_FROM = 1 << 19  # without the compiled loop (2^19 steps ~0.7 s there)
+CATCH_SAY_COMPILED = 1 << 23  # with it: past CATCH_STEPS_MOST = never (2^19 took 0.03 s: the message only flashed)
+
+
+def catch_say_from():
+    """Steps past which a long curved catch-up says "Working out the catch-up…" (only where it takes long)."""
+    return CATCH_SAY_COMPILED if carry_compiled_there() else CATCH_SAY_FROM
 
 
 def _catch_long(tempo, st, ppq, real, out, s0, ln, e, base_u):
@@ -1680,7 +1686,7 @@ def _catch_long(tempo, st, ppq, real, out, s0, ln, e, base_u):
             pair = flat_pair_runs(n, target)
             got = None if pair is None else ([], pair)
         else:
-            hook = tempo_ramp.slow_hook if len(starts) > CATCH_SAY_FROM else None
+            hook = tempo_ramp.slow_hook if len(starts) > catch_say_from() else None
             if hook:
                 hook(True, "catch")
             try:

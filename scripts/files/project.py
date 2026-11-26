@@ -208,11 +208,11 @@ def output_path(typed):
     return path if path.lower().endswith((".mid", ".midi")) else path + ".mid"
 
 
-def short_num(x, digits=12):
+def short_num(x):
     """A float as it is saved: a whole one as an int (4.0 -> 4), any other EXACT (json writes the shortest form that
     reads back the same). Trimming to 12 digits (as until 2026-11-26) moved a dragged point by ~1e-12 beats, enough
     to change notes on Save + open (a curve's 84 notes, an arc's 6: the save-then-open safety test); a beat far out
-    (a huge-tick MIDI's Extract at 8.6e9) was already kept exact. digits: unused, kept for old callers."""
+    (a huge-tick MIDI's Extract at 8.6e9) was already kept exact."""
     if not isinstance(x, float):
         return x
     return int(x) if x.is_integer() and abs(x) < 2 ** 53 else x
@@ -322,7 +322,7 @@ def project_json(data):
             lines.append(f"{json.dumps(k)}: {tempo_text(v)}")
         else:
             if isinstance(v, dict):
-                v = {a: short_num(b) for a, b in v.items()}  # (12 digits like shapes: a long default gate stays exact)
+                v = {a: short_num(b) for a, b in v.items()}  # (exact like shapes: a long default gate stays exact)
             lines.append(f"{json.dumps(k)}: {json.dumps(v)}")
     return "{\n " + ",\n ".join(lines) + "\n}\n"
 

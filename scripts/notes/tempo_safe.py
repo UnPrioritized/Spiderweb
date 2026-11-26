@@ -365,6 +365,12 @@ def _carried_at_once(wl, ll):
 CARRY_COMPILED_FROM = 64  # fit_block_runs: more blocks than this = the compiled carry loop (~1.7 us a block in Python)
 
 
+def carry_compiled_there():
+    """True when the own loops have the compiled carry loop (long catch-ups take ~10x less time)."""
+    from files.speed import loops
+    return getattr(loops(), "carry_blocks", None) is not None
+
+
 def _carry_compiled(wl, ll):
     """fit_block_runs' carry loop by the own loops (tempo.rs carry_blocks): (values, their ticks x us) or None (not
     there / block ticks past 64 bits: the Python loop)."""

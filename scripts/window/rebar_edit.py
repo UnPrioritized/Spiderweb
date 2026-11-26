@@ -207,7 +207,7 @@ def plain(x):
 
 
 def same(a, b):
-    """The same shape (one may have been through JSON / a project file: floats trimmed like a save)."""
+    """The same shape (one may have been through JSON / a project file: whole floats saved as ints, like a save)."""
     if a is b:
         return True
     if a.keys() != b.keys() or a.get("kind") != b.get("kind"):
