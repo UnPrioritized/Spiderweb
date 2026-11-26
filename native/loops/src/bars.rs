@@ -106,9 +106,10 @@ fn bar_nudge(have: i64, lengths: &[i64], up: &[i64], down: &[i64], order: &[i64]
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
 fn fit_bars_inner(ms: &[i64], dk: &[i64], kk: &[i64], tt: &[i64], bars: &[i64], lengths: &[i64], nudge: f64,
-                  most: i64, share: &mut [i64], up: &mut [i64], down: &mut [i64], order: &mut [i64]) {
+                  most: i64, share: &mut [i64], up: &mut [i64], down: &mut [i64], order: &mut [i64],
+                  state: &mut [i64]) {
     let n = ms.len();
-    let (mut carry, mut last) = (0i64, -1i64);
+    let (mut carry, mut last) = (state[0], state[1]);
     let mut lo = 0usize;
     while lo < n {
         let m = ms[lo];
@@ -153,6 +154,8 @@ fn fit_bars_inner(ms: &[i64], dk: &[i64], kk: &[i64], tt: &[i64], bars: &[i64], 
         carry = fit_length(need, lengths) - need;
         lo = hi;
     }
+    state[0] = carry;
+    state[1] = last;
 }
 
 #[inline(always)]
@@ -161,23 +164,27 @@ fn sorted_up(a: &[i64]) -> bool {
 }
 
 /// tempo_file._fit_bar_lines' walk over the bars (gaps sorted by bar: ms; dk = ticks each one's file ticks differ
-/// from its own, kk / tt its file ticks / time; share = zeros) -> share = each gap's nudge; 0 or FAILED.
+/// from its own, kk / tt its file ticks / time; share = zeros), a piece at a time (PLAN export in pieces): state =
+/// [carry, last bar] from the piece before ([0, -1] at the start), handed on -> share = each gap's nudge; 0 or
+/// FAILED (state untouched).
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-pub fn fit_bars(ms: &[i64], dk: &[i64], kk: &[i64], tt: &[i64], bars: &[i64], lengths: &[i64], nudge: f64,
-                most: i64, share: &mut [i64], up: &mut [i64], down: &mut [i64], order: &mut [i64]) -> i64 {
+pub fn fit_bars_from(ms: &[i64], dk: &[i64], kk: &[i64], tt: &[i64], bars: &[i64], lengths: &[i64], nudge: f64,
+                     most: i64, share: &mut [i64], up: &mut [i64], down: &mut [i64], order: &mut [i64],
+                     state: &mut [i64]) -> i64 {
     let n = ms.len();
     if dk.len() != n || kk.len() != n || tt.len() != n || share.len() < n || up.len() < n || down.len() < n
-        || order.len() < n || lengths.is_empty() || !sorted_up(lengths) || most < 1 || !nudge.is_finite() {
+        || order.len() < n || lengths.is_empty() || !sorted_up(lengths) || most < 1 || !nudge.is_finite()
+        || state.len() < 2 || state[1] < -1 {
         return crate::FAILED;
     }
     for i in 0..n {
         let m = ms[i];
-        if m < 0 || m as usize + 1 >= bars.len() || (i > 0 && ms[i - 1] > m) {
+        if m < 0 || m as usize + 1 >= bars.len() || (i > 0 && ms[i - 1] > m) || m < state[1] {
             return crate::FAILED;
         }
     }
-    fit_bars_inner(ms, dk, kk, tt, bars, lengths, nudge, most, share, up, down, order);
+    fit_bars_inner(ms, dk, kk, tt, bars, lengths, nudge, most, share, up, down, order, state);
     0
 }
 

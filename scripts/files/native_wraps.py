@@ -383,15 +383,17 @@ class Wraps:
 
     # ---- Fit bar lines on long songs (bars.rs; tempo_file's own Python is the twin: not in NEEDS)
 
-    def fit_bars(self, ms, dk, kk, tt, bars, lengths, nudge, most):
-        """tempo_file._fit_bar_lines' walk -> each gap's nudge (ticks, in ms' order), or None = not run."""
-        if not hasattr(self.x, "fit_bars"):
+    def fit_bars(self, ms, dk, kk, tt, bars, lengths, nudge, most, state):
+        """tempo_file._fit_bar_lines' walk over one piece of gaps -> each gap's nudge (ticks, in ms' order), or None
+        = not run. state = [carry, last bar] (int64 array of 2) from the piece before, handed on in place."""
+        if not hasattr(self.x, "fit_bars_from"):
             return None
         i, n = np.int64, len(ms)
         share, up, down, order = np.zeros(n, i), np.empty(n, i), np.empty(n, i), np.empty(n, i)
-        got = self.x.fit_bars(np.ascontiguousarray(ms, i), np.ascontiguousarray(dk, i), np.ascontiguousarray(kk, i),
-                              np.ascontiguousarray(tt, i), np.ascontiguousarray(bars, i),
-                              np.ascontiguousarray(lengths, i), float(nudge), int(most), share, up, down, order)
+        got = self.x.fit_bars_from(np.ascontiguousarray(ms, i), np.ascontiguousarray(dk, i),
+                                   np.ascontiguousarray(kk, i), np.ascontiguousarray(tt, i),
+                                   np.ascontiguousarray(bars, i), np.ascontiguousarray(lengths, i), float(nudge),
+                                   int(most), share, up, down, order, state)
         return share if got >= 0 else None
 
     def written_lines(self, fl, lengths, carry_most):

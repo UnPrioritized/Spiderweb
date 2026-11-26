@@ -1345,40 +1345,85 @@ def _written_lines(fl, lengths):
     return w, moved, unfit
 
 
+FIT_PIECE = 1 << 20  # Fit bar lines works on this many gaps at a time at most, whole bars (PLAN export in pieces:
+# the work lists of millions of gaps at once took ~0.7 GB); the carry goes on from piece to piece
+
+
 def _fit_bar_lines(gaps, keeps, bars, lengths):
     """Bar compensation: in each bar a Keep timing part changed, the longest gaps there get a tick more / fewer
     each so the bar's length fits a time signature (the gaps' time stays: only their tempo changes a hair). A bar
     that can't be fitted gently is written the nearest length a signature gives, and the next bars aim to land
-    the bar line back (BAR CARRY-OVER, _written_lines, user 2026-10-24); no spikes: user's "a hair"."""
+    the bar line back (BAR CARRY-OVER, _written_lines, user 2026-10-24); no spikes: user's "a hair". A piece of
+    about FIT_PIECE gaps at a time, always whole bars (a bar's gaps, also across two parts, nudged together)."""
     if not gaps:
         return
+    state = [0, None]  # (written bar line - true one, at the start of the bar after the last bar done)
+    if any(len(gaps[p][0]) and len(gaps[p - 1][0]) and gaps[p][0][0] < gaps[p - 1][0][-1]
+           for p in range(1, len(gaps))):  # (parts out of order: never made so; all at once, sorted by bar)
+        return _fit_piece(gaps, [(p, 0, len(k)) for p, (_, _, k, _) in enumerate(gaps)], bars, lengths, state,
+                          True)
+    segs, held, until = [], 0, None  # (the piece's (part, first gap, end); until = the bar line it must reach)
+    for p, (n, _, k, _) in enumerate(gaps):
+        g, j = len(k), 0
+        if until is not None:  # (the bar the piece stopped in goes on in this part: its gaps join the piece)
+            j = min(g, int(np.searchsorted(n[:g], until, "left")))
+            if j:
+                segs.append((p, 0, j))
+            if j == g:
+                continue
+            _fit_piece(gaps, segs, bars, lengths, state)
+            segs, held, until = [], 0, None
+        while j < g:
+            e = j + min(g - j, FIT_PIECE - held)
+            held += e - j
+            if held >= FIT_PIECE:  # (on to the end of the last gap's bar)
+                m = int(np.searchsorted(bars, n[e - 1], "right")) - 1
+                if m + 1 < len(bars):
+                    until = int(bars[m + 1])
+                    e = max(e, min(g, int(np.searchsorted(n[:g], until, "left"))))
+                segs.append((p, j, e))
+                j = e
+                if j < g or until is None:
+                    _fit_piece(gaps, segs, bars, lengths, state)
+                    segs, held, until = [], 0, None
+            else:
+                segs.append((p, j, e))
+                j = e
+    if segs:
+        _fit_piece(gaps, segs, bars, lengths, state)
+
+
+def _fit_piece(gaps, segs, bars, lengths, state, unsorted=False):
+    """_fit_bar_lines on the gaps segs = [(part, first gap, end)] (whole bars, in order), state = [carry, last bar or
+    None] from the piece before, handed on."""
     # each gap's bar (by the time signatures), then the bars' gaps together, in order (a million gaps one by one in
     # Python took seconds)
-    ms = np.concatenate([np.searchsorted(bars, n[:-1], "right") - 1 for n, _, _, _ in gaps])
-    ps = np.concatenate([np.full(len(k), p, np.int64) for p, (_, _, k, _) in enumerate(gaps)])
-    js = np.concatenate([np.arange(len(k)) for _, _, k, _ in gaps])
-    kk = np.concatenate([k for _, _, k, _ in gaps]).astype(np.int64)
-    tt = np.concatenate([total for _, total, _, _ in gaps]).astype(np.int64)
-    dk = kk - np.concatenate([np.diff(n) for n, _, _, _ in gaps])
+    ms = np.concatenate([np.searchsorted(bars, gaps[p][0][a:b], "right") - 1 for p, a, b in segs])
+    ps = np.concatenate([np.full(b - a, p, np.int64) for p, a, b in segs])
+    js = np.concatenate([np.arange(a, b, dtype=np.int64) for _, a, b in segs])
+    kk = np.concatenate([gaps[p][2][a:b] for p, a, b in segs]).astype(np.int64)
+    tt = np.concatenate([gaps[p][1][a:b] for p, a, b in segs]).astype(np.int64)
+    dk = kk - np.concatenate([np.diff(gaps[p][0][a:b + 1]) for p, a, b in segs])
     inside = ms < len(bars) - 1  # (gaps past the last bar line: past BARS_MOST, left as they are; else all)
     if not inside.all():
         ms, ps, js, kk, tt, dk = (x[inside] for x in (ms, ps, js, kk, tt, dk))
         if not len(ms):
             return
-    if len(ms) > 1 and not bool((ms[1:] >= ms[:-1]).all()):  # (parts come in order, their gaps too: usually
-        # sorted already, and a stable sort of sorted bars changes nothing; PLAN export in pieces: 6 copies saved)
+    if unsorted and len(ms) > 1 and not bool((ms[1:] >= ms[:-1]).all()):
         order_m = np.argsort(ms, kind="stable")
         ms, ps, js, dk, kk, tt = (x[order_m] for x in (ms, ps, js, dk, kk, tt))
     fast = getattr(speed.loops(), "fit_bars", None)  # (compiled: the walk below in one go, the same nudges; PLAN
-    share = None if fast is None else fast(ms, dk, kk, tt, bars, lengths, NUDGE, MAX_US)  # fit bar lines C)
+    st = np.array([state[0], -1 if state[1] is None else state[1]], np.int64)  # fit bar lines C)
+    share = None if fast is None else fast(ms, dk, kk, tt, bars, lengths, NUDGE, MAX_US, st)
     if share is not None:
+        state[0], state[1] = int(st[0]), None if st[1] == -1 else int(st[1])
         nz = np.flatnonzero(share)
         for p in np.unique(ps[nz]).tolist():
             at = nz[ps[nz] == p]
             gaps[p][2][js[at]] += share[at]  # (each gap once: a bar's gaps are nudged at most once)
         return
     cut = np.flatnonzero(np.diff(ms)) + 1
-    carry, last = 0, None  # (written bar line - true one, at the start of the bar after `last`)
+    carry, last = state
     for lo, hi in zip(np.concatenate([[0], cut]).tolist(), np.concatenate([cut, [len(ms)]]).tolist()):
         m = int(ms[lo])
         if carry and last is not None:  # (bars in between, no gaps to nudge: the carry goes on through them)
@@ -1435,6 +1480,7 @@ def _fit_bar_lines(gaps, keeps, bars, lengths):
         moved_by = nudge(true) if carry else None
         need = true + (moved_by or 0) - carry
         carry = _fit_length(need, lengths) - need
+    state[0], state[1] = carry, last
 
 
 def _signatures(keeps, tempo, bars, ppq, to_file):
