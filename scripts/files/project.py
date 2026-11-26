@@ -43,7 +43,7 @@ from notes.pen import clean_pen
 from notes.gliss import clean_gliss, for_new
 from notes.tempo import clamp_bpm, clean_tempo, empty as empty_tempo, has_tempo, tempo_text
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
-from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts, rows_where
+from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts, rows_where, sorted_union
 from notes.text import TEXT_DEFAULTS, clean_text, rejoin_old, tag_texts
 from notes import engine  # (engine.edo_lanes: 31-EDO "Overlaps keep their pitch")
 from notes import loaded_map  # (a loaded MIDI's ticks as shown after Change visual time signature)
@@ -1831,7 +1831,7 @@ class ProjectFiles:
             return
         cc = self.cc_messages(ppq, bpm)
         try:  # (the tempo worked out before writing: its own plain message, never a crash; hunt 2026-11-26)
-            notes, cc, plan = self.tempo_timed(ppq, bpm, beats, cc)
+            notes, cc, plan = self.tempo_timed(ppq, bpm, beats, cc, lazy=True)
         except MemoryError:
             messagebox.showerror(tr("project.spiderweb"), tr("big_ask.out_of_memory"), parent=self)
             return
@@ -1842,7 +1842,7 @@ class ProjectFiles:
                               lambda: write_midi(path, ppq, bpm, beats, notes, self.picture_use10,
                                                  self.pad_tracks(), cc, plan["events"], plan["sigs"], plan["keys"],
                                                  own=self.with_file_tracks(), least=self.least_tracks(),
-                                                 filled=self.filled_slots(notes))):
+                                                 filled=self.filled_slots(notes), tick_map=plan["tick_map"])):
             return
         self.wrote_file(path)
         channels = tracks  # (the tracks written, in every mode: pastes / your tracks make several in Single too)
@@ -1886,18 +1886,22 @@ class ProjectFiles:
             note += trn("project.tempo_cc_gave", n, n=n, where=self.bar_text(plan["gave"][0]))
         return note
 
-    def tempo_timed(self, ppq, bpm, beats, cc, notes=None, upto=None):
+    def tempo_timed(self, ppq, bpm, beats, cc, notes=None, upto=None, lazy=False):
         """(notes, cc, file_plan) for the MIDI file: the Tempo pane's changes, notes and CC messages in Keep timing
         parts moved to the ticks that keep their time (notes/tempo_file.py). notes: the ones going out (default:
-        every note); upto: only the ticks up to there count (Copy to Domino: the song up to the copy's end)."""
+        every note); upto: only the ticks up to there count (Copy to Domino: the song up to the copy's end).
+        lazy: the notes come back NOT moved and plan["tick_map"] = what moves them (write_midi's tick_map: a track
+        at a time, no moved copy of every note; PLAN export in pieces); None = nothing to move."""
         notes = self.outgoing() if notes is None else notes  # (+ wrapped kept notes: App.outgoing)
         # (Hz basses with finer gates: inside Keep timing parts drawn faster, made again on the file's ticks after
         # the other notes lay them out, hz_fine.py)
         fine = fine_owners(self.shapes) if len(notes) else []
         parts = finer_parts(self.tempo, bpm, ppq, int(notes[:, 1].max())) if fine else []
         anchors = notes[~swapped(notes, fine, parts)] if parts else notes
-        if has_tempo(self.tempo):
-            ticks = np.concatenate([anchors[:, 0], anchors[:, 1]])
+        if has_tempo(self.tempo):  # (each column's own ticks first: every start + end joined and sorted took
+            # 2 x 16 bytes a note; the plan reads them as a set, PLAN export in pieces)
+            ticks = sorted_union([sorted_union([anchors[:, 0]]), sorted_union([anchors[:, 1]])])  # (np.unique
+            # hashes: ~4 s a column at 16 M notes)
             loose = np.concatenate([np.zeros(0, np.int64)] + [np.array([m[0] for m in ms], np.int64)
                                                              for ms in cc.values()])  # (CC: give way, user)
             if upto is not None:
@@ -1918,7 +1922,11 @@ class ProjectFiles:
         stale = [i for i, sh in enumerate(self.shapes) if sh.get("hz") and self.hz_out_of_tune(sh)]
         on = notes[np.isin(notes[:, 5], stale), 0] if stale else ()
         plan["hz"] = [int(on.min()) / ppq] if len(on) else []
+        plan["tick_map"] = None
         if self.tempo.get("points") and any(len(p) > 5 and p[5] is True for p in self.tempo["points"]):
+            if lazy and not parts:  # (the writer moves them a track at a time)
+                plan["tick_map"] = plan["map"]
+                return notes, timed_ticks(plan, notes[:0], cc)[1], plan
             moved, cc = timed_ticks(plan, notes, cc)
             if parts:
                 mode = self.channel_mode.get()

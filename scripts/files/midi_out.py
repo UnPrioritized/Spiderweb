@@ -356,20 +356,23 @@ def _track_bytes(t, s, k, last):
 
 
 def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tempo=None, sigs=None, keys=None,
-               own=(), least=0, filled=None):
+               own=(), least=0, filled=None, tick_map=None):
     """notes: [start, end, pitch, velocity, slot, ...]. Every slot gets its own track with a single channel
     (use10: channel 10 used too, slot_track_channel; pad, least: track_slots). Nothing marks channel 10 as not drums
     (user, 2026-10-12: no messages that could switch something on in their own setup). cc = {slot: messages} for
     the slots' tracks (the Hz basses' CC lines the user drew: hz_cc.slot_events); with them past one round of
     channels every track starts with its port (FF 21: engine.slot_ports). tempo, sigs: tempo_track's. own: the
     tracks added by hand (files/own_tracks.py), put among the slots' (own_tracks.plan; filled: the slots counted as
-    having notes, App.filled_slots; None = the notes' own)."""
+    having notes, App.filled_slots; None = the notes' own). tick_map: the notes' ticks -> the file's (tempo_file's
+    plan "map", Keep timing), applied a track at a time while written (PLAN export in pieces: no moved copy of
+    every note); the same file as notes moved first."""
     head = tempo_track(bpm, beats, tempo, sigs, keys)
 
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
     tracks = plan(track_slots(notes, pad, least), own, np.unique(notes[:, 4]) if filled is None else filled)
-    write_bytes(path, _pieces(notes, tracks, use10,
-                              b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + _chunk(head), cc or {}))
+    start = (b"MThd" + struct.pack(">IHHH", 6, 1, len(tracks) + 1, ppq) + b"MTrk" + struct.pack(">I", len(head)),
+             head)  # (the first track's bytes as they are: one big copy fewer)
+    write_bytes(path, _pieces(notes, tracks, use10, start, cc or {}, tick_map=tick_map))
 
 
 def note_tracks(notes, use10=False, pad=True, cc=None, ports=None, own=(), files=0, filled=None, least=0):
@@ -406,12 +409,13 @@ def name_event(name):
     return b"\x00\xFF\x03" + vlq(len(data)) + data
 
 
-def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
+def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False, tick_map=None):
     """write_midi's file as pieces, one track at a time (a big file is never whole in memory). With the speed-ups
     the tracks are made side by side on several cores (midi_track), written in order. tracks: slots, and own
     tracks (dicts: their name first, then the notes drawn into them, on their channel; port A). ends: None
-    after each track too (track_chunks)."""
-    yield start
+    after each track too (track_chunks). start: bytes, or a tuple of byte pieces. tick_map: write_midi's (each
+    track's notes moved to the file's ticks as it's made)."""
+    yield from start if isinstance(start, tuple) else (start,)
     # (an empty Track 1 among them, track_slots' least: the own tracks' notes numbered past it)
     notes, autos, count, at, chans = own_compact(notes, floor=max((t + 1 for t in tracks if type(t) is not dict),
                                                                   default=0), chans=True)
@@ -432,11 +436,22 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
     # (a track of yours given a port in Track Properties: every track says its port, A too, so no player carries
     # one over from the track before; without one the file stays as it always was)
     ported = any(type(t) is dict and t.get("port") for t in tracks)
-    if fast is not None and (not len(notes) or notes[:, 0].min() < 0):  # (the radix sort: ticks from 0 only)
+    def lowest():
+        low = notes[:, 0].min()
+        return low if tick_map is None else int(tick_map(np.array([low], np.int64))[0])
+
+    if fast is not None and (not len(notes) or lowest() < 0):  # (the radix sort: ticks from 0 only)
         fast = None
     if fast is not None:
         notes = np.ascontiguousarray(notes)
         bits = int(notes[:, 1].max() * 2 + 2).bit_length()
+
+    def take(rows):
+        """These notes (a copy) at the file's ticks: tick_map's, else as they are."""
+        got = notes[rows]
+        if tick_map is not None and len(got):
+            got[:, 0], got[:, 1] = tick_map(got[:, 0]), tick_map(got[:, 1])
+        return got
 
     def make(track):
         head, mine_cc = [], cc.get(track) if type(track) is not dict else None
@@ -450,9 +465,9 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
             rows = np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]]
             mine = chans[rows]
             if evs:
-                return head + cc_track(notes[rows], mine if mine.min() != mine.max() else int(mine[0]), evs, ev_ch)
+                return head + cc_track(take(rows), mine if mine.min() != mine.max() else int(mine[0]), evs, ev_ch)
             if mine.min() != mine.max():  # (several channels: a folder, each note on its own)
-                return head + track_events(notes[rows], mine)
+                return head + track_events(take(rows), mine)
             channel = int(mine[0])  # (its colours' own channel: moved in from another track)
         else:
             channel = slot_track_channel(track, use10)[1]
@@ -462,7 +477,18 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
                 head = [bytes([0, 0xFF, 0x21, 1, 0])]
         if fast is not None and not mine_cc:
             rows = np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]]
-            events = [fast.midi_track(notes, rows, channel, MAX_DELTA, bits)] if len(rows) else [empty_track(channel)]
+            if not len(rows):
+                events = [empty_track(channel)]
+            elif tick_map is None:
+                events = [fast.midi_track(notes, rows, channel, MAX_DELTA, bits)]
+            else:  # (this track's notes moved to the file's ticks: a copy of its own; the radix sort's width by them)
+                mine = take(rows)
+                events = [fast.midi_track(mine, np.arange(len(mine)), channel, MAX_DELTA,
+                                          int(mine[:, 1].max() * 2 + 2).bit_length())]
+        elif tick_map is not None:
+            mine = take(np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]])
+            events = (cc_track(mine, channel, mine_cc) if mine_cc else track_events(mine, channel)
+                      if len(mine) else [empty_track(channel)])
         else:
             mine = notes if count == 1 else notes[order[cuts[track]:cuts[track + 1]]]
             events = (cc_track(mine, channel, mine_cc) if mine_cc else track_events(mine, channel)
