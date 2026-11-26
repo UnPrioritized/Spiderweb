@@ -18,7 +18,7 @@ import time
 from files import system
 from files.system import WINDOWS
 
-TESTED = "0.3.0"  # (the Maestro version Spiderweb was last checked with: skill maestro-update sets it)
+TESTED = "0.3.1"  # (the Maestro version Spiderweb was last checked with: skill maestro-update sets it)
 APP_ID = b"io.github.unprioritized.spiderweb"
 APP_NAME = b"Spiderweb"
 PORTS = 16
