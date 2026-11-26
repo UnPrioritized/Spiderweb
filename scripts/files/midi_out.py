@@ -273,11 +273,36 @@ def _table(rows, w):
     return np.asarray(a if a is not None else list(rows), np.int64).reshape(-1, w)
 
 
+TRACK_PIECE = 1 << 20  # events of one kind in one piece of the first track (PLAN export in pieces: the work lists of
+# 17 M tempo changes at once took 2.9 GB)
+
+
 def _tempo_track_arrays(tempo, sigs, keys):
-    """tempo_track for many events (PLAN fit bar lines D2: millions of fitted bars), the same bytes made at once: the
-    events in sorted()'s order (tick, then tempo / time / key signature, then their bytes), waits past MAX_DELTA
-    split with empty text events, every wait a variable-length number."""
+    """tempo_track for many events (PLAN fit bar lines D2: millions of fitted bars), the same bytes made with arrays:
+    the events in sorted()'s order (tick, then tempo / time / key signature, then their bytes), waits past MAX_DELTA
+    split with empty text events, every wait a variable-length number. Made a stretch of ticks at a time (each
+    table's TRACK_PIECE next events at most, all events of a tick together), so the work lists stay small."""
     t, s, k = _table(tempo, 2), _table(sigs, 3), _table(keys, 3)
+    tables = (t, s, k)
+    if not all(len(x) < 2 or bool((x[1:, 0] >= x[:-1, 0]).all()) for x in tables):
+        return bytearray(_track_bytes(t, s, k, 0)[0].tobytes()) + b"\x00\xFF\x2F\x00"  # (out of order: at once)
+    ticks = [np.ascontiguousarray(x[:, 0]) for x in tables]
+    pos, last, parts = [0, 0, 0], 0, []
+    while any(p < len(x) for p, x in zip(pos, tables)):
+        ahead = [int(tk[p + TRACK_PIECE]) for p, tk in zip(pos, ticks) if p + TRACK_PIECE < len(tk)]
+        lo = min(int(tk[p]) for p, tk in zip(pos, ticks) if p < len(tk))
+        upto = max(min(ahead), lo + 1) if ahead else None  # (ticks before this one: never an empty piece)
+        ends = [len(tk) if upto is None else int(np.searchsorted(tk, upto, "left")) for tk in ticks]
+        got, last = _track_bytes(*(x[p:e] for x, p, e in zip(tables, pos, ends)), last)
+        parts.append(got)
+        pos = ends
+    parts.append(np.array([0x00, 0xFF, 0x2F, 0x00], np.uint8))
+    return bytearray().join(parts)
+
+
+def _track_bytes(t, s, k, last):
+    """_tempo_track_arrays' bytes for these events (no end of track), the first wait counted from tick `last`:
+    (uint8 array, the last event's tick)."""
     tick = np.concatenate([t[:, 0], s[:, 0], k[:, 0]])
     kind = np.repeat(np.array([0, 1, 2], np.int64), [len(t), len(s), len(k)])
     # (the bytes after each kind's fixed start, as sort keys: tempo's 3 bytes = the number itself)
@@ -285,14 +310,16 @@ def _tempo_track_arrays(tempo, sigs, keys):
     k2 = np.concatenate([np.zeros(len(t), np.int64), s[:, 2], k[:, 2]])  # (int(mi): a bool is 0 / 1 here too)
     order = np.lexsort((k2, k1, kind, tick))
     tick, kind, k1, k2 = tick[order], kind[order], k1[order], k2[order]
-    delta = np.diff(tick, prepend=0)
+    if not len(tick):
+        return np.zeros(0, np.uint8), last
+    delta = np.diff(tick, prepend=last)
     fill = np.maximum(0, (delta - 1) // MAX_DELTA)  # (empty text events before it: each waits MAX_DELTA)
     rest = delta - fill * MAX_DELTA
     vl = 1 + (rest >= 1 << 7) + (rest >= 1 << 14) + (rest >= 1 << 21)
     dl = np.array([6, 7, 5], np.int64)[kind]
     size = fill * len(FILLER) + vl + dl
     at = np.concatenate([[0], np.cumsum(size)])
-    out = np.empty(int(at[-1]) + 4, np.uint8)
+    out = np.empty(int(at[-1]), np.uint8)
     if fill.any():  # (filler j of all = at its event's start + its place among the event's: one index list, moved
         # on a byte at a time in place: a huge-tick song has ~7 a bar)
         nf = int(fill.sum())
@@ -325,8 +352,7 @@ def _tempo_track_arrays(tempo, sigs, keys):
             out[q + 3], out[q + 4], out[q + 5], out[q + 6] = a, b, 24, 8
         else:
             out[q + 3], out[q + 4] = a, b
-    out[-4:] = (0x00, 0xFF, 0x2F, 0x00)
-    return bytearray(out.tobytes())
+    return out, int(tick[-1])
 
 
 def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tempo=None, sigs=None, keys=None,
