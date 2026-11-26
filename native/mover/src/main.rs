@@ -196,6 +196,9 @@ fn plus(p: &Path, end: &str) -> PathBuf {
 
 /// Nothing of the new version stays in use: the old exe back (and started) when there is one; a message.
 fn give_up(exe: &Path, updating: bool, why: Fail) -> i32 {
+    if why != Fail::Cancelled {  // (why, for a report: spiderweb-error.log beside it)
+        log_error(exe.parent().unwrap_or(Path::new(".")), &format!("gave up: {}", why.key()));
+    }
     let text = texts::get(&format!("updates.fail.{}", why.key()), &[]);
     let old = plus(exe, ".old");
     if updating && old.is_file() {
@@ -247,9 +250,12 @@ fn run(exe: &Path, top: &Path, args: &[String]) -> i32 {
         !OURS.contains(&n.as_str()) && n != me && !n.starts_with("spiderweb.exe.")
     })).unwrap_or(false);
     if !existing && busy {
-        if let Some(new_top) = free_name(top) {
-            if sys::ask(&texts::get("mover.busy", &[("folder", &top.display().to_string())])) {
-                return move_to(&new_top, exe);
+        if let Some(new_top) = free_name(top) {  // ("Spiderweb", or "Spiderweb (2)"... when that one is taken)
+            let name = new_top.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+            match sys::ask3(&texts::get("mover.busy", &[("folder", &top.display().to_string()), ("name", &name)])) {
+                Some(true) => return move_to(&new_top, exe),
+                Some(false) => {}
+                None => return 0,  // (Cancel: nothing changed)
             }
         }
     }

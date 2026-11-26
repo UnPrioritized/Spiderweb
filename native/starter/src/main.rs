@@ -111,7 +111,7 @@ fn run(dll: &Path, exe: &Path, data: &Path, repair: bool) -> Option<c_int> {
     if repair {
         args.push(REPAIR_ARG.into());
     }
-    args.extend(std::env::args_os().skip(1));
+    args.extend(std::env::args_os().skip(1).filter(|a| a != REPAIR_ARG));
     let mut wides: Vec<Vec<u16>> = args.iter().map(|a| win::wide(a)).collect();
     let mut ptrs: Vec<*mut u16> = wides.iter_mut().map(|w| w.as_mut_ptr()).collect();
     ptrs.push(std::ptr::null_mut());
@@ -137,8 +137,9 @@ fn main() {
         std::process::exit(1);
     };
     let Some(dll) = core_ok(&data) else { broken() };
-    let mut repair = false;
-    let bad = damaged(&data);
+    // started FOR a repair (Help -> About's "Check program files", a repair offer): straight to it, no question
+    let mut repair = std::env::args_os().skip(1).any(|a| a == REPAIR_ARG);
+    let bad = if repair { Some(0) } else { damaged(&data) };
     if bad != Some(0) {
         let text = match bad {
             Some(1) => texts.get("starter.repair", Some(1),
@@ -155,7 +156,7 @@ fn main() {
                  they are.\n\nNo = start anyway.", &[]),
         };
         repair = win::ask(&text);
-    } else if crashed_starting(&top) {
+    } else if !repair && crashed_starting(&top) {
         repair = win::ask(&texts.get("starter.crashed", None,
             "Spiderweb closed unexpectedly while starting last time. Its program files may be damaged.\n\nCheck and \
              repair them now? Spiderweb downloads this version again and puts back only damaged files. Your own \

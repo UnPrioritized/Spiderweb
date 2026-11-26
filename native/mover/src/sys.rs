@@ -210,6 +210,15 @@ pub fn ask(text: &str) -> bool {
     boxed(text, 0x04 | 0x30) == 6
 }
 
+/// Yes / No / Cancel (question sign): Some(true) Yes, Some(false) No, None Cancel (or the X).
+pub fn ask3(text: &str) -> Option<bool> {
+    match boxed(text, 0x03 | 0x20) {
+        6 => Some(true),
+        7 => Some(false),
+        _ => None,
+    }
+}
+
 /// OK only (information or error sign).
 pub fn tell(text: &str, error: bool) {
     boxed(text, if error { 0x10 } else { 0x40 });

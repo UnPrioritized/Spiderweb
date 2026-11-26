@@ -879,8 +879,9 @@ class HelpWindow(tk.Toplevel):
             if not bad:
                 messagebox.showinfo(tr("about.check_files"), trn("about.files_ok", seen[1], n=seen[1]), parent=self)
                 return
+            shown = "\n".join(bad[:8]) + ("\n" + tr("about.files_more", n=len(bad) - 8) if len(bad) > 8 else "")
             if messagebox.askyesno(tr("about.check_files"), trn("about.files_bad", len(bad), n=len(bad),
-                                                                 files="\n".join(bad[:8])), parent=self):
+                                                                 files=shown), parent=self):
                 app = self.app
                 app.on_close()
                 try:
