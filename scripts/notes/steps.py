@@ -321,6 +321,14 @@ def expanded(sh):
                            **({"off": copy.deepcopy(sh["off"])} if sh.get("off") else {}))
         if "sustain" in inside:  # (held inside the whole: its colours keep the held overlaps, case 492791693)
             E["_sus"] = True
+    elif names_whole_pages(sh, sh.get("order")):
+        # (a piece whose order names its WHOLE's pages (Gate aware flip before the Chop page) and that now runs its
+        # own way (a glue of its own): the whole is still made in that order, without the piece's own glue entry;
+        # else the whole ran its default order and velocities outside the glue box changed, case 211187012)
+        o = list(sh["order"])
+        if sh.get("glue") and GLUE in o:
+            del o[len(o) - 1 - o[::-1].index(GLUE)]
+        E["_whole"] = {"order": o}
     if sh.get("cut") and (GLUE, 0) in off:
         # (a sliced piece whose Glue was switched off in Properties: the glue in its whole stays off too, sliced.source
         # leaves it out. Else the whole's notes came glued: long notes cut at the knife, shortened by the later steps,
