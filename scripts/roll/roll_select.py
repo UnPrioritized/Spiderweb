@@ -21,6 +21,10 @@ class SelectTool:
         """hit: custom_hit at the press (inside the selected custom shape's box: it moves); on_box: the kept Select
         box pressed inside (on_kept_box)."""
         app = self.app
+        if on_box:  # inside it: moving the shapes takes it along
+            self.box_in = True
+            self.box_moving = boxes_upright(kept)[0]
+            self.box_kept = (self.box_moving, set(app.sels))
         # (its notes count too; a selected shape under the mouse first, except Ctrl+click: adds the one on top)
         i = self.shape_at(e.x, e.y, prefer_selected=not e.state & CTRL)
         if i is not None and self.by_area and not e.state & CTRL:  # (only a mask's area: a click picks it on
@@ -216,6 +220,12 @@ class SelectTool:
             self.app.start_play(keep=True)
 
     # ---- the ruler (bar numbers): the play line, dragged sideways a box over every key ------------------------------
+
+    def press_ruler(self, e, kept):
+        """The bar numbers pressed (any tool): the play line moves here (dragged sideways: a Select box, ruler_box)."""
+        if not self.app.player.running:  # (playing: the play line stays, user 2026-10-23; a drag is still a box)
+            self.app.set_playhead(self.event_pt(e)[0])
+        self.drag = ("seek", False, e.x, e.state, kept)
 
     def drag_seek(self, e):
         if abs(e.x - self.drag[2]) >= BOX_STILL:

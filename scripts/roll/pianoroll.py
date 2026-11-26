@@ -1503,11 +1503,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if e.y < self.ruler_h and not self.draft and self.ruler_band(e, kept):
             self.band_press(e, kept)
             return
-        if e.y < self.ruler_h:  # the bar numbers: move the play line (dragged sideways: a Select box, ruler_box)
-            if not app.player.running:  # (playing: the play line stays, user 2026-10-23; a drag is still a box)
-                app.set_playhead(self.event_pt(e)[0])
-            self.drag = ("seek", False, e.x, e.state, kept)
-            return
+        if e.y < self.ruler_h:  # the bar numbers (roll_select)
+            return self.press_ruler(e, kept)
         if app.tool.get() == "lasso":  # (a loop drawn / a waiting loop's point grabbed: roll_lasso)
             self.lasso_press(e, kept)
             return
@@ -1539,10 +1536,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         on_box = self.on_kept_box(kept, e) if tool == "select" and not self.draft else None
         if on_box and on_box != (0, 0):  # the kept Select box's side / corner: what's in it stretches (roll_edits)
             return self.press_stretch(kept, on_box)
-        if on_box:  # inside it: moving the shapes takes it along
-            self.box_in = True
-            self.box_moving = boxes_upright(kept)[0]
-            self.box_kept = (self.box_moving, set(app.sels))
 
         if tool == "slice":  # (roll_slice)
             return self.press_slice(e, kept)
