@@ -275,7 +275,7 @@ def swap_in(new_path, exe=None):
     """THE SWITCH: puts the checked starter in the running one's place (it becomes .old) and, for an unpacked
     folder version, data/version.txt names the new version. Returns undo(): True when the old starter and
     version.txt are back; False when they couldn't be (the folder then has the new starter + version: checked, used
-    at the next start). Raises OSError (nothing changed then). Untested under WINE (system.WINE)."""
+    at the next start). Raises OSError (nothing changed then). Works under Wine 10 (checked 2026-11-26)."""
     exe = exe or exe_path()
     old = exe + ".old"
     version = UNPACKED.get(new_path)
