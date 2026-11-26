@@ -8,7 +8,7 @@ New versions, the source code and problem reports: {WEBSITE}
 
 Spiderweb can look there for a new version by itself (set how often in [page:settings#General: how often|Settings], in the File menu, on the General tab; Never turns it off). When there is one, a small window says what's new in it and has a button to open the download page.
 
-When the new version comes with a safety signature, the window also has "Update and restart" (Spiderweb.exe: downloads the new one, checks it, swaps it in and starts it) or "Download and check" (running from the scripts: the checked zip goes to your Downloads folder, to unzip over your Spiderweb folder). A download that doesn't match its signature is thrown away. Nothing is downloaded until you press one of them. Your autosave and shapes stay.
+When the new version comes with a safety signature, the window also has "Update and restart" (Spiderweb.exe: downloads the new version, checks it and unpacks it beside the one you use; Spiderweb switches over as it closes and starts the new one, and the old version's files are deleted at a later start) or "Download and check" (running from the scripts: the checked zip goes to your Downloads folder, to unzip over your Spiderweb folder). A download that doesn't match its signature is thrown away. Nothing is downloaded until you press one of them. Your autosave and shapes stay.
 
 The first time a new version starts, it packs the older version's settings, palettes, saved shapes, the whole presets folder (Hz bass, Stir and Warp presets, rhythms, saved patterns and curves, Hz shape lines, wobble waves, colour formats), your own tool defaults (the "use as default" pins) and the look into one zip file in the settings folder inside the user folder's backups folder (named after the older version, e.g. "1.7.2-5ec9217.zip").
 
@@ -17,5 +17,13 @@ A small window says so (Open folder shows the zip), then What's new opens. Every
 All of the code was written by an AI model (Claude Opus 5.5, by Anthropic). Kanade Tachibana directed the project: decided what it should do, tested it and asked for changes.
 
 Spiderweb's folder holds the MIDI files you export (output) and the user folder: your autosave (and autosave-backup), settings, your saved presets (presets: one folder per list, one file per preset, so you can hand one to someone or bring a deleted one back from the Recycle Bin), and your shape library (shapes). If something goes wrong, spiderweb-error.log and spiderweb-crash.log sit right next to Spiderweb.
+
+## Program files
+
+Spiderweb.exe is small: the program itself sits in the data folder beside it (one folder per version), ready to use, so nothing is unpacked or written when it starts. Keep Spiderweb.exe and the data folder together.
+
+At every start Spiderweb.exe checks that its program files are all there and the right size. When some are missing or damaged, or when the last start crashed, it offers a repair: it downloads the same version again, checks its signature and puts back only the files that differ. Your own files stay as they are.
+
+Check program files (below) does the full check by hand: it compares every program file with its fingerprint, which also finds files that kept their size but changed. It takes a few seconds.
 
 The sound parts (BASS and BASSMIDI, used by Built-in BASSMIDI and the Hz bass preview) aren't under the MIT License: they are free for non-commercial use only (see the README).

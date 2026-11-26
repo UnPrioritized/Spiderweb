@@ -76,29 +76,46 @@ What it can do
   language.
 
 
-Running the .exe
-----------------
-Just run Spiderweb.exe. Nothing to install.
+Running the Windows version
+---------------------------
+Unzip Spiderweb-<version>.zip anywhere you like (Desktop, Documents, a USB
+stick...) and run Spiderweb.exe in the Spiderweb folder it makes. Nothing to
+install. Nothing is unpacked or written when it starts either: the program
+sits ready in its data folder, so it starts quickly, even from a hard drive.
+Keep Spiderweb.exe and the data folder together.
 
-"Windows protected your PC"? The .exe isn't signed (a signing certificate
-costs money every year), so Windows doesn't know it yet. Click "More info",
-then "Run anyway". Some virus scanners also wrongly flag programs packed with
-PyInstaller. If you'd rather not run the .exe, run it from source instead
-(below): the code is all there to read.
+"Windows protected your PC"? Spiderweb.exe isn't signed (a signing
+certificate costs money every year), so Windows doesn't know it yet. Click
+"More info", then "Run anyway". Some virus scanners may also wrongly flag it.
+If you'd rather not run the .exe, run it from source instead (below): the
+code is all there to read.
 
-- Exported MIDI goes in the same folder as the .exe. Your autosave,
-  settings, presets and saved shapes go in its "user" folder.
-- To update, replace just Spiderweb.exe in that folder; everything else
-  stays. Or press "Update and restart" when Spiderweb says a new version
-  is out.
+- Exported MIDI goes in the Spiderweb folder's "output" folder. Your
+  autosave, settings, presets and saved shapes go in its "user" folder.
+- To update, press "Update and restart" when Spiderweb says a new version
+  is out: the new version is unpacked beside the old one, Spiderweb switches
+  over as it closes and deletes the old version at a later start. Or unzip
+  the new zip into the same place, so its Spiderweb folder lands on yours.
+  Your user and output folders stay either way.
+- Coming from 1.7.x (a single Spiderweb.exe)? Its "Update and restart"
+  moves you over by itself: it fetches the small Spiderweb.exe from the
+  release page, which sets up the new layout in the same folder and starts
+  it. Your files stay. That small Spiderweb.exe can also be run on its own:
+  it sets Spiderweb up where it is (asking first when the folder holds other
+  things).
+- Damaged program files: Spiderweb.exe checks its program files at every
+  start and offers to repair them (it downloads the same version again and
+  puts back only what's damaged). Help -> About -> Check program files
+  checks every file's fingerprint by hand.
 - Update check: Spiderweb can look on GitHub for a new version when it
   starts. It asks you once how often (every start, once a day, week or
   month, or never); change it later in File -> Settings (Ctrl+,), General
   page. It only asks GitHub for the list of versions: nothing about you or
   your work is sent, and nothing is downloaded by itself.
 - Signed updates: every release is signed with a key that is kept
-  offline, never on GitHub. "Update and restart" checks that signature
-  before using the download, so files changed by anyone else are refused.
+  offline, never on GitHub. "Update and restart" (and the repair) checks
+  that signature before using the download, so files changed by anyone else
+  are refused.
 
 
 Getting started
@@ -227,7 +244,7 @@ gets ready).
 Which fast code runs, best first (Spiderweb picks by itself; results are
 the same either way, only the speed differs):
   1. The included fast code (scripts/loops): 64-bit Windows and Linux.
-     The download (exe) always uses this.
+     The Windows download always uses this.
   2. Numba, if you installed it: used when the included code can't load
      (Mac, older Linux). Spiderweb offers to install it once in that case.
   3. NumPy alone: works everywhere, slowest on huge projects.
@@ -249,8 +266,10 @@ card, or BASSMIDI), OmniMIDI (KDMAPI) when OmniMIDI is installed, or Maestro
 The Hz bass window's Preview needs no MIDI device: it plays with BASSMIDI,
 or Merlin / Kestrel on the graphics card.
 
-Building the .exe yourself: install PyInstaller once (pip install
-pyinstaller), then double-click build.bat. The result is in the dist folder.
+Building the Windows version yourself: install Rust (rustup.rs) and Visual
+Studio's C++ build tools once, then double-click build.bat. The result is in
+the dist folder: the Spiderweb folder, its zip and the small Spiderweb.exe
+for the release page.
 
 
 About this program
@@ -266,7 +285,7 @@ here for the piano roll.
 
 The Hz bass preview and the Built-in BASSMIDI playback use BASS, BASSMIDI and
 BASSmix by Un4seen Developments (un4seen.com; the DLLs, Linux .so and macOS .dylib
-files in scripts/bass, the DLLs also inside the .exe). They are NOT covered by
+files in scripts/bass, the DLLs also in the Windows version's data folder). They are NOT covered by
 Spiderweb's MIT License: they are free for non-commercial use only. Anyone
 selling or otherwise making money from a copy of Spiderweb needs a BASS
 licence from Un4seen.
@@ -276,7 +295,7 @@ Kestrel (GPU) playback uses Kestrel, the GPU MIDI synth by thtstickyboi
 mbms (mbms0, github.com/mbms0/kestrel-midi). It's under the Mozilla Public
 License 2.0. Spiderweb talks to it through its own small connector (source in
 native/kestrel_bridge; the built files in scripts/kestrel, the Windows one
-also inside the .exe; they aren't in the git repository: take them from a
+also in the Windows version; they aren't in the git repository: take them from a
 release's source zip, or build the connector with
 python native/kestrel_bridge/build_release.py). Rendered ahead also uses
 Merlin, Kestrel's second renderer that drops no note. Spiderweb's copy of
@@ -289,12 +308,14 @@ when you have it installed; no part of Maestro comes with Spiderweb.
 
 The fast loops for lots of notes are Spiderweb's own, written in Rust
 (source in native/loops, the built files in scripts/loops, the Windows one
-also inside the .exe; rebuild them with
+also in the Windows version; rebuild them with
 python native/loops/build_release.py). They carry the Rust libraries rayon
 and its helpers; their licences are in THIRD-PARTY-NOTICES.txt.
 
-The .exe also carries Python, Tcl/Tk, NumPy, Pillow, PyNaCl (with libsodium,
-cffi and pycparser), uharfbuzz (with HarfBuzz), python-bidi (LGPL-3: run from
-source or rebuild with build.bat to use your own copy) and PyInstaller's
-starter program. Their licences are in
+The Windows version also carries Python, Tcl/Tk, NumPy, Pillow, PyNaCl (with
+libsodium, cffi and pycparser), uharfbuzz (with HarfBuzz) and python-bidi
+(LGPL-3: its files sit as they are in the data folder's packages folder, so
+you can swap in your own copy). The small Spiderweb.exe that sets up the
+Windows version from the release page is built with the Rust libraries
+ed25519-compact and miniz_oxide. Their licences are in
 THIRD-PARTY-NOTICES.txt.

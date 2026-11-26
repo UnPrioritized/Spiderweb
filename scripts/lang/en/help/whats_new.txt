@@ -4,6 +4,10 @@ What changed in each version, newest first. This page opens by itself the first 
 
 What's new:
 
+• Spiderweb is now a folder: a small Spiderweb.exe with the program in a data folder beside it. Nothing is unpacked or written when it starts any more, so it starts much faster, most of all from a hard drive (a later start about 3 s → 0.7 s), and the copy of the whole program it used to unpack at every start is gone. Updating from 1.7 with "Update and restart" moves you over by itself; your files stay. The download is now a zip: unzip it and run Spiderweb.exe. See [page:about#Program files|About].
+
+• Repair: Spiderweb.exe checks its program files at every start, and when some are missing or damaged (or the last start crashed) it offers to download this version again and put back only those files. Help → About → Check program files compares every file with its fingerprint.
+
 • Add between works with drawn shapes, freehand lines, and a drawn shape with a line: each piece turns into the nearest piece of the other shape, and pieces with no partner grow or shrink along the way. A turned copy makes steps that turn instead of melting, and the new Turn by box turns or spins them by any angle. See [page:between#Drawn shapes|Add between].
 
 • Copy along a path can turn the copies: the new Turn boxes under Size set the first and the last copy's angle, and the ones between turn step by step (0 → 360 spins them once along the path). Bigger, smaller and turned copies are now made again from your drawing, so their edges stay clean instead of being stretched into steps. See [page:path|Copy along a path].
