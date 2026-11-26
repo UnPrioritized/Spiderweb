@@ -839,8 +839,15 @@ class LiquifyBend(StirBend):
         self.span = L.span_of(lq)
         self.S = np.array([self.span[2] - self.span[0], self.span[3] - self.span[1]])
         # (moves in the colour box's units; in the map's own units for the sums here: the same while not grown)
-        A = L.map_of(L.full(lq)) * (L.full(lq)["strength"] / 100.0)
-        self.A = np.ascontiguousarray(A if self.span == L.SPAN else A / self.S, np.float64)
+        key = (lq.get("map"), tuple(L.full(lq)["grid"]), L.full(lq)["strength"], self.span)
+        got = _LQ_A.get(key)  # (one making of the notes makes several benders of the same map: ~2 ms each at 1024)
+        if got is None:
+            A = L.map_of(L.full(lq)) * (L.full(lq)["strength"] / 100.0)
+            got = np.ascontiguousarray(A if self.span == L.SPAN else A / self.S, np.float64)
+            if len(_LQ_A) > 1:  # (16 MB each at a 1024 grid; a stroke makes a new map every dab)
+                _LQ_A.pop(next(iter(_LQ_A)))
+            _LQ_A[key] = got
+        self.A = got  # (shared: never written to)
         self.worst = 0.0
         self.st = {"ripple": 0.0, "ripple_len": 100.0}
 
@@ -859,7 +866,7 @@ class LiquifyBend(StirBend):
         """The farthest a spot moves each way, in the colour box's units, and how far the map reaches past the box."""
         from notes import liquify as L
         sp = L.span_of(lq)
-        P = np.abs(L.map_of(L.full(lq))).reshape(-1, 2).max(0) * (L.full(lq)["strength"] / 100.0)
+        P = L.largest_of(L.full(lq)) * (L.full(lq)["strength"] / 100.0)
         return P + np.array([max(-sp[0], sp[2] - 1, 0.0), max(-sp[1], sp[3] - 1, 0.0)])
 
     def _to(self, x, y):
@@ -907,38 +914,29 @@ class LiquifyBend(StirBend):
         """Spots' homes (map units) the sure way: the moved grid cells whose shown corners' box covers the spot (sorted
         once into buckets of one grid step by where they show), each cell's blend turned round exactly (_in_cell).
         Two homes (a crease of a very strong twirl): the one nearest the first guess (gx0, gy0). -> (x, y, found)."""
-        gy, gx = self.A.shape[:2]
+        n = len(mx)
+        ox, oy, found = mx.copy(), my.copy(), np.zeros(n, bool)
         if getattr(self, "_cells", None) is None:
             few = self._seeded_few(mx, my, gx0, gy0)  # (a handful of spots: only the cells that can reach each)
             if few is not None:
                 return few
-            self._cells = None
-            moved = (self.A != 0).any(2)
-            cm = moved[:-1, :-1] | moved[1:, :-1] | moved[:-1, 1:] | moved[1:, 1:]
-            cj, ci = np.nonzero(cm)
-            hx, hy = 1.0 / (gx - 1), 1.0 / (gy - 1)
-            xs = [(ci + di) * hx + self.A[cj + dj, ci + di, 0] for dj in (0, 1) for di in (0, 1)]
-            ys = [(cj + dj) * hy + self.A[cj + dj, ci + di, 1] for dj in (0, 1) for di in (0, 1)]
-            if len(cj):
-                b = min(hx, hy)
-                X0, X1 = np.min(xs, 0), np.max(xs, 0)
-                Y0, Y1 = np.min(ys, 0), np.max(ys, 0)
-                x0, y0 = float(X0.min()), float(Y0.min())
-                bx0, bx1 = np.floor((X0 - x0) / b).astype(np.int64), np.floor((X1 - x0) / b).astype(np.int64)
-                by0, by1 = np.floor((Y0 - y0) / b).astype(np.int64), np.floor((Y1 - y0) / b).astype(np.int64)
-                W = int(bx1.max()) + 2
-                nx, ny = bx1 - bx0 + 1, by1 - by0 + 1
-                cnt = nx * ny
-                if cnt.sum() <= CELLS_MOST:
-                    idx = np.repeat(np.arange(len(cj)), cnt)
-                    k = np.arange(len(idx)) - np.repeat(np.cumsum(cnt) - cnt, cnt)
-                    key = (by0[idx] + k // nx[idx]) * W + bx0[idx] + k % nx[idx]
-                    o = np.argsort(key, kind="stable")
-                    self._cells = cj[idx[o]], ci[idx[o]], key[o], b, x0, y0, W
-        n = len(mx)
-        ox, oy, found = mx.copy(), my.copy(), np.zeros(n, bool)
-        if self._cells is None:
-            return ox, oy, found
+            if n <= SPOTS_FEW:  # (a few spots, the map's pushes too far for _seeded_few's window: 1024 grid, 40
+                # strokes: 47 spots bucketed 770k cells = 4.6 M entries, 0.45 s an update)
+                pairs = self._spot_cells(mx, my)
+                if pairs is None:
+                    return ox, oy, found
+                return self._homes(*pairs, mx, my, gx0, gy0, ox, oy, found)
+            boxes = self._cell_boxes()
+            if boxes is None:
+                return ox, oy, found
+            cj, ci, bx0, bx1, by0, by1, b, x0, y0, W = boxes
+            nx, ny = bx1 - bx0 + 1, by1 - by0 + 1
+            cnt = nx * ny
+            idx = np.repeat(np.arange(len(cj)), cnt)
+            k = np.arange(len(idx)) - np.repeat(np.cumsum(cnt) - cnt, cnt)
+            key = (by0[idx] + k // nx[idx]) * W + bx0[idx] + k % nx[idx]
+            o = np.argsort(key, kind="stable")
+            self._cells = cj[idx[o]], ci[idx[o]], key[o], b, x0, y0, W
         CJ, CI, keys, b, x0, y0, W = self._cells
         bx = np.floor((mx - x0) / b).astype(np.int64)
         by = np.floor((my - y0) / b).astype(np.int64)
@@ -950,7 +948,133 @@ class LiquifyBend(StirBend):
             return ox, oy, found
         qi = np.repeat(np.arange(n), c)
         gi = np.arange(c.sum()) - np.repeat(np.cumsum(c) - c - lo, c)
-        sx, sy, ok = self._in_cell(CJ[gi], CI[gi], mx[qi], my[qi])
+        return self._homes(CJ[gi], CI[gi], qi, mx, my, gx0, gy0, ox, oy, found)
+
+    def _largest(self):
+        """The largest number in self.A (map units, Strength in), without reading the whole map again: the map's own
+        largest pushes (kept per map) scaled the same way as A (each step only rounds, never reorders)."""
+        from notes import liquify as L
+        lq = getattr(self, "lq", None)
+        if lq is None:  # (from_map: A alone)
+            return float(np.abs(self.A).max()) if self.A.size else 0.0
+        M = L.largest_of(L.full(lq)) * (L.full(lq)["strength"] / 100.0)
+        return float((M if self.span == L.SPAN else M / self.S).max())
+
+    def _spot_cells(self, mx, my):
+        """_seeded's pairs for a few spots: each spot with every moved cell whose buckets (as _cell_boxes counts
+        them) hold it, by spot, then the cells in bucket order (row, column) -> (cj, ci, spot), or None (no moved
+        cell). The very same pairs as the buckets give, without a box for every cell: blocks of TILE x TILE cells
+        whose shown points can't reach a spot are passed over whole. Never past CELLS_MOST (no buckets kept)."""
+        A = self.A
+        gy, gx = A.shape[:2]
+        hx, hy = 1.0 / (gx - 1), 1.0 / (gy - 1)
+        X = np.arange(gx)[None, :] * hx + A[:, :, 0]  # (each grid point where it shows; the same sums as point by
+        Y = np.arange(gy)[:, None] * hy + A[:, :, 1]  # point)
+        moved = A.view(np.complex128)[:, :, 0] != 0  # (either way moved)
+        near = moved.copy()  # (grid points that are a corner of a moved cell: a moved point next to or at them)
+        near[1:] |= moved[:-1]
+        near[:-1] |= moved[1:]
+        corner = near.copy()
+        corner[:, 1:] |= near[:, :-1]
+        corner[:, :-1] |= near[:, 1:]
+        if not corner.any():
+            return None
+        b = min(hx, hy)
+        x0 = float(np.min(X, where=corner, initial=np.inf))
+        y0 = float(np.min(Y, where=corner, initial=np.inf))
+        W = int(np.floor((float(np.max(X, where=corner, initial=-np.inf)) - x0) / b)) + 2
+        bx = np.floor((mx - x0) / b).astype(np.int64)
+        by = np.floor((my - y0) / b).astype(np.int64)
+        q = np.flatnonzero((bx >= 0) & (bx < W) & (by >= 0))
+        if not len(q):
+            return None
+        bx, by = bx[q], by[q]
+        T = TILE
+        nty, ntx = -(-gy // T), -(-gx // T)  # (blocks of grid points; a tile's cells reach one point into the next
+        # block: its box takes both)
+
+        def block(f, a, pad):
+            if (nty * T, ntx * T) == (gy, gx):  # (a grid of whole tiles, e.g. 1024: no padded copy)
+                P = a
+            else:
+                P = np.full((nty * T, ntx * T), pad)
+                P[:gy, :gx] = a
+            m = np.pad(f(P.reshape(nty, T, ntx, T), (1, 3)), ((0, 1), (0, 1)), constant_values=pad)
+            g = np.minimum if f is np.min else np.maximum
+            return g(g(m[:-1, :-1], m[1:, :-1]), g(m[:-1, 1:], m[1:, 1:]))
+        tx0 = np.floor((block(np.min, X, np.inf) - x0) / b).ravel()
+        tx1 = np.floor((block(np.max, X, -np.inf) - x0) / b).ravel()
+        ty0 = np.floor((block(np.min, Y, np.inf) - y0) / b).ravel()
+        ty1 = np.floor((block(np.max, Y, -np.inf) - y0) / b).ravel()
+        hits = [np.flatnonzero((tx0 <= bx[k]) & (bx[k] <= tx1) & (ty0 <= by[k]) & (by[k] <= ty1))
+                for k in range(len(q))]  # (each spot's tiles; a few spots, ~1000 tiles)
+        U = np.unique(np.concatenate(hits))
+        if not len(U):
+            return None
+        TT = T * T  # (the tiles' cells, tile after tile, each tile's T x T block whole: its slice by place in U)
+        jj, ii = np.divmod(np.arange(TT), T)
+        cj = ((U // ntx)[:, None] * T + jj[None]).ravel()
+        ci = ((U % ntx)[:, None] * T + ii[None]).ravel()
+        ok = (cj < gy - 1) & (ci < gx - 1)
+        cj, ci = np.where(ok, cj, 0), np.where(ok, ci, 0)
+        ok &= moved[cj, ci] | moved[cj + 1, ci] | moved[cj, ci + 1] | moved[cj + 1, ci + 1]
+        cx = (X[cj, ci], X[cj, ci + 1], X[cj + 1, ci], X[cj + 1, ci + 1])
+        cy = (Y[cj, ci], Y[cj, ci + 1], Y[cj + 1, ci], Y[cj + 1, ci + 1])
+        bx0 = np.floor((np.minimum(np.minimum(cx[0], cx[1]), np.minimum(cx[2], cx[3])) - x0) / b)
+        bx1 = np.floor((np.maximum(np.maximum(cx[0], cx[1]), np.maximum(cx[2], cx[3])) - x0) / b)
+        by0 = np.floor((np.minimum(np.minimum(cy[0], cy[1]), np.minimum(cy[2], cy[3])) - y0) / b)
+        by1 = np.floor((np.maximum(np.maximum(cy[0], cy[1]), np.maximum(cy[2], cy[3])) - y0) / b)
+        place = cj * gx + ci
+        out_c, out_q = [], []
+        for k, h in enumerate(hits):
+            if not len(h):
+                continue
+            idx = (np.searchsorted(U, h)[:, None] * TT + np.arange(TT)[None]).ravel()
+            u, v = bx[k], by[k]
+            idx = idx[ok[idx] & (bx0[idx] <= u) & (u <= bx1[idx]) & (by0[idx] <= v) & (v <= by1[idx])]
+            idx = idx[np.argsort(place[idx], kind="stable")]  # (row, column: the buckets' order)
+            out_c.append(idx)
+            out_q.append(np.full(len(idx), q[k]))
+        if not out_c:
+            return None
+        c, qq = np.concatenate(out_c), np.concatenate(out_q)
+        return cj[c], ci[c], qq
+
+    def _cell_boxes(self):
+        """The moved grid cells (row cj, column ci) and the buckets (one grid step b, from x0, y0; W across) their
+        shown corners' box covers -> (cj, ci, bx0, bx1, by0, by1, b, x0, y0, W); None = no moved cell, or more bucket
+        entries than CELLS_MOST (memory). Worked out once a bender (kept in _boxes)."""
+        if hasattr(self, "_boxes"):
+            return self._boxes
+        self._boxes = None
+        A = self.A
+        gy, gx = A.shape[:2]
+        moved = (A != 0).any(2)
+        cm = moved[:-1, :-1] | moved[1:, :-1] | moved[:-1, 1:] | moved[1:, 1:]
+        cj, ci = np.nonzero(cm)
+        if not len(cj):
+            return None
+        hx, hy = 1.0 / (gx - 1), 1.0 / (gy - 1)
+        X = np.arange(gx)[None, :] * hx + A[:, :, 0]  # (each grid point where it shows; the same sums as point by
+        Y = np.arange(gy)[:, None] * hy + A[:, :, 1]  # point, whole rows at a time)
+        cx = (X[:-1, :-1], X[:-1, 1:], X[1:, :-1], X[1:, 1:])
+        cy = (Y[:-1, :-1], Y[:-1, 1:], Y[1:, :-1], Y[1:, 1:])
+        X0 = np.minimum(np.minimum(cx[0], cx[1]), np.minimum(cx[2], cx[3]))[cm]
+        X1 = np.maximum(np.maximum(cx[0], cx[1]), np.maximum(cx[2], cx[3]))[cm]
+        Y0 = np.minimum(np.minimum(cy[0], cy[1]), np.minimum(cy[2], cy[3]))[cm]
+        Y1 = np.maximum(np.maximum(cy[0], cy[1]), np.maximum(cy[2], cy[3]))[cm]
+        b = min(hx, hy)
+        x0, y0 = float(X0.min()), float(Y0.min())
+        bx0, bx1 = np.floor((X0 - x0) / b).astype(np.int64), np.floor((X1 - x0) / b).astype(np.int64)
+        by0, by1 = np.floor((Y0 - y0) / b).astype(np.int64), np.floor((Y1 - y0) / b).astype(np.int64)
+        if ((bx1 - bx0 + 1) * (by1 - by0 + 1)).sum() <= CELLS_MOST:
+            self._boxes = cj, ci, bx0, bx1, by0, by1, b, x0, y0, int(bx1.max()) + 2
+        return self._boxes
+
+    def _homes(self, cj, ci, qi, mx, my, gx0, gy0, ox, oy, found):
+        """_seeded's end: each spot qi's candidate cells (cj, ci; in bucket order) turned round; per spot the home
+        nearest its first guess (ties: the first in that order) written into ox, oy, found."""
+        sx, sy, ok = self._in_cell(cj, ci, mx[qi], my[qi])
         o = np.flatnonzero(ok)
         far = (sx[o] - gx0[qi[o]]) ** 2 + (sy[o] - gy0[qi[o]]) ** 2
         o = o[np.lexsort((far, qi[o]))]
@@ -967,7 +1091,7 @@ class LiquifyBend(StirBend):
         gy, gx = A.shape[:2]
         hx, hy = 1.0 / (gx - 1), 1.0 / (gy - 1)
         if not hasattr(self, "_reach"):
-            self._reach = float(np.abs(A).max()) if A.size else 0.0
+            self._reach = self._largest()
         d = self._reach
         wi, wj = min(int(d / hx) + 3, gx - 1), min(int(d / hy) + 3, gy - 1)
         # (looking through a window is far cheaper a cell than sorting cells into buckets: up to twice the map's cells)
@@ -2036,6 +2160,10 @@ SEARCH = 241  # (the fine search's spots each way, over SEARCH_SPAN of the box)
 SEARCH_SPAN = (-1.0, 2.0)
 CELLS_MOST = 8_000_000  # (LiquifyBend._seeded: bucket entries of the moved cells at most (memory); past it the
 # first guess)
+SPOTS_FEW = 256  # (LiquifyBend._seeded: up to this many spots look only at the cells whose buckets hold one, no
+# sorting of every moved cell; a spot x candidate-cell table each)
+_LQ_A = {}  # (LiquifyBend's map in its own units per (map text, grid, strength, span); the last few, never written to)
+TILE = 16  # (LiquifyBend._spot_cells: blocks of this many cells each way passed over whole when they can't reach)
 
 
 def searcher(look):

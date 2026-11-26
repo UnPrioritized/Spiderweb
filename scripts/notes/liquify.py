@@ -144,6 +144,26 @@ def map_of(lq):
     return empty(lq["grid"])
 
 
+_LARGEST = {}  # map text -> its largest push each way (across, up); the last few kept, like _DECODED
+
+
+def largest_of(lq):
+    """A clean Liquify's largest push each way, |map| at most (across, up), Strength left out: the same numbers as
+    np.abs(map_of(lq)).reshape(-1, 2).max(0), kept per map (every making of the notes asks; ~20 ms at a 1024 grid)."""
+    text = lq.get("map")
+    if not text:
+        return np.zeros(2)
+    key = (text, tuple(lq["grid"]))
+    got = _LARGEST.get(key)
+    if got is None:
+        got = np.abs(map_of(lq)).reshape(-1, 2).max(0)
+        got.setflags(write=False)
+        if len(_LARGEST) > 16:
+            _LARGEST.pop(next(iter(_LARGEST)))
+        _LARGEST[key] = got
+    return got
+
+
 def mask_of(lq):
     """A clean Liquify's freeze mask (up, across) 0..1, or None (nothing frozen)."""
     return decode_mask(lq["grid"], lq["frozen"]) if lq and lq.get("frozen") else None
