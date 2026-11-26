@@ -27,8 +27,12 @@ OWN = ["files", "notes", "roll", "window"]  # (the program's code folders in scr
 SKIP_LIB = {"site-packages", "test", "idlelib", "turtledemo", "ensurepip", "venv", "pydoc_data", "__pycache__",
             "__phello__", "lib2to3"}
 SKIP_DLLS = ("_test", "_ctypes_test", "py.ico", "pyc.ico", "pyd.ico", "python_lib.cat", "sqlite3.dll", "_sqlite3")
-SKIP_DIRS = {"__pycache__", "tests", "testing", "include"}
+SKIP_DIRS = {"__pycache__", "tests", "testing", "include", "f2py"}  # (f2py: NumPy's Fortran compiler tool)
 SKIP_ENDS = (".pyi", ".pyc", ".lib", ".h", ".md")  # (.md: the CLAUDE.md notes never go out)
+# Parts of packages Spiderweb never uses (2026-11-26: no AVIF pictures, no Pillow font drawing): ~10 MB
+SKIP_STARTS = ("_avif.", "_imagingft.")  # (Pillow's own code expects these may be missing)
+# Beside Spiderweb.exe in the zip (README.txt + the licences)
+TOP_FILES = ("LICENSE", "README.txt", "THIRD-PARTY-NOTICES.txt", "SPIDERWEB-NOTES-FORMAT.md")
 
 
 def pyc(src, shown):
@@ -52,6 +56,8 @@ def copy_code(src, dst):
         rel = os.path.relpath(d, src)
         for n in names:
             s = os.path.join(d, n)
+            if n.startswith(SKIP_STARTS):
+                continue
             if n.endswith(".py"):
                 put(os.path.join(dst, rel, n[:-3] + ".pyc"), pyc(s, os.path.join(os.path.basename(src), rel, n)))
             elif not n.endswith(SKIP_ENDS):
@@ -131,7 +137,7 @@ def file_list(data):
 
 
 def main():
-    out = sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv else os.path.join(ROOT, "dist")
+    out = os.path.abspath(sys.argv[sys.argv.index("--out") + 1] if "--out" in sys.argv else os.path.join(ROOT, "dist"))
     if sys.platform != "win32" or sys.maxsize < 2 ** 32:
         sys.exit("The folder version is built on 64-bit Windows.")
     started = time.time()
@@ -156,6 +162,8 @@ def main():
     count = file_list(data)
     with open(os.path.join(app, "data", "version.txt"), "w", encoding="utf-8", newline="\n") as f:
         f.write(VERSION + "\n")
+    for n in TOP_FILES:
+        shutil.copy2(os.path.join(ROOT, n), os.path.join(app, n))
     z = os.path.join(out, f"Spiderweb-{VERSION}.zip")
     if os.path.exists(z):
         os.remove(z)
