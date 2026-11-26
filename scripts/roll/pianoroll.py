@@ -45,7 +45,7 @@ from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT,
                               RULER_TOP, VEL_TOP, bind_double_right, black_bands, box_kind, boxes_side, boxes_upright,
                               cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box,
-                              note_name, ruler_boxes, even_rows, whole_fit, whole_row)
+                              note_name, ruler_boxes, even_rows, whole_fit, whole_row, key_button_f)
 from roll.roll_lasso import LassoDrawing
 from roll.roll_drawtools import DrawTools
 from roll.roll_slice import SliceTool
@@ -1092,6 +1092,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if across:
             self.zoom_x(f, (self.kb_w + self.winfo_width()) / 2)
         else:
+            f = key_button_f(self.sy, f, even_rows(self.app) and not self.companion_overlay())
             self.zoom_y(f, (self.ruler_h + self.winfo_height()) / 2)
         self.clamp_view()
         self.request_redraw()

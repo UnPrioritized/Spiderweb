@@ -30,6 +30,17 @@ def even_rows(app):
     return bool(getattr(getattr(app, "even_rows", None), "get", lambda: False)())
 
 
+KEY_BUTTON_STEP = 1.1  # the up / down "+" / "-" buttons' zoom a click without "Even key rows" (user 2026-11-26: 1.25 too big)
+
+
+def key_button_f(sy, f, even):
+    """The zoom factor for an up / down "+" / "-" click (f > 1 = in) at row height sy: with "Even key rows" on,
+    exactly one pixel taller / shorter a click (user 2026-11-26); else a small step."""
+    if even:
+        return max(1.0, round(sy) + (1 if f > 1 else -1)) / sy
+    return KEY_BUTTON_STEP if f > 1 else 1 / KEY_BUTTON_STEP
+
+
 def own_roll(app):
     """Spiderweb's own piano roll, also while Draw on Domino has app.roll pointing at its overlay (which follows
     Domino's rows and never snaps: hunt 2026-11-26)."""

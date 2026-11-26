@@ -11,7 +11,7 @@ from files.mathexpr import fmt
 from notes.hzbass import (HZ_DEFAULTS, NOTE_BEND_MOST, all_tones, auto_state, bend_range, can_slide, glide, handle_u, heard, hz_of, layers_of,
                           bends, funnel_box, left_edge, links, pitch, slide_knob, slide_part, tone_keys)
 from roll.roll_shared import (ALT, CTRL, MAX_SX, MIN_SX, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name,
-                              recheck_pointer, ruler_boxes, even_rows, whole_fit, whole_row)
+                              recheck_pointer, ruler_boxes, even_rows, whole_fit, whole_row, key_button_f)
 from notes.custom import box_frame
 from notes.hzbass import sound_span
 from notes.meter import bar_lines, beat_lines, sigs_of
@@ -255,7 +255,7 @@ class HzView:
         if across:
             self.zoom_x(f, (self.kb_w + c.winfo_width()) / 2)
         else:
-            self.zoom_y(f, (self.ruler_h + c.winfo_height()) / 2)
+            self.zoom_y(key_button_f(self.sy, f, even_rows(self.app)), (self.ruler_h + c.winfo_height()) / 2)
         self.clamp_view()
         self.redraw()
 
