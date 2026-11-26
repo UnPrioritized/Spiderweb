@@ -42,6 +42,10 @@ class HzStart:
         lo, hi = app.hz_defaults["lo"], app.hz_defaults["hi"]
         app.show_position(tr("pianoroll.hz_keys", lo=note_name(lo, app.edo()), hi=note_name(hi, app.edo()), n=hi - lo + 1))
 
+    def hz_release(self, e, still):
+        """The keys dragged (or the second click): the window opens (pianoroll.on_release)."""
+        open_hz(self.app)
+
     def hz_keys_held(self):
         """The keys of a new Hz bass being dragged (or following the mouse after a click)."""
         return any(d and d[0] == "hzkeys" for d in (self.drag, self.follow))

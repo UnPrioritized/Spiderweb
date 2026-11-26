@@ -36,7 +36,6 @@ from roll.roll_hz import HzStart
 from window.widgets import bind_double, menu_click  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
 from window.big_ask import BIG
-from window.hz_window import open_hz
 from window.load_extract import can_extract, delete_loaded, stop_extract
 from window.widgets import Tooltip
 from roll.roll_live import BOX_TOOLS, LiveDrawing
@@ -52,6 +51,7 @@ from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, 
                               note_name, ruler_boxes, even_rows, whole_fit, whole_row)
 from roll.roll_lasso import LassoDrawing
 from roll.roll_drawtools import DrawTools
+from roll.roll_slice import SliceTool
 from roll.roll_pen import PenCircle
 from roll.roll_loaded import LoadedNotes
 from roll.roll_sustain import SustainStops
@@ -99,7 +99,7 @@ def grid_x(sh, make, x, sb, ppq, notes_of):
 
 class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
                 PathEditing, SustainStops, LassoDrawing, CentreDots, LiquifyBrush, WarpGrid, MelodyMarks, GlissEditing,
-                PenCircle, DrawTools, tk.Canvas):
+                PenCircle, DrawTools, SliceTool, tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
@@ -256,19 +256,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         top = max(KEYS[1] - 1 if above else 0, self.app.keys - 1 + room)
         return [max(-self.room_beats(), b), min(max(p, -room), top)]
 
-    def slice_pt(self, e):
-        """The Slice tool's line end at the mouse: time on the snap grid, keys on the lines between key rows (so a
-        flat cut runs between two keys); Shift = exactly there."""
-        b, _ = self.event_pt(e, snap=False)
-        # (keys from the mouse itself: event_pt stops at key 0's middle, so the line couldn't reach under the
-        # bottom key)
-        p = self.y2p(min(max(e.y, self.ruler_h), self.winfo_height()))
-        sb = self.app.snap_beats()
-        if not e.state & SHIFT:
-            b, p = (round(b / sb) * sb if sb else b), math.floor(p) + 0.5
-        _, lo, hi = self.room_edges()
-        return [b, min(max(p, lo - 0.5), hi + 0.5)]
-
     def box_area(self):
         """The Select box being dragged as (beat, pitch, beat, pitch) corners: out to whole snap steps and whole
         keys (grid_span; Shift / snap off = whole ticks, keys still whole: user), so it's never thinner than one
@@ -372,9 +359,12 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     # what a held drag (self.drag[0]) hands its mouse moves / its let go to (on_drag / on_release); each tool's
     # press, drag and let go live together in its own part (roll_drawtools...)
     DRAG_KINDS = {"create": "drag_create", "wall": "drag_wall", "segment": "drag_segment", "arcdrag": "drag_segment",
-                  "place": "drag_place", "free": "free_drag"}
+                  "place": "drag_place", "free": "free_drag", "slice": "drag_slice", "hzkeys": "hz_drag"}
     RELEASE_KINDS = {"create": "release_create", "wall": "release_wall", "segment": "release_segment",
-                     "arcdrag": "release_arcdrag", "place": "release_place", "free": "release_free"}
+                     "arcdrag": "release_arcdrag", "place": "release_place", "free": "release_free",
+                     "hzkeys": "hz_release"}
+    # ... and the ones whose let go is all their own (none of on_release's shared end: Hz warnings, Even settle...)
+    RELEASE_ALONE = {"knife": "release_knife", "slice": "release_slice"}
 
     def follows(self, kind):
         """True: the view goes along when this drag passes the edge (box_scroll); only with a Space setting on."""
@@ -1159,29 +1149,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         owners = self.note_owners(x, y)
         return out + lines + [i for i in rest if i not in lines and i in owners]
 
-    def knife_click(self, x, y):
-        """Slice with shape: the top shape under x, y (masks never cut: looked through) cuts with its notes, when it
-        can (App.can_knife); a line over pasted notes = the line (can't cut), never the notes under it."""
-        app = self.app
-        i = self.knife_at(x, y)
-        if i is not None and app.can_knife(app.shapes[i]):
-            app.knife_cut(i)
-        else:
-            app.status.config(text=tr("join_split.knife_cant" if i is not None else "join_split.knife_click"))
-
-    def knife_at(self, x, y, near=None):
-        """The shape a Slice with shape click at x, y is for: the first of shapes_at that isn't a mask or hidden,
-        or None. near (near_shapes, for the pointer on every mouse move): only those are tried by their lines."""
-        app = self.app
-        order = [i for i in range(len(app.shapes) - 1, -1, -1)
-                 if i not in app.hidden_shapes and not is_mask(app.shapes[i])]
-        mine = set(order)
-        for i in order if near is None else [i for i in near if i in mine]:
-            if self.hit_shape(x, y, [i]) is not None:
-                return i
-        owners = self.note_owners(x, y)
-        return next((i for i in order if i in owners), None)
-
     def near_shapes(self, x, y):
         """The shape numbers (top first) whose lines' reach, PICK px wider, holds x, y: the only ones whose lines /
         insides can be under the mouse (the hover pointer tries just these: every shape took ~0.1 s a move at 1,000
@@ -1566,18 +1533,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.box_moving = boxes_upright(kept)[0]
             self.box_kept = (self.box_moving, set(app.sels))
 
-        if tool == "slice" and app.slice_mode.get() == "shape":  # (Slice with shape: the click's shape cuts on let go;
-            if kept:  # the Select boxes go with the cut's undo step, then away: hunt 10-26)
-                self.box_kept = (kept, set(app.sels))
-            self.drag = ("knife", e.x, e.y)
-            return
-        if tool == "slice":  # (the kept Select boxes stay: only what's in them is cut)
-            if kept:
-                self.box_kept = (kept, set(app.sels))
-            pt = self.slice_pt(e)
-            self.drag = ("slice", pt, pt, e.x, e.y)
-            self.draw_slice()
-            return
+        if tool == "slice":  # (roll_slice)
+            return self.press_slice(e, kept)
         if tool == "text":
             self.text_click(e)
             return
@@ -1707,9 +1664,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.box_to()
             if self.box_timer is None:
                 self.box_scroll()
-        elif kind == "slice":
-            self.drag = ("slice", self.drag[1], self.slice_pt(e), *self.drag[3:])
-            self.draw_slice()
         elif kind.startswith("lasso"):
             self.lasso_drag(e)
             self.box_mouse = (e.x, e.y, e.state)  # (past the edge the view scrolls: box_scroll)
@@ -1865,8 +1819,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             if sh["pts"] != was:  # (snapped to the same angle: nothing to redo)
                 self.app.shape_edited()
             self.app.show_position(tr("pianoroll.turned", degrees=math.degrees(angle)))
-        elif kind == "hzkeys":
-            self.hz_drag(e)
         elif kind in self.DRAG_KINDS:  # (each tool's own drag: roll_drawtools)
             getattr(self, self.DRAG_KINDS[kind])(e)
 
@@ -1944,22 +1896,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.box_timer = None
             self.lasso_release(e)
             return
-        if kind == "knife":  # (a drag cuts nothing)
-            _, x, y = self.drag
-            self.drag = None
-            if abs(e.x - x) < 4 and abs(e.y - y) < 4:
-                self.knife_click(x, y)
-            if self.box_kept:
-                self.box_kept = None
-                self.request_redraw()
-            return
-        if kind == "slice":  # (a click without dragging cuts nothing)
-            _, a, b, x, y = self.drag
-            self.drag = None
-            self.draw_slice()
-            if abs(e.x - x) >= 4 or abs(e.y - y) >= 4:
-                self.app.slice_along(a, b)
-            return
+        if kind in self.RELEASE_ALONE:  # (let go on its own: nothing below runs; roll_slice...)
+            return getattr(self, self.RELEASE_ALONE[kind])(e)
         still = False  # let go where it was pressed
         if kind in ("create", "place", "wall", "segment", "arcdrag", "hzkeys"):
             x, y = self.drag[2:4] if kind == "place" else self.drag[-2:]
@@ -2016,8 +1954,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.app.set_stroke(part[1])
             else:
                 self.app.set_parts(self.part_group(self.app.selected(), part) if part else (), main=part)
-        elif kind == "hzkeys":
-            open_hz(self.app)
         elif kind in self.RELEASE_KINDS:  # (each tool's own let go: roll_drawtools)
             getattr(self, self.RELEASE_KINDS[kind])(e, still)
         elif kind in ("resize", "turn", "skew") or kind == "handle" and self.app.selected()["kind"] == "custom":

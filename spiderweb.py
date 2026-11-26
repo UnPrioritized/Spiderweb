@@ -123,6 +123,7 @@ Files (the scripts live in scripts/, one subfolder per group):
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse clicks handed on to each tool's part
     roll_drawtools.py the drawing tools' press / drag / let go (Line, box tools, Polyline, Arc, Funnel, Custom, Freehand)
+    roll_slice.py    the Slice tool's press / drag / let go (Slice line, Slice with shape)
     roll_draw.py     painting the grid, notes, handles, keyboard, ruler
     roll_loaded.py   a loaded MIDI's notes on the piano roll (overview at once, exact in the background)
     roll_curve.py    editing curves (anchors + handles, symmetric halves)
