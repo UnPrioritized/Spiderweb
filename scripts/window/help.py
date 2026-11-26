@@ -9,7 +9,7 @@ import tkinter as tk
 import webbrowser
 from tkinter import font as tkfont, ttk
 
-from files.lang import size as lang_size, tr
+from files.lang import size as lang_size, tr, trn
 from files.about import BANNER, BUILT, BUNDLE, FULL_VERSION, HERE, LICENSE, VERSION, WEBSITE
 from files import system
 from files.system import open_path
@@ -843,8 +843,53 @@ class HelpWindow(tk.Toplevel):
                        command=lambda: open_path(LICENSE, text=True)).pack(side="left")
         ttk.Button(row, text=tr("help.open_spiderweb_s_folder"), takefocus=False,
                    command=lambda: open_path(HERE)).pack(side="left", padx=(8, 0))
+        if BUNDLE:  # (the folder version: every program file against its fingerprint; files/repair.py)
+            self.check_button = ttk.Button(row, text=tr("about.check_files"), takefocus=False, command=self.check_files)
+            self.check_button.pack(side="left", padx=(8, 0))
         self.text.insert("end", "\n\n")
         self.embed(row)
+
+    def check_files(self):
+        """Help → About's "Check program files": every file's SHA-256 on a thread (a few seconds), then fine / the
+        repair offered (Spiderweb closes as usual first; closing cancelled = nothing happens)."""
+        import threading
+        from tkinter import messagebox
+        from files import repair
+        button = self.check_button
+        button.state(["disabled"])
+        seen, result = [0, 1], {}
+
+        def work():
+            result["bad"] = repair.damaged(progress=lambda d, n: seen.__setitem__(slice(None), [d, n]))
+        worker = threading.Thread(target=work, daemon=True)
+        worker.start()
+
+        def poll():
+            if not button.winfo_exists():
+                return
+            if worker.is_alive():
+                button.configure(text=tr("about.checking", pct=seen[0] * 100 // max(1, seen[1])))
+                self.after(100, poll)
+                return
+            button.configure(text=tr("about.check_files"))
+            button.state(["!disabled"])
+            bad = result.get("bad")
+            if bad is None:
+                bad = ["files.txt"]
+            if not bad:
+                messagebox.showinfo(tr("about.check_files"), trn("about.files_ok", seen[1], n=seen[1]), parent=self)
+                return
+            if messagebox.askyesno(tr("about.check_files"), trn("about.files_bad", len(bad), n=len(bad),
+                                                                 files="\n".join(bad[:8])), parent=self):
+                app = self.app
+                app.on_close()
+                try:
+                    still = bool(app.winfo_exists())
+                except tk.TclError:
+                    still = False
+                if not still:
+                    repair.start_repair()
+        self.after(100, poll)
 
     def add_clip(self, name):
         """Put clips/<name>.gif (playing) or clips/<name>.png (a still picture) at the end of the text. False if

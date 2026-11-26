@@ -402,6 +402,14 @@ def clean_old_versions(now=None):
                     remove(p)
         except OSError:
             continue
+    if BUNDLE:  # (files a repair renamed aside while Windows held them: free now)
+        for d, _, names in os.walk(BUNDLE):
+            for n in names:
+                if ".repair-old-" in n:
+                    try:
+                        remove(os.path.join(d, n))
+                    except OSError:
+                        pass
     return gone
 
 

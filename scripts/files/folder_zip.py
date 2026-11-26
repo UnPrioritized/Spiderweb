@@ -40,11 +40,15 @@ def listed(folder):
     """{place: (size, sha256)} from a version folder's files.txt; None when it has none (= not ours)."""
     try:
         with open(os.path.join(folder, "files.txt"), encoding="utf-8") as f:
-            lines = f.read().splitlines()
+            return read_list(f.read())
     except (OSError, UnicodeDecodeError):
         return None
+
+
+def read_list(text):
+    """{place: (size, sha256)} from a files.txt's text ("<size>\\t<sha256>\\t<place>"; "<size>\\t<place>" too)."""
     out = {}
-    for line in lines:
+    for line in text.splitlines():
         parts = line.split("\t")
         if len(parts) == 3 and parts[0].isdigit():
             out[parts[2].replace("\\", "/")] = (int(parts[0]), parts[1])

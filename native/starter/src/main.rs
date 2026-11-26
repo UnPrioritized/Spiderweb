@@ -94,6 +94,16 @@ fn damaged(data: &Path) -> Option<usize> {
 }
 
 /// Python's exit code; None when its DLL couldn't be loaded.
+/// The last start crashed before its window was up: user\crash-now.log (files/errors.py, rewritten at every start)
+/// holds a crash dump, no "==== closed " line and no "speed-ups:" note (written once the window is made). A damaged
+/// program file can crash Python itself, so nothing could be said then.
+fn crashed_starting(top: &Path) -> bool {
+    let Ok(log) = std::fs::read_to_string(top.join("user").join("crash-now.log")) else { return false };
+    let dump = log.lines().any(|l| !l.trim().is_empty() && !l.starts_with("==== ") && !l.starts_with("-- "));
+    log.contains("==== started") && dump && !log.contains("==== closed ") && !log.contains(" speed-ups: ")
+}
+
+/// Python's exit code; None when its DLL couldn't be loaded.
 fn run(dll: &Path, exe: &Path, data: &Path, repair: bool) -> Option<c_int> {
     let py_main = win::py_main(dll)?;
     // python -B (never write .pyc files) boot.pyc [--spiderweb-repair] <the arguments Spiderweb.exe was given>
@@ -145,6 +155,11 @@ fn main() {
                  they are.\n\nNo = start anyway.", &[]),
         };
         repair = win::ask(&text);
+    } else if crashed_starting(&top) {
+        repair = win::ask(&texts.get("starter.crashed", None,
+            "Spiderweb closed unexpectedly while starting last time. Its program files may be damaged.\n\nCheck and \
+             repair them now? Spiderweb downloads this version again and puts back only damaged files. Your own \
+             files stay as they are.\n\nNo = start as usual.", &[]));
     }
     match run(&dll, &exe, &data, repair) {
         Some(code) => std::process::exit(code),

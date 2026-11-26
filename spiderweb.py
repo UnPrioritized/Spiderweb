@@ -592,5 +592,12 @@ if __name__ == "__main__":
             app.after(500, lambda: messagebox.showwarning("Spiderweb", tr(
                 "about.not_moved", files="\n".join(not_moved), here=HERE, user=USER), parent=app))
         app.mainloop()
-    except Exception:  # couldn't start (errors inside the running window are caught by errors.install)
+    except Exception as e:  # couldn't start (errors inside the running window are caught by errors.install)
+        try:  # (the folder version: damaged program files = the repair offered instead; files/repair.py)
+            from files import repair
+            if repair.offer(e):
+                errors.write_log(*sys.exc_info(), "(starting up; repair started)")
+                sys.exit(1)
+        except ImportError:
+            pass
         errors.report(*sys.exc_info(), "(starting up)", fatal=True)
