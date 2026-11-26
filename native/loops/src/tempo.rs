@@ -439,6 +439,79 @@ fn fit_blocks_n(drawn: &[i64], a: i64, n0: i64, n1: i64, kj: i64, target: i64, e
     fit_exact_n(&ideal, n, target, safe_reach, pair_reach, out)
 }
 
+/// tempo_safe.fit_block_runs' carry loop (its NumPy twin = that Python loop): each of vals' blocks the Domino-safe
+/// value nearest what keeps the sum on track (wl = each block's share, ll = its ticks), what's off carried on.
+/// res = the blocks' ticks x us in two pieces (low 62 bits, the rest: past 64 bits on huge-tick songs) -> 0, or
+/// FAILED (lists too short). Python's own sums: float - (whole number made a float, nearest), whole numbers exact.
+#[inline(always)]
+pub fn carry_blocks(wl: &[f64], ll: &[i64], safe_reach: i64, vals: &mut [i64], res: &mut [i64]) -> i64 {
+    let m = vals.len();
+    if wl.len() < m || ll.len() < m || res.len() < 2 {
+        return crate::FAILED;
+    }
+    let top = TOP as f64;
+    let (mut done, mut owed) = (0i128, 0.0f64);
+    for k in 0..m {
+        let (w, l) = (wl[k], ll[k]);
+        if l <= 0 {
+            return crate::FAILED;
+        }
+        let u = nearest1n(pmin(pmax((w + owed) / l as f64, 1.0), top), safe_reach);
+        vals[k] = u;
+        let p = u as i128 * l as i128;
+        owed += w - p as f64;
+        done += p;
+    }
+    if done < 0 {
+        return crate::FAILED;
+    }
+    res[0] = (done & ((1i128 << 62) - 1)) as i64;
+    res[1] = (done >> 62) as i64;
+    0
+}
+
+/// tempo_safe.nearest_safe of x into out (its twin: that NumPy function; clipped to 1..0xFFFFFF, NaN kept, then
+/// the nearest Domino-safe value in the same order) -> 0, or FAILED (out too short).
+#[inline(always)]
+pub fn nearest_safe_arr(x: &[f64], safe_reach: i64, out: &mut [i64]) -> i64 {
+    if out.len() < x.len() {
+        return crate::FAILED;
+    }
+    let top = TOP as f64;
+    for (o, &v) in out.iter_mut().zip(x.iter()) {
+        *o = nearest1n(pmin(pmax(v, 1.0), top), safe_reach);
+    }
+    0
+}
+
+/// tempo_safe.flat_pair_runs (its twin: that Python function) for n < 2^39 and target < 2^53 (Python checks: every
+/// product inside 64 bits, target / n the same float): out = [A, B, ticks of A] -> 0, 1 = None, FAILED.
+#[inline(always)]
+pub fn pair_runs(n: i64, target: i64, reach: i64, safe_reach: i64, out: &mut [i64]) -> i64 {
+    if out.len() < 3 || n >= 1 << 39 || target >= 1 << 53 {
+        return crate::FAILED;
+    }
+    if n <= 0 || !(n <= target && target <= n * TOP) {
+        return 1;
+    }
+    let a0 = fdiv(target, n);
+    let r = target - a0 * n;
+    let got = if r == 0 && safe1n(a0) {
+        (0, a0, n, a0)
+    } else if r != 0 && safe1n(a0) && safe1n(a0 + 1) {
+        (0, a0, n * (a0 + 1) - target, a0 + 1)
+    } else {
+        full_pair_n(n, target, reach, safe_reach)
+    };
+    if got.0 != 0 {
+        return 1;
+    }
+    out[0] = got.1;
+    out[1] = got.3;
+    out[2] = got.2;
+    0
+}
+
 #[inline(always)]
 fn least1(t: i64, most: i64) -> i64 {
     let mut least = imax(1, -fdiv(-t, most));

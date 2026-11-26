@@ -835,14 +835,20 @@ def curve(kind, text, t, bend=None):
 
 
 FORMULA_SAMPLES = 4096  # a formula worked out at most this many times per part (in between: read off a straight line)
+_samples = {}  # formula function -> (grid, its values there): _apply's samples, the same every time
 
 
 def _apply(fn, t):
     if fn is None:
         return np.zeros_like(t)
     if t.size > FORMULA_SAMPLES + 1:  # (a long curve changes on every tick: tens of thousands)
-        grid = np.linspace(0.0, 1.0, FORMULA_SAMPLES + 1)
-        return np.interp(t, grid, _apply(fn, grid))
+        got = _samples.get(fn)
+        if got is None:  # (worked out once per formula: a long ramp read in thousands of pieces worked them out
+            if len(_samples) > 200:  # again for every piece, 95 % of its time)
+                _samples.clear()
+            grid = np.linspace(0.0, 1.0, FORMULA_SAMPLES + 1)
+            got = _samples[fn] = (grid, _apply(fn, grid))
+        return np.interp(t, *got)
     out = np.empty_like(t)
     flat = t.ravel()
     res = out.ravel()
@@ -1112,7 +1118,10 @@ def drawn_bpm(tempo, base, beats, arrays=None):
     ce = col_entry(pts) if len(asked) > 64 else None  # (a few beats: the loop below is quicker than a column read
     if ce is not None:  # of a list that isn't remembered) (only the curved parts among them: the loop `continue`s
         asked = asked[ce[9][asked]]  # on all the others)
-    asked = np.unique(asked)
+    if len(asked) > 64 and asked[0] == asked[-1] and bool((asked == asked[0]).all()):
+        asked = asked[:1]  # (one part asked about, e.g. a long ramp read in pieces: np.unique's answer, quicker)
+    else:
+        asked = np.unique(asked)
     for i in asked.tolist():  # (only the parts asked about: a song with
         kind = pts[i][2]  # thousands of points read part by part was slow, hunt 2026-10-22)
         if kind == "hold" or pts[i][1] == pts[i + 1][1] or pb[i + 1] <= pb[i]:
@@ -1675,7 +1684,7 @@ def _catch_long(tempo, st, ppq, real, out, s0, ln, e, base_u):
             if hook:
                 hook(True, "catch")
             try:
-                got = fit_block_runs(ideal, np.diff(np.append(starts, n)).tolist(), target)
+                got = fit_block_runs(ideal, np.diff(np.append(starts, n)), target)
             finally:
                 if hook:
                     hook(False)

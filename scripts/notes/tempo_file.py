@@ -582,7 +582,7 @@ def _long_gaps(buf, n, total, k, drawn, every):
                 at = np.array([n0 + b * (n1 - n0) // kj for b in blk.tolist()], np.int64)
             ideal = du[np.clip(np.searchsorted(s, at, "right") - 1, 0, len(s) - 1)].astype(np.float64)
             lens = np.diff(np.append(blk, kj))
-            got = fit_block_runs(ideal, lens.tolist(), tj) if len(blk) > 1 else None
+            got = fit_block_runs(ideal, lens, tj) if len(blk) > 1 else None
             if got is not None:
                 vals, (a, b, ka) = got
                 m = len(vals)

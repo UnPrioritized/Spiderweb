@@ -596,6 +596,32 @@ class Wraps:
                 return self.base.gap_plan(*args)
         return r
 
+    def carry_blocks(self, wl, ll, m, safe_reach):
+        """tempo_safe.fit_block_runs' carry loop over the first m blocks -> (values list, their ticks x us), or None
+        = not run (that Python loop, the twin: the same values). Not in NEEDS."""
+        if not hasattr(self.x, "carry_blocks"):
+            return None
+        vals, res = np.empty(m, np.int64), np.zeros(2, np.int64)
+        got = self.x.carry_blocks(np.ascontiguousarray(wl, np.float64), np.ascontiguousarray(ll, np.int64),
+                                  int(safe_reach), vals, res)
+        return (vals.tolist(), int(res[1]) << 62 | int(res[0])) if got >= 0 else None
+
+    def nearest_safe(self, x, safe_reach):
+        """tempo_safe.nearest_safe of a float64 array (any shape), or None = not run (that NumPy function, the
+        twin). Not in NEEDS."""
+        f = getattr(self.x, "nearest_safe_arr", None)
+        if f is None:
+            return None
+        flat = np.ascontiguousarray(x, np.float64).ravel()
+        out = np.empty(len(flat), np.int64)
+        return out.reshape(np.shape(x)) if f(flat, int(safe_reach), out) >= 0 else None
+
+    def pair_runs(self, n, target, reach, safe_reach, out):
+        """tempo_safe.flat_pair_runs (n < 2^39, target < 2^53) into out[:3] -> 0 / 1 (None), or negative = not run
+        (that Python function, the twin). Not in NEEDS."""
+        f = getattr(self.x, "pair_runs", None)
+        return -1 if f is None else f(n, target, reach, safe_reach, out)
+
     # ---- Load MIDI's byte loops (midi_scan): -> where each stopped
 
     def _at(self, name, args):

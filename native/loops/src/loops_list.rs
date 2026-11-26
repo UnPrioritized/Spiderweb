@@ -163,6 +163,10 @@ py_loops! {
     gap_plan(j: i64, last: i64, a: i64, n: &[i64], total: &[i64], k: &mut [i64], drawn: &[i64], pref: &[i64],
              every: i64, most: i64, safe_reach: i64, pair_reach: i64, lens: &mut [i64], vals: &mut [i64], pos: i64,
              got: &mut [i64]) -> arrays => crate::tempo::gap_plan_t;
+    carry_blocks(wl: &[f64], ll: &[i64], safe_reach: i64, vals: &mut [i64], res: &mut [i64])
+                 => crate::tempo::carry_blocks;
+    nearest_safe_arr(x: &[f64], safe_reach: i64, out: &mut [i64]) => crate::tempo::nearest_safe_arr;
+    pair_runs(n: i64, target: i64, reach: i64, safe_reach: i64, out: &mut [i64]) => crate::tempo::pair_runs;
     // ---- Load MIDI's byte loops (midi_scan.rs)
     midi_walk(b: &[u8], p: i64, end: i64, final_: bool, rest: i64, st: &mut [i64], cnt: &mut [i64])
               => crate::midi_scan::walk;
