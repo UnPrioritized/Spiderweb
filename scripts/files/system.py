@@ -337,6 +337,8 @@ def open_path(path, text=False):
         if WINDOWS:
             if text:
                 subprocess.Popen(["notepad.exe", path])
+            elif os.path.isdir(path):  # (with "\" at the end: a bare "...\Spiderweb" ran a Spiderweb.exe beside the
+                os.startfile(os.path.join(path, ""))  # folder (Windows looks for a program of that name first)
             else:
                 os.startfile(path)
         elif MAC:  # (untested; -t = TextEdit)
