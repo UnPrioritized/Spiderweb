@@ -299,6 +299,22 @@ def same_rows(a, b):
     return np.isin(v(a), v(b))
 
 
+LAZY_FROM = 1 << 20  # tempo_timed(lazy=) moves notes while writing from this many notes, when the tracks hold
+LAZY_PER_TRACK = 32  # this many each on average: measured (dev/scratch/lazy_rule_time.py, hunt 2026-11-27) 6-24 %
+# quicker there; below either moving them all at once is quicker (100 k notes +1..9 %, 1 M at 16 a track +15 %) and
+# the moved copy is small. 4 M+ notes always pass (65,535 tracks at most = 61+ each).
+
+
+def _track_count(slots):
+    """How many different tracks (slots) the notes go on: the automatic ones counted (np.unique hashes: slow on
+    millions), the ones added by hand (engine.OWN0 and past) apart."""
+    slots = np.asarray(slots, np.int64)
+    own = slots >= OWN0
+    auto = slots[~own]
+    n = int(np.count_nonzero(np.bincount(auto))) if len(auto) else 0
+    return n + (len(np.unique(slots[own])) if own.any() else 0)
+
+
 def timed_ticks(plan, notes, cc):
     """(notes, cc) moved to the file's ticks by file_plan's map (Keep timing parts)."""
     moved = notes.copy()
@@ -1826,9 +1842,6 @@ class ProjectFiles:
         quiet = self.may_overwrite(path)  # (asked like the Output file dialog does; not for our own last file)
         if not quiet:
             return
-        if long_silences(out) and not messagebox.askokcancel(
-                tr("project.spiderweb"), tr("project.long_silences", ppq=ppq, beats=MAX_DELTA // ppq), icon="warning"):
-            return
         cc = self.cc_messages(ppq, bpm)
         try:  # (the tempo worked out before writing: its own plain message, never a crash; hunt 2026-11-26)
             notes, cc, plan = self.tempo_timed(ppq, bpm, beats, cc, lazy=True)
@@ -1837,6 +1850,11 @@ class ProjectFiles:
             return
         except MidiError as e:
             messagebox.showerror(tr("project.spiderweb"), tr(e.key, **e.info), parent=self)
+            return
+        # (asked on the file's own waits, after Keep timing moved the notes: a part drawn far faster than heard
+        # stretches them; hunt 2026-11-27)
+        if long_silences(notes, plan["tick_map"]) and not messagebox.askokcancel(
+                tr("project.spiderweb"), tr("project.long_silences", ppq=ppq, beats=MAX_DELTA // ppq), icon="warning"):
             return
         if not self.write_out(path, "project.saving_midi",  # (millions of notes take a few seconds)
                               lambda: write_midi(path, ppq, bpm, beats, notes, self.picture_use10,
@@ -1924,7 +1942,10 @@ class ProjectFiles:
         plan["hz"] = [int(on.min()) / ppq] if len(on) else []
         plan["tick_map"] = None
         if self.tempo.get("points") and any(len(p) > 5 and p[5] is True for p in self.tempo["points"]):
-            if lazy and not parts:  # (the writer moves them a track at a time)
+            if lazy and not parts and len(notes) >= LAZY_FROM and (
+                    len(notes) >= LAZY_PER_TRACK * (MAX_TRACKS + 1) or  # (that many notes always pass)
+                    len(notes) >= LAZY_PER_TRACK * _track_count(notes[:, 4])):  # (the writer moves them a job of
+                # tracks at a time)
                 plan["tick_map"] = plan["map"]
                 return notes, timed_ticks(plan, notes[:0], cc)[1], plan
             moved, cc = timed_ticks(plan, notes, cc)

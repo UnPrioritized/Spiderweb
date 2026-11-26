@@ -134,6 +134,8 @@ def joined(spans):
 
 
 DENSE_WAIT_MS = 300  # Keep timing notes too close: worked out this long after the tempo / notes stop changing
+DENSE_POLL_MS = 40  # ... on a thread: looked at this often until done
+DENSE_THREAD_FROM = 1 << 20  # ... on a thread past this many note ticks + CC + beats (~0.2 s of work)
 REBAR_KINDS = ("rebar_dense", "rebar_cc", "rebar_round")  # (Change visual time signature's spots: TempoPane.rebar_marks)
 LIMIT_JOIN = 12  # px: limit spots (draw_limits) closer than this on screen = one band, one text
 DRAWS = {"line": "line", "formula": "formula"}  # pencil kind -> the curve the drawn part gets (bent by its handle)
@@ -2397,15 +2399,51 @@ class TempoPane(RebarMarks, ConductorMarks, KeepsItems, tk.Canvas):
             loose = sorted_union([anchors[1], np.array([m[0] for ms in cc.values() for m in ms], np.int64)])
         limits = {"dense": [], "gave": [], "unfit": [], "moved": []}
         if any(len(p) > 5 and p[5] is True for p in app.tempo["points"]):
-            try:
-                # (a loaded MIDI: its notes keep their file time; its tempo as SHOWN when bars were changed over it)
-                heard = loaded_map.heard(app.loaded_map, file_tempos(lm)) if lm is not None else None
-                if loose is None:  # (CC messages: they give way a tick, said in orange)
-                    cc = app.cc_messages(app.ppq, self.base())
-                    loose = np.array([m[0] for ms in cc.values() for m in ms], np.int64)
-                limits = limit_spots(app.tempo, self.base(), app.ppq, app.beats, ticks, heard, loose)
-            except (MemoryError, MidiError):  # (MidiError: a Keep timing part too long to work out, the export says)
-                pass
+            # (a loaded MIDI: its notes keep their file time; its tempo as SHOWN when bars were changed over it)
+            heard = loaded_map.heard(app.loaded_map, file_tempos(lm)) if lm is not None else None
+            if loose is None:  # (CC messages: they give way a tick, said in orange)
+                cc = app.cc_messages(app.ppq, self.base())
+                loose = np.array([m[0] for ms in cc.values() for m in ms], np.int64)
+            # (worked out on a thread, the marks drawn when it's done: at Fit bar lines' 64 M bars it took ~14 s
+            # and froze the window after every tempo edit; hunt 2026-11-27. _dense_job stays set meanwhile)
+            far = max([int(ticks.max()) // max(1, app.ppq) if len(ticks) else 0]
+                      + [int(p[0]) for p in app.tempo["points"]])  # (beats: at most one bar each)
+            if len(ticks) + len(loose) + far < DENSE_THREAD_FROM:  # (a usual song: at once, as always)
+                try:
+                    limits = limit_spots(app.tempo, self.base(), app.ppq, app.beats, ticks, heard, loose)
+                except (MemoryError, MidiError):
+                    pass
+                self.put_limits(key, limits)
+                return
+            job = self._dense_job = {"done": False, "got": None}
+            args = (copy.deepcopy(app.tempo), self.base(), app.ppq, app.beats, ticks, heard, loose)
+
+            def run():
+                try:
+                    job["got"] = limit_spots(*args)
+                except (MemoryError, MidiError):  # (MidiError: a Keep timing part too long to work out: the export
+                    pass                           # says)
+                except Exception as e:  # (said in the log like any error; no marks)
+                    job["error"] = e
+                job["done"] = True
+            threading.Thread(target=run, daemon=True, name="keep timing marks").start()
+            self.after(DENSE_POLL_MS, lambda: self.dense_done(job, key))
+            return
+        self.put_limits(key, limits)
+
+    def dense_done(self, job, key):
+        """work_dense's thread finished? its marks drawn (if nothing changed meanwhile), else asked again soon."""
+        if not job["done"]:
+            if self._dense_job is job:
+                self.after(DENSE_POLL_MS, lambda: self.dense_done(job, key))
+            return
+        if self._dense_job is job:
+            self._dense_job = None
+        if "error" in job:
+            raise job["error"]
+        self.put_limits(key, job["got"] or {"dense": [], "gave": [], "unfit": [], "moved": []})
+
+    def put_limits(self, key, limits):
         self._limits = {k: sorted(set(v)) for k, v in limits.items()}
         self._dense = (key, self._limits["dense"])
         self.request_redraw()

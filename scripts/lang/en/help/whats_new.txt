@@ -26,6 +26,10 @@ What's new:
 
 • Faster: Keep timing exports of long or busy songs use about 60 to 70 % less memory and take up to 40 % less time (16 million notes: 14.8 s and 5.5 GB → 8.4 s and 2.2 GB). The file comes out the same.
 
+• Fixed: the export's "notes in a jump play off time" warning went missing when the song also had a Keep timing part.
+
+• Fixed: Export MIDI didn't ask about silences too long for one step when a Keep timing part stretched them in the file, and on long songs with thousands of tracks that check made the window hang for seconds.
+
 • Fixed: a Keep timing part drawn far faster than the tempo heard before it (like 60,000,000 BPM over a part heard at 125) could make Export MIDI run out of memory.
 
 • Faster: Export MIDI of very big projects is about a tenth quicker (32 million notes: 1.6 s → 1.45 s).

@@ -170,14 +170,26 @@ def empty_track(ch):
     return bytes([0, 0xFF, 0x20, 1, ch, 0, 0x80 | ch, 0, 0])
 
 
-def long_silences(notes):
-    """True if some track has a silence too long for one step (written with empty events in between)."""
+def long_silences(notes, tick_map=None):
+    """True if some track has a silence too long for one step (written with empty events in between). tick_map:
+    the notes' ticks -> the file's (Keep timing's plan map: a part drawn faster than heard stretches the waits)."""
     notes = np.asarray(notes, np.int64).reshape(-1, 6)
-    if not len(notes) or notes[:, 1].max() <= MAX_DELTA:  # (the whole song is shorter than one step)
+    if not len(notes):
         return False
-    for slot in np.unique(notes[:, 4]):
-        own = notes[notes[:, 4] == slot]
-        tick = np.sort(np.concatenate([own[:, 0], own[:, 1]]))
+    s, e = notes[:, 0], notes[:, 1]
+    top = int(e.max()) if tick_map is None else int(tick_map(np.array([e.max()], np.int64))[0])
+    if top <= MAX_DELTA:  # (the whole song is shorter than one step)
+        return False
+    if tick_map is not None:
+        s, e = tick_map(s), tick_map(e)
+    # (the tracks one after another in one sort, each its own slice: a pass over every note per track took
+    # seconds with thousands of tracks; hunt 2026-11-27)
+    order = np.argsort(notes[:, 4], kind="stable")
+    slots = notes[order, 4]
+    cuts = np.concatenate([[0], np.flatnonzero(slots[1:] != slots[:-1]) + 1, [len(slots)]])
+    for a, b in zip(cuts[:-1].tolist(), cuts[1:].tolist()):
+        rows = order[a:b]
+        tick = np.sort(np.concatenate([s[rows], e[rows]]))
         if tick[0] > MAX_DELTA or np.diff(tick).max(initial=0) > MAX_DELTA:
             return True
     return False
@@ -453,7 +465,37 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False, tick_map=No
             got[:, 0], got[:, 1] = tick_map(got[:, 0]), tick_map(got[:, 1])
         return got
 
-    def make(track):
+    def rows_of(track):
+        """The rows of notes going on this track (None: an own track with none drawn into it)."""
+        if type(track) is dict:
+            track = at.get(track["id"])
+            if track is None:
+                return None
+        return np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]]
+
+    def group_made(g):
+        """make() for a job's tracks, their notes moved to the file's ticks ONCE for the whole job (a track at a
+        time paid the map's own cost per track: 20,000 small tracks took 3x as long; hunt 2026-11-27)."""
+        rs = [rows_of(t) for t in g]
+        have = [r for r in rs if r is not None and len(r)]
+        moved = take(np.concatenate(have)) if have else notes[:0]
+        # (one row list + one radix width for the whole job: made per track they cost tiny tracks ~25 %)
+        idx = np.arange(len(moved))
+        wide = int(moved[:, 1].max() * 2 + 2).bit_length() if len(moved) else 1
+        out, at_ = [], 0
+        for t, r in zip(g, rs):
+            n = 0 if r is None else len(r)
+            out.append(make(t, (moved, idx[at_:at_ + n], at_, wide)))
+            at_ += n
+        return out
+
+    def make(track, pre=None):
+        """The track's event bytes (pieces). pre: (its job's notes moved to the file's ticks, this track's rows
+        there, their first place, the job's radix width) from group_made."""
+        if pre is not None:
+            take_ = lambda rows: pre[0][pre[2]:pre[2] + len(pre[1])]  # noqa: E731 (this track's own, moved)
+        else:
+            take_ = take
         head, mine_cc = [], cc.get(track) if type(track) is not dict else None
         if type(track) is dict:  # (an own track: its port, its name, its notes if any were drawn into it)
             head = ([bytes([0, 0xFF, 0x21, 1, track.get("port", 0)])] if every or ported else []) + (
@@ -465,9 +507,9 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False, tick_map=No
             rows = np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]]
             mine = chans[rows]
             if evs:
-                return head + cc_track(take(rows), mine if mine.min() != mine.max() else int(mine[0]), evs, ev_ch)
+                return head + cc_track(take_(rows), mine if mine.min() != mine.max() else int(mine[0]), evs, ev_ch)
             if mine.min() != mine.max():  # (several channels: a folder, each note on its own)
-                return head + track_events(take(rows), mine)
+                return head + track_events(take_(rows), mine)
             channel = int(mine[0])  # (its colours' own channel: moved in from another track)
         else:
             channel = slot_track_channel(track, use10)[1]
@@ -481,12 +523,14 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False, tick_map=No
                 events = [empty_track(channel)]
             elif tick_map is None:
                 events = [fast.midi_track(notes, rows, channel, MAX_DELTA, bits)]
+            elif pre is not None:  # (moved with its job: its rows in the job's notes)
+                events = [fast.midi_track(pre[0], pre[1], channel, MAX_DELTA, pre[3])]
             else:  # (this track's notes moved to the file's ticks: a copy of its own; the radix sort's width by them)
-                mine = take(rows)
+                mine = take_(rows)
                 events = [fast.midi_track(mine, np.arange(len(mine)), channel, MAX_DELTA,
                                           int(mine[:, 1].max() * 2 + 2).bit_length())]
         elif tick_map is not None:
-            mine = take(np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]])
+            mine = take_(np.arange(len(notes)) if count == 1 else order[cuts[track]:cuts[track + 1]])
             events = (cc_track(mine, channel, mine_cc) if mine_cc else track_events(mine, channel)
                       if len(mine) else [empty_track(channel)])
         else:
@@ -516,7 +560,7 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False, tick_map=No
     if group:
         jobs.append(group)
         weights.append(held)
-    jobs = [lambda g=g: [make(t) for t in g] for g in jobs]
+    jobs = [(lambda g=g: [make(t) for t in g]) if tick_map is None else (lambda g=g: group_made(g)) for g in jobs]
     for made in (_in_order(jobs, min(TRACK_WORKERS, os.cpu_count() or 1), weights)
                  if fast is not None and len(jobs) > 1 else (job() for job in jobs)):
         for events in made:

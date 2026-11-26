@@ -1131,11 +1131,11 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
                     j += 1
         fa = a + offset
         lens, vals = buf.runs()
-        starts = fa + np.concatenate([[0], np.cumsum(lens)])
-        file_segs.append((fa, int(starts[-1]), (starts[:-1], vals)))
+        run_at = fa + np.concatenate([[0], np.cumsum(lens)])
+        file_segs.append((fa, int(run_at[-1]), (run_at[:-1], vals)))
         # (each part's heard and file clocks: a CC message that gave way goes on the file tick sounding nearest its
         # heard time, hunt 2026-10-24: the same share of ticks was up to 190 ms off where the tempo is uneven)
-        clocks.append([a, e, fa, heard_t, starts, vals, None])  # (the clock itself made when first asked: _clock)
+        clocks.append([a, e, fa, heard_t, run_at, vals, None])  # (the clock itself made when first asked: _clock)
         f = fa + np.concatenate([[0], np.cumsum(k)])
         bp_n.append(np.asarray(n, np.int64))
         bp_f.append(f.astype(np.int64))
@@ -1221,13 +1221,17 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         out["unfit"] = [t / ppq for t in unfit]
         out["moved"] = [t / ppq for t in moved]
     # warnings
+    # (the NOTE starts: a part's run starts took this name above until 2026-11-27, so with a Keep timing part the
+    # warning read file ticks and said nothing; hunt. Sorted once: each catch-up takes its own slice)
     starts = np.asarray(starts, np.int64).ravel()
+    if lay["worked"] and len(starts) > 1 and not bool((starts[1:] >= starts[:-1]).all()):
+        starts = np.sort(starts)
     seg_starts = [s[0] for s in segs]
     for st, plan in lay["worked"]:  # (a note in a jump plays off time where the time so far isn't the heard time)
         if not plan["ok"]:
             continue
         s0, e = beat_tick(st["from"], ppq), beat_tick(st["end"], ppq)
-        on = starts[(starts > s0) & (starts < e)]
+        on = starts[np.searchsorted(starts, s0, "right"):np.searchsorted(starts, e, "left")]
         if not len(on):
             continue
         if e - s0 > CATCH_TICKS_MOST:  # (a huge-tick song's long catch-up: by runs, never a tick each)
