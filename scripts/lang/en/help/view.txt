@@ -1,6 +1,6 @@
 Wheel = scroll up / down, Shift+wheel = sideways. Ctrl+Alt+wheel = zoom both ways, Ctrl+Shift+wheel = zoom time, Alt+wheel = zoom pitch. Ctrl+wheel = the next / previous track (shown alone, its name on the status line; down goes to the next one). Middle-drag scrolls. Fit view shows everything. The zoom and scroll are remembered. [page:settings#Even key rows|Settings] → Piano roll → Even key rows keeps every key row the same number of pixels tall.
 
-Scrollbars (under and right of the piano roll): drag the bar to scroll, drag one of its two ends to zoom, click beside it to go one screen that way. The − and + buttons at the end of each scrollbar zoom out / in. The bar under the piano roll reaches 8 bars past the last note.
+Scrollbars (under and right of the piano roll): drag the bar to scroll, drag one of its two ends to zoom, click beside it to go one screen that way. The − and + buttons at the end of each scrollbar zoom out / in; the ones beside the keys take small steps (exactly one pixel a click with Even key rows). The bar under the piano roll reaches 8 bars past the last note.
 
 Show lines / Show notes (top) hide the drawn lines or the notes. Keys outside a real 88-key piano are greyed on the keyboard (with 256 keys: the keys above the usual 128). A shape wholly above the top key shows a small red up arrow at the top of the piano roll: click it to grab the shape.
 
@@ -10,6 +10,6 @@ Scroll there, move shapes, points and handles there, draw there, or start a [pag
 
 Dragging something past the edge of the piano roll scrolls the view along. With every key row shown, the scrollbar beside the keys can still be dragged into the extra space, or pushed on past its end; dragging one of its ends catches on the keyboard's edge. Turn a setting down with shapes still out there and each one shows a small arrow at the top, bottom or left edge: click it to grab the shape.
 
-Big projects: when a change's notes take a while to make, they're made in the background while you keep scrolling and working. A small "Making notes…" box shows over the shape being made, and a resized shape's old notes stay, faded, in its new box until the new ones arrive. A click or key that needs the new notes waits for them.
+Big projects: when a change's notes take a while to make, they're made in the background while you keep scrolling and working. A small "Making notes…" box shows over the shape being made, and a resized shape's old notes stay, faded, in its new box until the new ones arrive (a turned or skewed shape shows none until then). A click or key that needs the new notes waits for them.
 
 Snap and grid: Snap (top) is the grid that points, moves and pastes snap to (Shift = free). Off, Bar, or a note length: a note with a dot = dotted (3/8 = a dotted quarter), a 3 = triplets (1/6 = quarter-note triplets). Custom… opens Customised snap: a number of notes (3 / 16 = three 16th notes), a dotted (.) or double-dotted (..) note, divided by a number (3 = triplets); it shows how long that is in beats and ticks.

@@ -8,7 +8,7 @@ User set defaults: every tool window whose default you saved with its pin (the p
 
 Double-click a row, press Enter or Change… to open that window and change its default; shapes aren't touched, and only one opens at a time. Pick rows (Ctrl / Shift click, drag over them, Ctrl+A) and press Reset… to go back to the program's own defaults; it asks once. The defaults are kept in shape-defaults.ini in the user folder.
 
-Piano roll: Even key rows (off at first) makes every key row the same whole number of pixels tall, in the piano roll and the Hz bass window: zooming up and down snaps to whole row heights, and Fit view picks the biggest height where every key fits (the space left over stays at the bottom). Without it, rows can come out 7, 8, 7 pixels tall at some zoom levels.
+Piano roll: Even key rows (off at first) makes every key row the same whole number of pixels tall, in the piano roll and the Hz bass window: zooming up and down snaps to whole row heights, and Fit view picks the biggest height where every key fits (the space left over stays at the bottom). Without it, rows can come out 7, 8, 7 pixels tall at some zoom levels. The Draw on Domino overlay doesn't use it: it follows Domino.
 
 Space past the keys / Space before the start (room to scroll and put shapes past the keys and before the first beat; see Help → [page:view#Space past the edges|View]). Keep notes made there: shapes keep the notes they make in that space, drawn see-through (Opacity: how strongly, 1 to 100 %). They're kept only in the project file, unless Wrap them around puts them back onto the keys in exports, Domino copies and playback; Show wrapped notes shows where they land. See Help → [page:offrange|Notes past the keys].
 

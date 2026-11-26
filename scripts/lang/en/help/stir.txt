@@ -143,7 +143,7 @@ Reverse the track order inside the area (under Flip and reverse, with an Area): 
 
 ## At the edges and colour sets
 
-At the edges (beside the knobs): what happens to colours stirred past the edge of the shape: Escape (the default), Wrap around, Repeat the colours, Bounce back, Bounce back, edge twice, Cut by the outline or Bend with the outline. The [page:edges|At the edges] page explains each one, with pictures.
+At the edges (beside the knobs): what happens to colours stirred past the edge of the shape: Escape (the default), Wrap around, Repeat the colours, Bounce back, Bounce back, edge twice, Cut by the outline or Bend with the outline. The [page:edges|At the edges] page explains each one, with pictures. Shape tabs have their own list (Cut off, Fit inside, Bounce back, Wrap around): see [page:deform].
 
 Colour sets (shown when a shape has more than one set of channels, 15 colours each, 16 with channel 10): "Stay in their set" (the default) keeps each note in its own set of tracks and gives it the matching colour there, so the whole pattern bends together. "Move between sets" gives each note the colour and track of the note it's stirred from, so notes can move to another set.
 

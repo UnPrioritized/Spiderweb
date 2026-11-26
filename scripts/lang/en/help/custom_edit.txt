@@ -3,7 +3,7 @@ A selected custom shape (and text) shows a box. The mouse pointer changes to sho
 Move: drag anywhere inside it ([page:select|Select tool]). Its notes snap to the grid, not the box: the start of its earliest note or the end of its last note, whichever is nearer the mouse; Shift = free. Shapes moved with a Select box follow the box instead (see [page:selecting|Selecting]).
 [clip:custom_edit-move]
 
-Resize: drag a corner square. The opposite corner stays put; Ctrl keeps its proportions. The notes on the side you drag snap to the grid (Shift = free). Its top and bottom stay on the lines between keys, covering the key under the mouse; dragging to the bottom and top keys covers every key. A shape from an older version, its top and bottom on the middle of a key, moves onto those lines the first time you resize it (half a key bigger at each end).
+Resize: drag a corner square. The opposite corner stays put; Ctrl keeps its proportions. The notes on the side you drag snap to the grid (Shift = free). Its top and bottom stay on the lines between keys, covering the key under the mouse; dragging to the bottom and top keys covers every key. A shape whose top or bottom sits on the middle of a key (from an older version, set in Properties, or moved with Shift): only the side you drag goes onto a line; the other side stays where it is until you drag it too.
 [clip:custom_edit-resize]
 
 One side: drag a side (or its middle square) to move just that side.

@@ -39,7 +39,7 @@ Copy Domino's Conductor track along with the notes (or alone) and its tempo chan
 
 Copy here takes only the notes, so they land on the track you picked in Domino. The tempo comes along only after Ctrl+A (everything picked), or from the track list with a band on the bar numbers or a box reaching over the Conductor row: then a Conductor block comes first, so pick the Conductor track before pasting.
 
-To copy just the tempo, draw a box on the track list's Conductor row (or click the Conductor pane and pick what to copy) and press Copy to Domino (or Ctrl+C with "Ctrl+C also copies for Domino" ticked), then paste it on Domino's Conductor track. See [page:conductor|Conductor pane].
+To copy just the tempo, draw a box on the track list's Conductor row (or click the Conductor pane and pick what to copy) and press Copy to Domino (or Ctrl+C with "Ctrl+C also copies for Domino" ticked), then paste it on Domino's Conductor track. A copy with more than 1,000,000 tempo changes joins neighbouring ones into longer steps, each keeping the same length in time. See [page:conductor|Conductor pane].
 
 ## Other things
 
