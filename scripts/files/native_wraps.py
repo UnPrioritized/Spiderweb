@@ -381,6 +381,53 @@ class Wraps:
                               np.ascontiguousarray(vk, f), int(vmode), float(keep), float(cycle), out)
         return got if got >= 0 else None
 
+    # ---- Fit bar lines on long songs (bars.rs; tempo_file's own Python is the twin: not in NEEDS)
+
+    def fit_bars(self, ms, dk, kk, tt, bars, lengths, nudge, most):
+        """tempo_file._fit_bar_lines' walk -> each gap's nudge (ticks, in ms' order), or None = not run."""
+        if not hasattr(self.x, "fit_bars"):
+            return None
+        i, n = np.int64, len(ms)
+        share, up, down, order = np.zeros(n, i), np.empty(n, i), np.empty(n, i), np.empty(n, i)
+        got = self.x.fit_bars(np.ascontiguousarray(ms, i), np.ascontiguousarray(dk, i), np.ascontiguousarray(kk, i),
+                              np.ascontiguousarray(tt, i), np.ascontiguousarray(bars, i),
+                              np.ascontiguousarray(lengths, i), float(nudge), int(most), share, up, down, order)
+        return share if got >= 0 else None
+
+    def written_lines(self, fl, lengths, carry_most):
+        """tempo_file._written_lines -> (written lines, moved, unfit) or None = not run."""
+        if not hasattr(self.x, "written_lines"):
+            return None
+        i = np.int64
+        fl = np.ascontiguousarray(fl, i)
+        w, moved, unfit, counts = fl.copy(), np.empty(len(fl), i), np.empty(len(fl), i), np.zeros(2, i)
+        if self.x.written_lines(fl, np.ascontiguousarray(lengths, i), int(carry_most), w, moved, unfit, counts) < 0:
+            return None
+        return w, moved[:counts[0]].tolist(), unfit[:counts[1]].tolist()
+
+    def bar_sigs(self, lines, bars, stop, own_s, own_top, own_pow, ppq, longest):
+        """tempo_file._signatures' walk -> (rows (n, 3), unfit ticks, (prev top, prev power) or None) or None."""
+        if not hasattr(self.x, "bar_sigs"):
+            return None
+        i = np.int64
+        out, unfit, counts = np.empty(6 * (stop + 1), i), np.empty(stop + 1, i), np.zeros(4, i)
+        if self.x.bar_sigs(np.ascontiguousarray(lines, i), np.ascontiguousarray(bars, i), int(stop),
+                           np.ascontiguousarray(own_s, i), np.ascontiguousarray(own_top, i),
+                           np.ascontiguousarray(own_pow, i), int(ppq), int(longest), out, unfit, counts) < 0:
+            return None
+        prev = None if counts[2] < 0 else (int(counts[2]), int(counts[3]))
+        return out[:3 * counts[0]].reshape(-1, 3), unfit[:counts[1]], prev
+
+    def flat_gaps(self, j, last, total, k, least, curved, reach, safe_reach, lens, vals):
+        """tempo_file._long_gaps' flat gaps from j (k changed in place) -> (j, last, runs written), or None."""
+        f = getattr(self.x, "flat_gaps", None)
+        if f is None:
+            return None
+        res = np.zeros(3, np.int64)
+        if f(int(j), int(last), total, k, least, curved, int(reach), int(safe_reach), lens, vals, 0, res) < 0:
+            return None
+        return int(res[0]), int(res[1]), int(res[2])
+
     def outline_notes(self, pts, offs, closed, ppq):
         """custom.paths_outline's notes before keep_longest ((n, 3) rows), or None = not run (its NumPy way, the
         same notes). Not in NEEDS (NumPy's way is the twin)."""

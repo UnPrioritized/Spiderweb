@@ -61,6 +61,7 @@ macro_rules! level_builds {
     };
 }
 
+mod bars;
 mod draw;
 mod engine;
 mod block;

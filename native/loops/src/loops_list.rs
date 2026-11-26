@@ -167,6 +167,16 @@ py_loops! {
                  => crate::tempo::carry_blocks;
     nearest_safe_arr(x: &[f64], safe_reach: i64, out: &mut [i64]) => crate::tempo::nearest_safe_arr;
     pair_runs(n: i64, target: i64, reach: i64, safe_reach: i64, out: &mut [i64]) => crate::tempo::pair_runs;
+    // ---- Fit bar lines on long songs (bars.rs; NumPy-twin: tempo_file's own Python)
+    fit_bars(ms: &[i64], dk: &[i64], kk: &[i64], tt: &[i64], bars: &[i64], lengths: &[i64], nudge: f64, most: i64,
+             share: &mut [i64], up: &mut [i64], down: &mut [i64], order: &mut [i64]) => crate::bars::fit_bars;
+    written_lines(fl: &[i64], lengths: &[i64], carry_most: i64, w: &mut [i64], moved: &mut [i64],
+                  unfit: &mut [i64], counts: &mut [i64]) => crate::bars::written_lines;
+    bar_sigs(lines: &[i64], bars: &[i64], stop: i64, own_s: &[i64], own_top: &[i64], own_pow: &[i64], ppq: i64,
+             longest: i64, out: &mut [i64], unfit: &mut [i64], counts: &mut [i64]) => crate::bars::bar_sigs;
+    flat_gaps(j: i64, last: i64, total: &[i64], k: &mut [i64], least: &[i64], curved: &[u8], reach: i64,
+              safe_reach: i64, lens: &mut [i64], vals: &mut [i64], pos: i64, res: &mut [i64])
+              => crate::bars::flat_gaps;
     // ---- Load MIDI's byte loops (midi_scan.rs)
     midi_walk(b: &[u8], p: i64, end: i64, final_: bool, rest: i64, st: &mut [i64], cnt: &mut [i64])
               => crate::midi_scan::walk;

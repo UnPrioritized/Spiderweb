@@ -513,7 +513,7 @@ pub fn pair_runs(n: i64, target: i64, reach: i64, safe_reach: i64, out: &mut [i6
 }
 
 #[inline(always)]
-fn least1(t: i64, most: i64) -> i64 {
+pub(crate) fn least1(t: i64, most: i64) -> i64 {
     let mut least = imax(1, -fdiv(-t, most));
     if least == 1 && t >= 2 && !domino_safe1(imin(imax(t, 1), most)) {
         least = 2;
@@ -647,7 +647,7 @@ pub fn gap_plan(j: i64, last: i64, a: i64, n: &[i64], total: &[i64], k: &mut [i6
 
 /// np.searchsorted(a, x, side) on sorted whole numbers.
 #[inline(always)]
-fn ss(a: &[i64], x: i64, right: bool) -> usize {
+pub(crate) fn ss(a: &[i64], x: i64, right: bool) -> usize {
     let (mut lo, mut hi) = (0usize, a.len());
     while lo < hi {
         let m = (lo + hi) / 2;

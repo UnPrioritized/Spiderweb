@@ -16,13 +16,15 @@ Warnings for the export message: notes starting inside a jump (they play off tim
 really heard isn't the project's BPM (their tone is worked out from it)."""
 
 import bisect
+import math
 from collections import namedtuple
 
 import numpy as np
 
 from files import speed
 from files.midi_scan import MOST_TICK
-from notes.meter import bar_line as meter_bar_line, bar_lines as meter_bar_lines, sigs_of, where as meter_where
+from notes.meter import EPS as METER_EPS, bar_line as meter_bar_line, parts as meter_parts, sigs_of, \
+    where as meter_where
 from notes.tempo import (CATCH_STEPS_MOST, CATCH_TICKS_MOST, EVERY, _put_all, _put_many, base_us, beat_tick,
                          typed_bpms, step_of,
                          file_segments, has_tempo, keep_heard, known_key, layout, segs_end, tempo_key)
@@ -115,10 +117,33 @@ def bar_ticks(tempo, ppq, upto, start=0):
     start) to the first one past upto (and one more): int64 array, at least two."""
     sigs = sigs_of(tempo)
     longest = max(s[1] * 4 / s[2] for s in sigs)
-    lines = [round(b * ppq) for b, _ in meter_bar_lines(sigs, max(0.0, start / ppq - 2 * longest - 1),
-                                                         upto / ppq + 2 * longest + 1)]
-    return np.unique(np.array(lines + [lines[-1] + 1], np.int64)) if len(lines) < 2 else np.unique(
-        np.array(lines, np.int64))
+    lines = np.rint(_bar_beats(sigs, max(0.0, start / ppq - 2 * longest - 1), upto / ppq + 2 * longest + 1)
+                    * ppq).astype(np.int64)  # (= round(b * ppq) one by one: both round halves to even)
+    if len(lines) < 2:
+        lines = np.append(lines, lines[-1] + 1)
+    return np.unique(lines)
+
+
+def _bar_beats(sigs, lo, hi):
+    """meter.bar_lines(sigs, lo, hi)'s beats as one float64 array, the same numbers (start + k x bar length), made
+    at once: one at a time was ~1 us and a Python object a bar, millions on a huge-tick song (fit bar lines C)."""
+    out = []
+    for start, n, first, end in meter_parts(sigs):
+        if end < lo or start > hi:
+            continue
+        k = max(0, math.floor((lo - start) / n))
+        if k == 0:  # (where the signature starts: always)
+            if start <= hi and start < end - METER_EPS and start >= lo - METER_EPS:
+                out.append(np.array([start], np.float64))
+            k = 1
+        reach = (min(hi, end) - start) / n  # (the last bar line it can reach, give or take rounding)
+        if reach + 2 < k:
+            continue
+        b = start + np.arange(k, math.floor(reach) + 3, dtype=np.int64).astype(np.float64) * n
+        stop = np.flatnonzero((b > hi) | (b >= end - METER_EPS))  # (bar_lines stops at the first such)
+        b = b[:stop[0]] if len(stop) else b
+        out.append(b[b >= lo - METER_EPS])
+    return np.concatenate(out) if out else np.zeros(0, np.float64)
 
 
 def signature(length, ppq, prefer=None):
@@ -582,10 +607,32 @@ def _long_gaps(buf, n, total, k, drawn, every):
     # a value an Interval step over billions of ticks is billions of values: user 2026-11-26, like catch-ups)
     steps = int((-(-k[curved] // every)).sum())
     ev = every if steps <= CATCH_STEPS_MOST else every * -(-steps // CATCH_STEPS_MOST)
+    least_a = _least(total)
+    # (compiled: runs of flat gaps in one go, the same pairs; a curved gap, or numbers past its reach, here; PLAN
+    # fit bar lines C: one bar line = one gap, millions of them)
+    fast = getattr(speed.loops(), "flat_gaps", None)
+    if fast is not None and (k.dtype != np.int64 or not k.flags.c_contiguous):
+        fast = None  # (k is changed in place: never a copy)
+    if fast is not None:
+        flat_u8 = np.ascontiguousarray(curved, np.uint8)
+        total_c, least_c = np.ascontiguousarray(total, np.int64), np.ascontiguousarray(least_a, np.int64)
+        lens_o, vals_o = np.empty(2 * len(k) + 2, np.int64), np.empty(2 * len(k) + 2, np.int64)
     curved = curved.tolist()
-    least = _least(total).tolist()
+    least = least_a.tolist()
     last = None
-    for j in range(len(k)):
+    j = -1
+    while j + 1 < len(k):
+        j += 1
+        if fast is not None and not curved[j]:
+            got = fast(j, -1 if last is None else last, total_c, k, least_c, flat_u8, PAIR_REACH, SAFE_REACH,
+                       lens_o, vals_o)
+            if got is not None and got[0] > j:
+                j2, l2, pos = got
+                if pos:
+                    buf.add_runs(lens_o[:pos].copy(), vals_o[:pos].copy())
+                last = None if l2 == -1 else l2
+                j = j2 - 1
+                continue
         kj, tj = int(k[j]), int(total[j])
         if curved[j]:
             n0, n1 = int(n[j]), int(n[j + 1])
@@ -1154,6 +1201,10 @@ def _written_lines(fl, lengths):
     own signatures go on from there). A carry that can't settle before then (no notes left to nudge) isn't used:
     that bar is left with no signature as before and the next line is exact. (written lines, bars whose end line
     is moved, bars left with none)."""
+    fast = getattr(speed.loops(), "written_lines", None)  # (compiled: the same lines; PLAN fit bar lines C)
+    got = None if fast is None else fast(fl, lengths, CARRY_MOST)
+    if got is not None:
+        return got
     w = np.array(fl, np.int64)
     moved, unfit = [], []
     m, last = 0, len(fl) - 1
@@ -1200,6 +1251,14 @@ def _fit_bar_lines(gaps, keeps, bars, lengths):
     dk = kk - np.concatenate([np.diff(n) for n, _, _, _ in gaps])
     order_m = np.argsort(ms, kind="stable")
     ms, ps, js, dk, kk, tt = (x[order_m] for x in (ms, ps, js, dk, kk, tt))
+    fast = getattr(speed.loops(), "fit_bars", None)  # (compiled: the walk below in one go, the same nudges; PLAN
+    share = None if fast is None else fast(ms, dk, kk, tt, bars, lengths, NUDGE, MAX_US)  # fit bar lines C)
+    if share is not None:
+        nz = np.flatnonzero(share)
+        for p in np.unique(ps[nz]).tolist():
+            at = nz[ps[nz] == p]
+            gaps[p][2][js[at]] += share[at]  # (each gap once: a bar's gaps are nudged at most once)
+        return
     cut = np.flatnonzero(np.diff(ms)) + 1
     carry, last = 0, None  # (written bar line - true one, at the start of the bar after `last`)
     for lo, hi in zip(np.concatenate([[0], cut]).tolist(), np.concatenate([cut, [len(ms)]]).tolist()):
@@ -1278,7 +1337,13 @@ def _signatures(keeps, tempo, bars, ppq, to_file):
     out, prev, unfit = [], None, []
     stop = min(len(bars) - 2, int(np.searchsorted(bars, last, "right")))
     lines, moved, _ = _written_lines(to_file(bars[:stop + 2]), bar_lengths(ppq))
-    for m in range(0, stop + 1):
+    fast = getattr(speed.loops(), "bar_sigs", None)  # (compiled: the walk below, the same rows; fit bar lines C)
+    got = None if fast is None else fast(lines, bars, stop, starts, [s[1] for s in own], [s[2] for s in own], ppq,
+                                         longest)
+    if got is not None:
+        rows, unf, prev = got
+        out, unfit = [tuple(r) for r in rows.tolist()], unf.tolist()
+    for m in range(0, stop + 1) if got is None else ():
         f0, f1 = int(lines[m]), int(lines[m + 1])
         mine = own_at(int(bars[m]))
         sig = mine if f1 - f0 == int(bars[m + 1] - bars[m]) else signature(f1 - f0, ppq, mine[1])
