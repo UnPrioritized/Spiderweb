@@ -342,7 +342,10 @@ class UpdatePopup(tk.Toplevel):
             return
         done, size = self.progress
         mb = lambda n: "%.1f" % (n / 1048576)  # noqa: E731
-        if done and not self.cancel_event.is_set():
+        if done == -1 and not self.cancel_event.is_set():  # (the folder version: the checked zip being unpacked)
+            self.bar.configure(value=1000)
+            self.say.configure(text=tr("updates.unpacking"))
+        elif done and not self.cancel_event.is_set():
             self.bar.configure(value=done * 1000 // size if size else 0)
             self.say.configure(text=tr("updates.downloading", done=mb(done), size=mb(size)) if size else
                                tr("updates.downloading_unknown", done=mb(done)))

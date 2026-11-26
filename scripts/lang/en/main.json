@@ -2290,6 +2290,7 @@
  "updates.cancel": "Cancel",
  "updates.connecting": "Connecting…",
  "updates.downloading": "Downloading… {done} of {size} MB",
+ "updates.unpacking": "Downloaded and checked. Unpacking the new version…",
  "updates.downloading_unknown": "Downloading… {done} MB",
  "updates.restarting": "Downloaded and checked. Spiderweb closes and starts the new version…",
  "updates.zip_ready": "Downloaded and checked: {file}\n\nUnzip it over your Spiderweb folder to update. Your own files in the user folder stay as they are.",
