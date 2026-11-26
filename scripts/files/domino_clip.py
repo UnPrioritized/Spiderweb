@@ -383,12 +383,17 @@ def domino_thin(tempo, most=DOMINO_TEMPO_MOST):
     steps only past 1 M): neighbouring changes inside one stretch of S ticks joined into ONE at their average
     microseconds (ticks x us summed: the stretch takes the same time, to a microsecond a beat), S the smallest
     that's enough. A change lasting longer than S (a held tempo) is never joined: only dense ramps thin out."""
-    if len(tempo) <= most:
-        return list(tempo)
+    if isinstance(tempo, np.ndarray):  # ((n, 2) ticks, us in tick order: tempo_items' table way, fit bar lines E)
+        t, u = tempo[:, 0].astype(np.int64), tempo[:, 1].astype(np.int64)
+        if len(t) <= most:
+            return list(zip(t.tolist(), u.tolist()))
+    else:
+        if len(tempo) <= most:
+            return list(tempo)
+        tempo = sorted(tempo)
+        t = np.array([e[0] for e in tempo], np.int64)
+        u = np.array([e[1] for e in tempo], np.int64)
     from notes.tempo_safe import nearest_safe
-    tempo = sorted(tempo)
-    t = np.array([e[0] for e in tempo], np.int64)
-    u = np.array([e[1] for e in tempo], np.int64)
     span = np.append(np.diff(t), np.iinfo(np.int64).max)  # (the last change: held to the end)
 
     def starts(s):
@@ -421,6 +426,20 @@ def domino_thin(tempo, most=DOMINO_TEMPO_MOST):
     return list(zip(t[first].tolist(), out_u.tolist()))
 
 
+def _take_table(a, first, end):
+    """tempo_items' take() on an (n, 2) table of (tick, us) in tick order, each tick once: the same rows."""
+    t = a[:, 0]
+    i = int(np.searchsorted(t, first, "right"))
+    hi = len(t) if end is None else int(np.searchsorted(t, end, "left"))
+    parts = ([np.array([[first, a[i - 1, 1]]], np.int64)] if i else []) + [a[i:max(i, hi)]]
+    got = np.concatenate(parts)
+    if end is not None and end > first:
+        j = int(np.searchsorted(t, end, "right")) - 1
+        if j >= 0 and len(got) and a[j, 1] != got[-1, 1]:
+            got = np.concatenate([got, [[end, a[j, 1]]]])
+    return got[got[:, 0] - first <= LONGEST]
+
+
 def tempo_items(tempo, sigs=(), first=0, end=None, keys=(), typed=None):
     """(Conductor item bytes, slow, thinned): tempo [(tick, us)], time signatures [(tick, top, bottom power)] and key
     signatures [(tick, sharps, minor)] as Domino's items, by tick (tempo, then time, then key signature on a tick). first..end: only that stretch, ticks counted
@@ -430,7 +449,10 @@ def tempo_items(tempo, sigs=(), first=0, end=None, keys=(), typed=None):
     (file_plan's "typed"): those BPMs written as typed (dms_bpm). The stretch's tempo past DOMINO_TEMPO_MOST
     changes: domino_thin (the third answer: True)."""
     typed = typed or {}
-    tempo = sorted(tempo)
+    table = getattr(tempo, "arr", None)  # (tempo_file.Rows of millions of fitted bars: taken + thinned as arrays,
+    if table is not None and not (len(table) > DOMINO_TEMPO_MOST and (np.diff(table[:, 0]) > 0).all()):  # E)
+        table = None
+    tempo = sorted(tempo) if table is None else ()
     sigs = sorted(sigs)
     out, slow = [], 0
 
@@ -441,9 +463,15 @@ def tempo_items(tempo, sigs=(), first=0, end=None, keys=(), typed=None):
         if back and got and tuple(back[0][1:]) != tuple(got[-1][1:]):
             got += back
         return [r for r in got if r[0] - first <= LONGEST]  # (past what Domino's ticks hold: left out)
-    rows = take(tempo)
-    thin = len(rows) > DOMINO_TEMPO_MOST
-    for tick, us in domino_thin(rows) if thin else rows:
+    if table is None:
+        rows = take(tempo)
+        thin = len(rows) > DOMINO_TEMPO_MOST
+        rows = domino_thin(rows) if thin else rows
+    else:
+        got = _take_table(table, first, end)
+        thin = len(got) > DOMINO_TEMPO_MOST
+        rows = domino_thin(got) if thin else list(zip(got[:, 0].tolist(), got[:, 1].tolist()))
+    for tick, us in rows:
         bpm, exact = dms_bpm(us, typed.get(us))
         slow += not exact
         out.append((tick - first, 0, item(2008, item(1001, struct.pack("<I", tick - first))

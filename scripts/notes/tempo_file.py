@@ -23,8 +23,8 @@ import numpy as np
 
 from files import speed
 from files.midi_scan import MOST_TICK
-from notes.meter import EPS as METER_EPS, bar_line as meter_bar_line, parts as meter_parts, sigs_of, \
-    where as meter_where
+from notes.meter import EPS as METER_EPS, bar_line as meter_bar_line, bar_start as meter_bar_start, \
+    parts as meter_parts, sigs_of, where as meter_where
 from notes.tempo import (CATCH_STEPS_MOST, CATCH_TICKS_MOST, EVERY, _put_all, _put_many, base_us, beat_tick,
                          typed_bpms, step_of,
                          file_segments, has_tempo, keep_heard, known_key, layout, segs_end, tempo_key)
@@ -103,13 +103,23 @@ KEEP_TICKS_MOST = 1 << 24  # a Keep timing part up to this many ticks is worked 
 # gap_ticks / gap_plan); a longer one by runs (_keep_long / _long_gaps, PLAN stage E 2026-11-26: a huge-tick MIDI's
 # parts run to trillions). 2^30 left parts just under it needing ~8 GB (hunt 2026-11-26, user took A: 2^24; very long
 # high-PPQ parts may pick other exact tempo pairs). load.keep_too_long only when its sums pass 64 bits
-BARS_MOST = 1 << 20  # Fit bar lines works on songs of at most this many bars (bar by bar: a huge-tick MIDI, 60 M BPM
-# at PPQ 32767, has billions and its export took 20 GB; past it the bars are written unfitted: the sound is the same)
+BARS_MOST = 1 << 24  # Fit bar lines fits the first this many bars (user 2026-11-26, PLAN fit bar lines: ~15 s and
+# ~4 GB at worst; a huge-tick MIDI, 60 M BPM at PPQ 32767, has billions); past it the bar lines are written unfitted
+# (the sound is the same) and the export says so ("bars_cut"). Planning in pieces = planned-features.md
 
 
 def bars_fit(tempo, ppq, upto):
-    """Fit bar lines (tempo "bars") works here: on, and at most BARS_MOST bars from the start to tick upto."""
-    return bool(tempo.get("bars", True)) and meter_where(sigs_of(tempo), upto / ppq)[0] < BARS_MOST
+    """Fit bar lines (tempo "bars") is on (its bars: bars_upto)."""
+    return bool(tempo.get("bars", True))
+
+
+def bars_upto(tempo, ppq, upto):
+    """The tick Fit bar lines' bars reach: upto, or bar BARS_MOST's line when that comes first (fitting stops there;
+    before 2026-11-26 a song past BARS_MOST anywhere had no fitting at all)."""
+    sigs = sigs_of(tempo)
+    if meter_where(sigs, upto / ppq)[0] < BARS_MOST:
+        return upto
+    return round(meter_bar_start(sigs, BARS_MOST) * ppq)
 
 
 def bar_ticks(tempo, ppq, upto, start=0):
@@ -751,12 +761,12 @@ def limit_spots(tempo, base, ppq, beats, ticks, heard=None, loose=None):
     # (ds5: beat_tick is steady up with the beat: the last tick is the latest beat's; one read, not 190,000)
     upto = max([int(t.max()) for t in (ticks, loose) if len(t)]
                + ([beat_tick(max(p[0] for p in tempo["points"]), ppq)] if tempo["points"] else []))
-    bars = bar_ticks(tempo, ppq, upto) if bars_fit(tempo, ppq, upto) else None
+    bars = bar_ticks(tempo, ppq, bars_upto(tempo, ppq, upto)) if bars_fit(tempo, ppq, upto) else None
     _, _, _, keeps, gaps, out["dense"], out["gave"], _ = keep_gaps(tempo, base, ppq, beats, ticks, bars, loose,
                                                                    heard)
     if not gaps or not bars_fit(tempo, ppq, max([upto] + [e for _, e, _ in keeps])):
         return out
-    bars = bar_ticks(tempo, ppq, max(upto, max(e for _, e, _ in keeps)))
+    bars = bar_ticks(tempo, ppq, bars_upto(tempo, ppq, max(upto, max(e for _, e, _ in keeps))))
     _fit_bar_lines(gaps, keeps, bars, bar_lengths(ppq))
     zero = np.zeros(1, np.int64)
     bp_n, bp_f, offset = [zero], [zero], 0  # (the file's ticks at the anchors, as file_plan's map; arrays, D2)
@@ -850,7 +860,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     # (ds5: beat_tick is steady up with the beat: the last tick is the latest beat's; one read, not 190,000)
     upto = max([int(t.max()) for t in (ticks, loose) if len(t)]
                + ([beat_tick(max(p[0] for p in tempo["points"]), ppq)] if tempo["points"] else []))
-    bars = bar_ticks(tempo, ppq, upto) if bars_fit(tempo, ppq, upto) else None
+    bars = bar_ticks(tempo, ppq, bars_upto(tempo, ppq, upto)) if bars_fit(tempo, ppq, upto) else None
     lay, segs, out["bad"], keeps, gaps, out["dense"], out["gave"], times = keep_gaps(tempo, base, ppq, beats, ticks,
                                                                                     bars, loose, heard)
     end = segs[-1][1]
@@ -862,8 +872,12 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     every_at = {a: step_of(tempo["points"][i], every_all)[0] for i, a, _, _ in lay["keeps"]}
     fit_bars = bars_fit(tempo, ppq, max([upto] + [e for _, e, _ in keeps]))
     if fit_bars and gaps:
-        if keeps:  # (bar lines far enough for every part)
-            bars = bar_ticks(tempo, ppq, max(upto, max(e for _, e, _ in keeps)))
+        if keeps:  # (bar lines far enough for every part, up to bar BARS_MOST: past it unfitted + said)
+            reach = max(upto, max(e for _, e, _ in keeps))
+            cut = bars_upto(tempo, ppq, reach)
+            bars = bar_ticks(tempo, ppq, cut)
+            if cut < max(e for _, e, _ in keeps):
+                out["bars_cut"] = cut / ppq
         _fit_bar_lines(gaps, keeps, bars, bar_lengths(ppq))
     # the file's tempo: plain stretches shifted, Keep timing parts made of their gaps
     pairs = _Pairs()
@@ -1305,6 +1319,11 @@ def _fit_bar_lines(gaps, keeps, bars, lengths):
     kk = np.concatenate([k for _, _, k, _ in gaps]).astype(np.int64)
     tt = np.concatenate([total for _, total, _, _ in gaps]).astype(np.int64)
     dk = kk - np.concatenate([np.diff(n) for n, _, _, _ in gaps])
+    inside = ms < len(bars) - 1  # (gaps past the last bar line: past BARS_MOST, left as they are; else all)
+    if not inside.all():
+        ms, ps, js, kk, tt, dk = (x[inside] for x in (ms, ps, js, kk, tt, dk))
+        if not len(ms):
+            return
     order_m = np.argsort(ms, kind="stable")
     ms, ps, js, dk, kk, tt = (x[order_m] for x in (ms, ps, js, dk, kk, tt))
     fast = getattr(speed.loops(), "fit_bars", None)  # (compiled: the walk below in one go, the same nudges; PLAN

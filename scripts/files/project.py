@@ -1878,6 +1878,9 @@ class ProjectFiles:
             note += tr("project.tempo_keep_coarse", where=self.bar_text(plan["coarse_keep"][0]))
         if plan.get("moved"):  # (bar carry-over, user 2026-10-24: no surprises in the export)
             note += tr("project.tempo_moved", where=self.bar_text(plan["moved"][0]))
+        if plan.get("bars_cut") is not None:  # (Fit bar lines stops at bar tempo_file.BARS_MOST: fit bar lines E)
+            from notes.tempo_file import BARS_MOST
+            note += tr("project.tempo_bars_cut", bars=f"{BARS_MOST:,}", where=self.bar_text(plan["bars_cut"]))
         if plan.get("gave"):  # (a heads-up only, user 2026-10-23)
             n = plan.get("gave_n") or len(plan["gave"])
             note += trn("project.tempo_cc_gave", n, n=n, where=self.bar_text(plan["gave"][0]))
