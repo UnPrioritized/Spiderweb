@@ -18,7 +18,7 @@ To open .spwb projects by double-clicking them, press "Open .spwb files with Spi
 
 Shapes are stored in beats, so changing PPQ doesn't move them.
 
-Export MIDI (Ctrl+E) writes the file set under Output file, with the PPQ from Project and the tempo and signatures from the Conductor pane. PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red). When the file is already there, Spiderweb asks before replacing it, unless it's exactly the file Spiderweb wrote there last (since it was opened): then it's replaced without asking and the status line says so. Warnings about the file still pop up. Export to Domino works the same way.
+Export MIDI (Ctrl+E) writes the file set under Output file, with the PPQ from Project and the tempo and signatures from the Conductor pane (Keep timing parts and Fit bar lines change what the file gets: see [page:conductor#Fit bar lines|Conductor]). PPQ 32767 or higher: many MIDI programs can't open the file (the box turns red). When the file is already there, Spiderweb asks before replacing it, unless it's exactly the file Spiderweb wrote there last (since it was opened): then it's replaced without asking and the status line says so. Warnings about the file still pop up. Export to Domino works the same way.
 
 Keys (under Project) set to 256: the piano roll goes up to key 255 instead of 127, and the MIDI file keeps those keys. That's for players that support 256 keys (handy for tunings like 31-EDO, which need more keys per octave). Many MIDI programs can't read keys above 127, and playback here skips them (unless 31-EDO Audio is on).
 

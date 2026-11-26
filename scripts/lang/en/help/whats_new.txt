@@ -32,6 +32,8 @@ What's new:
 
 • Fixed: a Keep timing part drawn far faster than the tempo heard before it (like 60,000,000 BPM over a part heard at 125) could make Export MIDI run out of memory.
 
+• Faster: a Liquify set to Shape updates faster on fine grids.
+
 • Faster: Export MIDI of very big projects is about a tenth quicker (32 million notes: 1.6 s → 1.45 s).
 
 • Faster: Load MIDI reads big MIDI files faster, most of all files with a few huge tracks, and uses half of the computer's threads, so other programs keep running smoothly on smaller PCs.
