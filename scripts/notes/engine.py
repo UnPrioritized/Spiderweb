@@ -367,191 +367,11 @@ def clean_shape(sh):
             and all(type(t) is int for t in tm[1:])):
         # (its group's colour turn, kept when Turn into plain notes unlinked it, + its repeat: between.turns)
         out["team"] = list(tm)
-    # the tracks it was laid on, one per colour (files/own_tracks.py into_ids: a track added by hand's id, or -1 - an
-    # automatic track's slot), the colours' columns still to lay (Domino's paste), gap tracks it keeps, the tracks of
-    # colours gone for now (App.fit_into: back on them when they come back)
-    # (into / into_rest: a loaded MIDI's track too, FILE0 + its number)
-    for key, low, high in (("into", -ID_MOST, FILE_MOST), ("cols", 0, ID_MOST), ("into_gap", 0, ID_MOST),
-                           ("into_rest", -ID_MOST, FILE_MOST)):
-        got = sh.get(key)
-        got = [got] if type(got) is int else got if isinstance(got, list) else []
-        got = [v for v in got[:INTO_MOST] if type(v) is int and low <= v < high]
-        if got:
-            out[key] = got
-    # (each colour's own channel in its track, -1 = the track's: an Extract's in the loaded MIDI's track it came
-    # from, a channel dragged into a folder, PLAN #11)
-    chs = sh.get("into_ch")
-    if "into" in out and isinstance(chs, list) and all(type(c) is int and -1 <= c <= 15 for c in chs):
-        out.update(aligned_ch({"into": out["into"], "into_ch": chs, "into_home": sh.get("into_home")}))
-        home = out.get("into_home")  # (... and that track: on another one the colour takes its channel)
-        if home is not None and not all(type(v) is int and -1 <= v < FILE_MOST for v in home):
-            out.pop("into_home")
-    if "into_rest" in out:  # (... and the colours gone for now: their channels kept, rest_ch)
-        rchs, rhome = rest_ch(dict(sh, into_rest=out["into_rest"]))
-        if any(c >= 0 for c in rchs):
-            out["into_rest_ch"] = rchs
-            out["into_rest_home"] = [v if -1 <= v < FILE_MOST else -1 for v in rhome]
-    if "into" in out and isinstance(sh.get("slots10"), bool):  # (its automatic tracks' channel rule: mask.slot_rule)
-        out["slots10"] = sh["slots10"]
-    if "into" in out and sh.get("from_paste") is True:  # (plain copy of a laid Domino paste: keeps its tracks in
-        out["from_paste"] = True                       # every Channels mode, App.pasted_notes; hunt 2026-10-29)
-    if "into" in out and sh.get("into_new") is True:  # (just drawn / pasted, colours not laid yet: App.fit_into)
-        out["into_new"] = True
+    clean_tracks(sh, out)
     if out["kind"] == "custom":
-        strokes = clean_strokes(sh.get("strokes"))
-        if len(out["pts"]) != 3 or not strokes:
+        sh = clean_custom(sh, out)
+        if sh is None:
             return None
-        out["name"] = str(sh.get("name", ""))
-        out["strokes"] = strokes
-        areas = clean_areas(sh.get("areas"))
-        if areas:  # areas coloured by hand (areas.py)
-            out["areas"] = areas
-        fit = sh.get("fit")
-        try:  # Fit box to drawing: the straight box shown round it, in the frame's u / v (custom.box_pts)
-            fit = [[float(u), float(v)] for u, v in fit] if fit else None
-        except (TypeError, ValueError):
-            fit = None
-        if fit and len(fit) == 3 and all(math.isfinite(x) for p in fit for x in p):
-            out["fit"] = fit
-        out["fill"] = sh.get("fill") if sh.get("fill") in FILLS else "empty"
-        out["gate"] = max(1e-6, float(sh.get("gate", CUSTOM_DEFAULTS["gate"])))
-        out["align"] = sh.get("align") if sh.get("align") in ALIGNS else "auto"
-        out["ends"] = sh.get("ends") if sh.get("ends") in ENDS else "drop"
-        out.update({k: True for k in CUSTOM_FLAGS if sh.get(k) is True})
-        nested = clean_nested(sh.get("nested")) if out["fill"] in ("fill", "spam") else None
-        if nested:  # Inside fill Nested (nested.py)
-            out["nested"] = nested
-        tiles = clean_tiles(sh.get("tiles")) if out["fill"] in ("fill", "spam") and not nested else None
-        if tiles:  # Inside fill Tiles (tiles.py)
-            out["tiles"] = tiles
-        ripples = (clean_ripples(sh.get("ripples")) if out["fill"] in ("fill", "spam") and not nested and not tiles
-                   else None)
-        if ripples:  # Inside fill Ripples (ripples.py)
-            out["ripples"] = ripples
-        kept = clean_kept_patterns(sh.get("patterns_kept"))
-        if kept:  # (patterns switched off: their settings come back when picked again, custom.shelve_patterns)
-            out["patterns_kept"] = kept
-        if sh.get("gate_flip") is True:  # its gates laid from the right (gateflip.py)
-            out["gate_flip"] = True
-        free = sh.get("even_free") if out.get("even") else None
-        if isinstance(free, dict):  # (Even steps: the drawing before the tick, given back on untick)
-            try:
-                fp, at = [[float(a), float(b)] for a, b in free["pts"]], [[float(a), float(b)] for a, b in free["at"]]
-                fs = clean_strokes(free["strokes"])
-                if (len(fp) == len(at) == 3 and fs and isinstance(free.get("mark"), str)
-                        and all(math.isfinite(x) for p in fp + at for x in p)):
-                    out["even_free"] = {"pts": fp, "strokes": fs, "at": at, "mark": free["mark"]}
-            except (TypeError, ValueError, KeyError):
-                pass
-        try:  # the smallest outline gate in beats (custom.grow_inward)
-            edge = float(sh.get("edge") or 0)
-        except (TypeError, ValueError):
-            edge = 0
-        if edge > 0:
-            out["edge"] = min(edge, 10 ** 4)
-        if sh.get("edge_mode") == "sideways":  # (the first way: each note grown sideways; default = even band)
-            out["edge_mode"] = "sideways"
-        try:  # the view it was first drawn in (custom.drawn_view): a number, or [m, n]
-            rd = sh.get("round") or 0
-            rd = [float(x) for x in rd] if isinstance(rd, list) else float(rd)
-        except (TypeError, ValueError):
-            rd = 0
-        if isinstance(rd, list):
-            if len(rd) == 2 and all(map(math.isfinite, rd)) and rd[1] > 0:
-                out["round"] = rd
-        elif math.isfinite(rd) and rd > 0:
-            out["round"] = rd
-        rg = clean_range(sh.get("range"))
-        if rg:  # the spam gate going from one to another across the shape (gaterange.py)
-            out["range"] = rg
-        rg = clean_range(sh.get("range_kept"))
-        if rg:  # (one switched off: the Range window brings it back when it's switched on)
-            out["range_kept"] = rg
-        clean_hz_of(sh, out)
-        fr = sh.get("from")  # the shapes it was made of (convert.py)
-        if isinstance(fr, dict) and isinstance(fr.get("shapes"), list) and fr["shapes"]:
-            olds = [clean_shape(o) if isinstance(o, dict) else None for o in fr["shapes"]]
-            try:
-                if all(olds) and len(fr["pts"]) == 3:
-                    out["from"] = {"shapes": olds, "strokes": clean_strokes(fr["strokes"]),
-                                   "pts": [[float(b), float(p)] for b, p in fr["pts"]]}
-                    vel = fr.get("vel")  # (its velocities when made: changed since = Split gives them to the shapes)
-                    if isinstance(vel, dict):
-                        got = {k: v for k, v in clean_basics(vel).items() if k != "end_dot"}
-                        if vel.get("vel_env"):
-                            got["vel_env"] = [[float(u), max(1.0, min(127.0, float(v)))] for u, v in vel["vel_env"]]
-                        out["from"]["vel"] = got
-            except (KeyError, TypeError, ValueError):
-                pass
-        pg = clean_polygon(sh.get("polygon"))
-        if pg and "notes" not in sh and not sh.get("text"):  # made by the Polygon tool (polygon.py)
-            out["polygon"] = pg
-            out["strokes"] = polygon_strokes(pg)
-        tx = clean_text(sh["text"]) if isinstance(sh.get("text"), dict) else None
-        if tx:  # typed text (text.py): its strokes are the letters, the settings let it be retyped
-            out["text"] = tx
-        mg = clean_merge(sh["merge"], clean_shape) if isinstance(sh.get("merge"), dict) else None
-        if mg:  # Gate sensitive merge (merge.py): two shapes' notes, saved as the recipe
-            out["merge"] = mg
-            if mg.pop("lift", False):  # (its parts' gate flips moved onto it: notes made again, unflipped parts)
-                out["gate_flip"] = True
-                sh = {k: v for k, v in sh.items() if k != "notes"}
-            if "notes" not in sh:  # (left out of project files: made again)
-                sh = dict(sh, notes=pack_notes([[0, 1, 0, 1, 0]]) if getattr(_unmade, "on", False) else
-                          recipe_notes(mg))
-        if "notes" in sh:  # pasted notes (custom.py): the strokes are just the box
-            if not isinstance(sh["notes"], str) or not check_notes(sh["notes"]):
-                return None
-            out.update(notes=sh["notes"], strokes=[dict(BOX_STROKE)], fill="empty")
-            if sh.get("own_vel"):
-                out["own_vel"] = True
-            if sh.get("flip_colours") is True:  # (sliced from a gate flipped paste: its colours' order kept, gateflip)
-                out["flip_colours"] = True
-            if isinstance(sh.get("paste"), str):  # pieces sliced from one paste: its tracks share channels (render)
-                out["paste"] = sh["paste"]
-            if isinstance(sh.get("cc"), str) and check_cc(sh["cc"]):  # its tracks' CCs etc. (passengers.py)
-                out["cc"] = sh["cc"]
-            st = clean_strips(sh.get("strips"))
-            if st:  # Separate strips (strips.py): each strip of a track its own channels
-                out["strips"] = st
-            um = clean_unmerge(sh["unmerge"], clean_shape) if isinstance(sh.get("unmerge"), dict) else None
-            if um:  # a Gate sensitive merge kept as separate shapes: the shape its notes were, for Split (merge.py)
-                out["unmerge"] = um
-            # Apply mask's notes (mask.py): track = the channel slot it had (True: from a picture, always kept; [beat,
-            # key]: Multi channel, while its first point is there), painted in the picture's colours, overlaps kept
-            # (copied from a sustained shape), what it is (its name in any language)
-            o = sh.get("own_slots")
-            if o is True or (isinstance(o, list) and len(o) == 2 and all(
-                    isinstance(v, (int, float)) and math.isfinite(v) for v in o)):
-                out["own_slots"] = o if o is True else [float(v) for v in o]
-            if isinstance(sh.get("slots10"), bool):  # (its slots' channel rule when made: mask.slot_rule)
-                out["slots10"] = sh["slots10"]
-            pn = sh.get("picture_notes")
-            if isinstance(pn, dict):  # (the picture's colours, picture.clean_settings' "pal": a list of #rrggbb)
-                pal = pn.get("pal")
-                ok = isinstance(pal, list) and all(isinstance(h, str) for h in pal)
-                out["picture_notes"] = {"pal": list(pal) if ok else None}
-            if sh.get("held") is True:
-                out["held"] = True
-            if sh.get("paste_laps") is True:  # (made from a Domino paste's notes: keeps their overlaps like it, keeps_laps)
-                out["paste_laps"] = True
-            ex = clean_extract(sh.get("extract"))
-            if ex:  # (Load MIDI's Extract: the loaded notes it took stay hidden while it's there, loaded.py)
-                out["extract"] = ex
-            if sh.get("made") in ("mask", "leftovers", "path", "plain"):
-                out["made"] = sh["made"]
-            mb = sh.get("made_by")  # (the one-time command that made it + the shape it came from: Properties)
-            if isinstance(mb, list) and len(mb) == 2 and all(isinstance(x, str) for x in mb):
-                out["made_by"] = [mb[0][:20], mb[1][:200]]
-            if isinstance(sh.get("leftover_of"), str):  # (a two-shapes merge's leftovers: its Split takes them back)
-                out["leftover_of"] = sh["leftover_of"][:64]
-            if sh.get("lapped") is True:  # (merge leftovers: each note's Colours round on its track, + LAP x round)
-                out["lapped"] = True
-            pic = clean_picture(sh.get("picture"))
-            if pic:  # a picture made into notes (picture.py): the notes are its finished colours, track = slot
-                out["picture"] = pic
-                for k in ("own_vel", "glue", "fx"):  # (no note tools on a picture, user)
-                    out.pop(k, None)
     if out["kind"] == "gliss":  # a Glissando run: its line (straight: 2 points, bent: a curve's) + settings (gliss.py)
         n = len(out["pts"])
         out["pts"] = out["pts"][:n - (n - 1) % 3] if n >= 4 else [out["pts"][0], out["pts"][-1]]
@@ -625,6 +445,209 @@ def clean_shape(sh):
     # (again on what was read: a number written as text, "nan" or "1e400", got past sane as text; and where it
     # reaches, its strokes too)
     return out if sane(out) and within_reach(out) else None
+
+
+def clean_tracks(sh, out):
+    """A shape's tracks and channels from a file into out: the tracks it was laid on, one per colour
+    (files/own_tracks.py into_ids: a track added by hand's id, or -1 - an automatic track's slot), the colours'
+    columns still to lay (Domino's paste), gap tracks it keeps, the tracks of colours gone for now (App.fit_into: back
+    on them when they come back); into / into_rest: a loaded MIDI's track too, FILE0 + its number."""
+    for key, low, high in (("into", -ID_MOST, FILE_MOST), ("cols", 0, ID_MOST), ("into_gap", 0, ID_MOST),
+                           ("into_rest", -ID_MOST, FILE_MOST)):
+        got = sh.get(key)
+        got = [got] if type(got) is int else got if isinstance(got, list) else []
+        got = [v for v in got[:INTO_MOST] if type(v) is int and low <= v < high]
+        if got:
+            out[key] = got
+    # (each colour's own channel in its track, -1 = the track's: an Extract's in the loaded MIDI's track it came
+    # from, a channel dragged into a folder, PLAN #11)
+    chs = sh.get("into_ch")
+    if "into" in out and isinstance(chs, list) and all(type(c) is int and -1 <= c <= 15 for c in chs):
+        out.update(aligned_ch({"into": out["into"], "into_ch": chs, "into_home": sh.get("into_home")}))
+        home = out.get("into_home")  # (... and that track: on another one the colour takes its channel)
+        if home is not None and not all(type(v) is int and -1 <= v < FILE_MOST for v in home):
+            out.pop("into_home")
+    if "into_rest" in out:  # (... and the colours gone for now: their channels kept, rest_ch)
+        rchs, rhome = rest_ch(dict(sh, into_rest=out["into_rest"]))
+        if any(c >= 0 for c in rchs):
+            out["into_rest_ch"] = rchs
+            out["into_rest_home"] = [v if -1 <= v < FILE_MOST else -1 for v in rhome]
+    if "into" not in out:
+        return
+    if isinstance(sh.get("slots10"), bool):  # (its automatic tracks' channel rule: mask.slot_rule)
+        out["slots10"] = sh["slots10"]
+    if sh.get("from_paste") is True:  # (plain copy of a laid Domino paste: keeps its tracks in every Channels mode,
+        out["from_paste"] = True     # App.pasted_notes; hunt 2026-10-29)
+    if sh.get("into_new") is True:  # (just drawn / pasted, colours not laid yet: App.fit_into)
+        out["into_new"] = True
+
+
+def clean_custom(sh, out):
+    """A custom shape's own settings from a file into out (its drawing, fill, patterns, Hz bass, what it was made of,
+    polygon / text / merge recipe, pasted notes). Returns the shape as read on (a merge's notes made again), or None
+    when it can't be used."""
+    strokes = clean_strokes(sh.get("strokes"))
+    if len(out["pts"]) != 3 or not strokes:
+        return None
+    out["name"] = str(sh.get("name", ""))
+    out["strokes"] = strokes
+    areas = clean_areas(sh.get("areas"))
+    if areas:  # areas coloured by hand (areas.py)
+        out["areas"] = areas
+    fit = sh.get("fit")
+    try:  # Fit box to drawing: the straight box shown round it, in the frame's u / v (custom.box_pts)
+        fit = [[float(u), float(v)] for u, v in fit] if fit else None
+    except (TypeError, ValueError):
+        fit = None
+    if fit and len(fit) == 3 and all(math.isfinite(x) for p in fit for x in p):
+        out["fit"] = fit
+    out["fill"] = sh.get("fill") if sh.get("fill") in FILLS else "empty"
+    out["gate"] = max(1e-6, float(sh.get("gate", CUSTOM_DEFAULTS["gate"])))
+    out["align"] = sh.get("align") if sh.get("align") in ALIGNS else "auto"
+    out["ends"] = sh.get("ends") if sh.get("ends") in ENDS else "drop"
+    out.update({k: True for k in CUSTOM_FLAGS if sh.get(k) is True})
+    nested = clean_nested(sh.get("nested")) if out["fill"] in ("fill", "spam") else None
+    if nested:  # Inside fill Nested (nested.py)
+        out["nested"] = nested
+    tiles = clean_tiles(sh.get("tiles")) if out["fill"] in ("fill", "spam") and not nested else None
+    if tiles:  # Inside fill Tiles (tiles.py)
+        out["tiles"] = tiles
+    ripples = (clean_ripples(sh.get("ripples")) if out["fill"] in ("fill", "spam") and not nested and not tiles
+               else None)
+    if ripples:  # Inside fill Ripples (ripples.py)
+        out["ripples"] = ripples
+    kept = clean_kept_patterns(sh.get("patterns_kept"))
+    if kept:  # (patterns switched off: their settings come back when picked again, custom.shelve_patterns)
+        out["patterns_kept"] = kept
+    if sh.get("gate_flip") is True:  # its gates laid from the right (gateflip.py)
+        out["gate_flip"] = True
+    free = sh.get("even_free") if out.get("even") else None
+    if isinstance(free, dict):  # (Even steps: the drawing before the tick, given back on untick)
+        try:
+            fp, at = [[float(a), float(b)] for a, b in free["pts"]], [[float(a), float(b)] for a, b in free["at"]]
+            fs = clean_strokes(free["strokes"])
+            if (len(fp) == len(at) == 3 and fs and isinstance(free.get("mark"), str)
+                    and all(math.isfinite(x) for p in fp + at for x in p)):
+                out["even_free"] = {"pts": fp, "strokes": fs, "at": at, "mark": free["mark"]}
+        except (TypeError, ValueError, KeyError):
+            pass
+    try:  # the smallest outline gate in beats (custom.grow_inward)
+        edge = float(sh.get("edge") or 0)
+    except (TypeError, ValueError):
+        edge = 0
+    if edge > 0:
+        out["edge"] = min(edge, 10 ** 4)
+    if sh.get("edge_mode") == "sideways":  # (the first way: each note grown sideways; default = even band)
+        out["edge_mode"] = "sideways"
+    try:  # the view it was first drawn in (custom.drawn_view): a number, or [m, n]
+        rd = sh.get("round") or 0
+        rd = [float(x) for x in rd] if isinstance(rd, list) else float(rd)
+    except (TypeError, ValueError):
+        rd = 0
+    if isinstance(rd, list):
+        if len(rd) == 2 and all(map(math.isfinite, rd)) and rd[1] > 0:
+            out["round"] = rd
+    elif math.isfinite(rd) and rd > 0:
+        out["round"] = rd
+    rg = clean_range(sh.get("range"))
+    if rg:  # the spam gate going from one to another across the shape (gaterange.py)
+        out["range"] = rg
+    rg = clean_range(sh.get("range_kept"))
+    if rg:  # (one switched off: the Range window brings it back when it's switched on)
+        out["range_kept"] = rg
+    clean_hz_of(sh, out)
+    fr = sh.get("from")  # the shapes it was made of (convert.py)
+    if isinstance(fr, dict) and isinstance(fr.get("shapes"), list) and fr["shapes"]:
+        olds = [clean_shape(o) if isinstance(o, dict) else None for o in fr["shapes"]]
+        try:
+            if all(olds) and len(fr["pts"]) == 3:
+                out["from"] = {"shapes": olds, "strokes": clean_strokes(fr["strokes"]),
+                               "pts": [[float(b), float(p)] for b, p in fr["pts"]]}
+                vel = fr.get("vel")  # (its velocities when made: changed since = Split gives them to the shapes)
+                if isinstance(vel, dict):
+                    got = {k: v for k, v in clean_basics(vel).items() if k != "end_dot"}
+                    if vel.get("vel_env"):
+                        got["vel_env"] = [[float(u), max(1.0, min(127.0, float(v)))] for u, v in vel["vel_env"]]
+                    out["from"]["vel"] = got
+        except (KeyError, TypeError, ValueError):
+            pass
+    pg = clean_polygon(sh.get("polygon"))
+    if pg and "notes" not in sh and not sh.get("text"):  # made by the Polygon tool (polygon.py)
+        out["polygon"] = pg
+        out["strokes"] = polygon_strokes(pg)
+    tx = clean_text(sh["text"]) if isinstance(sh.get("text"), dict) else None
+    if tx:  # typed text (text.py): its strokes are the letters, the settings let it be retyped
+        out["text"] = tx
+    mg = clean_merge(sh["merge"], clean_shape) if isinstance(sh.get("merge"), dict) else None
+    if mg:  # Gate sensitive merge (merge.py): two shapes' notes, saved as the recipe
+        out["merge"] = mg
+        if mg.pop("lift", False):  # (its parts' gate flips moved onto it: notes made again, unflipped parts)
+            out["gate_flip"] = True
+            sh = {k: v for k, v in sh.items() if k != "notes"}
+        if "notes" not in sh:  # (left out of project files: made again)
+            sh = dict(sh, notes=pack_notes([[0, 1, 0, 1, 0]]) if getattr(_unmade, "on", False) else
+                      recipe_notes(mg))
+    if "notes" in sh and not clean_pasted(sh, out):  # pasted notes (custom.py): the strokes are just the box
+        return None
+    return sh
+
+
+def clean_pasted(sh, out):
+    """A custom shape holding its own notes (a paste, an Extract, Apply mask's, a picture's, plain notes): its
+    notes and their settings from a file into out. False when its notes can't be used."""
+    if not isinstance(sh["notes"], str) or not check_notes(sh["notes"]):
+        return False
+    out.update(notes=sh["notes"], strokes=[dict(BOX_STROKE)], fill="empty")
+    if sh.get("own_vel"):
+        out["own_vel"] = True
+    if sh.get("flip_colours") is True:  # (sliced from a gate flipped paste: its colours' order kept, gateflip)
+        out["flip_colours"] = True
+    if isinstance(sh.get("paste"), str):  # pieces sliced from one paste: its tracks share channels (render)
+        out["paste"] = sh["paste"]
+    if isinstance(sh.get("cc"), str) and check_cc(sh["cc"]):  # its tracks' CCs etc. (passengers.py)
+        out["cc"] = sh["cc"]
+    st = clean_strips(sh.get("strips"))
+    if st:  # Separate strips (strips.py): each strip of a track its own channels
+        out["strips"] = st
+    um = clean_unmerge(sh["unmerge"], clean_shape) if isinstance(sh.get("unmerge"), dict) else None
+    if um:  # a Gate sensitive merge kept as separate shapes: the shape its notes were, for Split (merge.py)
+        out["unmerge"] = um
+    # Apply mask's notes (mask.py): track = the channel slot it had (True: from a picture, always kept; [beat,
+    # key]: Multi channel, while its first point is there), painted in the picture's colours, overlaps kept
+    # (copied from a sustained shape), what it is (its name in any language)
+    o = sh.get("own_slots")
+    if o is True or (isinstance(o, list) and len(o) == 2 and all(
+            isinstance(v, (int, float)) and math.isfinite(v) for v in o)):
+        out["own_slots"] = o if o is True else [float(v) for v in o]
+    if isinstance(sh.get("slots10"), bool):  # (its slots' channel rule when made: mask.slot_rule)
+        out["slots10"] = sh["slots10"]
+    pn = sh.get("picture_notes")
+    if isinstance(pn, dict):  # (the picture's colours, picture.clean_settings' "pal": a list of #rrggbb)
+        pal = pn.get("pal")
+        ok = isinstance(pal, list) and all(isinstance(h, str) for h in pal)
+        out["picture_notes"] = {"pal": list(pal) if ok else None}
+    if sh.get("held") is True:
+        out["held"] = True
+    if sh.get("paste_laps") is True:  # (made from a Domino paste's notes: keeps their overlaps like it, keeps_laps)
+        out["paste_laps"] = True
+    ex = clean_extract(sh.get("extract"))
+    if ex:  # (Load MIDI's Extract: the loaded notes it took stay hidden while it's there, loaded.py)
+        out["extract"] = ex
+    if sh.get("made") in ("mask", "leftovers", "path", "plain"):
+        out["made"] = sh["made"]
+    mb = sh.get("made_by")  # (the one-time command that made it + the shape it came from: Properties)
+    if isinstance(mb, list) and len(mb) == 2 and all(isinstance(x, str) for x in mb):
+        out["made_by"] = [mb[0][:20], mb[1][:200]]
+    if isinstance(sh.get("leftover_of"), str):  # (a two-shapes merge's leftovers: its Split takes them back)
+        out["leftover_of"] = sh["leftover_of"][:64]
+    if sh.get("lapped") is True:  # (merge leftovers: each note's Colours round on its track, + LAP x round)
+        out["lapped"] = True
+    pic = clean_picture(sh.get("picture"))
+    if pic:  # a picture made into notes (picture.py): the notes are its finished colours, track = slot
+        out["picture"] = pic
+        for k in ("own_vel", "glue", "fx"):  # (no note tools on a picture, user)
+            out.pop(k, None)
+    return True
 
 
 def within_reach(sh):
