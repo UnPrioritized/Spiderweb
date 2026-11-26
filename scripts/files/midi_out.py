@@ -323,7 +323,9 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
                                                                   default=0), chans=True)
     fast = loops()
     if count > 1:  # (one sort finds every track's notes, in their own order)
-        if fast is not None and len(notes) >= SORT_OWN_FROM:  # (the own counting pass: the same order, 1.3-1.8x)
+        # (the own counting pass: the same order, 1.3-1.8x; our own library only: Numba's copy sets aside three
+        # note-long work lists even on sorted notes, ~0.7 GB more at 32 M than NumPy's sort)
+        if fast is not None and getattr(fast, "x", False) is not False and len(notes) >= SORT_OWN_FROM:
             slots = np.ascontiguousarray(notes[:, 4])
             order = fast.key_order_cores(slots, slots, slots, slots)
         else:
