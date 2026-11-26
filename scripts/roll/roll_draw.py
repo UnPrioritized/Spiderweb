@@ -31,7 +31,7 @@ from notes.meter import bar_lines, beat_lines, key_name, sig_text, sigs_of
 from notes.tempo import bpm_text, heard_marks, kept_bpms, ruler_cols, ruler_marks, short_bpm, tempo_key
 from roll.roll_shared import (BLACK, DRAFT_COLOR, EDO, EDO_BLACK, EDO_PIANO, EDO_WHITE, PIANO_88, PREVIEW_LIMIT,
                               PlayFollow, SELECTED_COLOR, SLOT_COLORS, black_bands, draw_boxes, fade, note_colours,
-                              note_name, recheck_pointer, slot_colours, velocity_shades)
+                              key_name_y, note_name, recheck_pointer, slot_colours, velocity_shades)
 from roll.tiles import Tiles, see_through_strips
 from window import look
 from window.notes_wait import stale_ok
@@ -2968,10 +2968,11 @@ class RollDrawing:
             label = note_name(p, edo) if n == 0 and self.sy >= 6 else (
                 note_name(p, edo) if (white or edo) and self.sy >= 16 else None)
             if label:
-                self.create_text(kb - 3, (y0 + y1) / 2, text=label, anchor="e", fill=look.KEY_TEXT,
-                                 font=look.font(font_size if white else min(font_size, 8), "bold" if n == 0 else "normal",
-                                                 fit=True),
-                                 tags=("frame", "kbd"))
+                font = look.font(font_size if white else min(font_size, 8), "bold" if n == 0 else "normal", fit=True)
+                y = key_name_y(font, y0, y1, self.sy)
+                if y is not None:  # (a row too short for its name: none)
+                    self.create_text(kb - 3, y, text=label, anchor="se", fill=look.KEY_TEXT, font=font,
+                                     tags=("frame", "kbd"))
         self.create_line(kb, top, kb, h, fill=look.ROLL_EDGE, tags=("frame", "kbd"))
 
     def draw_ruler(self, w):

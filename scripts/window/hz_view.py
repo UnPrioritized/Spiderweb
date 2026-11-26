@@ -11,7 +11,7 @@ from files.mathexpr import fmt
 from notes.hzbass import (HZ_DEFAULTS, NOTE_BEND_MOST, all_tones, auto_state, bend_range, can_slide, glide, handle_u, heard, hz_of, layers_of,
                           bends, funnel_box, left_edge, links, pitch, slide_knob, slide_part, tone_keys)
 from roll.roll_shared import (ALT, CTRL, MAX_SX, MIN_SX, SELECTED_COLOR, SHIFT, SLOT_COLORS, draw_boxes, fade, note_name,
-                              recheck_pointer, ruler_boxes, even_rows, whole_fit, whole_row, key_button_f)
+                              key_name_y, recheck_pointer, ruler_boxes, even_rows, whole_fit, whole_row, key_button_f)
 from notes.custom import box_frame
 from notes.hzbass import sound_span
 from notes.meter import bar_lines, beat_lines, sigs_of
@@ -381,8 +381,10 @@ class HzView:
         for k in range(k_lo, k_hi + 1):  # (the names after the keys, so small rows don't cover them)
             y = self.y_of(k)
             if k % 12 == 0 or (self.sy >= 15 * s and k % 12 not in BLACK):
-                c.create_text(kb - 3, y + self.sy / 2, text=note_name(k), anchor="e", fill=look.HZ_KEY_TEXT,
-                              font=look.font(7, "bold" if k % 12 == 0 else "normal", fit=True))
+                font = look.font(7, "bold" if k % 12 == 0 else "normal", fit=True)
+                ny = key_name_y(font, y, y + self.sy, self.sy)
+                if ny is not None:  # (a row too short for its name: none)
+                    c.create_text(kb - 3, ny, text=note_name(k), anchor="se", fill=look.HZ_KEY_TEXT, font=font)
         c.create_line(kb, 0, kb, h, fill=look.HZ_EDGE)
         c.create_rectangle(0, 0, w, rh, fill=look.HZ_RULER, outline="")  # bar numbers
         # (by the time signatures; zoomed far out every 2nd, 4th... bar number, so they don't run into each other)

@@ -444,3 +444,25 @@ def note_name(p, edo=False):
         # as the 31-EDO template plays it, user 2026-11-10)
         return f"{EDO_NAMES[p % EDO]}{p // EDO - 1 + (p % EDO == EDO - 1)}"
     return f"{NOTE_NAMES[p % 12]}{p // 12 - 1}"
+
+
+_KEY_FONTS = {}  # font -> (descent, capital letters' height), for key_name_y
+
+
+def key_name_y(font, y0, y1, sy):
+    """Where a key's name goes on the keyboard (both piano rolls): canvas y of the text's bottom, anchor "s*", or
+    None when rows at this zoom (sy px a key) are too short for it (user 2026-11-27: hidden then, never reaching
+    into the row above or onto the line under it). Decided by the SHORTEST row at this zoom, floor(sy), never by
+    this row's own rounded height: rows of 9 and 10 px side by side showed some names and not others (user). Its
+    capitals are centred on the key row y0..y1, 1 px clear of the line drawn at y1."""
+    m = _KEY_FONTS.get(font)
+    if m is None:
+        import tkinter.font as tkfont
+        f = tkfont.Font(font=font)
+        # (capitals ~ 0.65 of the ascent, which holds the font's leading; checked: dev/scratch/key_names.py)
+        m = _KEY_FONTS[font] = (f.metrics("descent"), f.metrics("ascent") * 0.65)
+    descent, cap = m
+    if math.floor(sy + 1e-9) - 2 < cap:  # (+1: round letters like C reach a pixel past the capitals' height)
+        return None
+    base = min((y0 + y1 + cap) / 2, y1 - 1)  # (the letters' baseline)
+    return round(base) + descent

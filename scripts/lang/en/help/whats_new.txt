@@ -32,6 +32,8 @@ What's new:
 
 • Fixed: a Keep timing part drawn far faster than the tempo heard before it (like 60,000,000 BPM over a part heard at 125) could make Export MIDI run out of memory.
 
+• Fixed: the key names on the piano keys (C3, C4...) sat on or across the line under their key at many zoom levels, in the piano roll and the Hz bass window. They now always fit inside their own key, and zoomed out too far for that they're left out.
+
 • Faster: a Liquify set to Shape updates faster on fine grids.
 
 • Faster: Export MIDI of very big projects is about a tenth quicker (32 million notes: 1.6 s → 1.45 s).
