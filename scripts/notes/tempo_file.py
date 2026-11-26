@@ -1365,8 +1365,10 @@ def _fit_bar_lines(gaps, keeps, bars, lengths):
         ms, ps, js, kk, tt, dk = (x[inside] for x in (ms, ps, js, kk, tt, dk))
         if not len(ms):
             return
-    order_m = np.argsort(ms, kind="stable")
-    ms, ps, js, dk, kk, tt = (x[order_m] for x in (ms, ps, js, dk, kk, tt))
+    if len(ms) > 1 and not bool((ms[1:] >= ms[:-1]).all()):  # (parts come in order, their gaps too: usually
+        # sorted already, and a stable sort of sorted bars changes nothing; PLAN export in pieces: 6 copies saved)
+        order_m = np.argsort(ms, kind="stable")
+        ms, ps, js, dk, kk, tt = (x[order_m] for x in (ms, ps, js, dk, kk, tt))
     fast = getattr(speed.loops(), "fit_bars", None)  # (compiled: the walk below in one go, the same nudges; PLAN
     share = None if fast is None else fast(ms, dk, kk, tt, bars, lengths, NUDGE, MAX_US)  # fit bar lines C)
     if share is not None:
