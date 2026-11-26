@@ -18,6 +18,8 @@ What's new:
 
 • Faster: very long curved catch-ups get ready about 10 times faster (200,000 beats at PPQ 32767: 6.6 s → 0.65 s), exporting huge Keep timing parts takes about a third to a quarter of the time, and long formula tempo ramps work out about 6 times faster.
 
+• Faster: Export MIDI of very big projects is about a tenth quicker (32 million notes: 1.6 s → 1.45 s).
+
 • Faster: Load MIDI reads big MIDI files faster, most of all files with a few huge tracks, and uses half of the computer's threads, so other programs keep running smoothly on smaller PCs.
 
 • Faster: drawn shapes with many coloured areas make their notes up to 3 to 4 times faster, so projects holding them open sooner, and an edit's notes made in the background no longer wait for older ones that aren't wanted any more.

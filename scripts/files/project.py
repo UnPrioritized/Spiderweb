@@ -1893,11 +1893,14 @@ class ProjectFiles:
         fine = fine_owners(self.shapes) if len(notes) else []
         parts = finer_parts(self.tempo, bpm, ppq, int(notes[:, 1].max())) if fine else []
         anchors = notes[~swapped(notes, fine, parts)] if parts else notes
-        ticks = np.concatenate([anchors[:, 0], anchors[:, 1]])
-        loose = np.concatenate([np.zeros(0, np.int64)] + [np.array([m[0] for m in ms], np.int64)
-                                                         for ms in cc.values()])  # (CC: give way, user)
-        if upto is not None:
-            ticks, loose = ticks[ticks <= upto], loose[loose <= upto]
+        if has_tempo(self.tempo):
+            ticks = np.concatenate([anchors[:, 0], anchors[:, 1]])
+            loose = np.concatenate([np.zeros(0, np.int64)] + [np.array([m[0] for m in ms], np.int64)
+                                                             for ms in cc.values()])  # (CC: give way, user)
+            if upto is not None:
+                ticks, loose = ticks[ticks <= upto], loose[loose <= upto]
+        else:  # (no tempo line: file_plan reads none of them; 32 M notes' ticks cost 0.1 s for nothing)
+            ticks = loose = np.zeros(0, np.int64)
         if has_tempo(self.tempo):  # (a long Keep timing part of many notes takes a moment)
             self.busy(tr("project.tempo_working"))
         try:

@@ -21,6 +21,7 @@ TRACK_WORKERS = 8  # tracks made side by side (with the speed-ups)
 AHEAD_NOTES = 16_000_000  # notes in tracks under way / made ahead of the one written at most (~64 bytes each
 # while made: the sort's arrays, ~8 bytes once made)
 JOB_NOTES = 200_000  # small tracks made together in jobs of about this many notes
+SORT_OWN_FROM = 1_000_000  # notes from which the tracks' sort is the own loops' (key_order_cores; below: NumPy's)
 
 
 def track_events(notes, ch):
@@ -320,9 +321,14 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
     # (an empty Track 1 among them, track_slots' least: the own tracks' notes numbered past it)
     notes, autos, count, at, chans = own_compact(notes, floor=max((t + 1 for t in tracks if type(t) is not dict),
                                                                   default=0), chans=True)
+    fast = loops()
     if count > 1:  # (one sort finds every track's notes, in their own order)
-        slots = notes[:, 4].astype(np.int16 if count < 2 ** 15 else np.int64)
-        order = np.argsort(slots, kind="stable")
+        if fast is not None and len(notes) >= SORT_OWN_FROM:  # (the own counting pass: the same order, 1.3-1.8x)
+            slots = np.ascontiguousarray(notes[:, 4])
+            order = fast.key_order_cores(slots, slots, slots, slots)
+        else:
+            slots = notes[:, 4].astype(np.int16 if count < 2 ** 15 else np.int64)
+            order = np.argsort(slots, kind="stable")
         cuts = np.zeros(count + 1, np.int64)
         np.cumsum(np.bincount(slots, minlength=count), out=cuts[1:])
         del slots
@@ -330,7 +336,6 @@ def _pieces(notes, tracks, use10, start, cc, ports=None, ends=False):
     # (a track of yours given a port in Track Properties: every track says its port, A too, so no player carries
     # one over from the track before; without one the file stays as it always was)
     ported = any(type(t) is dict and t.get("port") for t in tracks)
-    fast = loops()
     if fast is not None and (not len(notes) or notes[:, 0].min() < 0):  # (the radix sort: ticks from 0 only)
         fast = None
     if fast is not None:
