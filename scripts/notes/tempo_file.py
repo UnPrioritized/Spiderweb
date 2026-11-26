@@ -553,6 +553,22 @@ def _keep_long(a, e, u, mine, part, segs, seg_starts, ts, bs, ls):
     return [n, total, k, drawn], (int(u) if heard is None else heard), dense, gave
 
 
+FILE_TICKS_MOST = 1 << 27  # a short Keep timing part goes the runs way past this (lists of 1 GB each)
+
+
+def _file_huge(a, n, k, drawn, every):
+    """A short Keep timing part (drawn per tick from a) whose file side is too big for the per-tick ways: a gap of
+    more than FILE_TICKS_MOST file ticks (gap_plan's lists hold one entry a file tick of the gap) or curved gaps of
+    more than that many steps all told. Below it they stay as they were (the runs way may pick other values)."""
+    if not len(k) or int(k.max()) > FILE_TICKS_MOST:
+        return bool(len(k))
+    if int(k.sum()) // every <= FILE_TICKS_MOST:
+        return False
+    changes = np.flatnonzero(drawn[1:] != drawn[:-1]) + 1 + a  # (as file_plan's slow: gaps over a drawn change)
+    curved = (k > every) & (np.searchsorted(changes, n[:-1], "right") < np.searchsorted(changes, n[1:], "left"))
+    return int((k[curved] // every).sum()) > FILE_TICKS_MOST
+
+
 def _long_gaps(buf, n, total, k, drawn, every):
     """file_plan's gap fitting for a part past KEEP_TICKS_MOST (drawn = RunSet), by runs: a gap over a steady drawn
     tempo (or no longer than `every` file ticks) = its flat pair (or a tick more / fewer, like the per-tick way, or
@@ -762,6 +778,11 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         pre = []
         every = every_at.get(a, every_all)
         long_part = isinstance(drawn, RunSet)
+        if not long_part and _file_huge(a, n, k, drawn, max(1, int(every))):  # (short here but huge in the FILE:
+            # drawn far faster than heard, e.g. 60 M BPM over a part heard at 125 = billions of file ticks; the
+            # per-tick ways made lists that long and ran out of memory, 2026-11-26): by runs too
+            drawn = RunSet(*_runs_arrays(_cut(segs, a, e, seg_starts)))
+            long_part = True
         if long_part:  # (a part past KEEP_TICKS_MOST: by runs, PLAN stage E)
             if _long_gaps(buf, n, total, k, drawn, max(1, int(every))):
                 out["coarse_keep"].append(a / ppq)
@@ -1112,8 +1133,10 @@ def _fit_length(d, lengths):
     """The bar length nearest d (file ticks) that time signatures can write: as many of the longest as needed, then
     the nearest one (the shorter on a tie); d itself when it fits."""
     longest, base = int(lengths[-1]), 0
-    while d > longest and not (lengths[min(np.searchsorted(lengths, d), len(lengths) - 1)] == d):
-        d, base = d - longest, base + longest
+    if d > longest:  # (as many of the longest as leave at most one: one division, not one at a time = a huge-tick
+        # song's bars, ~2,000 longest each, took 13 ms a bar; PLAN fit bar lines A)
+        base = (d - 1) // longest * longest
+        d -= base
     i = int(np.searchsorted(lengths, d))
     if i < len(lengths) and lengths[i] == d:
         return base + int(d)
@@ -1261,12 +1284,13 @@ def _signatures(keeps, tempo, bars, ppq, to_file):
         sig = mine if f1 - f0 == int(bars[m + 1] - bars[m]) else signature(f1 - f0, ppq, mine[1])
         if sig is None:  # (too long for one signature: as many of the longest as fit, then the rest)
             at, rest = f0, f1 - f0
-            while rest > longest and signature(rest, ppq) is None:
+            if rest > longest:  # (no signature fits past the longest: all those bars at once, one division)
                 s = signature(longest, ppq)
                 if s != prev:
                     out.append((at, *s))
                     prev = s
-                at, rest = at + longest, rest - longest
+                skip = (rest - 1) // longest * longest
+                at, rest = at + skip, rest - skip
             sig = signature(rest, ppq)
             if sig is None:  # (the rest fits none: the next bar writes its own again, so its line is right)
                 prev = None
