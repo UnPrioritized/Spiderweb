@@ -43,7 +43,7 @@ from notes.pen import clean_pen
 from notes.gliss import clean_gliss, for_new
 from notes.tempo import clamp_bpm, clean_tempo, empty as empty_tempo, has_tempo, tempo_text
 from notes.meter import DEFAULT as DEFAULT_SIG, clean_sigs, sigs_of
-from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts
+from notes.tempo_file import bar_line, bar_ticks, file_plan, finer_parts, rows_where
 from notes.text import TEXT_DEFAULTS, clean_text, rejoin_old, tag_texts
 from notes import engine  # (engine.edo_lanes: 31-EDO "Overlaps keep their pitch")
 from notes import loaded_map  # (a loaded MIDI's ticks as shown after Change visual time signature)
@@ -83,7 +83,7 @@ def domino_sigs(sigs, first, ppq):
     Domino would start a new bar there and shift every bar line after it). Key signatures all go (no bars)."""
     if bar_line(sigs, first, ppq) == first:
         return sigs
-    return [s for s in sigs if s[0] > first]
+    return rows_where(sigs, above=first)  # (a big Rows table stays one: hunt 2026-11-26)
 
 
 def backup_path(autosave):
@@ -2120,8 +2120,8 @@ class ProjectFiles:
         # (changes past the song's end make no sound: left out, Domino's ticks stop; signatures too without a tempo
         # line: one far past the song failed the export, hunt 2026-10-23)
         last = min(max([int(notes[:, 1].max())] + [ms[-1][0] for ms in cc.values() if ms]) + beats * ppq, LONGEST)
-        tempo = [e for e in plan["events"] if e[0] <= last] if has_tempo(self.tempo) else None
-        sigs = [s for s in plan["sigs"] if s[0] <= last]
+        tempo = rows_where(plan["events"], upto=last) if has_tempo(self.tempo) else None  # (tables stay tables:
+        sigs = rows_where(plan["sigs"], upto=last)  # tempo_items thins them as arrays, hunt 2026-11-26)
         keys = [k for k in plan["keys"] if k[0] <= last]
         if not self.write_out(path, "project.saving_dms", lambda: write_bytes(
                 path, dms_data(notes, ppq, bpm, beats, self.picture_use10, drums=not self.all16(),
@@ -2542,6 +2542,14 @@ class ProjectFiles:
         tempo = plan["events"] if plan else [(0, round(60_000_000 / 120))]  # (no tempo line: MIDI's 120 BPM)
 
         def stretch(rows_in):  # (the one in force at first on tick 0, then the changes inside the copy)
+            table = getattr(rows_in, "arr", None)
+            if table is not None:  # (a Rows table: the same rows picked as arrays, never every row as a tuple;
+                a = table[np.lexsort(table.T[::-1])]  # hunt 2026-11-26)
+                t = a[:, 0]
+                i = int(np.searchsorted(t, first, "right"))
+                inside = a[(t > first) & (t < end)]
+                return ([(0,) + tuple(r[1:]) for r in a[max(0, i - 1):i].tolist()]
+                        + [(r[0] - first,) + tuple(r[1:]) for r in inside.tolist()])
             rows_in = sorted(rows_in)
             now = [r for r in rows_in if r[0] <= first][-1:]
             return [(0,) + tuple(r[1:]) for r in now] + [(r[0] - first,) + tuple(r[1:]) for r in rows_in

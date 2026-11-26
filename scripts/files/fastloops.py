@@ -4943,14 +4943,12 @@ def gap_plan(j, last, a, n, total, k, drawn, pref, every, most, safe_reach, pair
     """tempo_file.file_plan's loop over one Keep timing part's gaps from gap j: each gap's file tempo as runs into
     lens / vals from pos (each gap its own runs), k[j] changed where its pair needs a tick more or less, as that
     loop does. last = the value the gap before ended on (-1 = none). -> (number of gaps, last, pos); a smaller
-    gap number = stopped there: lens / vals have no room for its most runs (kj + 10; the caller keeps the runs,
-    makes room and goes on from there)."""
+    gap number = stopped there: lens / vals have no room for its most runs (2 for its pair, else kj + 10; the
+    caller keeps the runs, makes room and goes on from there)."""
     g = len(k)
     while j < g:
         n0, n1 = n[j], n[j + 1]
         kj, tj = k[j], total[j]
-        if pos + kj + 10 > len(lens):  # (no room for this gap's most runs: one per tick: the caller makes room)
-            return j, last, pos
         curved = kj > every and pref[n1 - a - 1] - pref[n0 - a] > 0
         least = _least1(tj, most)
         kk = max(kj, 1)
@@ -4958,8 +4956,11 @@ def gap_plan(j, last, a, n, total, k, drawn, pref, every, most, safe_reach, pair
         exact = tj % kk == 0
         qb = qa if exact else qa + 1
         qka = kj if exact else kj * qb - tj
-        if (not curved and kj >= 1 and qa >= 1 and qb <= most and least <= kj and kj <= tj
-                and _domino_safe1(min(max(qa, 1), most)) and _domino_safe1(min(max(qb, 1), most))):
+        quick = (not curved and kj >= 1 and qa >= 1 and qb <= most and least <= kj and kj <= tj
+                 and _domino_safe1(min(max(qa, 1), most)) and _domino_safe1(min(max(qb, 1), most)))
+        if pos + (2 if quick else kj + 10) > len(lens):  # (no room for this gap's most runs: the caller makes room;
+            return j, last, pos  # kj for every gap made lists of billions, hunt 2026-11-26)
+        if quick:
             if 0 < qka < kj and last != -1 and qa != last and qb == last:
                 lens[pos], vals[pos] = kj - qka, qb
                 lens[pos + 1], vals[pos + 1] = qka, qa

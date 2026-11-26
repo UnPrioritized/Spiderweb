@@ -554,9 +554,6 @@ pub fn gap_plan(j: i64, last: i64, a: i64, n: &[i64], total: &[i64], k: &mut [i6
         let ju = j as usize;
         let (n0, n1) = (n[ju], n[ju + 1]);
         let (mut kj, tj) = (k[ju], total[ju]);
-        if pos + kj + 10 > lens.len() as i64 {
-            return put(res, j, last, pos);
-        }
         let curved = kj > every && pref[(n1 - a - 1) as usize] - pref[(n0 - a) as usize] > 0;
         let least = least1(tj, most);
         let kk = imax(kj, 1);
@@ -564,8 +561,14 @@ pub fn gap_plan(j: i64, last: i64, a: i64, n: &[i64], total: &[i64], k: &mut [i6
         let exact = fmodi(tj, kk) == 0;
         let qb = if exact { qa } else { qa + 1 };
         let qka = if exact { kj } else { kj * qb - tj };
-        if !curved && kj >= 1 && qa >= 1 && qb <= most && least <= kj && kj <= tj
-            && domino_safe1(imin(imax(qa, 1), most)) && domino_safe1(imin(imax(qb, 1), most)) {
+        let quick = !curved && kj >= 1 && qa >= 1 && qb <= most && least <= kj && kj <= tj
+            && domino_safe1(imin(imax(qa, 1), most)) && domino_safe1(imin(imax(qb, 1), most));
+        // (room for what this gap writes: 2 runs for its pair, else a run a file tick at most; asking kj for every
+        // gap made Python make lists of billions for a fast part of short gaps, hunt 2026-11-26)
+        if pos + if quick { 2 } else { kj + 10 } > lens.len() as i64 {
+            return put(res, j, last, pos);
+        }
+        if quick {
             let p = pos as usize;
             if 0 < qka && qka < kj && last != -1 && qa != last && qb == last {
                 lens[p] = kj - qka;

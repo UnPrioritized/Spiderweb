@@ -87,6 +87,19 @@ def file_keys(tempo, ppq):
 def bar_line(sigs, tick, ppq, after=False):
     """The file's bar line at or before tick (after: at or after it), by the time signatures [(tick, top, bottom
     power)] (file_plan's "sigs")."""
+    table = getattr(sigs, "arr", None)
+    if table is not None and len(table) > 64:  # (a Rows table of millions of fitted bars: found by halving, the
+        # same row as sorted() + counting; hunt 2026-11-26: 2 M rows as tuples took 2.8 s)
+        a = table[np.lexsort((table[:, 2], table[:, 1], table[:, 0]))]
+        i = max(0, int(np.searchsorted(a[:, 0], tick, "right")) - 1)
+        at, top, power = (int(x) for x in a[i])
+        unit = max(1, top * 4 * ppq // 2 ** power)
+        line = at + (tick - at) // unit * unit
+        if after and line < tick:
+            line += unit
+            if i + 1 < len(a):
+                line = min(line, int(a[i + 1, 0]))
+        return line
     sigs = sorted(sigs)
     i = max(0, [s[0] <= tick for s in sigs].count(True) - 1)
     at, top, power = sigs[i]
@@ -241,6 +254,22 @@ class Rows:
 
     def __repr__(self):
         return f"Rows({self.arr.tolist()!r})" if len(self) <= 16 else f"Rows(<{len(self):,} rows>)"
+
+
+def rows_where(rows, above=None, upto=None):
+    """rows (a Rows table or a list of tuples) with only the rows whose tick is > above and <= upto (None = no
+    limit): a Rows stays one table (Export / Copy to Domino of millions of fitted bars, hunt 2026-11-26), a list
+    stays a list."""
+    table = getattr(rows, "arr", None)
+    if table is not None:
+        t = table[:, 0]
+        keep = np.ones(len(t), bool)
+        if above is not None:
+            keep &= t > above
+        if upto is not None:
+            keep &= t <= upto
+        return Rows(table[keep])
+    return [r for r in rows if (above is None or r[0] > above) and (upto is None or r[0] <= upto)]
 
 
 def _seg_events(segs):
@@ -498,8 +527,13 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     keeps = [(a, e, _heard_long(lay, n, a, e) if e - a > KEEP_TICKS_MOST else keep_heard(lay, n, a, e))
              for n, a, e in keeps if e > a]
     fit_bars = bars_fit(tempo, ppq, max([last_tick] + [e for _, e, _ in keeps]))
-    if fit_bars and bars is None:  # (bar lines by the time signatures: fitting works inside each one, user)
-        bars = bar_ticks(tempo, ppq, max([last_tick] + [e for _, e, _ in keeps]))
+    if fit_bars and bars is None:  # (bar lines by the time signatures: fitting works inside each one, user; only
+        # as far as the Keep timing parts reach, never to the last note: hunt 2026-11-26, a far note on a huge-tick
+        # song made 16 M bar lines a tempo edit for nothing; capped at BARS_MOST. No part: none needed)
+        if keeps:
+            bars = bar_ticks(tempo, ppq, bars_upto(tempo, ppq, max(e for _, e, _ in keeps)))
+        else:
+            fit_bars = False
     # gaps between anchors, part by part: (first tick, end tick, time = ticks x heard us, file ticks)
     gaps, dense, gave, times = [], [], [], []
     starts = [s[0] for s in segs]
@@ -641,17 +675,19 @@ def _keep_long(a, e, u, mine, part, segs, seg_starts, ts, bs, ls):
 FILE_TICKS_MOST = 1 << 27  # a short Keep timing part goes the runs way past this (lists of 1 GB each)
 
 
-def _file_huge(a, n, k, drawn, every):
+def _file_huge(a, n, k, total, drawn, every):
     """A short Keep timing part (drawn per tick from a) whose file side is too big for the per-tick ways: a gap of
-    more than FILE_TICKS_MOST file ticks (gap_plan's lists hold one entry a file tick of the gap) or curved gaps of
-    more than that many steps all told. Below it they stay as they were (the runs way may pick other values)."""
-    if not len(k) or int(k.max()) > FILE_TICKS_MOST:
-        return bool(len(k))
-    if int(k.sum()) // every <= FILE_TICKS_MOST:
+    more than FILE_TICKS_MOST file ticks NOT done by its two values (its lists hold one entry a file tick; a steady
+    gap's pair needs none since the hunt fix 2026-11-26) or curved gaps of more than that many steps all told.
+    Below it they stay as they were (the runs way may pick other values)."""
+    if not len(k) or (int(k.max()) <= FILE_TICKS_MOST and int(k.sum()) // every <= FILE_TICKS_MOST):
         return False
     changes = np.flatnonzero(drawn[1:] != drawn[:-1]) + 1 + a  # (as file_plan's slow: gaps over a drawn change)
     curved = (k > every) & (np.searchsorted(changes, n[:-1], "right") < np.searchsorted(changes, n[1:], "left"))
-    return int((k[curved] // every).sum()) > FILE_TICKS_MOST
+    if int((k[curved] // every).sum()) > FILE_TICKS_MOST:
+        return True
+    big = k > FILE_TICKS_MOST
+    return bool(big.any()) and not bool((_quick_pairs(k[big], total[big])[0] & ~curved[big]).all())
 
 
 def _long_gaps(buf, n, total, k, drawn, every):
@@ -761,12 +797,12 @@ def limit_spots(tempo, base, ppq, beats, ticks, heard=None, loose=None):
     # (ds5: beat_tick is steady up with the beat: the last tick is the latest beat's; one read, not 190,000)
     upto = max([int(t.max()) for t in (ticks, loose) if len(t)]
                + ([beat_tick(max(p[0] for p in tempo["points"]), ppq)] if tempo["points"] else []))
-    bars = bar_ticks(tempo, ppq, bars_upto(tempo, ppq, upto)) if bars_fit(tempo, ppq, upto) else None
-    _, _, _, keeps, gaps, out["dense"], out["gave"], _ = keep_gaps(tempo, base, ppq, beats, ticks, bars, loose,
+    # (bar lines only as far as the Keep timing parts reach: keep_gaps makes them; hunt 2026-11-26)
+    _, _, _, keeps, gaps, out["dense"], out["gave"], _ = keep_gaps(tempo, base, ppq, beats, ticks, None, loose,
                                                                    heard)
     if not gaps or not bars_fit(tempo, ppq, max([upto] + [e for _, e, _ in keeps])):
         return out
-    bars = bar_ticks(tempo, ppq, bars_upto(tempo, ppq, max(upto, max(e for _, e, _ in keeps))))
+    bars = bar_ticks(tempo, ppq, bars_upto(tempo, ppq, max(e for _, e, _ in keeps)))
     _fit_bar_lines(gaps, keeps, bars, bar_lengths(ppq))
     zero = np.zeros(1, np.int64)
     bp_n, bp_f, offset = [zero], [zero], 0  # (the file's ticks at the anchors, as file_plan's map; arrays, D2)
@@ -860,9 +896,10 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     # (ds5: beat_tick is steady up with the beat: the last tick is the latest beat's; one read, not 190,000)
     upto = max([int(t.max()) for t in (ticks, loose) if len(t)]
                + ([beat_tick(max(p[0] for p in tempo["points"]), ppq)] if tempo["points"] else []))
-    bars = bar_ticks(tempo, ppq, bars_upto(tempo, ppq, upto)) if bars_fit(tempo, ppq, upto) else None
+    # (bar lines only as far as the Keep timing parts reach: keep_gaps makes them; hunt 2026-11-26)
+    bars = None
     lay, segs, out["bad"], keeps, gaps, out["dense"], out["gave"], times = keep_gaps(tempo, base, ppq, beats, ticks,
-                                                                                    bars, loose, heard)
+                                                                                    None, loose, heard)
     end = segs[-1][1]
     # (long curved catch-ups stepped longer than their Interval: the export says so, user 2026-11-26)
     out["coarse"] = [st["line"] for st, cp in lay["worked"] if cp.get("ok") and cp.get("coarse")]
@@ -873,7 +910,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     fit_bars = bars_fit(tempo, ppq, max([upto] + [e for _, e, _ in keeps]))
     if fit_bars and gaps:
         if keeps:  # (bar lines far enough for every part, up to bar BARS_MOST: past it unfitted + said)
-            reach = max(upto, max(e for _, e, _ in keeps))
+            reach = max(e for _, e, _ in keeps)  # (never to the last note: hunt 2026-11-26)
             cut = bars_upto(tempo, ppq, reach)
             bars = bar_ticks(tempo, ppq, cut)
             if cut < max(e for _, e, _ in keeps):
@@ -891,7 +928,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         pre = []
         every = every_at.get(a, every_all)
         long_part = isinstance(drawn, RunSet)
-        if not long_part and _file_huge(a, n, k, drawn, max(1, int(every))):  # (short here but huge in the FILE:
+        if not long_part and _file_huge(a, n, k, total, drawn, max(1, int(every))):  # (short here but huge in the FILE:
             # drawn far faster than heard, e.g. 60 M BPM over a part heard at 125 = billions of file ticks; the
             # per-tick ways made lists that long and ran out of memory, 2026-11-26): by runs too
             drawn = RunSet(*_runs_arrays(_cut(segs, a, e, seg_starts)))
@@ -954,10 +991,14 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         else:  # (compiled: gap_plan does the gaps, the same numbers)
             pref = np.concatenate([[0], np.cumsum(drawn[1:] != drawn[:-1], dtype=np.int64)])
             # (room for the usual runs: two a pair, one a curve's step; a gap whose values change on every tick
-            # (_fit_exact) needs more: gap_plan stops before it and the room grows)
-            room = 3 * len(k) + 16 + (int((k // every).sum()) if every > 1 else 0)
+            # (_fit_exact) needs more: gap_plan stops before it and the room grows. Steps only for CURVED gaps and
+            # per-tick room only for gaps not done by their two values: counting every gap's ticks / Interval made
+            # lists of billions for a fast part of short steady gaps, hunt 2026-11-26)
+            curved = (k > every) & (pref[n[1:] - a - 1] - pref[n[:-1] - a] > 0)
+            quick = _quick_pairs(k, total)[0] & ~curved
+            room = 3 * len(k) + 16 + (int((k[curved] // every).sum()) if every > 1 else 0)
             lens_out, vals_out = np.empty(room, np.int64), np.empty(room, np.int64)
-            got_out = np.empty(int(k.max()) + 9, np.int64)
+            got_out = np.empty((int(k[~quick].max()) if (~quick).any() else 0) + 9, np.int64)
             j, last = 0, -1
             while True:
                 j, last, pos = loops.gap_plan(j, last, a, n, total, k, drawn, pref, int(every), MAX_US, SAFE_REACH,
@@ -966,7 +1007,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
                     buf.add_runs(lens_out[:pos].copy(), vals_out[:pos].copy())
                 if j >= len(k):
                     break
-                need = int(k[j]) + 10
+                need = 2 if quick[j] else int(k[j]) + 10  # (as gap_plan's own room check)
                 if need > len(lens_out):
                     lens_out, vals_out = np.empty(need, np.int64), np.empty(need, np.int64)
                 elif not pos:  # (an empty room and still stopped: never happens; the NumPy way, to be safe)
