@@ -355,12 +355,19 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     FOLLOW_KINDS = frozenset(("move", "handle", "resize", "skew", "stretch", "create", "segment", "arcdrag", "wall",
                               "place", "free", "rccentre", "slice", "knife"))
 
-    # what a held drag (self.drag[0]) hands its mouse moves / its let go to (on_drag / on_release); each tool's
-    # press, drag and let go live together in its own part (roll_drawtools...)
+    # what a held drag (self.drag[0]) hands its mouse moves / its let go to (on_drag / on_release): each tool's
+    # press, drag and let go live together in its own part (roll_select, roll_edits, roll_drawtools, roll_slice,
+    # roll_hz, roll_lasso, roll_text, roll_gliss, roll_sustain, roll_path, roll_centre, roll_warp, roll_liquify).
+    # A kind in no table: nothing on a move (warp_none: a shape picked, never moved); only the shared end at let go.
+    LASSO_KINDS = ("lasso_free", "lasso_poly", "lasso_magnet", "lasso_point")
     DRAG_KINDS = {"create": "drag_create", "wall": "drag_wall", "segment": "drag_segment", "arcdrag": "drag_segment",
                   "place": "drag_place", "free": "free_drag", "slice": "drag_slice", "hzkeys": "hz_drag",
                   "move": "drag_move", "box": "drag_box", "seek": "drag_seek", "handle": "drag_handle",
-                  "resize": "drag_resize", "skew": "drag_skew", "turn": "drag_turn", "stretch": "stretch_to"}
+                  "resize": "drag_resize", "skew": "drag_skew", "turn": "drag_turn", "stretch": "stretch_to",
+                  "pan": "pan_to", "sustop": "stop_drag", "path": "path_drag", "rccentre": "centre_drag",
+                  "liquify": "liquify_drag", "warp": "warp_drag", "warp_box": "warp_box_drag", "textsel": "text_drag",
+                  "gliss_copies": "gliss_drag", "gliss_len": "gliss_drag", "keyhold": "key_hold_drag",
+                  **dict.fromkeys(LASSO_KINDS, "drag_lasso")}
     RELEASE_KINDS = {"create": "release_create", "wall": "release_wall", "segment": "release_segment",
                      "arcdrag": "release_arcdrag", "place": "release_place", "free": "release_free",
                      "hzkeys": "hz_release", "move": "release_move", "box": "release_box", "seek": "release_seek",
@@ -369,11 +376,42 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     # ... what runs first at a let go, before the notes catch up (a snap worked out, a big funnel's question)
     RELEASE_FIRST = {"resize": "release_resize_first", "handle": "release_handle_first"}
     # ... and the ones whose let go is all their own (none of on_release's shared end: Hz warnings, Even settle...)
-    RELEASE_ALONE = {"knife": "release_knife", "slice": "release_slice"}
+    RELEASE_ALONE = {"knife": "release_knife", "slice": "release_slice", "sustop": "release_sustop",
+                     "path": "release_path", "rccentre": "release_drop", "liquify": "liquify_release",
+                     "warp": "warp_release", "warp_none": "release_drop", "warp_box": "warp_box_release",
+                     **dict.fromkeys(LASSO_KINDS, "release_lasso")}
 
     def follows(self, kind):
         """True: the view goes along when this drag passes the edge (box_scroll); only with a Space setting on."""
         return kind in self.FOLLOW_KINDS and bool(self.room_keys() or self.room_beats())
+
+    def drag_lasso(self, e):
+        """A Lasso loop drawn / its point dragged (roll_lasso, shared with the drawer): past the edge the view
+        scrolls (box_scroll)."""
+        self.lasso_drag(e)
+        self.box_mouse = (e.x, e.y, e.state)
+        if self.box_timer is None:
+            self.box_timer = self.after_idle(self.box_scroll)
+
+    def release_lasso(self, e):
+        if self.box_timer:
+            self.after_cancel(self.box_timer)
+            self.box_timer = None
+        self.lasso_release(e)
+
+    def release_sustop(self, e):
+        """A sustained shape's stop line let go (roll_sustain)."""
+        self.stop_release(e)
+        self.drag = None
+
+    def release_path(self, e):
+        """Copy along a path's B / point let go (roll_path)."""
+        self.path_release(e)
+        self.drag = None
+
+    def release_drop(self, e):
+        """Let go of a drag with nothing more to do (the Clumps centre dot, a Warp click that picked a shape)."""
+        self.drag = None
 
     def ruler_box(self):
         """The ruler dragged sideways (any tool): a Select box over every key from where it was pressed, like many
@@ -1548,35 +1586,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.box_timer = self.after_idle(self.box_scroll)
         if e.state & 0x200 and kind != "pan":  # (the middle button held too: Tk gives the moves to the left button's
             self.pan_view(e)                     # drag, so the view moves here; what's held follows the mouse)
-        if kind == "pan":
-            self.pan_to(e)
-        elif kind == "sustop":
-            self.stop_drag(e)
-        elif kind == "path":
-            self.path_drag(e)
-        elif kind == "rccentre":
-            self.centre_drag(e)
-        elif kind == "liquify":
-            self.liquify_drag(e)
-        elif kind == "warp":
-            self.warp_drag(e)
-        elif kind == "warp_none":
-            pass
-        elif kind == "warp_box":
-            self.warp_box_drag(e)
-        elif kind.startswith("lasso"):
-            self.lasso_drag(e)
-            self.box_mouse = (e.x, e.y, e.state)  # (past the edge the view scrolls: box_scroll)
-            if self.box_timer is None:
-                self.box_timer = self.after_idle(self.box_scroll)
-        elif kind == "textsel":
-            self.text_drag(e)
-        elif kind in ("gliss_copies", "gliss_len"):
-            self.gliss_drag(e)
-        elif kind == "keyhold":
-            self.key_hold_drag(e)
-        elif kind in self.DRAG_KINDS:  # (each tool's own drag: roll_drawtools)
-            getattr(self, self.DRAG_KINDS[kind])(e)
+        held = self.DRAG_KINDS.get(kind)
+        if held:  # (each tool's own drag: see DRAG_KINDS)
+            getattr(self, held)(e)
 
     def on_release(self, e, second=False):
         """second: the click that finishes a shape started with a click (see follow)."""
@@ -1593,37 +1605,9 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             getattr(self, self.RELEASE_FIRST[kind])(e)
         if not getattr(self, "grid_job", None):  # (a snap being worked out: its notes come with it, grid_soon)
             self.app.catch_up_notes()
-        if kind == "sustop":
-            self.stop_release(e)
-            self.drag = None
+        if kind in self.RELEASE_ALONE:  # (let go on its own: nothing below runs)
+            getattr(self, self.RELEASE_ALONE[kind])(e)
             return
-        if kind == "path":
-            self.path_release(e)
-            self.drag = None
-            return
-        if kind == "rccentre":
-            self.drag = None
-            return
-        if kind == "liquify":
-            self.liquify_release(e)
-            return
-        if kind == "warp":
-            self.warp_release(e)
-            return
-        if kind == "warp_none":
-            self.drag = None
-            return
-        if kind == "warp_box":
-            self.warp_box_release(e)
-            return
-        if kind.startswith("lasso"):
-            if self.box_timer:
-                self.after_cancel(self.box_timer)
-                self.box_timer = None
-            self.lasso_release(e)
-            return
-        if kind in self.RELEASE_ALONE:  # (let go on its own: nothing below runs; roll_slice...)
-            return getattr(self, self.RELEASE_ALONE[kind])(e)
         still = False  # let go where it was pressed
         if kind in ("create", "place", "wall", "segment", "arcdrag", "hzkeys"):
             x, y = self.drag[2:4] if kind == "place" else self.drag[-2:]
@@ -1637,7 +1621,7 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         if (kind in ("box", "move") or kind in self.FOLLOW_KINDS) and self.box_timer:
             self.after_cancel(self.box_timer)
             self.box_timer = None
-        if kind in self.RELEASE_KINDS:  # (each tool's own let go: roll_select, roll_drawtools...)
+        if kind in self.RELEASE_KINDS:  # (each tool's own let go: see DRAG_KINDS)
             getattr(self, self.RELEASE_KINDS[kind])(e, still)
         if kind in ("handle", "move", "stretch"):
             self.app.sync_funnel()  # its note count
