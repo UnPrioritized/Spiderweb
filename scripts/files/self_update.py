@@ -132,6 +132,8 @@ def _fetch(url, most, path=None, progress=None, cancel=None):
                     got += block
                 if progress:
                     progress(done, size)
+            if size and done != size:  # (cut off by the other end: a connection problem, not a "bad file" alarm)
+                raise ConnectionError("download cut short")
         if cancel is not None and cancel.is_set():
             raise Refused("cancelled")
         if out:
@@ -206,7 +208,7 @@ def _download(release, progress, cancel):
         try:
             if progress:
                 progress(-1, 0)  # (the popup says "Unpacking…")
-            return unpack(part, version, cancel)
+            return unpack(part, version, cancel, (lambda n, total: progress(-1, total, n)) if progress else None)
         finally:
             try:
                 os.remove(part)
@@ -223,12 +225,12 @@ def _download(release, progress, cancel):
     return dest
 
 
-def unpack(zip_path, version, cancel=None):
+def unpack(zip_path, version, cancel=None, progress=None):
     """The checked zip's data/<version>/ beside the running one (files/folder_zip.py: own folder until whole); its
-    Spiderweb.exe saved as <exe>.new, README / licences beside the exe updated. Returns <exe>.new. Raises Refused
-    (nothing left behind)."""
+    Spiderweb.exe saved as <exe>.new, README / licences beside the exe updated. progress(files done, all). Returns
+    <exe>.new. Raises Refused (nothing left behind)."""
     new_exe = folder_zip.unpack(zip_path, version, DATA, exe_path() + ".new", cancel, keep=BUNDLE,
-                                top_to=os.path.dirname(exe_path()))
+                                top_to=os.path.dirname(exe_path()), progress=progress)
     UNPACKED[new_exe] = version
     return new_exe
 
@@ -346,9 +348,9 @@ def give_back(exe=None):
 
 
 def clean_leftovers():
-    """At start: an update's <exe>.old (the old program may still be ending: retried for a while on a thread),
-    <exe>.new / part files and, CLEAN_AFTER_S later, older data/<version> folders (exe: clean_old_versions); a
-    dropped source zip download's part files in Downloads (scripts)."""
+    """At start: an update's <exe>.old (the old program may still be ending: retried for a while on a thread) and
+    <exe>.new / part files (exe; older data/<version> folders: clean_after_start, once the window is up); a dropped
+    source zip download's part files in Downloads (scripts)."""
     if exe_mode():
         exe = exe_path()
         for p in glob.glob(glob.escape(exe) + ".new*"):  # (once, now: a download started later uses these names)
@@ -368,10 +370,16 @@ def clean_leftovers():
                     break
                 time.sleep(1)
         threading.Thread(target=work, daemon=True).start()
-        threading.Thread(target=lambda: (time.sleep(CLEAN_AFTER_S), clean_old_versions()), daemon=True,
-                         name="old versions").start()
         return
     _source_parts()
+
+
+def clean_after_start(app):
+    """(Folder version) Old version folders go CLEAN_AFTER_S after the main window is up (hunt 2026-11-26: counted
+    from the launch, a new version failing at start lost its fallback while its message was still showing)."""
+    if exe_mode():
+        app.after(int(CLEAN_AFTER_S * 1000), lambda: threading.Thread(target=clean_old_versions, daemon=True,
+                                                                 name="old versions").start())
 
 
 def clean_old_versions(now=None):

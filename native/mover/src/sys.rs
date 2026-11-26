@@ -38,6 +38,27 @@ extern "system" {
     fn BCryptCloseAlgorithmProvider(h: H, flags: u32) -> i32;
     fn BCryptGenRandom(alg: H, buf: *mut u8, len: u32, flags: u32) -> i32;
 }
+#[link(name = "kernel32")]
+extern "system" {
+    fn CreateMutexW(attr: *mut c_void, owner: c_int, name: *const u16) -> H;
+    fn GetLastError() -> u32;
+}
+
+/// True for the first mover in this folder; a second one started meanwhile (a double-click, or Spiderweb.exe
+/// clicked while an old version's update is still running) gets false and quietly ends (hunt 2026-11-26: two at
+/// once wrecked the new install). The lock lasts as long as this program.
+pub fn first_mover(top: &std::path::Path) -> bool {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;  // (FNV-1a of the folder's name, lower case: one name per folder)
+    for b in top.to_string_lossy().to_lowercase().bytes() {
+        h = (h ^ b as u64).wrapping_mul(0x100_0000_01b3);
+    }
+    let name = wide(&format!("Local\\Spiderweb-mover-{h:016x}"));
+    unsafe {
+        let m = CreateMutexW(std::ptr::null_mut(), 0, name.as_ptr());
+        m.is_null() || GetLastError() != 183  // (ERROR_ALREADY_EXISTS)
+    }
+}
+
 #[link(name = "user32")]
 extern "system" {
     fn MessageBoxW(hwnd: H, text: *const u16, caption: *const u16, kind: u32) -> c_int;

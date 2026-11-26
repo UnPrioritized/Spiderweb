@@ -162,7 +162,26 @@ fn main() {
              repair them now? Spiderweb downloads this version again and puts back only damaged files. Your own \
              files stay as they are.\n\nNo = start as usual.", &[]));
     }
+    let log = top.join("user").join("crash-now.log");
+    let stamp = || std::fs::metadata(&log).and_then(|m| m.modified()).ok();
+    let before = stamp();
     match run(&dll, &exe, &data, repair) {
+        // Ended with an error before Spiderweb even wrote its start line (crash-now.log untouched): damaged
+        // Python parts fail there with no word at all (hunt 2026-11-26). Repair mode's own plain message exits 3.
+        Some(code) if code != 0 && code != 3 && stamp() == before => {
+            if repair {
+                broken();
+            }
+            let ask = texts.get("starter.failed", None,
+                "Spiderweb couldn't start: some of its program files seem to be damaged.\n\nRepair them now? \
+                 Spiderweb downloads this version again and puts back only the damaged files. Your own files stay \
+                 as they are.", &[]);
+            if win::ask(&ask) {
+                let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+                let _ = std::process::Command::new(&exe).arg(REPAIR_ARG).args(args).current_dir(&top).spawn();
+            }
+            std::process::exit(code);
+        }
         Some(code) => std::process::exit(code),
         None => broken(),
     }

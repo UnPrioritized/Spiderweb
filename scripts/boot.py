@@ -12,9 +12,18 @@ sys.spiderweb_bundle = os.path.dirname(os.path.abspath(__file__))
 sys.argv[0] = sys.executable  # (Spiderweb.exe, as the user started it)
 if REPAIR in sys.argv:
     sys.argv.remove(REPAIR)
-    from files import repair  # noqa: E402
-
-    sys.exit(repair.run())
+    try:
+        from files import repair  # noqa: E402
+    except BaseException:  # (the repair's own files damaged: a plain message, the starter's words, then the page)
+        import ctypes
+        if ctypes.windll.user32.MessageBoxW(
+                None, "Spiderweb can't repair itself: its program files are too damaged.\n\nOpen the download page "
+                "to get Spiderweb again? Your settings, autosave and exports (the user and output folders) stay as "
+                "they are.", "Spiderweb", 0x04 | 0x10 | 0x10000) == 6:
+            import webbrowser
+            webbrowser.open("https://github.com/UnPrioritized/Spiderweb/releases/latest")
+        sys.exit(3)  # (3: said already; the starter adds nothing)
+    sys.exit(repair.run(sys.argv[1:]))
 import runpy  # noqa: E402
 
 try:

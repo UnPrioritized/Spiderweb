@@ -582,6 +582,11 @@ if __name__ == "__main__":
         from window.app import App
         app = App()
         label_window(app)
+        try:  # (the folder version's older versions: deleted once this one is up, never on a failed start)
+            from files.self_update import clean_after_start
+            clean_after_start(app)
+        except Exception:
+            pass
         open_files.start(app, given)
         if errors.last_crash is not None:  # (the run before crashed: said once)
             app.after(400, lambda: errors.say_crash(app))

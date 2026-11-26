@@ -846,6 +846,8 @@ class HelpWindow(tk.Toplevel):
         if BUNDLE:  # (the folder version: every program file against its fingerprint; files/repair.py)
             self.check_button = ttk.Button(row, text=tr("about.check_files"), takefocus=False, command=self.check_files)
             self.check_button.pack(side="left", padx=(8, 0))
+            if getattr(self.app, "files_checking", None):  # (a check still running: shown as such)
+                self.check_button.state(["disabled"])
         self.text.insert("end", "\n\n")
         self.embed(row)
 
@@ -855,34 +857,53 @@ class HelpWindow(tk.Toplevel):
         import threading
         from tkinter import messagebox
         from files import repair
-        button = self.check_button
-        button.state(["disabled"])
+        app = self.app
+        if getattr(app, "files_checking", None):  # (one check at a time: the About page shown again mid-check)
+            return
         seen, result = [0, 1], {}
+        app.files_checking = seen
+        self.check_button.state(["disabled"])
 
         def work():
             result["bad"] = repair.damaged(progress=lambda d, n: seen.__setitem__(slice(None), [d, n]))
         worker = threading.Thread(target=work, daemon=True)
         worker.start()
 
-        def poll():
-            if not button.winfo_exists():
-                return
+        def button():
+            """The About page's button as it is now (the page may have been left / shown again, Help closed)."""
+            h = getattr(app, "help_window", None)
+            b = getattr(h, "check_button", None) if h is not None else None
+            try:
+                return b if b is not None and b.winfo_exists() else None
+            except tk.TclError:
+                return None
+
+        def poll():  # (on the main window: the answer comes even when Help was closed meanwhile; hunt 2026-11-26)
+            b = button()
             if worker.is_alive():
-                button.configure(text=tr("about.checking", pct=seen[0] * 100 // max(1, seen[1])))
-                self.after(100, poll)
+                if b is not None:
+                    b.state(["disabled"])
+                    b.configure(text=tr("about.checking", pct=seen[0] * 100 // max(1, seen[1])))
+                app.after(100, poll)
                 return
-            button.configure(text=tr("about.check_files"))
-            button.state(["!disabled"])
+            app.files_checking = None
+            if b is not None:
+                b.configure(text=tr("about.check_files"))
+                b.state(["!disabled"])
+            h = getattr(app, "help_window", None)
+            try:
+                parent = h if h is not None and h.winfo_exists() else app
+            except tk.TclError:
+                parent = app
             bad = result.get("bad")
             if bad is None:
                 bad = ["files.txt"]
             if not bad:
-                messagebox.showinfo(tr("about.check_files"), trn("about.files_ok", seen[1], n=seen[1]), parent=self)
+                messagebox.showinfo(tr("about.check_files"), trn("about.files_ok", seen[1], n=seen[1]), parent=parent)
                 return
             shown = "\n".join(bad[:8]) + ("\n" + tr("about.files_more", n=len(bad) - 8) if len(bad) > 8 else "")
             if messagebox.askyesno(tr("about.check_files"), trn("about.files_bad", len(bad), n=len(bad),
-                                                                 files=shown), parent=self):
-                app = self.app
+                                                                 files=shown), parent=parent):
                 app.on_close()
                 try:
                     still = bool(app.winfo_exists())
@@ -890,7 +911,7 @@ class HelpWindow(tk.Toplevel):
                     still = False
                 if not still:
                     repair.start_repair()
-        self.after(100, poll)
+        app.after(100, poll)
 
     def add_clip(self, name):
         """Put clips/<name>.gif (playing) or clips/<name>.png (a still picture) at the end of the text. False if

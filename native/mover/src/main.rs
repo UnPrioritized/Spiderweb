@@ -41,6 +41,7 @@ pub enum Fail {
     WrongVersion,
     NewerList,
     StartFailed,
+    ForeignData,
     Other,
 }
 
@@ -56,6 +57,7 @@ impl Fail {
             Fail::WrongVersion => "wrong_version",
             Fail::NewerList => "newer_list",
             Fail::StartFailed => "start_failed",
+            Fail::ForeignData => "foreign_data",
             Fail::Other => "other",
         }
     }
@@ -154,10 +156,14 @@ fn set_up(top: &Path, exe: &Path, s: &ui::Shared) -> Result<PathBuf, Fail> {
     if sha.hex() != want {
         return Err(Fail::BadFile);
     }
-    s.done.store(u32::MAX, Ordering::Relaxed);
+    s.done.store(0, Ordering::Relaxed);
     say("mover.unpacking", &[("version", VERSION)]);
     let new_exe = PathBuf::from(format!("{}.new", exe.display()));
-    folder::unpack(&zip, VERSION, &data, &new_exe, top, &s.cancel, &mut |_, _| {})?;
+    folder::unpack(&zip, VERSION, &data, &new_exe, top, &s.cancel, &mut |n, all| {
+        s.done.store(n as u32, Ordering::Relaxed);  // (the bar moves file by file: hunt 2026-11-26)
+        s.all.store(all as u32, Ordering::Relaxed);
+        say("mover.unpacking_n", &[("version", VERSION), ("n", &n.to_string()), ("all", &all.to_string())]);
+    })?;
     let tmp = data.join(format!("version.txt.{}", sys::random_hex()));
     fs::write(&tmp, format!("{VERSION}\n")).and_then(|_| fs::rename(&tmp, data.join("version.txt"))).map_err(|_| {
         let _ = fs::remove_file(&tmp);
@@ -229,6 +235,9 @@ fn move_to(new_top: &Path, exe: &Path) -> i32 {
 }
 
 fn run(exe: &Path, top: &Path, args: &[String]) -> i32 {
+    if !sys::first_mover(top) {
+        return 0;  // (another mover is already setting this folder up)
+    }
     if let Some(i) = args.iter().position(|a| a == REMOVE) {
         if let Some(original) = args.get(i + 1).map(PathBuf::from) {  // (the downloaded copy this one came from)
             std::thread::spawn(move || retry(30, || folder::remove(&original)));
@@ -259,8 +268,8 @@ fn run(exe: &Path, top: &Path, args: &[String]) -> i32 {
             }
         }
     }
-    if existing && !folder::is_ours(&data) {
-        return give_up(exe, updating, Fail::Disk);
+    if existing && !folder::is_ours(&data) {  // (a "data" folder of the user's own: said so, never unpacked into)
+        return give_up(exe, updating, Fail::ForeignData);
     }
     let shared = Arc::new(ui::Shared {
         cancel: AtomicBool::new(false), finished: AtomicBool::new(false), done: AtomicU32::new(0),

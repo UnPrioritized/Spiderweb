@@ -82,6 +82,34 @@ def remove_listed(folder):
     return not os.path.exists(folder)
 
 
+def whole(folder):
+    """Every file its files.txt lists is there with its size (no list = not whole)."""
+    files = listed(folder)
+    if not files:
+        return False
+    for rel, (size, _) in files.items():
+        p = inside(folder, rel)
+        try:
+            if p is None or os.path.getsize(p) != size:
+                return False
+        except OSError:
+            return False
+    return True
+
+
+def retry(job, tries=25):
+    """job() until it works (a file another program holds for a moment); True if it did."""
+    import time
+    for n in range(tries):
+        try:
+            job()
+            return True
+        except OSError:
+            if n + 1 < tries:
+                time.sleep(0.2)
+    return False
+
+
 def is_ours(data):
     """A data/ folder Spiderweb made: missing, empty, or holding version.txt / version folders with a files.txt."""
     try:
@@ -97,7 +125,8 @@ def is_ours(data):
 
 def unpack(zip_path, version, data, new_exe, cancel=None, keep=None, top_to=None, progress=None):
     """The checked zip's data/<version>/ into data/<version>.part-<random>/, sizes checked against its files.txt,
-    renamed data/<version>/ (an earlier try's folder of that version removed by its list first, never `keep`); its
+    renamed data/<version>/ (hunt 2026-11-26: a data/<version> already there and whole is KEPT; one not whole is set
+    aside under an unpacking's name, never deleted in place, never `keep`); its
     Spiderweb.exe saved as new_exe; top_to = a folder for README + licences (None: left as they are). progress(done,
     all) in files. Raises Refused; nothing left behind then (the part folder and new_exe deleted)."""
     import zipfile
@@ -136,10 +165,16 @@ def unpack(zip_path, version, data, new_exe, cancel=None, keep=None, top_to=None
                 p = inside(stage, rel)
                 if p is None or not os.path.isfile(p) or os.path.getsize(p) != size:
                     raise Refused("bad_file")
-            if os.path.isdir(final):
-                if os.path.normcase(final) == os.path.normcase(keep or "") or not remove_listed(final):
+            if os.path.isdir(final) and whole(final):  # (already there and whole: kept, never deleted + replaced;
+                drop(stage)                              # it may be in use by a Spiderweb started from it)
+            else:
+                if os.path.isdir(final):  # (an earlier try's, not whole: set aside whole under an unpacking's
+                    if os.path.normcase(final) == os.path.normcase(keep or ""):  # own name, cleaned later;
+                        raise Refused("disk")                                     # never deleted in place)
+                    if not retry(lambda: os.rename(final, "%s.part-%s" % (final, secrets.token_hex(4)))):
+                        raise Refused("disk")
+                if not retry(lambda: os.rename(stage, final)):  # (an antivirus / cloud folder may hold it a moment)
                     raise Refused("disk")
-            os.rename(stage, final)
             for i in tops:  # (after the folder is in place: a failing readme never stops it)
                 try:
                     with z.open(i) as src, open(os.path.join(top_to, i.filename[len(TOP):]), "wb") as out:

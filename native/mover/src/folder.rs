@@ -1,7 +1,7 @@
 //! The folder version's zip unpacked safely, and version folders' lists: the same rules as scripts/files/folder_zip.py
 //! (keep both in step). NEVER TOUCHES WHAT ISN'T SPIDERWEB'S: unpacking goes into data\<version>.part-<random>\,
-//! renamed data\<version>\ only once whole (sizes checked against its files.txt); a version folder is deleted only by
-//! its own files.txt.
+//! renamed data\<version>\ only once whole (sizes checked against its files.txt); a data\<version> already there and
+//! whole is kept, one not whole is set aside under an unpacking's name (the program cleans those later).
 
 use std::collections::HashMap;
 use std::fs;
@@ -62,35 +62,12 @@ pub fn remove(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Deletes a version folder the way it came: its listed files (+ files.txt), then folders left empty, deepest first.
-pub fn remove_listed(folder: &Path) -> bool {
+/// Every file its files.txt lists is there with its size (no list = not whole).
+pub fn whole(folder: &Path) -> bool {
     let Some(files) = listed(folder) else { return false };
-    for rel in files.keys() {
-        if let Some(p) = inside(folder, rel) {
-            if p.is_file() {
-                let _ = remove(&p);
-            }
-        }
-    }
-    let _ = remove(&folder.join("files.txt"));
-    let mut dirs = Vec::new();
-    collect_dirs(folder, &mut dirs);
-    dirs.sort_by_key(|d| std::cmp::Reverse(d.as_os_str().len()));
-    for d in dirs {
-        let _ = fs::remove_dir(d);  // (only empty ones)
-    }
-    !folder.exists()
-}
-
-fn collect_dirs(d: &Path, out: &mut Vec<PathBuf>) {
-    out.push(d.to_path_buf());
-    if let Ok(entries) = fs::read_dir(d) {
-        for e in entries.flatten() {
-            if e.file_type().map_or(false, |t| t.is_dir()) {
-                collect_dirs(&e.path(), out);
-            }
-        }
-    }
+    !files.is_empty() && files.iter().all(|(rel, size)| {
+        inside(folder, rel).and_then(|p| fs::metadata(p).ok()).map_or(false, |m| m.is_file() && m.len() == *size)
+    })
 }
 
 /// A data\ folder Spiderweb made: missing, empty, or holding version.txt / version folders with a files.txt.
@@ -242,10 +219,21 @@ fn unpack_into(z: &[u8], version: &str, data: &Path, stage: &Path, new_exe: &Pat
         }
     }
     let fin = data.join(version);
-    if fin.is_dir() && !remove_listed(&fin) {
-        return Err(Fail::Disk);
+    if fin.is_dir() && whole(&fin) {
+        // (already there and whole, e.g. set up by another start a moment ago and maybe in use: kept, never
+        // deleted and replaced; hunt 2026-11-26)
+        let _ = fs::remove_dir_all(stage);
+    } else {
+        if fin.is_dir() {  // (an earlier try's, not whole: set aside under an unpacking's own name, cleaned later)
+            let aside = data.join(format!("{version}.part-{}", crate::sys::random_hex()));
+            if !crate::retry(10, || fs::rename(&fin, &aside)) {
+                return Err(Fail::Disk);
+            }
+        }
+        if !crate::retry(5, || fs::rename(stage, &fin)) {  // (an antivirus / cloud folder may hold it a moment)
+            return Err(Fail::Disk);
+        }
     }
-    fs::rename(stage, &fin).map_err(|_| Fail::Disk)?;
     for e in tops {  // (after the folder is in place: a failing readme never stops it)
         if let (Ok(b), Some(rel)) = (contents(z, e), e.name.strip_prefix(TOP)) {
             let _ = fs::write(top.join(rel), b);

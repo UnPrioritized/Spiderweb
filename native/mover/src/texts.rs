@@ -8,8 +8,22 @@ use std::sync::OnceLock;
 const TEXTS: &str = include_str!(env!("SPIDERWEB_TEXTS"));  // ("<code>\t<key>\t<text>" lines, \n \t \\ escaped)
 static CODE: OnceLock<String> = OnceLock::new();
 
+/// A text file as the program reads it: UTF-8 (with or without its BOM) or UTF-16 (saved so by hand in Notepad).
+fn read_text(path: &Path) -> String {
+    let Ok(b) = std::fs::read(path) else { return String::new() };
+    if b.starts_with(&[0xFF, 0xFE]) || b.starts_with(&[0xFE, 0xFF]) {
+        let le = b[0] == 0xFF;
+        let units: Vec<u16> = b[2..].chunks_exact(2)
+            .map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) }).collect();
+        return String::from_utf16_lossy(&units);
+    }
+    let b = b.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&b);
+    String::from_utf8_lossy(b).into_owned()
+}
+
+/// The language picked in Settings (the last "code" line of [language] wins, as in the program).
 pub fn init(top: &Path) {
-    let text = std::fs::read_to_string(top.join("user").join("settings.ini")).unwrap_or_default();
+    let text = read_text(&top.join("user").join("settings.ini"));
     let mut inside = false;
     let mut code = "en".to_string();
     for line in text.lines() {

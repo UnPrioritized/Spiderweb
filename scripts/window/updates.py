@@ -317,8 +317,8 @@ class UpdatePopup(tk.Toplevel):
 
         def work():
             try:
-                result["path"] = self_update.download(release, lambda d, s: progress.__setitem__(slice(None), [d, s]),
-                                                      cancel)
+                result["path"] = self_update.download(
+                    release, lambda d, s, files=0: progress.__setitem__(slice(None), [d, s, files]), cancel)
             except self_update.Refused as e:
                 result["fail"] = str(e)
             except OSError:  # (disk trouble comes as Refused("disk"): what's left is the connection)
@@ -340,11 +340,12 @@ class UpdatePopup(tk.Toplevel):
         """(Tk isn't touched from the download thread: this looks at what it reached.)"""
         if not self.winfo_exists():
             return
-        done, size = self.progress
+        done, size = self.progress[:2]
+        files = self.progress[2] if len(self.progress) > 2 else 0
         mb = lambda n: "%.1f" % (n / 1048576)  # noqa: E731
-        if done == -1 and not self.cancel_event.is_set():  # (the folder version: the checked zip being unpacked)
-            self.bar.configure(value=1000)
-            self.say.configure(text=tr("updates.unpacking"))
+        if done == -1 and not self.cancel_event.is_set():  # (the folder version: the checked zip being unpacked,
+            self.bar.configure(value=files * 1000 // size if size else 0)  # file by file)
+            self.say.configure(text=tr("updates.unpacking_n", n=files, all=size) if size else tr("updates.unpacking"))
         elif done and not self.cancel_event.is_set():
             self.bar.configure(value=done * 1000 // size if size else 0)
             self.say.configure(text=tr("updates.downloading", done=mb(done), size=mb(size)) if size else

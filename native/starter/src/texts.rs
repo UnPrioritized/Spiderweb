@@ -13,9 +13,24 @@ fn usable_code(code: &str) -> bool {
         && !code.starts_with(['_', '-'])
 }
 
-fn language(top: &Path) -> String {
-    let text = std::fs::read_to_string(top.join("user").join("settings.ini")).unwrap_or_default();
+/// A text file as the program reads it: UTF-8 (with or without its BOM) or UTF-16 (saved so by hand in Notepad).
+pub fn read_text(path: &Path) -> String {
+    let Ok(b) = std::fs::read(path) else { return String::new() };
+    if b.starts_with(&[0xFF, 0xFE]) || b.starts_with(&[0xFE, 0xFF]) {
+        let le = b[0] == 0xFF;
+        let units: Vec<u16> = b[2..].chunks_exact(2)
+            .map(|c| if le { u16::from_le_bytes([c[0], c[1]]) } else { u16::from_be_bytes([c[0], c[1]]) }).collect();
+        return String::from_utf16_lossy(&units);
+    }
+    let b = b.strip_prefix(&[0xEF, 0xBB, 0xBF]).unwrap_or(&b);
+    String::from_utf8_lossy(b).into_owned()
+}
+
+/// The language picked in Settings (the last "code" line of [language] wins, as in the program), else "en".
+pub fn language(top: &Path) -> String {
+    let text = read_text(&top.join("user").join("settings.ini"));
     let mut inside = false;
+    let mut code = "en".to_string();
     for line in text.lines() {
         let l = line.trim();
         if l.starts_with('[') {
@@ -23,12 +38,12 @@ fn language(top: &Path) -> String {
         } else if inside {
             if let Some((k, v)) = l.split_once('=').or_else(|| l.split_once(':')) {
                 if k.trim().eq_ignore_ascii_case("code") && usable_code(v.trim()) {
-                    return v.trim().to_string();
+                    code = v.trim().to_string();
                 }
             }
         }
     }
-    "en".to_string()
+    code
 }
 
 fn json_files(folder: &Path, one_file: &Path) -> Vec<String> {
@@ -37,9 +52,10 @@ fn json_files(folder: &Path, one_file: &Path) -> Vec<String> {
         let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path())
             .filter(|p| p.extension().map_or(false, |x| x.eq_ignore_ascii_case("json"))).collect();
         paths.sort();
-        out.extend(paths.iter().filter_map(|p| std::fs::read_to_string(p).ok()));
+        out.extend(paths.iter().map(|p| read_text(p)).filter(|t| !t.is_empty()));
     }
-    if let Ok(t) = std::fs::read_to_string(one_file) {
+    let t = read_text(one_file);
+    if !t.is_empty() {
         out.push(t); // (an old one-file translation lang\<code>.json)
     }
     out
