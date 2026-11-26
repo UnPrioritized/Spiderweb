@@ -4,6 +4,8 @@ Draw lines, polylines, freehand strokes, curves, arcs and text on a piano roll a
 (the black MIDI "spiderweb" technique).
 
 Files (the scripts live in scripts/, one subfolder per group):
+  boot.py            the folder version's start (data/<version>/boot.pyc, run by Spiderweb.exe from native/starter)
+  build_folder.py    (beside this file) builds the folder version: Spiderweb.exe + data/<version>/ + the zip
   window/            the main window and its side panel
     app.py           main window: toolbar, side panel, shapes
     app_clip.py      the main window's Copy / Cut / Paste of shapes (the program's clipboard, shared text, Domino)
@@ -220,7 +222,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     pip_age.py       the start's package offers skip versions under 14 days old (asks PyPI their dates)
     errors.py        spiderweb-error.log and the "something went wrong" message; spiderweb-crash.log when the
                      program dies outright (both next to Spiderweb)
-    about.py         version number, the program's folder, the user folder (moving old files in)
+    about.py         version number, the program's folder, the user folder (moving old files in), the folder version
     settings.py      the app's own settings (user/settings.ini: the look, later more)
     (window/) settings_window.py  the Settings window (gear button): Look (+ note colour palettes), Updates
     (window/) palettes.py  note colour palettes (user/palettes/), switched live
@@ -395,7 +397,8 @@ def offer_extras():
     (the Text tool's joined letters / right-to-left writing; without them it draws letters one by one). Run from source with one
     missing (or, for the Text tool's two, older than notes.shaping.LOWEST: pip updates it): offer to install it,
     once (a "No" or a failed install is remembered in packages.json; the exe has what it needs inside)."""
-    if getattr(sys, "frozen", False):
+    from files.about import FROZEN
+    if FROZEN:
         return
     import importlib
     import importlib.util
@@ -554,8 +557,9 @@ if __name__ == "__main__":
         clean_leftovers()  # (an update's Spiderweb.exe.old / .new: exe only)
     except Exception:
         pass
+    from files.about import FROZEN
     from files.system import WINE
-    if WINE and getattr(sys, "frozen", False):  # (old unpacked copies of the exe a hard-ended session left: Temp)
+    if WINE and FROZEN:  # (old one-file exes' unpacked copies a hard-ended session left in Temp)
         import threading
         from files.system import clean_old_unpacked
         threading.Thread(target=clean_old_unpacked, name="old unpacked", daemon=True).start()

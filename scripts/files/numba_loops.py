@@ -19,7 +19,8 @@ _STALE_PREFIXES = ("fastloops.", "midi_scan.", "midi_index.", "midi_play.", "mid
 
 def available():
     """Numba installed here (only looked for, not loaded) and not the exe (SPIDERWEB_NUMBA=off: never, for checks)."""
-    if getattr(sys, "frozen", False) or os.environ.get("SPIDERWEB_NUMBA") == "off":
+    from files.about import FROZEN
+    if FROZEN or os.environ.get("SPIDERWEB_NUMBA") == "off":
         return False
     return importlib.util.find_spec("numba") is not None
 

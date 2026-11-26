@@ -1,4 +1,5 @@
-"""The program's version and its folder (output and the logs go there; autosave, settings, shapes in user/)."""
+"""The program's version and its folders (output and the logs go in HERE; autosave, settings, shapes in user/;
+the program's own parts in PARTS)."""
 
 import os
 import sys
@@ -15,10 +16,15 @@ except ImportError:
 FULL_VERSION = f"{VERSION} ({BUILD})" if BUILD else VERSION  # (Help, errors.log; saved files keep it as "build")
 WEBSITE = "https://github.com/UnPrioritized/Spiderweb"  # new versions, the source code, problem reports
 
-# The spiderweb folder (scripts/<group>/ is two levels down); the .exe build unpacks to a temp folder, so there it's
-# the folder the .exe is in instead.
-HERE = (os.path.dirname(sys.executable) if getattr(sys, "frozen", False)
+# The folder version (Spiderweb.exe + data/<version>/, built by build.bat): its start code (scripts/boot.py) names
+# the data/<version> folder before anything else loads. None = run from the scripts.
+BUNDLE = getattr(sys, "spiderweb_bundle", None)
+FROZEN = BUNDLE is not None
+# The spiderweb folder: where spiderweb.py is (scripts/<group>/ is two levels down), or where Spiderweb.exe is.
+HERE = (os.path.dirname(os.path.dirname(BUNDLE)) if FROZEN
         else os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
+# The folder holding the program's own parts (icons, lang, loops, kestrel, bass): scripts/, or data/<version>/
+PARTS = BUNDLE if FROZEN else os.path.join(HERE, "scripts")
 # The app's own files (autosave, settings, presets, saved shapes): one folder, so the spiderweb folder
 # holds only the program and the user's own files
 USER = os.path.join(HERE, "user")
@@ -48,11 +54,11 @@ def move_old_files():
                 failed.append(name)
     return failed
 
-# The window icons (made by make_icon.py); the .exe carries them inside, unpacked with the program
-ICONS = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "icons")
+# The window icons (made by make_icon.py)
+ICONS = os.path.join(PARTS, "icons")
 # The "Spiderweb" picture on the About page (written with the Text tool; Help shrinks it to fit)
 BANNER = os.path.join(ICONS, "spiderweb.png")
-# The license: the copy next to Spiderweb, else the one the .exe carries inside
+# The license: the copy next to Spiderweb, else the one in data/<version>/
 LICENSE = os.path.join(HERE, "LICENSE")
-if not os.path.exists(LICENSE) and hasattr(sys, "_MEIPASS"):
-    LICENSE = os.path.join(sys._MEIPASS, "LICENSE")
+if not os.path.exists(LICENSE) and FROZEN:
+    LICENSE = os.path.join(BUNDLE, "LICENSE")

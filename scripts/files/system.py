@@ -534,7 +534,8 @@ FILE_KIND = "Spiderweb.Project"  # (the name Windows files .spwb under)
 def file_link_command(here):
     """-> (command, icon) Windows runs for a double-clicked file: the exe, or pythonw + spiderweb.py from source."""
     import os
-    if getattr(sys, "frozen", False):
+    from files.about import FROZEN
+    if FROZEN:
         return f'"{sys.executable}" "%1"', f'"{sys.executable}",0'
     exe = sys.executable
     quiet = os.path.join(os.path.dirname(exe), "pythonw.exe")
@@ -600,17 +601,20 @@ UNPACKED_REST_S = 600  # (a folder newer than this may be another copy still unp
 
 
 def clean_old_unpacked():
-    """(Wine-like systems, the exe only; untested on a phone) The exe unpacks itself into a "_MEI…" folder in Temp
-    at each start and removes it at a normal end; a session ended hard (the whole Wine app closed with Spiderweb
-    open) leaves ~125 MB behind each time. Removed here: OURS (UNPACKED_OURS inside), not this run's, older than
-    UNPACKED_REST_S and not in use by a running copy (its program files can't be opened for writing). How many."""
+    """(Wine-like systems, the exe only; untested on a phone) The old one-file exe (1.7.x) unpacked itself into a
+    "_MEI…" folder in Temp at each start and removed it at a normal end; a session ended hard (the whole Wine app
+    closed with Spiderweb open) left ~125 MB behind each time. The folder version unpacks nothing; it still clears
+    those leftovers: OURS (UNPACKED_OURS inside), older than UNPACKED_REST_S and not in use by a running copy (its
+    program files can't be opened for writing). How many."""
     import os
     import shutil
+    import tempfile
     import time
-    own = getattr(sys, "_MEIPASS", None)
-    if not WINE or not own or not getattr(sys, "frozen", False):
+    from files.about import FROZEN
+    if not WINE or not FROZEN:
         return 0
-    temp = os.path.dirname(os.path.normpath(own))
+    own = ""  # (nothing of this run is in Temp)
+    temp = tempfile.gettempdir()
     gone = 0
     try:
         names = os.listdir(temp)

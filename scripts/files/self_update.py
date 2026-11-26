@@ -40,7 +40,8 @@ class Refused(Exception):
 
 def exe_mode():
     """True = running as the exe (it can swap itself); False = from the scripts (the zip is only downloaded)."""
-    return bool(getattr(sys, "frozen", False)) and sys.platform == "win32"
+    from files.about import FROZEN
+    return FROZEN and sys.platform == "win32"
 
 
 def exe_path():

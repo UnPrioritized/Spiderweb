@@ -15,13 +15,12 @@ itself with its "language" text, e.g. "한국어 (Korean)"."""
 import json
 import os
 import re
-import sys
 
 from files import settings
-from files.about import HERE
+from files.about import HERE, PARTS
 
 
-BUILT_IN = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "lang")
+BUILT_IN = os.path.join(PARTS, "lang")
 OWN = os.path.join(HERE, "lang")  # (beside spiderweb.py / the exe: translations added by users, looked at first)
 CODE = r"[A-Za-z0-9][A-Za-z0-9_-]{0,19}"  # (a file / folder name only, never a path; "_template" is never listed)
 DEVICES = re.compile(r"(con|prn|aux|nul|com\d|lpt\d)", re.I)  # (Windows device names: never a file)

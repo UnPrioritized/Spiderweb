@@ -1,7 +1,7 @@
 //! Spiderweb.exe of the folder version: starts the program kept in data\<version>\ next to it. Nothing is unpacked
 //! or written. data\version.txt names the version to start (an update writes it last, as its one switch-over step);
 //! without it, the version this starter was built with.
-//! At every start: the program files' names + sizes against data\<version>\files.txt (only file details asked
+//! At every start: the program files' names + sizes against data\<version>\files.txt (only folder listings asked
 //! of Windows, nothing read: milliseconds). Missing / wrong = offer to repair (the program's repair mode); Python
 //! itself missing = offer the download page. Then data\<version>\python3NN.dll runs boot.pyc with the arguments
 //! given (python314._pth there sets Python's paths and keeps any other Python's settings out).
@@ -67,7 +67,10 @@ fn damaged(data: &Path) -> Option<usize> {
     let list = std::fs::read_to_string(data.join("files.txt")).ok()?;
     let mut wanted: HashMap<String, Vec<(String, u64)>> = HashMap::new();
     for line in list.lines() {
-        let Some((size, name)) = line.split_once('\t') else { continue };
+        // "<size>\t<sha256>\t<place>" (the fingerprint is for the full check by hand; "<size>\t<place>" reads too)
+        let mut parts = line.splitn(3, '\t');
+        let (Some(size), Some(second)) = (parts.next(), parts.next()) else { continue };
+        let name = parts.next().unwrap_or(second);
         let Ok(size) = size.trim().parse::<u64>() else { continue };
         let name = name.replace('/', "\\");
         let (folder, file) = name.rsplit_once('\\').unwrap_or(("", &name));

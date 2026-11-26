@@ -1,7 +1,7 @@
 """The built-in synth (the Hz bass preview): BASS + BASSMIDI by Un4seen Developments through ctypes.
 
-The DLLs sit in scripts/bass/x64 and x86 (the one matching this Python is used; the .exe carries the 64-bit ones
-inside); Linux's .so files in scripts/bass/linux-x64 (64-bit PCs only), macOS's .dylib files (Intel + Apple chips in
+The DLLs sit in scripts/bass/x64 and x86 (the one matching this Python is used; the exe's data/<version>
+holds the 64-bit ones); Linux's .so files in scripts/bass/linux-x64 (64-bit PCs only), macOS's .dylib files (Intel + Apple chips in
 one) in scripts/bass/mac (untested). They are free for non-commercial use only (README). Nothing here needs a MIDI-out device.
 
 Sound is made ahead of time, not live: render() turns a stretch of the notes into sound (48 kHz stereo floats) and
@@ -26,7 +26,7 @@ from collections import deque
 import numpy as np
 
 from files import errors, sfz
-from files.about import HERE
+from files.about import PARTS
 from files.system import MAC, WINDOWS
 
 RATE = 48000  # frames a second
@@ -135,7 +135,7 @@ def load_dlls():
     if _dlls:
         return _dlls
     arch = "x64" if struct.calcsize("P") == 8 else "x86"
-    folder = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "bass",
+    folder = os.path.join(PARTS, "bass",
                           arch if WINDOWS else "mac" if MAC else "linux-" + arch)
     ending = ".dylib" if MAC else ".so"
     try:

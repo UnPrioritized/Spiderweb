@@ -27,7 +27,7 @@ import sys
 
 import numpy as np
 
-from files.about import HERE
+from files.about import FROZEN, HERE, PARTS
 from files.native_wraps import NEEDS, Wraps
 from files.system import MAC, WINDOWS, WINE
 
@@ -65,8 +65,8 @@ _failed = set()  # (loops that failed once: said once in the logs)
 
 
 def lib_path():
-    """Where the library is: scripts/loops/<system>/ (the exe: its own loops/ folder)."""
-    base = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "loops")
+    """Where the library is: scripts/loops/<system>/ (the exe: data/<version>/loops/)."""
+    base = os.path.join(PARTS, "loops")
     if WINDOWS:
         return os.path.join(base, "x64", "spiderweb_loops.dll")
     if MAC:
@@ -223,7 +223,7 @@ def try_levels(first, run=None):
     import subprocess
     import time
     if run is None:
-        start = [sys.executable] if getattr(sys, "frozen", False) else [sys.executable,
+        start = [sys.executable] if FROZEN else [sys.executable,
                                                                          os.path.join(HERE, "spiderweb.py")]
 
         def run(tried, wait):

@@ -101,10 +101,9 @@ def _numba_loops():
 def _drop_numba_saved():
     """The exe's user/compiled-loops folder: Numba's saved loops from versions before 2026-11 (tens of MB), never
     used again. Deleted once; only our own folder, nothing else."""
-    import sys
-    if not getattr(sys, "frozen", False):
-        return
     from files import about
+    if not about.FROZEN:
+        return
     folder = os.path.join(about.USER, "compiled-loops")
     if os.path.isdir(folder):
         import shutil

@@ -5,13 +5,12 @@ the Help window; which ones go where: see help_texts.py)."""
 
 import os
 import re
-import sys
 import tkinter as tk
 import webbrowser
 from tkinter import font as tkfont, ttk
 
 from files.lang import size as lang_size, tr
-from files.about import BANNER, BUILT, FULL_VERSION, HERE, LICENSE, VERSION, WEBSITE
+from files.about import BANNER, BUILT, BUNDLE, FULL_VERSION, HERE, LICENSE, VERSION, WEBSITE
 from files import system
 from files.system import open_path
 from window import look
@@ -22,7 +21,7 @@ from window.help_texts import (BY_ID, DRAWER_TOOL_TOPICS, NEXT, PAGE_LINK, SECTI
 TOOL_TIPS = set(TOOL_TOPICS.values()) | set(DRAWER_TOOL_TOPICS.values())
 # the tips' place once dragged (window_places; "tip" was saved where the first tip showed, moved or not: left behind)
 TIP_PLACE = "tip_moved"
-CLIPS = os.path.join(getattr(sys, "_MEIPASS", HERE), "clips")  # (the .exe carries them inside)
+CLIPS = os.path.join(BUNDLE or HERE, "clips")  # (spiderweb/clips, or data/<version>/clips)
 TOPIC_LINKS = 3  # a page with this many "## " headings or more gets a line of links to them at its top (user 2026-10-29)
 
 

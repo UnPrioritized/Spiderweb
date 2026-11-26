@@ -12,7 +12,7 @@ import time
 import traceback
 
 from files.lang import tr
-from files.about import FULL_VERSION as VERSION, HERE, USER
+from files.about import BUNDLE, FROZEN, FULL_VERSION as VERSION, HERE, USER
 from files.system import WINE, error_box
 
 LOG = os.path.join(HERE, "spiderweb-error.log")
@@ -68,13 +68,13 @@ def pc_text():
     from files.system import cpu_name, free_memory, total_memory
     gb = lambda n: "?" if n is None else f"{n / 2 ** 30:.1f} GB"
     return (f"{cpu_name() or 'processor ?'}, {os.cpu_count() or '?'} cores, {gb(total_memory())} memory "
-            f"({gb(free_memory())} free), {'exe' if getattr(sys, 'frozen', False) else 'source'}")
+            f"({gb(free_memory())} free), {'exe' if FROZEN else 'source'}")
 
 
 def _folder_rules():
-    """(pattern, short name) for the folders hidden in the logs, longest first: Spiderweb's own (and the exe's
-    unpacked files) -> <Spiderweb>, the user's home folder -> ~."""
-    folders = [(HERE, "<Spiderweb>"), (getattr(sys, "_MEIPASS", ""), "<Spiderweb>"), (os.path.expanduser("~"), "~")]
+    """(pattern, short name) for the folders hidden in the logs, longest first: Spiderweb's own (data/<version> inside
+    it too) -> <Spiderweb>, the user's home folder -> ~."""
+    folders = [(HERE, "<Spiderweb>"), (BUNDLE or "", "<Spiderweb>"), (os.path.expanduser("~"), "~")]
     rules = []
     for folder, name in sorted(folders, key=lambda f: -len(f[0])):
         folder = os.path.normpath(folder).rstrip("\\/") if folder else ""

@@ -18,7 +18,7 @@ import time
 
 import numpy as np
 
-from files.about import HERE
+from files.about import PARTS
 from files.synth import RATE, SynthError, _ATTRIB_BUFFER, _SAMPLE_FLOAT, _STREAMPROC
 from files.system import WINDOWS
 
@@ -285,7 +285,7 @@ _dll = None
 
 
 def dll_path():
-    base = os.path.join(getattr(sys, "_MEIPASS", os.path.join(HERE, "scripts")), "kestrel")
+    base = os.path.join(PARTS, "kestrel")
     return os.path.join(base, "x64", DLL_NAME) if WINDOWS else os.path.join(base, "linux-x64", SO_NAME)
 
 
