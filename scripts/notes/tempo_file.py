@@ -297,9 +297,30 @@ def _seg_events(segs):
             vals.append(np.asarray(u, np.int64))
     if not ticks:
         return []
-    t, v = np.concatenate(ticks), np.concatenate(vals)
-    keep = np.concatenate([[True], v[1:] != v[:-1]])
-    return Rows(np.column_stack([t[keep], v[keep]]))
+    # (one table filled piece by piece, the repeats dropped in place a stretch at a time: joining every piece and
+    # then picking the kept rows held ~50 bytes an event at once; PLAN export in pieces, the same rows)
+    size = sum(len(x) for x in ticks)
+    out = np.empty((size, 2), np.int64)
+    at = 0
+    for x, y in zip(ticks, vals):
+        out[at:at + len(x), 0] = x
+        out[at:at + len(x), 1] = y
+        at += len(x)
+    ticks = vals = None
+    w, prev = 0, None
+    for s in range(0, size, EVENTS_PIECE):
+        v = out[s:s + EVENTS_PIECE, 1]
+        keep = np.empty(len(v), bool)
+        keep[0] = prev is None or v[0] != prev
+        keep[1:] = v[1:] != v[:-1]
+        prev = int(v[-1])
+        got = out[s:s + EVENTS_PIECE][keep]
+        out[w:w + len(got)] = got
+        w += len(got)
+    return Rows(out[:w] if w > size * 3 // 4 else out[:w].copy())
+
+
+EVENTS_PIECE = 1 << 20  # _seg_events drops repeats this many rows at a time
 
 
 def _quick_pairs(k, total):
@@ -323,30 +344,39 @@ class _RunBuf:
     # (2026-11-06: every piece numbered in order and turned into runs all at once at the end: one piece at a time
     # = a few small NumPy calls each, 40,000 gaps in a Keep the audio export; the same runs)
 
+    # (PLAN export in pieces 2026-11-27: the pieces kept IN THE ORDER ADDED (whatever was waiting turned into runs
+    # before the next kind of piece), so runs() only joins them: the old numbering + sort back into order held
+    # ~72 bytes a run at once, 0.7 GB over 10 M runs; the same runs)
+
     def __init__(self, size=0):
-        self.ids, self.lens, self.vals = [], [], []  # (add's runs, plain Python)
-        self.pend, self.pend_ids, self.waiting = [], [], 0  # (add_array's gaps waiting)
-        self.chunks = []  # (ids, lens, vals) arrays of gaps already turned into runs
-        self.count = 0
+        self.lens, self.vals = [], []  # (add's runs waiting, plain Python)
+        self.pend, self.waiting = [], 0  # (add_array's gaps waiting)
+        self.chunks = []  # (lens, vals) arrays of runs, in order
+
+    def _lists(self):
+        if self.lens:
+            self.chunks.append((np.array(self.lens, np.int64), np.array(self.vals, np.int64)))
+            self.lens, self.vals = [], []
 
     def add(self, length, value):
         if length > 0:
-            self.ids.append(self.count)
+            if self.pend:
+                self.flush()
             self.lens.append(length)
             self.vals.append(value)
-            self.count += 1
 
     def add_runs(self, lens, vals):
         """Runs made already (gap_plan's), in order, as one piece."""
-        self.chunks.append((np.full(len(lens), self.count, np.int64), lens, vals))
-        self.count += 1
+        if self.pend:
+            self.flush()
+        self._lists()
+        self.chunks.append((lens, vals))
 
     def add_array(self, got):
         """One gap's per-tick values as runs (each gap's runs its own, also where the gap before ends on the same
         value)."""
+        self._lists()
         self.pend.append(got)
-        self.pend_ids.append(self.count)
-        self.count += 1
         self.waiting += len(got)
         if self.waiting > 1 << 20:  # (never millions of per-tick values held: the runs are the point)
             self.flush()
@@ -360,18 +390,30 @@ class _RunBuf:
         cut[1:] = got[1:] != got[:-1]
         cut[np.cumsum(sizes[:-1])] = True
         starts = np.flatnonzero(cut)
-        ids = np.repeat(np.array(self.pend_ids, np.int64), sizes)[starts]
-        self.chunks.append((ids, np.diff(np.append(starts, len(got))), got[starts].astype(np.int64)))
-        self.pend, self.pend_ids, self.waiting = [], [], 0
+        self.chunks.append((np.diff(np.append(starts, len(got))), got[starts].astype(np.int64)))
+        self.pend, self.waiting = [], 0
 
     def runs(self):
+        """(lens, vals) of every run in order; the buffer is empty afterwards."""
         if self.pend:
             self.flush()
-        ids = np.concatenate([np.array(self.ids, np.int64)] + [c[0] for c in self.chunks])
-        lens = np.concatenate([np.array(self.lens, np.int64)] + [c[1] for c in self.chunks])
-        vals = np.concatenate([np.array(self.vals, np.int64)] + [c[2] for c in self.chunks])
-        order = np.argsort(ids, kind="stable")  # (back in the order added; a gap's own runs keep theirs)
-        return lens[order], vals[order]
+        self._lists()
+        chunks, self.chunks = self.chunks, []
+        if not chunks:
+            z = np.zeros(0, np.int64)
+            return z, z.copy()
+        if len(chunks) == 1:
+            return np.asarray(chunks[0][0], np.int64), np.asarray(chunks[0][1], np.int64)
+        size = sum(len(c[0]) for c in chunks)
+        lens, vals = np.empty(size, np.int64), np.empty(size, np.int64)
+        at = 0
+        chunks.reverse()
+        while chunks:  # (each piece let go once copied: never both the whole lists and every piece at once)
+            ln, v = chunks.pop()
+            lens[at:at + len(ln)] = ln
+            vals[at:at + len(v)] = v
+            at += len(ln)
+        return lens, vals
 
 
 def _spans_off(segs, keeps, start_u):
@@ -514,9 +556,10 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
         loose = sorted_union([np.asarray(loose, np.int64)])
         at = np.searchsorted(ts, loose)
         loose = loose[(at >= len(ts)) | (ts[np.minimum(at, len(ts) - 1)] != loose)] if len(ts) else loose
-    every_tick = np.concatenate([ticks, loose])
-    segs, bad = file_segments(tempo, base, ppq, int(every_tick.max()) + 1 if len(every_tick) else 0)
-    last_tick = int(every_tick.max()) if len(every_tick) else 0
+    # (the latest tick of both, never the two joined: a copy of every note tick, PLAN export in pieces)
+    tops = [int(x.max()) for x in (np.asarray(ticks), loose) if len(x)]
+    segs, bad = file_segments(tempo, base, ppq, max(tops) + 1 if tops else 0)
+    last_tick = max(tops) if tops else 0
     # a part on to the song's end stops at the last note (not a tick past it: no gap there to count); its heard
     # tempo: one whole number, or one per tick from its heard tempo line
     keeps = [(n, a, last_tick if e is None else e) for n, (_, a, e, _) in enumerate(lay["keeps"])]
@@ -643,33 +686,78 @@ def _keep_long(a, e, u, mine, part, segs, seg_starts, ts, bs, ls):
         from files.midi_read import MidiError
         raise MidiError("load.keep_too_long", ticks=f"{e - a:,}", most=f"{KEEP_TICKS_MOST:,}") from None
     near = ts[np.searchsorted(ts, a, "left"):np.searchsorted(ts, e, "right")]
-    inside = near[(near > a) & (near < e)]
+    inside = near[np.searchsorted(near, a, "right"):np.searchsorted(near, e, "left")]  # (sorted: a slice, no copy)
     marks = [np.array([a, e], np.int64), inside]
     if bs is not None:
         marks.append(bs[np.searchsorted(bs, a, "right"):np.searchsorted(bs, e, "left")])
     lo = ls[np.searchsorted(ls, a, "right"):np.searchsorted(ls, e, "left")]
     gave = []
+    # (KEEP_PIECE gaps at a time, PLAN export in pieces: the work lists of millions of anchors at once took
+    # ~0.7 GB; the running total goes on from piece to piece, one add after another as one cumsum: the same numbers)
+    hp = None if heard is None else _prefix_sums(heard, True)
+    dp = _prefix_sums(drawn, False)
+
+    def piece(c0, c1, lo):
+        """Gaps c0..c1 of n: (time, file ticks needed, note?, close?)."""
+        x = n[c0:c1 + 1]
+        d = np.diff(x)
+        total = d * int(u) if hp is None else np.diff(_prefix_at(hp, x))
+        exact = total / (np.diff(_prefix_at(dp, x)) / d)
+        note = _member(x, near)
+        real = note | _member(x, lo) if len(lo) else note
+        return total, exact, note, real[:-1] & real[1:] & (exact < 1)
+
     while True:
         n = sorted_union(marks + [lo])
-        d = np.diff(n)
-        total = d * int(u) if heard is None else np.diff(_prefix(heard, n, True))
-        exact = total / (np.diff(_prefix(drawn, n, False)) / d)
-        note = _member(n, near)
-        real = note | _member(n, lo)
-        close = real[:-1] & real[1:] & (exact < 1)
+        g = len(n) - 1
         if not len(lo):
             break
-        j = np.flatnonzero(close)
-        drop = np.where(~note[j + 1], n[j + 1], np.where(~note[j], n[j], -1))
-        drop = drop[drop >= 0]
+        drops = []
+        for c0 in range(0, g, KEEP_PIECE):  # (a loose one too close gives way: the later of the two when both are)
+            _, _, note, close = piece(c0, min(g, c0 + KEEP_PIECE), lo)
+            j = np.flatnonzero(close)
+            if len(j):
+                x = n[c0:]
+                drop = np.where(~note[j + 1], x[j + 1], np.where(~note[j], x[j], -1))
+                drops.append(drop[drop >= 0])
+        drop = np.concatenate(drops) if drops else np.zeros(0, np.int64)
         if not len(drop):
             break
         lo = np.setdiff1d(lo, drop)
         gave += np.unique(drop).tolist()
-    dense = n[:-1][close & note[:-1] & note[1:]].tolist()
-    k = np.diff(np.concatenate([[0], np.rint(np.cumsum(exact))])).astype(np.int64)
-    k = np.clip(k, _least(total), total)
-    return [n, total, k, drawn], (int(u) if heard is None else heard), dense, gave
+    # rounded on a running total, so the part keeps the drawn tempo on average
+    total_all, k = np.empty(g, np.int64), np.empty(g, np.int64)
+    dense, carry = [], 0.0
+    for c0 in range(0, g, KEEP_PIECE):
+        c1 = min(g, c0 + KEEP_PIECE)
+        total, exact, note, close = piece(c0, c1, lo)
+        dense += n[c0:c1][close & note[:-1] & note[1:]].tolist()
+        run = np.cumsum(np.concatenate([[carry], exact]))
+        carry = run[-1]
+        kc = np.diff(np.rint(run)).astype(np.int64)
+        k[c0:c1] = np.clip(kc, _least(total), total)
+        total_all[c0:c1] = total
+    return [n, total_all, k, drawn], (int(u) if heard is None else heard), dense, gave
+
+
+KEEP_PIECE = 1 << 20  # _keep_long's gaps worked on at once
+
+
+def _prefix_sums(runs, exact):
+    """_prefix's sums over the runs, worked out once for many reads (_prefix_at)."""
+    s, t, u = runs
+    w = (t - s) * u if exact else (t - s).astype(np.float64) * u
+    if exact and len(u) and (int(t[-1]) - int(s[0])) * int(u.max()) >= 1 << 62:
+        raise OverflowError
+    return s, u if exact else u.astype(np.float64), np.concatenate([[0], np.cumsum(w)])
+
+
+def _prefix_at(sums, x):
+    """_prefix(runs, x, exact) from _prefix_sums(runs, exact): the same numbers."""
+    s, u, cum = sums
+    x = np.asarray(x, np.int64)
+    i = np.clip(np.searchsorted(s, x, "right") - 1, 0, len(s) - 1)
+    return cum[i] + (x - s[i]) * u[i]
 
 
 FILE_TICKS_MOST = 1 << 27  # a short Keep timing part goes the runs way past this (lists of 1 GB each)
@@ -696,31 +784,49 @@ def _long_gaps(buf, n, total, k, drawn, every):
     the nearest values), a gap over a curve = fit_block_runs on `every` file ticks (made longer past
     tempo.CATCH_STEPS_MOST), ideal = the drawn tempo where each step reads it. k may change (a tick more / fewer)."""
     s, _, du = drawn
-    i0 = np.searchsorted(s, n[:-1], "right") - 1
-    i1 = np.searchsorted(s, n[1:] - 1, "right") - 1
-    curved = (i1 > i0) & (k > every)
+    # (GAPS_PIECE gaps at a time, PLAN export in pieces: the work lists of millions of gaps at once took ~0.8 GB;
+    # first which gaps are curved (one byte a gap) and their steps, then the gaps in order, `last` handed on)
+    g = len(k)
+    curved_all = np.empty(g, np.uint8)
+    steps = 0
+    for c0 in range(0, g, GAPS_PIECE):
+        c1 = min(g, c0 + GAPS_PIECE)
+        cv = ((np.searchsorted(s, n[c0 + 1:c1 + 1] - 1, "right") > np.searchsorted(s, n[c0:c1], "right"))
+              & (k[c0:c1] > every))
+        curved_all[c0:c1] = cv
+        steps += int((-(-k[c0:c1][cv] // every)).sum())
     # (the part's curved gaps: at most CATCH_STEPS_MOST steps all told, else every step longer by one factor;
     # a value an Interval step over billions of ticks is billions of values: user 2026-11-26, like catch-ups)
-    steps = int((-(-k[curved] // every)).sum())
     ev = every if steps <= CATCH_STEPS_MOST else every * -(-steps // CATCH_STEPS_MOST)
-    least_a = _least(total)
     # (compiled: runs of flat gaps in one go, the same pairs; a curved gap, or numbers past its reach, here; PLAN
     # fit bar lines C: one bar line = one gap, millions of them)
     fast = getattr(speed.loops(), "flat_gaps", None)
     if fast is not None and (k.dtype != np.int64 or not k.flags.c_contiguous):
         fast = None  # (k is changed in place: never a copy)
-    if fast is not None:
-        flat_u8 = np.ascontiguousarray(curved, np.uint8)
-        total_c, least_c = np.ascontiguousarray(total, np.int64), np.ascontiguousarray(least_a, np.int64)
-        lens_o, vals_o = np.empty(2 * len(k) + 2, np.int64), np.empty(2 * len(k) + 2, np.int64)
-    curved = curved.tolist()
-    least = least_a.tolist()
     last = None
+    for c0 in range(0, g, GAPS_PIECE):
+        last = _long_piece(buf, n, total, k, du, s, every, ev, curved_all, c0, min(g, c0 + GAPS_PIECE), fast, last)
+    return ev != every
+
+
+GAPS_PIECE = 1 << 20  # _long_gaps' gaps worked on at once
+
+
+def _long_piece(buf, n, total, k, du, s, every, ev, curved_all, c0, c1, fast, last):
+    """_long_gaps on gaps c0..c1 (k changed in place), last = the value the gap before ended on -> the last one."""
+    k_c, tot = k[c0:c1], total[c0:c1]
+    least_a = _least(tot)
+    if fast is not None:
+        flat_u8 = curved_all[c0:c1]
+        total_c, least_c = np.ascontiguousarray(tot, np.int64), np.ascontiguousarray(least_a, np.int64)
+        lens_o, vals_o = np.empty(2 * len(k_c) + 2, np.int64), np.empty(2 * len(k_c) + 2, np.int64)
+    curved = curved_all[c0:c1].astype(bool).tolist()
+    least = least_a.tolist()
     j = -1
-    while j + 1 < len(k):
+    while j + 1 < len(k_c):
         j += 1
         if fast is not None and not curved[j]:
-            got = fast(j, -1 if last is None else last, total_c, k, least_c, flat_u8, PAIR_REACH, SAFE_REACH,
+            got = fast(j, -1 if last is None else last, total_c, k_c, least_c, flat_u8, PAIR_REACH, SAFE_REACH,
                        lens_o, vals_o)
             if got is not None and got[0] > j:
                 j2, l2, pos = got
@@ -729,9 +835,9 @@ def _long_gaps(buf, n, total, k, drawn, every):
                 last = None if l2 == -1 else l2
                 j = j2 - 1
                 continue
-        kj, tj = int(k[j]), int(total[j])
+        kj, tj = int(k_c[j]), int(tot[j])
         if curved[j]:
-            n0, n1 = int(n[j]), int(n[j + 1])
+            n0, n1 = int(n[c0 + j]), int(n[c0 + j + 1])
             blk = np.arange(0, kj, ev, dtype=np.int64)
             # (file ticks read back to Spiderweb's: where the drawn tempo is read; past 64 bits in Python's whole
             # numbers: it wrapped round into a sawtooth, hunt 2026-11-26)
@@ -758,7 +864,7 @@ def _long_gaps(buf, n, total, k, drawn, every):
                 pair = flat_pair_runs(kk, tj)
                 if pair is not None:
                     kj = kk
-                    k[j] = kk
+                    k_c[j] = kk
                     break
         if pair is None:  # (nothing near: the nearest values, not Domino-safe)
             q, r = divmod(tj, kj)
@@ -772,7 +878,7 @@ def _long_gaps(buf, n, total, k, drawn, every):
             buf.add(ka, a)
             buf.add(kj - ka, b)
             last = b if ka < kj else a
-    return ev != every
+    return last
 
 
 def dense_spots(tempo, base, ppq, beats, ticks, heard=None):
@@ -1026,6 +1132,8 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         bp_f.append(f.astype(np.int64))
         offset = int(f[-1]) - e
         at = e
+    # (the gaps' own lists let go: only the map, the runs and the CC clocks are needed now; PLAN export in pieces)
+    gaps = n = total = k = drawn = lens = vals = f = buf = pre = slow = None  # noqa: F841
     if not keeps and not file_segs and offset == 0:
         file_segs = segs  # (ds5: no Keep timing: _cut(segs, 0, end) is segs as they are; kept with its arrays)
     else:
@@ -1174,9 +1282,10 @@ def _in_file(out):
     """file_plan's tempo / time / key signature events past the farthest tick a MIDI file holds (midi_scan.MOST_TICK)
     left out: a point dragged that far wrote a file read back as damaged, or gigabytes of waits (hunt 2026-11-26)."""
     for k in ("events", "sigs", "keys"):
-        if isinstance(out[k], Rows):  # (a table: kept one, D2)
+        if isinstance(out[k], Rows):  # (a table: kept one, D2; copied only when a row goes: millions of events)
             a = out[k].arr
-            out[k] = Rows(a[a[:, 0] <= MOST_TICK] if (a[:, 0] <= MOST_TICK).any() else a[:1])
+            if len(a) and bool((a[:, 0] > MOST_TICK).any()):
+                out[k] = Rows(a[a[:, 0] <= MOST_TICK] if (a[:, 0] <= MOST_TICK).any() else a[:1])
         else:
             out[k] = [e for e in out[k] if e[0] <= MOST_TICK] or out[k][:1]
     return out
