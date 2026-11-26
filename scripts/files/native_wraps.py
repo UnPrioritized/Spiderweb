@@ -407,18 +407,21 @@ class Wraps:
             return None
         return w, moved[:counts[0]].tolist(), unfit[:counts[1]].tolist()
 
-    def bar_sigs(self, lines, bars, stop, own_s, own_top, own_pow, ppq, longest):
-        """tempo_file._signatures' walk -> (rows (n, 3), unfit ticks, (prev top, prev power) or None) or None."""
-        if not hasattr(self.x, "bar_sigs"):
+    def bar_sigs(self, lines, bars, stop, own_s, own_top, own_pow, ppq, longest, prev=None):
+        """tempo_file._signatures' walk over bars 0..stop, from prev (the signature written before them, None =
+        none) -> (rows (n, 3), unfit ticks, (prev top, prev power) or None) or None."""
+        f = getattr(self.x, "bar_sigs_from", None)
+        if f is None:
             return None
         i = np.int64
         out, unfit, counts = np.empty(6 * (stop + 1), i), np.empty(stop + 1, i), np.zeros(4, i)
-        if self.x.bar_sigs(np.ascontiguousarray(lines, i), np.ascontiguousarray(bars, i), int(stop),
-                           np.ascontiguousarray(own_s, i), np.ascontiguousarray(own_top, i),
-                           np.ascontiguousarray(own_pow, i), int(ppq), int(longest), out, unfit, counts) < 0:
+        state = np.array([-1, -1] if prev is None else prev, i)
+        if f(np.ascontiguousarray(lines, i), np.ascontiguousarray(bars, i), int(stop), np.ascontiguousarray(own_s, i),
+             np.ascontiguousarray(own_top, i), np.ascontiguousarray(own_pow, i), int(ppq), int(longest), out, unfit,
+             counts, state) < 0:
             return None
         prev = None if counts[2] < 0 else (int(counts[2]), int(counts[3]))
-        return out[:3 * counts[0]].reshape(-1, 3), unfit[:counts[1]], prev
+        return out[:3 * counts[0]].reshape(-1, 3).copy(), unfit[:counts[1]].copy(), prev
 
     def flat_gaps(self, j, last, total, k, least, curved, reach, safe_reach, lens, vals):
         """tempo_file._long_gaps' flat gaps from j (k changed in place) -> (j, last, runs written), or None."""

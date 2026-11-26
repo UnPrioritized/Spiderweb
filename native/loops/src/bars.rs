@@ -261,8 +261,21 @@ fn signature_n(length: i64, ppq: i64, prefer: i64) -> (i64, i64) {
 /// counts = [rows, unfit, prev top, prev power] (the last written; -1 = none); 0 or FAILED.
 #[inline(always)]
 #[allow(clippy::too_many_arguments)]
-pub fn bar_sigs(lines: &[i64], bars: &[i64], stop: i64, own_s: &[i64], own_top: &[i64], own_pow: &[i64], ppq: i64,
-                longest: i64, out: &mut [i64], unfit: &mut [i64], counts: &mut [i64]) -> i64 {
+/// (PLAN export in pieces: for a stretch of bars) state = [prev top, prev power] (-1 = none) the walk starts from;
+/// counts[2..4] = where it ended (the next stretch's state) -> 0 or FAILED.
+pub fn bar_sigs_from(lines: &[i64], bars: &[i64], stop: i64, own_s: &[i64], own_top: &[i64], own_pow: &[i64],
+                     ppq: i64, longest: i64, out: &mut [i64], unfit: &mut [i64], counts: &mut [i64],
+                     state: &mut [i64]) -> i64 {
+    if state.len() < 2 {
+        return crate::FAILED;
+    }
+    bar_sigs_core(lines, bars, stop, own_s, own_top, own_pow, ppq, longest, out, unfit, counts, (state[0], state[1]))
+}
+
+#[inline(always)]
+#[allow(clippy::too_many_arguments)]
+fn bar_sigs_core(lines: &[i64], bars: &[i64], stop: i64, own_s: &[i64], own_top: &[i64], own_pow: &[i64], ppq: i64,
+                 longest: i64, out: &mut [i64], unfit: &mut [i64], counts: &mut [i64], prev0: (i64, i64)) -> i64 {
     let no = own_s.len();
     if stop < 0 || lines.len() < stop as usize + 2 || bars.len() < stop as usize + 2 || no == 0
         || own_top.len() != no || own_pow.len() != no || !(1..=(1 << 40)).contains(&ppq) || longest < 1
@@ -275,7 +288,7 @@ pub fn bar_sigs(lines: &[i64], bars: &[i64], stop: i64, own_s: &[i64], own_top: 
         }
     }
     let (mut nr, mut nu) = (0usize, 0usize);
-    let mut prev = (-1i64, -1i64);
+    let mut prev = prev0;
     let ls = signature_n(longest, ppq, -1);
     for m in 0..=stop as usize {
         let (mut f0, f1) = (lines[m], lines[m + 1]);

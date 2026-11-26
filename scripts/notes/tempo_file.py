@@ -539,7 +539,7 @@ def _member(x, s):
     return s[at] == x
 
 
-def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None):
+def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None, made=None):
     """The Keep timing parts' gaps between anchors: (layout, segs, bad catch-ups, keeps [(a, e, us)], gaps [[n,
     total, file ticks, drawn]], dense = beats of EVERY gap whose two notes are under a tick apart at the part's
     tempo (it stays faster there), gave, times = each part's heard time: ticks x us from its start, one per tick
@@ -547,7 +547,8 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     their time only where they have room (CC messages, user 2026-10-23: never the tempo staying faster for one):
     one under a tick from another is no anchor (file_plan's map puts it between its neighbours). heard = a
     loaded MIDI's own tempo [(tick, us)]: its notes keep the time they have in the file (user 2026-10-24: no
-    unexpected BPM changes), not the time at the tempo heard before the part."""
+    unexpected BPM changes), not the time at the tempo heard before the part. made: a dict that gets "bars" = the
+    bar lines worked out here (when they were), for the caller to use again."""
     lay = layout(tempo, base, ppq)
     ts = sorted_union([ticks])
     if loose is None:
@@ -575,6 +576,8 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
         # song made 16 M bar lines a tempo edit for nothing; capped at BARS_MOST. No part: none needed)
         if keeps:
             bars = bar_ticks(tempo, ppq, bars_upto(tempo, ppq, max(e for _, e, _ in keeps)))
+            if made is not None:  # (file_plan / limit_spots use the same list: made once, PLAN export in pieces)
+                made["bars"] = bars
         else:
             fit_bars = False
     # gaps between anchors, part by part: (first tick, end tick, time = ticks x heard us, file ticks)
@@ -582,7 +585,7 @@ def keep_gaps(tempo, base, ppq, beats, ticks, bars=None, loose=None, heard=None)
     starts = [s[0] for s in segs]
     # (sorted once, each part takes its own slice: every part looked through every note of the song, thousands of
     # jumps x 300k notes froze for seconds, PLAN #12 hunt; the same answers)
-    bs =np.sort(bars) if fit_bars else None
+    bs = (bars if len(bars) < 2 or bool((bars[1:] >= bars[:-1]).all()) else np.sort(bars)) if fit_bars else None
     ls = np.sort(loose)
     fast = speed.loops()  # (compiled: gap_ticks does a part's work below in one go, the same numbers)
     if fast is not None:
@@ -904,11 +907,14 @@ def limit_spots(tempo, base, ppq, beats, ticks, heard=None, loose=None):
     upto = max([int(t.max()) for t in (ticks, loose) if len(t)]
                + ([beat_tick(max(p[0] for p in tempo["points"]), ppq)] if tempo["points"] else []))
     # (bar lines only as far as the Keep timing parts reach: keep_gaps makes them; hunt 2026-11-26)
+    made = {}
     _, _, _, keeps, gaps, out["dense"], out["gave"], _ = keep_gaps(tempo, base, ppq, beats, ticks, None, loose,
-                                                                   heard)
+                                                                   heard, made)
     if not gaps or not bars_fit(tempo, ppq, max([upto] + [e for _, e, _ in keeps])):
         return out
-    bars = bar_ticks(tempo, ppq, bars_upto(tempo, ppq, max(e for _, e, _ in keeps)))
+    bars = made.get("bars")
+    if bars is None:
+        bars = bar_ticks(tempo, ppq, bars_upto(tempo, ppq, max(e for _, e, _ in keeps)))
     _fit_bar_lines(gaps, keeps, bars, bar_lengths(ppq))
     zero = np.zeros(1, np.int64)
     bp_n, bp_f, offset = [zero], [zero], 0  # (the file's ticks at the anchors, as file_plan's map; arrays, D2)
@@ -1003,9 +1009,9 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     upto = max([int(t.max()) for t in (ticks, loose) if len(t)]
                + ([beat_tick(max(p[0] for p in tempo["points"]), ppq)] if tempo["points"] else []))
     # (bar lines only as far as the Keep timing parts reach: keep_gaps makes them; hunt 2026-11-26)
-    bars = None
+    bars, made = None, {}
     lay, segs, out["bad"], keeps, gaps, out["dense"], out["gave"], times = keep_gaps(tempo, base, ppq, beats, ticks,
-                                                                                    None, loose, heard)
+                                                                                    None, loose, heard, made)
     end = segs[-1][1]
     # (long curved catch-ups stepped longer than their Interval: the export says so, user 2026-11-26)
     out["coarse"] = [st["line"] for st, cp in lay["worked"] if cp.get("ok") and cp.get("coarse")]
@@ -1018,7 +1024,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         if keeps:  # (bar lines far enough for every part, up to bar BARS_MOST: past it unfitted + said)
             reach = max(e for _, e, _ in keeps)  # (never to the last note: hunt 2026-11-26)
             cut = bars_upto(tempo, ppq, reach)
-            bars = bar_ticks(tempo, ppq, cut)
+            bars = made["bars"] if "bars" in made else bar_ticks(tempo, ppq, cut)  # (keep_gaps' own: the same)
             if cut < max(e for _, e, _ in keeps):
                 out["bars_cut"] = cut / ppq
         _fit_bar_lines(gaps, keeps, bars, bar_lengths(ppq))
@@ -1125,8 +1131,7 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         file_segs.append((fa, int(starts[-1]), (starts[:-1], vals)))
         # (each part's heard and file clocks: a CC message that gave way goes on the file tick sounding nearest its
         # heard time, hunt 2026-10-24: the same share of ticks was up to 190 ms off where the tempo is uneven)
-        clocks.append((a, e, fa, heard_t, starts, vals,
-                       np.concatenate([[0], np.cumsum(lens * vals, dtype=np.float64)])))
+        clocks.append([a, e, fa, heard_t, starts, vals, None])  # (the clock itself made when first asked: _clock)
         f = fa + np.concatenate([[0], np.cumsum(k)])
         bp_n.append(np.asarray(n, np.int64))
         bp_f.append(f.astype(np.int64))
@@ -1139,10 +1144,22 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     else:
         file_segs += [(x + offset, y + offset, v) for x, y, v in _cut(segs, at, end)]
     events = _seg_events(file_segs)
+    file_segs = None
+    for c in clocks:  # (the runs kept for the CC clocks: their values fit 4 bytes; PLAN export in pieces)
+        if len(c[5]) and int(c[5].max()) < 1 << 31 and int(c[5].min()) >= 0:
+            c[5] = c[5].astype(np.int32)
     if events[0][0] != 0:
         events = Rows(np.concatenate([[[0, start_u]], events.arr]))
     out["events"] = events
     bp_n, bp_f = np.concatenate(bp_n), np.concatenate(bp_f)
+
+    def _clock(c):
+        """Part c's file clock: ticks x us summed up to each run's start (made the first time a CC message between
+        two anchors needs it; never for exports without such)."""
+        if c[6] is None:
+            starts, vals = c[4], c[5]
+            c[6] = np.concatenate([[0], np.cumsum(np.diff(starts) * vals, dtype=np.float64)])
+        return c[6]
 
     def to_file(t):
         # between two anchors (a CC message that gave way, keep_gaps): the file tick sounding nearest its heard
@@ -1155,10 +1172,12 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         mid = (j > i) & (t > bp_n[i]) & (d > 0) & (fd != d)
         if np.any(mid):
             share = bp_f[i] + np.rint((t - bp_n[i]) * fd / np.maximum(d, 1)).astype(np.int64)
-            for a, e, fa, heard_t, starts, vals, clock in clocks:
+            for c in clocks:
+                a, e, fa, heard_t, starts, vals = c[:6]
                 on = mid & (t > a) & (t < e)
                 if not np.any(on):
                     continue
+                clock = _clock(c)
                 x = t[on] - a
                 want = (heard_t[x] if isinstance(heard_t, np.ndarray) else _prefix(heard_t, t[on], False)
                         if isinstance(heard_t, RunSet) else x.astype(np.float64) * heard_t)
@@ -1592,6 +1611,9 @@ def _fit_piece(gaps, segs, bars, lengths, state, unsorted=False):
     state[0], state[1] = carry, last
 
 
+SIG_PIECE = 1 << 20  # _signatures' bars worked on at once
+
+
 def _signatures(keeps, tempo, bars, ppq, to_file):
     """([(file tick, top, bottom power)], [Spiderweb ticks of the bars no time signature fits], [Spiderweb ticks
     of the bar lines written a little off]): a time signature wherever the bar length changes, up to the bar after
@@ -1609,11 +1631,28 @@ def _signatures(keeps, tempo, bars, ppq, to_file):
 
     out, prev, unfit = [], None, []
     stop = min(len(bars) - 2, int(np.searchsorted(bars, last, "right")))
-    lines, moved, _ = _written_lines(to_file(bars[:stop + 2]), bar_lengths(ppq))
+    fl = np.empty(stop + 2, np.int64)  # (the bar lines' file ticks a stretch at a time: to_file's work lists for
+    for s in range(0, stop + 2, SIG_PIECE):  # every bar at once took ~60 bytes a bar; PLAN export in pieces)
+        fl[s:s + SIG_PIECE] = to_file(bars[s:min(s + SIG_PIECE, stop + 2)])
+    lines, moved, _ = _written_lines(fl, bar_lengths(ppq))
+    fl = None
     fast = getattr(speed.loops(), "bar_sigs", None)  # (compiled: the walk below, the same rows; fit bar lines C)
-    got = None if fast is None else fast(lines, bars, stop, starts, [s[1] for s in own], [s[2] for s in own], ppq,
-                                         longest)
-    rows = None
+    got, rows = None, None
+    if fast is not None:  # (a stretch of bars at a time, the last signature handed on: room for 2 rows a bar was
+        # made for every bar at once)
+        o_top, o_pow = [s[1] for s in own], [s[2] for s in own]
+        parts, unf, carry = [], [], None
+        for m0 in range(0, stop + 1, SIG_PIECE):
+            m1 = min(m0 + SIG_PIECE, stop + 1)  # (bars m0 .. m1 - 1: their lines m0 .. m1)
+            piece = fast(lines[m0:m1 + 1], bars[m0:m1 + 1], m1 - m0 - 1, starts, o_top, o_pow, ppq, longest, carry)
+            if piece is None:
+                parts = None
+                break
+            parts.append(piece[0])
+            unf.append(piece[1])
+            carry = piece[2]
+        if parts is not None:
+            got = (np.concatenate(parts) if len(parts) != 1 else parts[0], np.concatenate(unf), carry)
     if got is not None:  # (its rows stay one table: Rows below, never a tuple a row; fit bar lines D2)
         rows, unf, prev = got
         unfit = unf.tolist()

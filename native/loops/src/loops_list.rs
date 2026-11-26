@@ -173,8 +173,9 @@ py_loops! {
                   state: &mut [i64]) => crate::bars::fit_bars_from;
     written_lines(fl: &[i64], lengths: &[i64], carry_most: i64, w: &mut [i64], moved: &mut [i64],
                   unfit: &mut [i64], counts: &mut [i64]) => crate::bars::written_lines;
-    bar_sigs(lines: &[i64], bars: &[i64], stop: i64, own_s: &[i64], own_top: &[i64], own_pow: &[i64], ppq: i64,
-             longest: i64, out: &mut [i64], unfit: &mut [i64], counts: &mut [i64]) => crate::bars::bar_sigs;
+    bar_sigs_from(lines: &[i64], bars: &[i64], stop: i64, own_s: &[i64], own_top: &[i64], own_pow: &[i64], ppq: i64,
+                  longest: i64, out: &mut [i64], unfit: &mut [i64], counts: &mut [i64],
+                  state: &mut [i64]) => crate::bars::bar_sigs_from;
     flat_gaps(j: i64, last: i64, total: &[i64], k: &mut [i64], least: &[i64], curved: &[u8], reach: i64,
               safe_reach: i64, lens: &mut [i64], vals: &mut [i64], pos: i64, res: &mut [i64])
               => crate::bars::flat_gaps;
