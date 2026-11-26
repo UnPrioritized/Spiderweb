@@ -40,6 +40,8 @@ What's new:
 
 • Fixed: some damaged MIDI files stopped Load MIDI with an error instead of loading.
 
+• Fixed: saving and opening a project could change its notes. Dragged points and velocity lines are now saved exactly (before, a few notes could move or get 1 louder after opening), and stirred, sliced and merged pieces keep their colours, step order and velocities. Glue in a box on a sliced piece no longer changes velocities outside the box.
+
 • Fixed small rounding mistakes that changed the notes: Notes by snap could add an extra note one step early on the last key; Wrapped slices could give one tick two different slices; Hz bass could add an extra wave after a held tone; Gate Range across the keys could miss its first or last gate; a velocity line could read a stretched paste's note a tick off.
 
 • Fixed small rounding mistakes in the tools: boxes with an edge between two ticks (a fine snap at a low PPQ) could leave a note out; Bend → Wobble could end above or below the note; Turn in the drawer landed off the grid on grids 12, 24 and 48; pasting Hz effect points onto a repeat's start did nothing; the Conductor's Interval box and the Hz Repeat every box cut a typed fraction down (2.9 became 2) instead of refusing it.
