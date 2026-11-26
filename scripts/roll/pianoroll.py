@@ -13,12 +13,12 @@ from types import SimpleNamespace
 
 import numpy as np
 
-from files.lang import tr, trn
+from files.lang import tr
 from files.system import double_click_ms
 from notes.between import copied as between_copied, group_of, keep_pushes, push_sizes, whole_groups
-from notes.custom import box_frame, box_pts, even_on, fill_plan, fill_test, frame_in_box
+from notes.custom import box_pts, even_on, fill_plan, fill_test, frame_in_box
 from notes.even_steps import whole_width
-from notes.engine import SPACE_KEYS as engine_space_keys, cached_reach, make_shape, shape_key
+from notes.engine import SPACE_KEYS as engine_space_keys, cached_reach, shape_key
 from notes.meter import bar_beat_tick, sigs_of
 from notes.joined import all_tumours
 from notes.mask import OFF, ROW, is_mask, mask_area
@@ -48,11 +48,11 @@ from roll.roll_melody import MelodyMarks
 from roll.roll_path import PathEditing
 from roll.roll_shared import (ALT, BOX_CURSORS, BOX_SCROLL_MS, BOX_STILL, CTRL, MAX_SX, MIN_SX, PICK, SHIFT,
                               RULER_TOP, VEL_TOP, bind_double_right, black_bands, box_kind, boxes_side, boxes_upright,
-                              cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box, mouse_trail,
+                              cached_path, cached_strokes, grab_while_panning, grid_span, line_touches_box,
                               note_name, ruler_boxes, even_rows, whole_fit, whole_row)
 from roll.roll_lasso import LassoDrawing
+from roll.roll_drawtools import DrawTools
 from roll.roll_pen import PenCircle
-from notes.pen import ink_at
 from roll.roll_loaded import LoadedNotes
 from roll.roll_sustain import SustainStops
 from roll.roll_text import TextTyping
@@ -99,7 +99,7 @@ def grid_x(sh, make, x, sb, ppq, notes_of):
 
 class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
                 PathEditing, SustainStops, LassoDrawing, CentreDots, LiquifyBrush, WarpGrid, MelodyMarks, GlissEditing,
-                PenCircle, tk.Canvas):
+                PenCircle, DrawTools, tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
@@ -368,6 +368,13 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     # handles / box sides, shapes being drawn, the Stir centre point, a Slice line
     FOLLOW_KINDS = frozenset(("move", "handle", "resize", "skew", "stretch", "create", "segment", "arcdrag", "wall",
                               "place", "free", "rccentre", "slice", "knife"))
+
+    # what a held drag (self.drag[0]) hands its mouse moves / its let go to (on_drag / on_release); each tool's
+    # press, drag and let go live together in its own part (roll_drawtools...)
+    DRAG_KINDS = {"create": "drag_create", "wall": "drag_wall", "segment": "drag_segment", "arcdrag": "drag_segment",
+                  "place": "drag_place", "free": "free_drag"}
+    RELEASE_KINDS = {"create": "release_create", "wall": "release_wall", "segment": "release_segment",
+                     "arcdrag": "release_arcdrag", "place": "release_place", "free": "release_free"}
 
     def follows(self, kind):
         """True: the view goes along when this drag passes the edge (box_scroll); only with a Space setting on."""
@@ -1582,12 +1589,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         if kept and tool != "select":  # a drawing tool: the Select boxes stay (add_drawn, user)
             self.box_kept = (kept, set(app.sels))
-        if tool == "funnel" and self.draft and len(self.draft["pts"]) == 2:
-            # the funnel's line is drawn, now its wall
-            self.draft["pts"] += [list(pt), list(pt)]
-            self.drag = ("wall", e.x, e.y)
-            self.request_redraw()
-            return
+        if tool == "funnel" and self.draft and len(self.draft["pts"]) == 2:  # (its line drawn: now its wall)
+            return self.press_wall(e, pt)
         if tool == "select":
             # (its notes count too; a selected shape under the mouse first, except Ctrl+click: adds the one on top)
             i = self.shape_at(e.x, e.y, prefer_selected=not e.state & CTRL)
@@ -1658,65 +1661,18 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             # without dragging highlights the part under the mouse (none: clears it)
             self.drag = ("move", pt, orig, None if e.state & CTRL or not tap else i, False, part if again else False)
             return
-        if tool == "poly":  # click its points, or drag each segment
-            if self.draft is None:
-                self.draft = make_shape("poly", [pt, pt], app.defaults)
-                self.pen_draft()  # (the shared pen: roll_pen)
-            elif self.poly_point(pt):
-                return
-            self.drag = ("segment", e.x, e.y)
-            self.request_redraw()
-            return
+        # the drawing tools (roll_drawtools)
+        if tool == "poly":
+            return self.press_poly(e, pt)
         if tool in BOX_TOOLS:
-            self.draft = self.box_draft(tool, pt, pt)
-            self.drag = ("create", pt, e.x, e.y)
-            self.request_redraw()
-            return
-        if tool == "arc":  # three clicks: start, a point it passes through, end (or drag start -> end, then bend)
-            if self.draft is None:
-                self.draft = make_shape("arc", [pt, pt], app.defaults)
-                self.draft["k"] = self.sy / self.sx  # round as it looks on screen now
-                self.pen_draft()
-                self.drag = ("arcdrag", e.x, e.y)
-            elif self.arc_bend:  # dragged start -> end: this click sets the point it passes through
-                self.draft["pts"][1] = pt
-                self.arc_bend = False
-                self.finish_arc()
-            elif len(self.draft["pts"]) == 2:
-                self.draft["pts"][-1] = pt
-                self.draft["pts"].append(list(pt))
-            else:
-                self.draft["pts"][-1] = pt
-                self.finish_arc()
-            self.request_redraw()
-            return
+            return self.press_box_tool(e, tool, pt)
+        if tool == "arc":
+            return self.press_arc(e, pt)
         if tool == "custom":
-            tpl = app.custom_template(app.custom_shape)
-            if not tpl:
-                app.status.config(text=tr("pianoroll.pick_a_custom_shape_in_the"))
-                return
-            self.draft = app.new_custom(tpl[0], *pt, *pt, areas=tpl[2], drawn=tpl[1])
-            self.drag = ("place", pt, e.x, e.y, tpl[1])
-            self._draft_time = 0.0  # (slow or not: found again for each new shape)
-            self.request_redraw()
-            return
+            return self.press_custom(e, pt)
         if tool == "free":
-            self.draft = make_shape("free", [self.draw_pt(e, snap=False)], app.defaults)
-            trail = mouse_trail(e.x_root, e.y_root, None)
-            self.drag = ("free", e.x, e.y, trail[-1][2] if trail else None)
-            # (each point's width from the hand's speed, worked out as it's drawn and never again: the pen's Width
-            # from speed, pen.ink_at; where + when the mouse was, Windows' mouse trail when it has one)
-            self._ink_way = ([(e.x / self.scale, e.y / self.scale)], [trail[-1][2] if trail else e.time])
-            self.draft["ink"] = [1.0]
-            if app.free_thick > 1:  # (the wide pen already while drawing: its notes show as they'll be, user)
-                self.draft["k"] = self.sy / self.sx
-                self.pen_draft()
-            return
-        self.draft = make_shape(tool, [pt, pt], app.new_defaults(tool))
-        self.pen_draft()
-        self.drag = ("create", pt, e.x, e.y)
-        self._draft_time = 0.0
-        self.request_redraw()
+            return self.press_free(e)
+        self.press_line(e, tool, pt)
 
     def on_drag(self, e):
         self.app.show_position(self.position_text(e))
@@ -1850,37 +1806,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.app.shape_edited(moving=True)
         elif kind == "stretch":
             self.stretch_to(e)
-        elif kind == "free":
-            self.free_drag(e)
-        elif kind in ("segment", "arcdrag"):  # a polyline's next point / an arc's end, at the mouse
-            self.draft["pts"][-1] = self.draw_pt(e)
-            self.request_redraw()
-        elif kind == "create":
-            kind, pt = self.draft.get("draw") or self.draft["kind"], self.draw_pt(e)
-            if kind in BOX_TOOLS:
-                start = self.drag[1]
-                flat = False
-                if not self.app.live.get():  # (its own shape: keys on the lines between keys; live shapes' strokes
-                    start, pt = self.row_box(start, pt, e.state & SHIFT)  # stay lines, user)
-                    flat = start[1] == pt[1] and float(pt[1]).is_integer()  # (one key: nothing, Ctrl or not)
-                if e.state & CTRL and not flat:  # a perfect circle / polygon on screen
-                    pt = self.keep_aspect(start, pt, self.box_aspect(kind))
-                self.draft = self.box_draft(kind, start, pt)
-            else:
-                self.draft = make_shape(kind, [self.drag[1], pt], self.app.new_defaults(kind))
-                self.pen_draft()
-            self.draft_moved()
-        elif kind == "wall":
-            pt = self.event_pt(e)
-            self.draft["pts"][3] = pt
-            if e.state & CTRL:  # centred on the line: both ends equally far from it
-                mid = self.crossing(self.draft["pts"][:2], (self.draft["pts"][2], pt))
-                if mid:
-                    self.draft["pts"][2] = [2 * mid[0] - pt[0], 2 * mid[1] - pt[1]]
-            self.request_redraw()
-            text = self.position_text(e) or ""
-            n = self.app.note_count(self.draft)
-            self.app.show_position(tr("pianoroll.new_funnel_notes", text=text, notes=trn("n.notes", n, n=n)))
         elif kind == "resize":
             _, k, orig, side, start = self.drag
             pt = self.resize_point(orig, k, side, start, e)
@@ -1942,15 +1867,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.app.show_position(tr("pianoroll.turned", degrees=math.degrees(angle)))
         elif kind == "hzkeys":
             self.hz_drag(e)
-        elif kind == "place":
-            _, start, _, _, aspect = self.drag
-            start, pt = self.row_box(start, self.event_pt(e), e.state & SHIFT)  # (keys on the lines between keys)
-            flat = start[1] == pt[1] and float(pt[1]).is_integer()  # (one key: nothing, Ctrl or not)
-            if e.state & CTRL and aspect and not flat:
-                pt = self.keep_aspect(start, pt, aspect)
-            self.draft["pts"] = box_frame(start[0], start[1], pt[0], pt[1])
-            self.draft_moved()
-            self.show_draft(self.position_text(e) or "")
+        elif kind in self.DRAG_KINDS:  # (each tool's own drag: roll_drawtools)
+            getattr(self, self.DRAG_KINDS[kind])(e)
 
     def copy_moved(self, orig):
         """Ctrl+drag inside the kept Select box, the first move: copies of the shapes are added and selected, and
@@ -1971,35 +1889,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         app.shapes_changed(moving=True)
         self.dup = "done"
         return new
-
-    def free_drag(self, e):
-        """Freehand: every place the mouse passed since the last move (also the ones Windows skipped while the
-        program was busy), at least 3 px apart. Only the new bit of line is drawn now; the whole roll (the notes)
-        follows a few times a second, so painting doesn't hold up reading the mouse."""
-        _, lx, ly, since = self.drag
-        trail = mouse_trail(e.x_root, e.y_root, since)
-        if trail:
-            since = trail[-1][2]
-            ox, oy = self.winfo_rootx(), self.winfo_rooty()
-            spots = [(x - ox, y - oy, t) for x, y, t in trail]
-        else:
-            spots = [(e.x, e.y, e.time)]
-        pts = self.draft["pts"]
-        ink = self.draft.get("ink")
-        way = getattr(self, "_ink_way", None)
-        for x, y, t in spots:
-            if math.hypot(x - lx, y - ly) >= 3:
-                pt = self.event_pt(SimpleNamespace(x=x, y=y, state=e.state), snap=False)
-                self.create_line(self.t2x(pts[-1][0]), self.p2y(pts[-1][1]), self.t2x(pt[0]), self.p2y(pt[1]),
-                                 fill=look.DRAFT_LINE, width=look.LINES + 1)  # (as the draft's redraw)
-                pts.append(pt)
-                if ink is not None and way is not None:
-                    way[0].append((x / self.scale, y / self.scale))
-                    way[1].append(t)
-                    ink.append(ink_at(*way))
-                lx, ly = x, y
-        self.drag = ("free", lx, ly, since)
-        self.request_redraw(delay=100)
 
     def on_release(self, e, second=False):
         """second: the click that finishes a shape started with a click (see follow)."""
@@ -2129,66 +2018,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
                 self.app.set_parts(self.part_group(self.app.selected(), part) if part else (), main=part)
         elif kind == "hzkeys":
             open_hz(self.app)
-        elif kind == "create":
-            funnel = self.draft["kind"] == "funnel"
-            if still:  # clicked twice in the same spot: nothing
-                self.cancel_draft()
-            elif funnel and self.add_funnel_line():
-                pass
-            elif funnel:  # the line: the wall comes next (the panel says so)
-                self.app.sync_funnel()
-            else:
-                self.commit_draft()
-        elif kind == "wall":
-            if still:
-                del self.draft["pts"][2:]  # clicked twice in the same spot: still waiting for the wall
-                self.request_redraw()
-            elif not self.arrange_funnel(self.draft["pts"]):
-                del self.draft["pts"][2:]  # the wall can't run along the line: still waiting for a wall
-                self.request_redraw()
-                self.app.sync_funnel(note=tr("pianoroll.the_wall_has_to_cross_the"))
-            elif self.app.confirm_big([dict(self.draft, pts=self.arrange_funnel(self.draft["pts"]))]):
-                self.draft["pts"] = self.arrange_funnel(self.draft["pts"])
-                self.commit_draft()
-            else:
-                self.cancel_draft()
-        elif kind == "free":
-            pts = self.draft["pts"]
-            if self.live_drawing() and len(pts) >= 3 and math.hypot(
-                    e.x - self.t2x(pts[0][0]), e.y - self.p2y(pts[0][1])) < 12 * self.scale:
-                pts.append(list(pts[0]))  # let go near its start: closed
-            if len(pts) >= 2:
-                # made perfect with the last sensitivity picked (smooth.py), as the roll looks now
-                self.draft.update(smooth=self.app.free_smooth, k=self.sy / self.sx)
-                if self.app.free_thick > 1:  # (a wide pen: pen.py; into a live shape too, user 2026-11-19; roll_live
-                    # draft_stroke carries it)
-                    self.draft["thick"] = self.app.free_thick
-                if self.app.free_pen:  # (the pen's shape picked last)
-                    self.draft["pen"] = dict(self.app.free_pen)
-                ink = self.draft.pop("ink", None)
-                self._ink_way = None
-                if ink and len(ink) == len(pts) - 1:  # (a loop closed at the let go: its end as its last point)
-                    ink.append(ink[-1])
-                if ink and len(ink) == len(pts):
-                    self.draft["ink"] = ink
-                self.commit_draft()
-            else:
-                self.cancel_draft()
-        elif kind == "segment" and not still:  # dragged: the point goes where it was let go
-            self.poly_point(self.draw_pt(e))
-        elif kind == "arcdrag" and not still:  # dragged start -> end: now it bends with the mouse until a click
-            (b0, p0), end = self.draft["pts"]
-            self.draft["pts"] = [[b0, p0], [(b0 + end[0]) / 2, (p0 + end[1]) / 2], end]
-            self.arc_bend = True
-            self.request_redraw()
-        elif kind == "place":
-            pts = self.draft["pts"]
-            if still or pts[0][1] == pts[2][1]:  # (one key tall: nothing is made, user 2026-11-20)
-                self.cancel_draft()
-            elif self.keep_draft() or self.app.confirm_big([self.draft]):
-                self.commit_draft()
-            else:
-                self.cancel_draft()
+        elif kind in self.RELEASE_KINDS:  # (each tool's own let go: roll_drawtools)
+            getattr(self, self.RELEASE_KINDS[kind])(e, still)
         elif kind in ("resize", "turn", "skew") or kind == "handle" and self.app.selected()["kind"] == "custom":
             self.app.sync_custom()  # (a stroke's point dragged: its gaps may have closed)
         elif kind == "stretch":  # the box goes back to its size, the shapes stay stretched (user)

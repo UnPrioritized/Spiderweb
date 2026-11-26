@@ -121,7 +121,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     props_text.py    the Properties window's words and numbers (what each of its lines shows)
     track_pictures.py the track list's pictures: a loaded MIDI's rows painted, the strip under the list, its picker
   roll/              the piano roll
-    pianoroll.py     the piano roll canvas: view, hit testing, mouse editing
+    pianoroll.py     the piano roll canvas: view, hit testing, mouse clicks handed on to each tool's part
+    roll_drawtools.py the drawing tools' press / drag / let go (Line, box tools, Polyline, Arc, Funnel, Custom, Freehand)
     roll_draw.py     painting the grid, notes, handles, keyboard, ruler
     roll_loaded.py   a loaded MIDI's notes on the piano roll (overview at once, exact in the background)
     roll_curve.py    editing curves (anchors + handles, symmetric halves)
