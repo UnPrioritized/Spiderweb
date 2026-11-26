@@ -297,27 +297,31 @@ def _seg_events(segs):
             vals.append(np.asarray(u, np.int64))
     if not ticks:
         return []
-    # (one table filled piece by piece, the repeats dropped in place a stretch at a time: joining every piece and
-    # then picking the kept rows held ~50 bytes an event at once; PLAN export in pieces, the same rows)
-    size = sum(len(x) for x in ticks)
+    # (the repeats dropped a stretch at a time, counted first, then the kept rows written into a table of just that
+    # size: a table for every run first held 16 bytes a run more than kept, ~0.9 GB at 16 M bars; PLAN export in
+    # pieces, the same rows)
+    def kept():
+        prev = None
+        for x, y in zip(ticks, vals):
+            for s in range(0, len(y), EVENTS_PIECE):
+                v = y[s:s + EVENTS_PIECE]
+                if not len(v):
+                    continue
+                keep = np.empty(len(v), bool)
+                keep[0] = prev is None or v[0] != prev
+                keep[1:] = v[1:] != v[:-1]
+                prev = int(v[-1])
+                yield x[s:s + EVENTS_PIECE], v, keep
+
+    size = sum(int(keep.sum()) for _, _, keep in kept())
     out = np.empty((size, 2), np.int64)
-    at = 0
-    for x, y in zip(ticks, vals):
-        out[at:at + len(x), 0] = x
-        out[at:at + len(x), 1] = y
-        at += len(x)
-    ticks = vals = None
-    w, prev = 0, None
-    for s in range(0, size, EVENTS_PIECE):
-        v = out[s:s + EVENTS_PIECE, 1]
-        keep = np.empty(len(v), bool)
-        keep[0] = prev is None or v[0] != prev
-        keep[1:] = v[1:] != v[:-1]
-        prev = int(v[-1])
-        got = out[s:s + EVENTS_PIECE][keep]
-        out[w:w + len(got)] = got
-        w += len(got)
-    return Rows(out[:w] if w > size * 3 // 4 else out[:w].copy())
+    w = 0
+    for x, v, keep in kept():
+        n = int(keep.sum())
+        out[w:w + n, 0] = x[keep]
+        out[w:w + n, 1] = v[keep]
+        w += n
+    return Rows(out)
 
 
 EVENTS_PIECE = 1 << 20  # _seg_events drops repeats this many rows at a time
@@ -1193,7 +1197,15 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
     if keeps:
         # (the map as anchors -> file ticks: a loaded MIDI's export, midi_scan.rewrite; the CC messages that gave
         # way as anchors of their own there, so they land by time too)
-        lt = np.setdiff1d(loose, bp_n)
+        # (= np.setdiff1d(loose, bp_n), which sorted copies of the whole map even with no CC message at all: ~1.3 GB
+        # at 16 M bars; the map's anchors come in order, so a look-up does it; PLAN export in pieces)
+        if not len(loose):
+            lt = loose[:0]
+        elif len(bp_n) < 2 or bool((bp_n[1:] >= bp_n[:-1]).all()):
+            lt = sorted_union([loose])
+            lt = lt[~_member(lt, bp_n)]
+        else:
+            lt = np.setdiff1d(loose, bp_n)
         if len(lt):
             lf = to_file(lt)
             n_all, f_all = np.concatenate([bp_n, lt]), np.concatenate([bp_f, lf])
