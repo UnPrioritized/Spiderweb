@@ -897,7 +897,7 @@ class HelpWindow(tk.Toplevel):
                 parent = app
             bad = result.get("bad")
             if bad is None:
-                bad = ["files.txt"]
+                bad = ["checksum.txt"]
             if not bad:
                 messagebox.showinfo(tr("about.check_files"), trn("about.files_ok", seen[1], n=seen[1]), parent=parent)
                 return

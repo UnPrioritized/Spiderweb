@@ -1,7 +1,7 @@
 //! The folder version's zip unpacked safely, and version folders' lists: the same rules as scripts/files/folder_zip.py
 //! (keep both in step). NEVER TOUCHES WHAT ISN'T SPIDERWEB'S: unpacking goes into data\<version>.part-<random>\,
-//! renamed data\<version>\ only once whole (sizes checked against its files.txt); a data\<version> already there and
-//! whole is kept, one not whole is set aside under an unpacking's name (the program cleans those later).
+//! renamed data\<version>\ only once whole (sizes checked against its checksum.txt); a data\<version> already there
+//! and whole is kept, one not whole is set aside under an unpacking's name (the program cleans those later).
 
 use std::collections::HashMap;
 use std::fs;
@@ -12,6 +12,7 @@ use crate::Fail;
 
 const TOP: &str = "Spiderweb/";
 pub const EXE: &str = "Spiderweb.exe";
+const LIST: &str = "checksum.txt";
 const TOP_FILES: [&str; 4] = ["LICENSE", "README.txt", "THIRD-PARTY-NOTICES.txt", "SPIDERWEB-NOTES-FORMAT.md"];
 const UNPACKED_MOST: u64 = 2 << 30;
 
@@ -29,9 +30,9 @@ pub fn inside(root: &Path, rel: &str) -> Option<PathBuf> {
     Some(out)
 }
 
-/// {place: size} from a version folder's files.txt; None when it has none (= not ours).
+/// {place: size} from a version folder's checksum.txt; None when it has none (= not ours).
 pub fn listed(folder: &Path) -> Option<HashMap<String, u64>> {
-    let text = fs::read_to_string(folder.join("files.txt")).ok()?;
+    let text = fs::read_to_string(folder.join(LIST)).ok()?;
     let mut out = HashMap::new();
     for line in text.lines() {
         let parts: Vec<&str> = line.split('\t').collect();
@@ -62,7 +63,7 @@ pub fn remove(path: &Path) -> std::io::Result<()> {
     }
 }
 
-/// Every file its files.txt lists is there with its size (no list = not whole).
+/// Every file its checksum.txt lists is there with its size (no list = not whole).
 pub fn whole(folder: &Path) -> bool {
     let Some(files) = listed(folder) else { return false };
     !files.is_empty() && files.iter().all(|(rel, size)| {
@@ -70,7 +71,7 @@ pub fn whole(folder: &Path) -> bool {
     })
 }
 
-/// A data\ folder Spiderweb made: missing, empty, or holding version.txt / version folders with a files.txt.
+/// A data\ folder Spiderweb made: missing, empty, or holding version.txt / version folders with a checksum.txt.
 pub fn is_ours(data: &Path) -> bool {
     let Ok(entries) = fs::read_dir(data) else { return !data.exists() };
     let names: Vec<_> = entries.flatten().collect();
@@ -185,7 +186,7 @@ fn unpack_into(z: &[u8], version: &str, data: &Path, stage: &Path, new_exe: &Pat
         return Err(Fail::TooBig);
     }
     let exe_name = format!("{TOP}{EXE}");
-    if !all.iter().any(|e| e.name == exe_name) || !all.iter().any(|e| e.name == format!("{inner}files.txt")) {
+    if !all.iter().any(|e| e.name == exe_name) || !all.iter().any(|e| e.name == format!("{inner}{LIST}")) {
         return Err(Fail::BadFile);
     }
     let mut tops = Vec::new();

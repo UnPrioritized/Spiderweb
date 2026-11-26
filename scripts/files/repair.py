@@ -1,9 +1,10 @@
 """Repairing the folder version's program files (data/<version>/; user 2026-11-26). Three ways in:
-- the starter found names / sizes wrong (files.txt) and the user said Repair: boot.pyc gets --spiderweb-repair -> run()
+- the starter found names / sizes wrong (checksum.txt) or the list damaged and the user said Repair: boot.pyc gets
+  --spiderweb-repair -> run()
 - Spiderweb couldn't start because a program file won't load (looks_damaged): offer() asks, then starts the repair
-- Help -> About "Check program files": damaged() = every file's SHA-256 against files.txt (a few seconds)
+- Help -> About "Check program files": damaged() = every file's SHA-256 against checksum.txt (a few seconds)
 run() needs only Python, PyNaCl and these few files: it downloads THIS version's zip from its release page (signed
-list checked, SHA-256 checked), compares every file with the zip's own files.txt and puts back only those that
+list checked, SHA-256 checked), compares every file with the zip's own checksum.txt and puts back only those that
 differ (a file Windows holds is renamed aside first: <name>.repair-old-<random>, deleted at a later start by
 self_update.clean_old_versions). user/ and output/ are never touched. Then Spiderweb starts as usual."""
 
@@ -111,9 +112,10 @@ def _sha(path):
 
 
 def damaged(folder=None, progress=None, cancel=None):
-    """Places (from files.txt) of files missing, of another size or another SHA-256. None = no files.txt."""
+    """Places (from checksum.txt) of files missing, of another size or another SHA-256. None = the list is missing or
+    damaged (a line that doesn't read, cut short: never a check that quietly skips files)."""
     folder = folder or BUNDLE
-    files = folder_zip.listed(folder)
+    files = folder_zip.listed(folder, strict=True)
     if files is None:
         return None
     bad = []
@@ -207,7 +209,7 @@ def repair(progress=None, cancel=None, putting_back=None):
     fixed = 0
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         try:
-            listing = z.read(inner + "files.txt")
+            listing = z.read(inner + folder_zip.LIST)
         except KeyError:
             raise folder_zip.Refused("bad_file") from None
         wanted = folder_zip.read_list(listing.decode("utf-8", "replace"))
@@ -224,7 +226,7 @@ def repair(progress=None, cancel=None, putting_back=None):
             if not same:
                 _put(p, z.read(inner + rel))
                 fixed += 1
-        here_list = os.path.join(BUNDLE, "files.txt")
+        here_list = os.path.join(BUNDLE, folder_zip.LIST)
         try:
             same = open(here_list, "rb").read() == listing
         except OSError:

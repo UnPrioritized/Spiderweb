@@ -1,8 +1,8 @@
 """The folder version's zip (Spiderweb-<version>.zip: Spiderweb/Spiderweb.exe + Spiderweb/data/<version>/ with its
-files.txt) unpacked safely, and version folders deleted the way they came. Plain Python only (no other program
+checksum.txt) unpacked safely, and version folders deleted the way they came. Plain Python only (no other program
 module): used by the updater (files/self_update.py) and by the mover (scripts/mover.py, its own small exe).
 NEVER TOUCHES WHAT ISN'T SPIDERWEB'S: unpacking goes into a folder of its own, renamed only once whole; a version
-folder is deleted only by its own files.txt (anything else put there stays)."""
+folder is deleted only by its own checksum.txt (anything else put there stays)."""
 
 import os
 import secrets
@@ -10,6 +10,7 @@ import shutil
 import stat
 
 EXE = "Spiderweb.exe"
+LIST = "checksum.txt"  # (each version folder's list of its files: size, SHA-256, place; build_folder.py)
 UNPACKED_MOST = 2 << 30  # (what a release zip may unpack to: ~150 MB now)
 TOP = "Spiderweb/"
 TOP_FILES = ("LICENSE", "README.txt", "THIRD-PARTY-NOTICES.txt", "SPIDERWEB-NOTES-FORMAT.md")  # (beside the exe)
@@ -36,30 +37,41 @@ def inside(root, rel):
     return os.path.join(root, *rel.split("/"))
 
 
-def listed(folder):
-    """{place: (size, sha256)} from a version folder's files.txt; None when it has none (= not ours)."""
+def listed(folder, strict=False):
+    """{place: (size, sha256)} from a version folder's checksum.txt; None when it has none (= not ours), or (strict)
+    when it is damaged (see read_list)."""
     try:
-        with open(os.path.join(folder, "files.txt"), encoding="utf-8") as f:
-            return read_list(f.read())
+        with open(os.path.join(folder, LIST), encoding="utf-8", newline="") as f:
+            return read_list(f.read(), strict)
     except (OSError, UnicodeDecodeError):
         return None
 
 
-def read_list(text):
-    """{place: (size, sha256)} from a files.txt's text ("<size>\\t<sha256>\\t<place>"; "<size>\\t<place>" too)."""
+def read_list(text, strict=False):
+    """{place: (size, sha256)} from a checksum.txt's text ("<size>\\t<sha256>\\t<place>"; "<size>\\t<place>" too).
+    Lines that don't read are skipped; strict = None instead (the list is damaged), also when it is empty or doesn't
+    end with a line break (cut short). Strict is for checking files; deleting / unpacking take what reads."""
     out = {}
+    if strict and not text.endswith("\n"):
+        return None
     for line in text.splitlines():
+        if not line.strip():
+            continue
         parts = line.split("\t")
-        if len(parts) == 3 and parts[0].isdigit():
+        if len(parts) == 3 and parts[0].isdigit() and parts[2]:
             out[parts[2].replace("\\", "/")] = (int(parts[0]), parts[1])
-        elif len(parts) == 2 and parts[0].isdigit():
+        elif len(parts) == 2 and parts[0].isdigit() and parts[1]:
             out[parts[1].replace("\\", "/")] = (int(parts[0]), "")
+        elif strict:
+            return None
+    if strict and not out:
+        return None
     return out
 
 
 def remove_listed(folder):
-    """Deletes a version folder the way it came: only the files its own files.txt lists (and files.txt), then the
-    folders left empty, deepest first. Anything else someone put there stays, with its folders. True = all gone."""
+    """Deletes a version folder the way it came: only the files its own checksum.txt lists (and the list itself), then
+    the folders left empty, deepest first. Anything else someone put there stays, with its folders. True = all gone."""
     files = listed(folder)
     if files is None:
         return False
@@ -71,7 +83,7 @@ def remove_listed(folder):
             except OSError:
                 pass
     try:
-        remove(os.path.join(folder, "files.txt"))
+        remove(os.path.join(folder, LIST))
     except OSError:
         pass
     for d, _, _ in sorted(os.walk(folder), key=lambda w: -len(w[0])):
@@ -83,7 +95,7 @@ def remove_listed(folder):
 
 
 def whole(folder):
-    """Every file its files.txt lists is there with its size (no list = not whole)."""
+    """Every file its checksum.txt lists is there with its size (no list = not whole)."""
     files = listed(folder)
     if not files:
         return False
@@ -111,7 +123,7 @@ def retry(job, tries=25):
 
 
 def is_ours(data):
-    """A data/ folder Spiderweb made: missing, empty, or holding version.txt / version folders with a files.txt."""
+    """A data/ folder Spiderweb made: missing, empty, or holding version.txt / version folders with a checksum.txt."""
     try:
         names = os.listdir(data)
     except FileNotFoundError:
@@ -124,7 +136,7 @@ def is_ours(data):
 
 
 def unpack(zip_path, version, data, new_exe, cancel=None, keep=None, top_to=None, progress=None):
-    """The checked zip's data/<version>/ into data/<version>.part-<random>/, sizes checked against its files.txt,
+    """The checked zip's data/<version>/ into data/<version>.part-<random>/, sizes checked against its checksum.txt,
     renamed data/<version>/ (hunt 2026-11-26: a data/<version> already there and whole is KEPT; one not whole is set
     aside under an unpacking's name, never deleted in place, never `keep`); its
     Spiderweb.exe saved as new_exe; top_to = a folder for README + licences (None: left as they are). progress(done,
@@ -139,7 +151,7 @@ def unpack(zip_path, version, data, new_exe, cancel=None, keep=None, top_to=None
             if sum(i.file_size for i in infos) > UNPACKED_MOST:
                 raise Refused("too_big")
             names = {i.filename for i in infos}
-            if TOP + EXE not in names or inner + "files.txt" not in names:
+            if TOP + EXE not in names or inner + LIST not in names:
                 raise Refused("bad_file")
             tops = []
             for n, i in enumerate(infos):

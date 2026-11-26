@@ -4,12 +4,12 @@ file's SHA-256 matching. Anything else = refused, the half download deleted, the
 
 The folder version (Spiderweb.exe + data/<version>/): the checked Spiderweb-<version>.zip is saved in data/ and
 unpacked there under a name of its own (data/<version>.part-<random>/), renamed data/<version>/ only once whole (its
-files' sizes checked against its files.txt), its starter saved beside the running one as <exe>.new. Nothing the
+files' sizes checked against its checksum.txt), its starter saved beside the running one as <exe>.new. Nothing the
 running program uses is touched until then. On closing, ONE switch: the starter swapped (Windows lets a running exe be
 renamed: <exe> -> <exe>.old, .new -> <exe>) and data/version.txt names the new version; Spiderweb closes as usual,
 then the new one starts with --updated (it waits for this one's lock, spiderweb.py). Closing cancelled / failing =
 undo() (old starter + version.txt back). At a later start, once the new one is up (CLEAN_AFTER_S), clean_leftovers()
-deletes <exe>.old and the old data/<version>/ folders: only the files each one's own files.txt lists, then folders
+deletes <exe>.old and the old data/<version>/ folders: only the files each one's own checksum.txt lists, then folders
 left empty (anything else put there stays).
 From the scripts the checked source zip is only saved in Downloads and shown: running scripts are never overwritten.
 ONE download at a time (_busy); each writes its own "<target>.<random>.part" (never two writers on one file)."""
@@ -384,7 +384,7 @@ def clean_after_start(app):
 
 def clean_old_versions(now=None):
     """(Folder version, CLEAN_AFTER_S after a start: this version is up) In data/: version folders OLDER than this
-    one (never this run's, never a newer one an update just unpacked) deleted by their own files.txt only; an
+    one (never this run's, never a newer one an update just unpacked) deleted by their own checksum.txt only; an
     unpacking's own data/<version>.part-<random>/ folder and part files older than STALE_PART_S. How many folders."""
     if not exe_mode() or not os.path.isdir(DATA):
         return 0

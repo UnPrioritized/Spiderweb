@@ -1,7 +1,8 @@
 """Builds the folder version of Spiderweb (Windows, 64-bit): Spiderweb.exe (the starter, native/starter) + data/<version>/
 holding Python, the packages, the program as .pyc files, icons, lang, clips and the DLLs. Nothing is unpacked when it
-starts. Also data/version.txt and data/<version>/files.txt (size, SHA-256 and place of every file: the starter checks
-sizes at each start, Help -> About's "Check program files" the fingerprints), and Spiderweb-<version>.zip.
+starts. Also data/version.txt and data/<version>/checksum.txt (size, SHA-256 and place of every file: the starter checks
+sizes at each start, Help -> About's "Check program files" the fingerprints; the list's own SHA-256 is baked into
+the starter), and Spiderweb-<version>.zip.
   python build_folder.py [--out DIR]   (default: dist)
 Uses the Python running it (its version, its installed packages) and needs Rust + the Windows SDK for the starter."""
 
@@ -121,7 +122,8 @@ def program(data):
 
 
 def file_list(data):
-    """files.txt: "<size>\\t<sha256>\\t<place>" for every file in data/<version> (not itself)."""
+    """checksum.txt: "<size>\\t<sha256>\\t<place>" for every file in data/<version> (not itself). Returns how many
+    files and the list's own SHA-256 (baked into the starter)."""
     lines = []
     for d, _, names in os.walk(data):
         for n in names:
@@ -131,9 +133,10 @@ def file_list(data):
                 for block in iter(lambda: f.read(1 << 20), b""):
                     h.update(block)
             lines.append(f"{os.path.getsize(p)}\t{h.hexdigest()}\t{os.path.relpath(p, data)}")
-    with open(os.path.join(data, "files.txt"), "w", encoding="utf-8", newline="\n") as f:
-        f.write("\n".join(sorted(lines)) + "\n")
-    return len(lines)
+    text = ("\n".join(sorted(lines)) + "\n").encode("utf-8")
+    with open(os.path.join(data, "checksum.txt"), "wb") as f:
+        f.write(text)
+    return len(lines), hashlib.sha256(text).hexdigest()
 
 
 def main():
@@ -156,10 +159,11 @@ def main():
     finally:
         if os.path.exists(stamp):
             os.remove(stamp)  # (the build stamp was only for this build)
-    if subprocess.call([sys.executable, os.path.join(ROOT, "native", "starter", "build_release.py")]):
+    count, list_sha = file_list(data)  # (first: the starter is built with the list's own SHA-256)
+    if subprocess.call([sys.executable, os.path.join(ROOT, "native", "starter", "build_release.py")],
+                       env=dict(os.environ, SPIDERWEB_LIST_SHA256=list_sha)):
         sys.exit("The starter didn't build.")
     shutil.copy2(os.path.join(ROOT, "build", "starter", "Spiderweb.exe"), os.path.join(app, "Spiderweb.exe"))
-    count = file_list(data)
     with open(os.path.join(app, "data", "version.txt"), "w", encoding="utf-8", newline="\n") as f:
         f.write(VERSION + "\n")
     for n in TOP_FILES:

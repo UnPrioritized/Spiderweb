@@ -1,12 +1,13 @@
 //! Spiderweb.exe of the folder version: starts the program kept in data\<version>\ next to it. Nothing is unpacked
 //! or written. data\version.txt names the version to start (an update writes it last, as its one switch-over step);
 //! without it, the version this starter was built with.
-//! At every start: the program files' names + sizes against data\<version>\files.txt (only folder listings asked
-//! of Windows, nothing read: milliseconds). Missing / wrong = offer to repair (the program's repair mode); Python
-//! itself missing = offer the download page. Then data\<version>\python3NN.dll runs boot.pyc with the arguments
+//! At every start: the program files' names + sizes against data\<version>\checksum.txt (only folder listings asked
+//! of Windows, nothing read but the list, itself checked against the SHA-256 baked in at build: milliseconds).
+//! Missing / wrong = offer to repair (the program's repair mode); Python itself missing = offer the download page. Then data\<version>\python3NN.dll runs boot.pyc with the arguments
 //! given (python314._pth there sets Python's paths and keeps any other Python's settings out).
 #![windows_subsystem = "windows"]
 
+mod sha256;
 mod texts;
 mod win;
 
@@ -17,6 +18,11 @@ const BUILT_VERSION: &str = match option_env!("SPIDERWEB_VERSION") {
     Some(v) => v,
     None => "dev",
 };
+/// The program files' list in data\<version>\ ("<size>\t<sha256>\t<place>" per file; build_folder.py writes it).
+const LIST: &str = "checksum.txt";
+/// SHA-256 of this build's own checksum.txt (build_folder.py makes the list first, then builds this starter with
+/// it); None in a plain build. Only checked when starting the version this starter was built with.
+const LIST_SHA256: Option<&str> = option_env!("SPIDERWEB_LIST_SHA256");
 const DOWNLOADS: &str = "https://github.com/UnPrioritized/Spiderweb/releases/latest";
 /// Given to boot.pyc when the user picked Repair (the program's repair mode).
 const REPAIR_ARG: &str = "--spiderweb-repair";
@@ -59,19 +65,36 @@ fn core_ok(data: &Path) -> Option<PathBuf> {
     Some(dll)
 }
 
-/// How many files in files.txt are missing or have another size (None = the list itself is missing). Each folder
-/// is listed once (Windows hands back every file's size with the listing: ~60 folders, not ~1,250 files asked
-/// one by one; a cold hard drive took 0.3 s that way).
-fn damaged(data: &Path) -> Option<usize> {
+/// How many files in checksum.txt are missing or have another size (None = the list itself is missing or
+/// damaged). The list is checked first: for this starter's own version, against the SHA-256 the build baked in
+/// (LIST_SHA256); for any version, every line must read and the list must end with a line break (cut short = not).
+/// Each folder is listed once (Windows hands back every file's size with the listing: ~60 folders, not ~1,250
+/// files asked one by one; a cold hard drive took 0.3 s that way).
+fn damaged(data: &Path, own_version: bool) -> Option<usize> {
     use std::collections::HashMap;
-    let list = std::fs::read_to_string(data.join("files.txt")).ok()?;
+    let raw = std::fs::read(data.join(LIST)).ok()?;
+    if let (true, Some(want)) = (own_version, LIST_SHA256) {
+        if sha256::hex(&raw) != want.to_ascii_lowercase() {
+            return None;
+        }
+    }
+    let list = String::from_utf8(raw).ok()?;
+    if !list.ends_with('\n') {
+        return None;
+    }
     let mut wanted: HashMap<String, Vec<(String, u64)>> = HashMap::new();
     for line in list.lines() {
+        if line.trim().is_empty() {
+            continue;
+        }
         // "<size>\t<sha256>\t<place>" (the fingerprint is for the full check by hand; "<size>\t<place>" reads too)
         let mut parts = line.splitn(3, '\t');
-        let (Some(size), Some(second)) = (parts.next(), parts.next()) else { continue };
+        let (Some(size), Some(second)) = (parts.next(), parts.next()) else { return None };
         let name = parts.next().unwrap_or(second);
-        let Ok(size) = size.trim().parse::<u64>() else { continue };
+        let Ok(size) = size.trim().parse::<u64>() else { return None };
+        if name.is_empty() {
+            return None;
+        }
         let name = name.replace('/', "\\");
         let (folder, file) = name.rsplit_once('\\').unwrap_or(("", &name));
         wanted.entry(folder.to_ascii_lowercase()).or_default().push((file.to_lowercase(), size));
@@ -139,7 +162,7 @@ fn main() {
     let Some(dll) = core_ok(&data) else { broken() };
     // started FOR a repair (Help -> About's "Check program files", a repair offer): straight to it, no question
     let mut repair = std::env::args_os().skip(1).any(|a| a == REPAIR_ARG);
-    let bad = if repair { Some(0) } else { damaged(&data) };
+    let bad = if repair { Some(0) } else { damaged(&data, version == BUILT_VERSION) };
     if bad != Some(0) {
         let text = match bad {
             Some(1) => texts.get("starter.repair", Some(1),
@@ -151,8 +174,8 @@ fn main() {
                  this version again and puts back only those files. Your own files stay as they are.\n\nNo = start \
                  anyway.", &[]),
             None => texts.get("starter.repair_list", None,
-                "Spiderweb can't check its program files: their list is missing.\n\nRepair them now? Spiderweb \
-                 downloads this version again and puts back what is missing or damaged. Your own files stay as \
+                "Spiderweb can't check its program files: their list is missing or damaged.\n\nRepair them now? \
+                 Spiderweb downloads this version again and puts back what is missing or damaged. Your own files stay as \
                  they are.\n\nNo = start anyway.", &[]),
         };
         repair = win::ask(&text);

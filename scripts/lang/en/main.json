@@ -3659,5 +3659,5 @@
  "starter.broken": "Spiderweb can't start: its program files are missing or damaged.\n\n{folder}\n\nOpen the download page to get Spiderweb again? Your settings, autosave and exports (the user and output folders) stay as they are.",
  "starter.repair": "{n} of Spiderweb's program files are missing or damaged.\n\nRepair them now? Spiderweb downloads this version again and puts back only those files. Your own files stay as they are.\n\nNo = start anyway.",
  "starter.repair_one": "1 of Spiderweb's program files is missing or damaged.\n\nRepair it now? Spiderweb downloads this version again and puts back only that file. Your own files stay as they are.\n\nNo = start anyway.",
- "starter.repair_list": "Spiderweb can't check its program files: their list is missing.\n\nRepair them now? Spiderweb downloads this version again and puts back what is missing or damaged. Your own files stay as they are.\n\nNo = start anyway."
+ "starter.repair_list": "Spiderweb can't check its program files: their list is missing or damaged.\n\nRepair them now? Spiderweb downloads this version again and puts back what is missing or damaged. Your own files stay as they are.\n\nNo = start anyway."
 }
