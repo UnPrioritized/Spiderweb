@@ -121,6 +121,9 @@ def bar_ticks(tempo, ppq, upto, start=0):
                     * ppq).astype(np.int64)  # (= round(b * ppq) one by one: both round halves to even)
     if len(lines) < 2:
         lines = np.append(lines, lines[-1] + 1)
+    step = np.diff(lines)
+    if (step >= 0).all():  # (made in order already: np.unique's answer by dropping repeats, ~25x quicker; D2)
+        return lines[np.concatenate([[True], step > 0])]
     return np.unique(lines)
 
 
@@ -184,13 +187,60 @@ class _Pairs:
         return got
 
 
+class Rows:
+    """file_plan's tempo events / time signatures as ONE int64 table (n rows of w numbers) that reads like the list
+    of tuples it stands for: len, rows by number (tuples of Python ints), slices, going through, ==, +. No Python
+    object an event (PLAN fit bar lines D2: millions of fitted bars took ~200 bytes each); .arr for the quick ways
+    (midi_out.tempo_track, loaded.retime_for)."""
+    __slots__ = ("arr",)
+
+    def __init__(self, arr, w=2):
+        a = np.asarray(arr, np.int64)
+        self.arr = a if a.ndim == 2 else a.reshape(-1, w)
+
+    def __len__(self):
+        return len(self.arr)
+
+    def __bool__(self):
+        return len(self.arr) > 0
+
+    def __getitem__(self, i):
+        if isinstance(i, slice):
+            return Rows(self.arr[i])
+        return tuple(self.arr[i].tolist())
+
+    def __iter__(self):
+        for s in range(0, len(self.arr), 1 << 16):  # (a piece at a time: never every row as tuples at once)
+            yield from map(tuple, self.arr[s:s + (1 << 16)].tolist())
+
+    def __eq__(self, other):
+        if isinstance(other, Rows):
+            return self.arr.shape == other.arr.shape and bool(np.array_equal(self.arr, other.arr))
+        try:
+            return len(other) == len(self) and all(tuple(x) == y for x, y in zip(other, self))
+        except TypeError:
+            return NotImplemented
+
+    __hash__ = None
+
+    def __add__(self, other):
+        return list(self) + list(other)
+
+    def __radd__(self, other):
+        return list(other) + list(self)
+
+    def __repr__(self):
+        return f"Rows({self.arr.tolist()!r})" if len(self) <= 16 else f"Rows(<{len(self):,} rows>)"
+
+
 def _seg_events(segs):
-    """tempo._runs for file_plan's pieces: (a, b, us), us = a number, one per tick, or (run starts, values)."""
+    """tempo._runs for file_plan's pieces: (a, b, us), us = a number, one per tick, or (run starts, values). As
+    Rows (one table, fit bar lines D2)."""
     arr = getattr(segs, "arr", None)  # (ds5: tempo.Segs, all held: its arrays)
     if arr is not None and len(segs) > 64:
         t, v = arr
         keep = np.concatenate([[True], v[1:] != v[:-1]])
-        return list(zip(t[keep].tolist(), v[keep].tolist()))
+        return Rows(np.column_stack([t[keep], v[keep]]))
     ticks, vals = [], []
     for a, b, u in segs:
         if isinstance(u, tuple):
@@ -210,7 +260,7 @@ def _seg_events(segs):
         return []
     t, v = np.concatenate(ticks), np.concatenate(vals)
     keep = np.concatenate([[True], v[1:] != v[:-1]])
-    return list(zip(t[keep].tolist(), v[keep].tolist()))
+    return Rows(np.column_stack([t[keep], v[keep]]))
 
 
 def _quick_pairs(k, total):
@@ -708,13 +758,14 @@ def limit_spots(tempo, base, ppq, beats, ticks, heard=None, loose=None):
         return out
     bars = bar_ticks(tempo, ppq, max(upto, max(e for _, e, _ in keeps)))
     _fit_bar_lines(gaps, keeps, bars, bar_lengths(ppq))
-    bp_n, bp_f, offset = [0], [0], 0  # (the file's ticks at the anchors, as file_plan's map)
+    zero = np.zeros(1, np.int64)
+    bp_n, bp_f, offset = [zero], [zero], 0  # (the file's ticks at the anchors, as file_plan's map; arrays, D2)
     for (a, e, _), (n, _, k, _) in zip(keeps, gaps):
         f = a + offset + np.concatenate([[0], np.cumsum(k)])
-        bp_n += n.tolist()
-        bp_f += f.tolist()
+        bp_n.append(np.asarray(n, np.int64))
+        bp_f.append(f.astype(np.int64))
         offset = int(f[-1]) - e
-    bp_n, bp_f = np.array(bp_n, np.int64), np.array(bp_f, np.int64)
+    bp_n, bp_f = np.concatenate(bp_n), np.concatenate(bp_f)
     stop = min(len(bars) - 2, int(np.searchsorted(bars, max(e for _, e, _ in keeps), "right")))
     lines = bars[:stop + 2]
     i = np.searchsorted(bp_n, lines, "right") - 1
@@ -816,7 +867,8 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         _fit_bar_lines(gaps, keeps, bars, bar_lengths(ppq))
     # the file's tempo: plain stretches shifted, Keep timing parts made of their gaps
     pairs = _Pairs()
-    file_segs, bp_n, bp_f, clocks = [], [0], [0], []
+    zero = np.zeros(1, np.int64)
+    file_segs, bp_n, bp_f, clocks = [], [zero], [zero], []  # (anchors as arrays, joined once: D2)
     offset, at = 0, 0
     seg_starts = [s[0] for s in segs]
     for (a, e, u), (n, total, k, drawn), heard_t in zip(keeps, gaps, times):
@@ -915,8 +967,8 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         clocks.append((a, e, fa, heard_t, starts, vals,
                        np.concatenate([[0], np.cumsum(lens * vals, dtype=np.float64)])))
         f = fa + np.concatenate([[0], np.cumsum(k)])
-        bp_n += n.tolist()
-        bp_f += f.tolist()
+        bp_n.append(np.asarray(n, np.int64))
+        bp_f.append(f.astype(np.int64))
         offset = int(f[-1]) - e
         at = e
     if not keeps and not file_segs and offset == 0:
@@ -925,9 +977,9 @@ def file_plan(tempo, base, ppq, beats=4, ticks=(), starts=(), hz=None, loose=(),
         file_segs += [(x + offset, y + offset, v) for x, y, v in _cut(segs, at, end)]
     events = _seg_events(file_segs)
     if events[0][0] != 0:
-        events.insert(0, (0, start_u))
+        events = Rows(np.concatenate([[[0, start_u]], events.arr]))
     out["events"] = events
-    bp_n, bp_f = np.array(bp_n, np.int64), np.array(bp_f, np.int64)
+    bp_n, bp_f = np.concatenate(bp_n), np.concatenate(bp_f)
 
     def to_file(t):
         # between two anchors (a CC message that gave way, keep_gaps): the file tick sounding nearest its heard
@@ -1067,7 +1119,11 @@ def _in_file(out):
     """file_plan's tempo / time / key signature events past the farthest tick a MIDI file holds (midi_scan.MOST_TICK)
     left out: a point dragged that far wrote a file read back as damaged, or gigabytes of waits (hunt 2026-11-26)."""
     for k in ("events", "sigs", "keys"):
-        out[k] = [e for e in out[k] if e[0] <= MOST_TICK] or out[k][:1]
+        if isinstance(out[k], Rows):  # (a table: kept one, D2)
+            a = out[k].arr
+            out[k] = Rows(a[a[:, 0] <= MOST_TICK] if (a[:, 0] <= MOST_TICK).any() else a[:1])
+        else:
+            out[k] = [e for e in out[k] if e[0] <= MOST_TICK] or out[k][:1]
     return out
 
 
@@ -1340,9 +1396,10 @@ def _signatures(keeps, tempo, bars, ppq, to_file):
     fast = getattr(speed.loops(), "bar_sigs", None)  # (compiled: the walk below, the same rows; fit bar lines C)
     got = None if fast is None else fast(lines, bars, stop, starts, [s[1] for s in own], [s[2] for s in own], ppq,
                                          longest)
-    if got is not None:
+    rows = None
+    if got is not None:  # (its rows stay one table: Rows below, never a tuple a row; fit bar lines D2)
         rows, unf, prev = got
-        out, unfit = [tuple(r) for r in rows.tolist()], unf.tolist()
+        unfit = unf.tolist()
     for m in range(0, stop + 1) if got is None else ():
         f0, f1 = int(lines[m]), int(lines[m + 1])
         mine = own_at(int(bars[m]))
@@ -1372,4 +1429,6 @@ def _signatures(keeps, tempo, bars, ppq, to_file):
             if (top, power) != prev:
                 out.append((int(to_file(np.array([at]))[0]), top, power))
                 prev = (top, power)
+    if rows is not None:
+        out = Rows(np.concatenate([rows, np.array(out, np.int64).reshape(-1, 3)]))
     return out, unfit, [int(bars[m + 1]) for m in moved]

@@ -498,6 +498,10 @@ class Retime:
             self.drop[k] = 1
         self.inserts = {}
         for n, events in inserts.items():
+            if isinstance(events, tuple):  # (already (ticks, starts, bytes) in time order: loaded.retime_for's
+                self.inserts[n] = (np.ascontiguousarray(events[0], np.int64),  # arrays for many events)
+                                   np.ascontiguousarray(events[1], np.int64), np.ascontiguousarray(events[2], np.uint8))
+                continue
             events = sorted(events, key=lambda e: e[0])
             at = np.zeros(len(events) + 1, np.int64)
             at[1:] = np.cumsum([len(e[1]) for e in events])

@@ -423,6 +423,48 @@ def tempo_new(lm, tempo):
     return not same_conductor(tempo, conductor_line(lm), ("points", "catch"))
 
 
+RETIME_ARRAYS_FROM = 4096  # a plan with this many tempo events + time signatures or more: retime_for's arrays
+
+
+def _meta_table(rows, w):
+    a = getattr(rows, "arr", None)  # (tempo_file.Rows' own table)
+    return np.asarray(a if a is not None else list(rows), np.int64).reshape(-1, w)
+
+
+def _meta_inserts(plan, tempo_on, sigs_on, targets, lm):
+    """retime_for's inserts for many events as (ticks, starts, bytes) arrays, the same events in the same order as
+    its lists: tempo, then time, then key signatures, sorted by tick keeping that order (fit bar lines D2)."""
+    parts = {}  # (track -> [(ticks, rows of bytes (n, 7), sizes)] in the order the lists added them)
+
+    def rows(t, cols):
+        b = np.zeros((len(t), 7), np.uint8)
+        for i, c in enumerate(cols):
+            b[:, i] = c
+        return t, b, np.full(len(t), len(cols), np.int64)
+
+    if tempo_on:
+        a = _meta_table(plan["events"], 2)
+        u = a[:, 1]
+        got = rows(a[:, 0], [0xFF, 0x51, 0x03, (u >> 16) & 0xFF, (u >> 8) & 0xFF, u & 0xFF])
+        for n in targets:
+            parts.setdefault(n, []).append(got)
+    if sigs_on:
+        had = tempo_tracks(lm, (TIME_SIG, KEY_SIG))
+        n = had[0] if had else (targets[0] if targets else 0)
+        s, k = _meta_table(plan["sigs"], 3), _meta_table(plan["keys"], 3)
+        parts.setdefault(n, []).append(rows(s[:, 0], [0xFF, 0x58, 0x04, s[:, 1], s[:, 2], 24, 8]))
+        parts[n].append(rows(k[:, 0], [0xFF, 0x59, 0x02, k[:, 1] & 0xFF, (k[:, 2] != 0).astype(np.int64)]))
+    out = {}
+    for n, ps in parts.items():
+        t = np.concatenate([p[0] for p in ps])
+        b = np.concatenate([p[1] for p in ps])
+        size = np.concatenate([p[2] for p in ps])
+        order = np.argsort(t, kind="stable")
+        t, b, size = t[order], b[order], size[order]
+        out[n] = (t, np.concatenate([[0], np.cumsum(size)]), b[np.arange(7) < size[:, None]])
+    return out
+
+
 def retime_for(lm, tempo, plan, targets, bp=False):
     """midi_copy.Retime for exporting lm with a changed Conductor line (plan = tempo_file.file_plan's). A changed
     tempo: the file's tempo events left out, the new list put into each of targets (track numbers). Changed time /
@@ -437,6 +479,9 @@ def retime_for(lm, tempo, plan, targets, bp=False):
     tempo_on = tempo_new(lm, tempo) or keep_map  # (events moved: the file's tempos would land wrong)
     sigs_on = not same_conductor(tempo, conductor_line(lm), ("sigs", "keysigs")) or keep_map
     drop = ([TEMPO] if tempo_on else []) + ([TIME_SIG, KEY_SIG] if sigs_on else [])
+    if len(plan["events"]) + len(plan["sigs"]) >= RETIME_ARRAYS_FROM:  # (millions of fitted bars: arrays, D2)
+        inserts = _meta_inserts(plan, tempo_on, sigs_on, targets, lm)
+        return Retime(bp if keep_map else None, drop, inserts, tempo_tracks(lm, tuple(drop)) if drop else [])
     inserts = {}
     if tempo_on:
         for n in targets:

@@ -246,6 +246,8 @@ def tempo_track(bpm, beats, tempo=None, sigs=None, keys=None):
     head = bytearray()
     tempo = tempo or [(0, round(60_000_000 / bpm))]
     sigs = sigs or [(0, beats, 2)]
+    if len(tempo) + len(sigs) >= TRACK_ARRAYS_FROM:
+        return _tempo_track_arrays(tempo, sigs, keys or ())
     events = sorted([(t, 1, bytes([0xFF, 0x58, 4, n, d, 24, 8])) for t, n, d in sigs]
                     + [(t, 0, b"\xFF\x51\x03" + int(us).to_bytes(3, "big")) for t, us in tempo]
                     + [(t, 2, bytes([0xFF, 0x59, 2, sf & 0xFF, int(mi)])) for t, sf, mi in keys or ()])
@@ -259,6 +261,72 @@ def tempo_track(bpm, beats, tempo=None, sigs=None, keys=None):
         last = tick
     head += vlq(0) + b"\xFF\x2F\x00"
     return head
+
+
+TRACK_ARRAYS_FROM = 4096  # a first track of this many events or more: made with arrays (the same bytes)
+FILLER = bytes([0xFF, 0xFF, 0xFF, 0x7F, 0xFF, 0x01, 0x00])  # vlq(MAX_DELTA) + an empty text event
+
+
+def _table(rows, w):
+    """Events as an (n, w) int64 table: tempo_file.Rows' own, else made from the tuples."""
+    a = getattr(rows, "arr", None)
+    return np.asarray(a if a is not None else list(rows), np.int64).reshape(-1, w)
+
+
+def _tempo_track_arrays(tempo, sigs, keys):
+    """tempo_track for many events (PLAN fit bar lines D2: millions of fitted bars), the same bytes made at once: the
+    events in sorted()'s order (tick, then tempo / time / key signature, then their bytes), waits past MAX_DELTA
+    split with empty text events, every wait a variable-length number."""
+    t, s, k = _table(tempo, 2), _table(sigs, 3), _table(keys, 3)
+    tick = np.concatenate([t[:, 0], s[:, 0], k[:, 0]])
+    kind = np.repeat(np.array([0, 1, 2], np.int64), [len(t), len(s), len(k)])
+    # (the bytes after each kind's fixed start, as sort keys: tempo's 3 bytes = the number itself)
+    k1 = np.concatenate([t[:, 1], s[:, 1], k[:, 1] & 0xFF])
+    k2 = np.concatenate([np.zeros(len(t), np.int64), s[:, 2], k[:, 2]])  # (int(mi): a bool is 0 / 1 here too)
+    order = np.lexsort((k2, k1, kind, tick))
+    tick, kind, k1, k2 = tick[order], kind[order], k1[order], k2[order]
+    delta = np.diff(tick, prepend=0)
+    fill = np.maximum(0, (delta - 1) // MAX_DELTA)  # (empty text events before it: each waits MAX_DELTA)
+    rest = delta - fill * MAX_DELTA
+    vl = 1 + (rest >= 1 << 7) + (rest >= 1 << 14) + (rest >= 1 << 21)
+    dl = np.array([6, 7, 5], np.int64)[kind]
+    size = fill * len(FILLER) + vl + dl
+    at = np.concatenate([[0], np.cumsum(size)])
+    out = np.empty(int(at[-1]) + 4, np.uint8)
+    if fill.any():  # (filler j of all = at its event's start + its place among the event's: one index list, moved
+        # on a byte at a time in place: a huge-tick song has ~7 a bar)
+        nf = int(fill.sum())
+        place = np.repeat(at[:-1] - (np.cumsum(fill) - fill) * len(FILLER), fill)
+        place += np.arange(0, nf * len(FILLER), len(FILLER), dtype=np.int64)
+        for v in FILLER:
+            out[place] = v
+            place += 1
+    p = at[:-1] + fill * len(FILLER)  # (the wait's first byte)
+    for n in (1, 2, 3, 4):
+        on = vl == n
+        if not on.any():
+            continue
+        q, r = p[on], rest[on]
+        for i in range(n):  # (highest 7 bits first, top bit on all but the last)
+            out[q + i] = ((r >> (7 * (n - 1 - i))) & 0x7F) | (0x80 if i < n - 1 else 0)
+    d = p + vl  # (the event's own bytes)
+    for kd, head in ((0, (0xFF, 0x51, 0x03)), (1, (0xFF, 0x58, 0x04)), (2, (0xFF, 0x59, 0x02))):
+        on = kind == kd
+        if not on.any():
+            continue
+        q = d[on]
+        for i, v in enumerate(head):
+            out[q + i] = v
+        a, b = k1[on], k2[on]
+        if kd == 0:
+            for i in range(3):
+                out[q + 3 + i] = (a >> (8 * (2 - i))) & 0xFF
+        elif kd == 1:
+            out[q + 3], out[q + 4], out[q + 5], out[q + 6] = a, b, 24, 8
+        else:
+            out[q + 3], out[q + 4] = a, b
+    out[-4:] = (0x00, 0xFF, 0x2F, 0x00)
+    return bytearray(out.tobytes())
 
 
 def write_midi(path, ppq, bpm, beats, notes, use10=False, pad=True, cc=None, tempo=None, sigs=None, keys=None,
