@@ -3622,5 +3622,9 @@
  "companion.took_onion": "Took {notes} from {tracks} in Domino (with the onion skin tracks): change them, then press Send",
  "companion.onion_drag_box": "Onion skin tracks were left alone: drag a box in Domino to take their notes too",
  "companion.onion_skipped":"The notes in the box on onion skin tracks {tracks} couldn't be taken, so they stay in Domino as they were",
- "companion.onion_skipped_one": "The notes in the box on onion skin track {tracks} couldn't be taken, so they stay in Domino as they were"
+ "companion.onion_skipped_one": "The notes in the box on onion skin track {tracks} couldn't be taken, so they stay in Domino as they were",
+ "starter.broken": "Spiderweb can't start: its program files are missing or damaged.\n\n{folder}\n\nOpen the download page to get Spiderweb again? Your settings, autosave and exports (the user and output folders) stay as they are.",
+ "starter.repair": "{n} of Spiderweb's program files are missing or damaged.\n\nRepair them now? Spiderweb downloads this version again and puts back only those files. Your own files stay as they are.\n\nNo = start anyway.",
+ "starter.repair_one": "1 of Spiderweb's program files is missing or damaged.\n\nRepair it now? Spiderweb downloads this version again and puts back only that file. Your own files stay as they are.\n\nNo = start anyway.",
+ "starter.repair_list": "Spiderweb can't check its program files: their list is missing.\n\nRepair them now? Spiderweb downloads this version again and puts back what is missing or damaged. Your own files stay as they are.\n\nNo = start anyway."
 }

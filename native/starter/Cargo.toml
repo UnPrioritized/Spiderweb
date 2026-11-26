@@ -1,0 +1,19 @@
+[package]
+name = "spiderweb_starter"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+# The Spiderweb.exe of the folder version. No crates: every Windows call is declared by hand (src/win.rs).
+# Build with build_release.py (icon + version info + manifest, user paths taken out).
+
+[[bin]]
+name = "Spiderweb"
+path = "src/main.rs"
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
