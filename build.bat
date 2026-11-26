@@ -1,6 +1,7 @@
 @echo off
 rem Builds the folder version: dist\Spiderweb\ (Spiderweb.exe + data\<version>\) and dist\Spiderweb-<version>.zip,
-rem plus dist\Spiderweb-source.zip. Needs Rust + Visual Studio's C++ tools (the starter, native\starter).
+rem the mover dist\Spiderweb.exe and dist\Spiderweb-source.zip. Needs Rust + Visual Studio's C++ tools (the starter
+rem native\starter, the mover native\mover).
 cd /d "%~dp0"
 python make_icon.py
 if errorlevel 1 (pause & exit /b 1)
@@ -12,6 +13,11 @@ rem The own compiled loops are in git (rebuilt from native\loops with: python na
 if exist dist\Spiderweb.exe del dist\Spiderweb.exe
 python build_folder.py --out dist
 if errorlevel 1 (pause & exit /b 1)
+rem The mover: the small dist\Spiderweb.exe that old one-file versions' updaters fetch; it sets up the folder version
+rem where it is (native\mover, Rust).
+python native\mover\build_release.py
+if errorlevel 1 (pause & exit /b 1)
+copy /y build\mover\Spiderweb.exe dist\Spiderweb.exe >nul
 rem Source archive for sharing: spiderweb.py + the scripts and clips folders, launchers, license and the Kestrel connector's,
 rem own loops' and starter's source only (no autosave/shapes/output).
 if exist dist\Spiderweb-source.zip del dist\Spiderweb-source.zip
@@ -21,8 +27,10 @@ if exist dist\Spiderweb-source.zip del dist\Spiderweb-source.zip
   native\kestrel_bridge\Cargo.lock native\kestrel_bridge\make_notices.py native\kestrel_bridge\NOTICES.txt ^
   native\loops\src native\loops\Cargo.toml native\loops\Cargo.lock native\loops\build_release.py ^
   native\loops\make_notices.py native\loops\NOTICES.txt ^
-  native\starter\src native\starter\Cargo.toml native\starter\Cargo.lock native\starter\build.rs native\starter\build_release.py native\starter\starter.manifest
+  native\starter\src native\starter\Cargo.toml native\starter\Cargo.lock native\starter\build.rs native\starter\build_release.py native\starter\starter.manifest ^
+  native\mover\src native\mover\Cargo.toml native\mover\Cargo.lock native\mover\build.rs native\mover\build_release.py ^
+  native\mover\make_notices.py native\mover\NOTICES.txt
 if errorlevel 1 (pause & exit /b 1)
 echo.
-echo Done: dist\Spiderweb\, dist\Spiderweb-^<version^>.zip and dist\Spiderweb-source.zip
+echo Done: dist\Spiderweb\, dist\Spiderweb-^<version^>.zip, dist\Spiderweb.exe (the mover) and dist\Spiderweb-source.zip
 pause

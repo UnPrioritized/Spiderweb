@@ -31,13 +31,13 @@ def rc_exe():
     return found[-1]
 
 
-def resources(version):
-    """The .res holding the icon, version info and manifest."""
+def resources(version, out=OUT):
+    """The .res holding the icon, version info and manifest (the mover's build uses it too, own out folder)."""
     nums = [int(n) for n in re.match(r"[\d.]+", version).group().strip(".").split(".")][:4]
     nums += [0] * (4 - len(nums))
     commas = ",".join(map(str, nums))
-    os.makedirs(OUT, exist_ok=True)
-    rc = os.path.join(OUT, "starter.rc")
+    os.makedirs(out, exist_ok=True)
+    rc = os.path.join(out, "starter.rc")
     esc = lambda p: p.replace("\\", "\\\\")  # noqa: E731
     with open(rc, "w", encoding="utf-8") as f:
         f.write(f'''#pragma code_page(65001)
@@ -67,7 +67,7 @@ BEGIN
   END
 END
 ''')
-    res = os.path.join(OUT, "starter.res")
+    res = os.path.join(out, "starter.res")
     subprocess.check_call([rc_exe(), "/nologo", "/fo", res, rc])
     return res
 

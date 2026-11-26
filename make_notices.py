@@ -1,9 +1,9 @@
-"""Writes THIRD-PARTY-NOTICES.txt: the licences of everything Spiderweb.exe carries inside it besides Spiderweb itself
-(Python, Tcl/Tk, NumPy, Pillow, PyNaCl + cffi + pycparser, uharfbuzz + HarfBuzz, python-bidi, PyInstaller's
-starter), read from the copies installed here so the notices match the versions built in (HarfBuzz's own text:
-licences/HarfBuzz-COPYING.txt, uharfbuzz's wheel leaves it out), then the own compiled loops' Rust crates (native/loops/NOTICES.txt) and
-the Kestrel connector's (native/kestrel_bridge/NOTICES.txt), each written by its own make_notices.py. build.bat runs
-it before building."""
+"""Writes THIRD-PARTY-NOTICES.txt: the licences of everything Spiderweb's folder version carries besides Spiderweb itself
+(Python, Tcl/Tk, NumPy, Pillow, PyNaCl + cffi + pycparser, uharfbuzz + HarfBuzz, python-bidi), read from the
+copies installed here so the notices match the versions built in (HarfBuzz's own text: licences/HarfBuzz-COPYING.txt,
+uharfbuzz's wheel leaves it out), then the own compiled loops' Rust crates (native/loops/NOTICES.txt), the Kestrel
+connector's (native/kestrel_bridge/NOTICES.txt) and the mover's (native/mover/NOTICES.txt), each written by its own
+make_notices.py. build.bat runs it before building."""
 
 import glob
 import importlib.metadata as meta
@@ -15,17 +15,18 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 OUT = os.path.join(HERE, "THIRD-PARTY-NOTICES.txt")
 LINE = "=" * 78
 
-HEAD = """Spiderweb.exe carries these programs and libraries inside it. Their licences ask for their
-notices to come with it, so here they are. Spiderweb's own licence is in LICENSE.
+HEAD = """Spiderweb (Spiderweb.exe and its data folder) carries these programs and libraries. Their licences ask
+for their notices to come with it, so here they are. Spiderweb's own licence is in LICENSE.
 
 The Hz bass preview and the built-in synth use BASS, BASSMIDI and BASSmix by Un4seen Developments
 (un4seen.com). They aren't covered by these licences or by Spiderweb's: they are free for
 non-commercial use only (see README.txt).
 
-The own compiled loops (scripts/loops, also inside the .exe) are built with Rust crates (rayon and
+The own compiled loops (scripts/loops, also in the data folder) are built with Rust crates (rayon and
 its helpers): their licences come after the packages below. Kestrel (GPU) playback uses the Kestrel
-connector (scripts/kestrel, also inside the .exe): its licences, Kestrel's own among them, are at the
-end of this file.
+connector (scripts/kestrel, also in the data folder): its licences, Kestrel's own among them, come
+next. Last, the crates of the mover (the small Spiderweb.exe on the release page that sets up this
+folder version).
 """
 
 BIDI_NOTE = """python-bidi is free software under the GNU Lesser General Public License, version 3 or later
@@ -76,9 +77,8 @@ def main():
              section("HarfBuzz (inside uharfbuzz)",
                      open(os.path.join(HERE, "licences", "HarfBuzz-COPYING.txt"), encoding="utf-8").read()),
              package("python-bidi", "python-bidi (right-to-left writing in the Text tool)"),
-             section("About python-bidi's licence (LGPL-3)", BIDI_NOTE),
-             package("pyinstaller", "PyInstaller (its starter program runs Spiderweb.exe)")]
-    for own in (("loops", "NOTICES.txt"), ("kestrel_bridge", "NOTICES.txt")):
+             section("About python-bidi's licence (LGPL-3)", BIDI_NOTE)]
+    for own in (("loops", "NOTICES.txt"), ("kestrel_bridge", "NOTICES.txt"), ("mover", "NOTICES.txt")):
         path = os.path.join(HERE, "native", *own)
         if os.path.isfile(path):
             parts.append(f"\n\n{LINE}\n{LINE}\n\n" + open(path, encoding="utf-8").read())

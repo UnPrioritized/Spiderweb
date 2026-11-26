@@ -1,0 +1,24 @@
+[package]
+name = "spiderweb_mover"
+version = "1.0.0"
+edition = "2021"
+publish = false
+
+# The mover: the small Spiderweb.exe on each release page (old one-file versions' updaters fetch it; downloaded by
+# hand it sets Spiderweb up where it is). Windows calls declared by hand; two crates only (versions picked by the
+# 14-day rule, user 2026-11-18): the signature check and the zip's deflate. Build: build_release.py.
+
+[[bin]]
+name = "Spiderweb"
+path = "src/main.rs"
+
+[dependencies]
+ed25519-compact = { version = "=2.6.1", default-features = false }
+miniz_oxide = { version = "=0.9.1" }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "unwind"  # (a panic is caught: the old version put back + a message, never a crash box)
+strip = true

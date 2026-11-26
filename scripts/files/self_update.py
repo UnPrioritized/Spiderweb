@@ -20,24 +20,21 @@ import http.client
 import os
 import re
 import secrets
-import shutil
-import stat
 import subprocess
 import sys
 import threading
 import time
 import urllib.request
 
-from files import signing, system
+from files import folder_zip, signing, system
 from files.about import BUNDLE, HERE, VERSION
+from files.folder_zip import EXE, Refused, listed, remove, remove_listed  # noqa: F401 (tests + updates.py use them here)
 from files.update_check import TIMEOUT, version_tuple
 
-EXE = "Spiderweb.exe"
 ZIP = "Spiderweb-source.zip"
 FOLDER_ZIP = "Spiderweb-%s.zip"  # (the folder version's download: Spiderweb/Spiderweb.exe + Spiderweb/data/<version>/)
 DATA = os.path.join(HERE, "data")  # (the folder version's data/: version folders + version.txt)
 VERSION_TXT = os.path.join(DATA, "version.txt")
-UNPACKED_MOST = 2 << 30  # (what a release zip may unpack to: ~160 MB now)
 CLEAN_AFTER_S = 30  # old version folders deleted this long after a start (a start that fails never deletes them)
 STAGE = re.compile(r"[0-9A-Za-z._-]+\.part-[0-9a-f]{8}")  # (data/<version>.part-<random>: an unpacking's own name)
 SMALL_MOST = 64 * 1024  # the list and its signature (a few hundred bytes)
@@ -46,10 +43,6 @@ UPDATED = "--updated"  # the new exe's start argument
 OPEN = urllib.request.urlopen  # (tests put a pretend GitHub here)
 STALE_PART_S = 3600  # a Downloads part file older than this at start = a dropped download (another folder's
 _busy = threading.Lock()  # Spiderweb may be downloading a younger one right now)
-
-
-class Refused(Exception):
-    """Why the update can't go on: the end of an "updates.fail.*" text key."""
 
 
 def exe_mode():
@@ -81,15 +74,6 @@ def _writable(folder):
         return True
     except OSError:
         return False
-
-
-def remove(path):
-    """Delete a file, read-only ones too (a read-only exe's .old could never be deleted). Raises OSError."""
-    try:
-        os.remove(path)
-    except PermissionError:
-        os.chmod(path, stat.S_IWRITE)
-        os.remove(path)
 
 
 def possible(release):
@@ -239,116 +223,17 @@ def _download(release, progress, cancel):
     return dest
 
 
-def _inside(root, rel):
-    """root/rel when it stays inside root (no "..", no drive or absolute part), else None."""
-    rel = rel.replace("\\", "/")
-    if not rel or rel.startswith("/") or ":" in rel or any(p in ("", ".", "..") for p in rel.split("/")):
-        return None
-    return os.path.join(root, *rel.split("/"))
-
-
-def listed(folder):
-    """{place: (size, sha256)} from a version folder's files.txt; None when it has none (= not ours)."""
-    try:
-        with open(os.path.join(folder, "files.txt"), encoding="utf-8") as f:
-            lines = f.read().splitlines()
-    except (OSError, UnicodeDecodeError):
-        return None
-    out = {}
-    for line in lines:
-        parts = line.split("\t")
-        if len(parts) == 3 and parts[0].isdigit():
-            out[parts[2].replace("\\", "/")] = (int(parts[0]), parts[1])
-        elif len(parts) == 2 and parts[0].isdigit():
-            out[parts[1].replace("\\", "/")] = (int(parts[0]), "")
-    return out
-
-
-def remove_listed(folder):
-    """Deletes a version folder the way it came: only the files its own files.txt lists (and files.txt), then the
-    folders left empty, deepest first. Anything else someone put there stays, with its folders. True = all gone."""
-    files = listed(folder)
-    if files is None:
-        return False
-    for rel in files:
-        p = _inside(folder, rel)
-        if p and os.path.isfile(p):
-            try:
-                remove(p)
-            except OSError:
-                pass
-    try:
-        remove(os.path.join(folder, "files.txt"))
-    except OSError:
-        pass
-    for d, _, _ in sorted(os.walk(folder), key=lambda w: -len(w[0])):
-        try:
-            os.rmdir(d)  # (only empty ones)
-        except OSError:
-            pass
-    return not os.path.exists(folder)
-
-
 def unpack(zip_path, version, cancel=None):
-    """The checked zip's data/<version>/ into data/<version>.part-<random>/, sizes checked against its files.txt,
-    renamed data/<version>/; its Spiderweb.exe saved as <exe>.new. Returns <exe>.new. Raises Refused (nothing left
-    behind: the part folder deleted)."""
-    import zipfile
-    top = "Spiderweb/"
-    inner = "%sdata/%s/" % (top, version)
-    stage = os.path.join(DATA, "%s.part-%s" % (version, secrets.token_hex(4)))
-    final = os.path.join(DATA, version)
-    new_exe = exe_path() + ".new"
-    try:
-        with zipfile.ZipFile(zip_path) as z:
-            infos = [i for i in z.infolist() if not i.is_dir()]
-            if sum(i.file_size for i in infos) > UNPACKED_MOST:
-                raise Refused("too_big")
-            names = {i.filename for i in infos}
-            if top + EXE not in names or inner + "files.txt" not in names:
-                raise Refused("bad_file")
-            for i in infos:
-                if cancel is not None and cancel.is_set():
-                    raise Refused("cancelled")
-                if i.filename == top + EXE:
-                    dest = new_exe
-                elif i.filename.startswith(inner):
-                    dest = _inside(stage, i.filename[len(inner):])
-                else:
-                    continue  # (README and licences beside the exe: left as they are)
-                if dest is None:
-                    raise Refused("bad_file")
-                os.makedirs(os.path.dirname(dest), exist_ok=True)
-                with z.open(i) as src, open(dest, "wb") as out:
-                    shutil.copyfileobj(src, out, 1 << 20)
-        files = listed(stage)
-        for rel, (size, _) in (files or {}).items():
-            p = _inside(stage, rel)
-            if p is None or not os.path.isfile(p) or os.path.getsize(p) != size:
-                raise Refused("bad_file")
-        if os.path.isdir(final):  # (a folder of this version left by an earlier try: ours only, by its own list)
-            if os.path.normcase(final) == os.path.normcase(BUNDLE or "") or not remove_listed(final):
-                raise Refused("disk")
-        os.rename(stage, final)
-    except Refused:
-        _drop(stage, new_exe)
-        raise
-    except (OSError, zipfile.BadZipFile, EOFError):
-        _drop(stage, new_exe)
-        raise Refused("disk") from None
+    """The checked zip's data/<version>/ beside the running one (files/folder_zip.py: own folder until whole); its
+    Spiderweb.exe saved as <exe>.new, README / licences beside the exe updated. Returns <exe>.new. Raises Refused
+    (nothing left behind)."""
+    new_exe = folder_zip.unpack(zip_path, version, DATA, exe_path() + ".new", cancel, keep=BUNDLE,
+                                top_to=os.path.dirname(exe_path()))
     UNPACKED[new_exe] = version
     return new_exe
 
 
 UNPACKED = {}  # <exe>.new -> the version unpacked with it (swap_in switches version.txt to it)
-
-
-def _drop(stage, new_exe):
-    shutil.rmtree(stage, ignore_errors=True)  # (an unpacking's own folder: only what it wrote)
-    try:
-        remove(new_exe)
-    except OSError:
-        pass
 
 
 def _read(path):
@@ -504,7 +389,7 @@ def clean_old_versions(now=None):
             if os.path.isdir(p):
                 if STAGE.fullmatch(name):
                     if now - os.path.getmtime(p) > STALE_PART_S:
-                        _drop(p, "")
+                        folder_zip.drop(p)
                     continue
                 v = version_tuple(name)
                 if (v is None or mine is None or v >= mine
