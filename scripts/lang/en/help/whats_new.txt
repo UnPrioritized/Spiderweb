@@ -22,7 +22,9 @@ What's new:
 
 • Faster: very long curved catch-ups get ready about 10 times faster (200,000 beats at PPQ 32767: 6.6 s → 0.65 s), exporting huge Keep timing parts takes about a third to a quarter of the time, and long formula tempo ramps work out about 6 times faster.
 
-• Faster: Fit bar lines works through about a million bars a second (before: a few thousand), and exports with very long Keep timing parts take about 40 % less memory. It now fits the first 16,777,216 bars of a song (before, a song past about a million bars got no fitting at all, even near its start), and the export says where it stops.
+• Faster: Fit bar lines works through about a million bars a second (before: a few thousand). It now fits the first 67,108,864 bars of a song (before, a song past about a million bars got no fitting at all, even near its start), and the export says where it stops.
+
+• Faster: Keep timing exports of long or busy songs use about 60 to 70 % less memory and take up to 40 % less time (16 million notes: 14.8 s and 5.5 GB → 8.4 s and 2.2 GB). The file comes out the same.
 
 • Fixed: a Keep timing part drawn far faster than the tempo heard before it (like 60,000,000 BPM over a part heard at 125) could make Export MIDI run out of memory.
 

@@ -116,9 +116,9 @@ KEEP_TICKS_MOST = 1 << 24  # a Keep timing part up to this many ticks is worked 
 # gap_ticks / gap_plan); a longer one by runs (_keep_long / _long_gaps, PLAN stage E 2026-11-26: a huge-tick MIDI's
 # parts run to trillions). 2^30 left parts just under it needing ~8 GB (hunt 2026-11-26, user took A: 2^24; very long
 # high-PPQ parts may pick other exact tempo pairs). load.keep_too_long only when its sums pass 64 bits
-BARS_MOST = 1 << 24  # Fit bar lines fits the first this many bars (user 2026-11-26, PLAN fit bar lines: ~15 s and
-# ~4 GB at worst; a huge-tick MIDI, 60 M BPM at PPQ 32767, has billions); past it the bar lines are written unfitted
-# (the sound is the same) and the export says so ("bars_cut"). Planning in pieces = planned-features.md
+BARS_MOST = 1 << 26  # Fit bar lines fits the first this many bars (user 2026-11-27 after PLAN export in pieces:
+# 64 M bars ~32 s and ~6 GB at worst, was 2^24; a huge-tick MIDI, 60 M BPM at PPQ 32767, has billions); past it the
+# bar lines are written unfitted (the sound is the same) and the export says so ("bars_cut")
 
 
 def bars_fit(tempo, ppq, upto):
