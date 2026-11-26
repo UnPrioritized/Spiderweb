@@ -125,6 +125,7 @@ Files (the scripts live in scripts/, one subfolder per group):
     roll_drawtools.py the drawing tools' press / drag / let go (Line, box tools, Polyline, Arc, Funnel, Custom, Freehand)
     roll_slice.py    the Slice tool's press / drag / let go (Slice line, Slice with shape)
     roll_select.py   the Select tool's press / drag / let go (picking, moving, Ctrl+drag copies, Select box, ruler)
+    roll_edits.py    editing a held shape: points / handles, the custom shape's box (resize, turn, skew), box stretch
     roll_draw.py     painting the grid, notes, handles, keyboard, ruler
     roll_loaded.py   a loaded MIDI's notes on the piano roll (overview at once, exact in the background)
     roll_curve.py    editing curves (anchors + handles, symmetric halves)

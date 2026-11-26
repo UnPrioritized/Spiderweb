@@ -16,8 +16,7 @@ import numpy as np
 from files.lang import tr
 from files.system import double_click_ms
 from notes.between import group_of, keep_pushes, push_sizes, whole_groups
-from notes.custom import box_pts, even_on, fill_plan, fill_test, frame_in_box
-from notes.even_steps import whole_width
+from notes.custom import fill_plan, fill_test
 from notes.engine import SPACE_KEYS as engine_space_keys, cached_reach, shape_key
 from notes.meter import bar_beat_tick, sigs_of
 from notes.joined import all_tumours
@@ -25,17 +24,15 @@ from notes.mask import OFF, ROW, is_mask, mask_area
 from notes.paths import KEYS
 from notes.funnel import funnel_contains, funnel_handles, funnel_origins
 from notes.gliss import pen_shape
-from notes.fx import copied as fx_copied, with_turn as fx_turned
-from notes.sliced import clip_strokes, on_side, piece_knives, steps_kept
+from notes.sliced import clip_strokes, on_side, piece_knives
 from roll.roll_curve import CurveEditing
 from roll.roll_custom import CustomBox
 from roll.roll_draw import RollDrawing
-from roll.roll_funnel import FLAT, FunnelEditing
+from roll.roll_funnel import FunnelEditing
 from roll.roll_gliss import GlissEditing
 from roll.roll_hz import HzStart
 from window.widgets import bind_double, menu_click  # (THE CONTROL SCHEME: double-clicks pair up)
 from window import look
-from window.big_ask import BIG
 from window.load_extract import can_extract, delete_loaded, stop_extract
 from window.widgets import Tooltip
 from roll.roll_live import BOX_TOOLS, LiveDrawing
@@ -53,6 +50,7 @@ from roll.roll_lasso import LassoDrawing
 from roll.roll_drawtools import DrawTools
 from roll.roll_slice import SliceTool
 from roll.roll_select import SelectTool
+from roll.roll_edits import ShapeEdits
 from roll.roll_pen import PenCircle
 from roll.roll_loaded import LoadedNotes
 from roll.roll_sustain import SustainStops
@@ -100,7 +98,7 @@ def grid_x(sh, make, x, sb, ppq, notes_of):
 
 class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing, LiveDrawing, ShapeMenu, TextTyping, HzStart,
                 PathEditing, SustainStops, LassoDrawing, CentreDots, LiquifyBrush, WarpGrid, MelodyMarks, GlissEditing,
-                PenCircle, DrawTools, SliceTool, SelectTool, tk.Canvas):
+                PenCircle, DrawTools, SliceTool, SelectTool, ShapeEdits, tk.Canvas):
     def __init__(self, parent, app, scale):
         super().__init__(parent, bg=look.ROLL_BG, highlightthickness=0, cursor="crosshair")
         self.app = app
@@ -361,10 +359,15 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
     # press, drag and let go live together in its own part (roll_drawtools...)
     DRAG_KINDS = {"create": "drag_create", "wall": "drag_wall", "segment": "drag_segment", "arcdrag": "drag_segment",
                   "place": "drag_place", "free": "free_drag", "slice": "drag_slice", "hzkeys": "hz_drag",
-                  "move": "drag_move", "box": "drag_box", "seek": "drag_seek"}
+                  "move": "drag_move", "box": "drag_box", "seek": "drag_seek", "handle": "drag_handle",
+                  "resize": "drag_resize", "skew": "drag_skew", "turn": "drag_turn", "stretch": "stretch_to"}
     RELEASE_KINDS = {"create": "release_create", "wall": "release_wall", "segment": "release_segment",
                      "arcdrag": "release_arcdrag", "place": "release_place", "free": "release_free",
-                     "hzkeys": "hz_release", "move": "release_move", "box": "release_box", "seek": "release_seek"}
+                     "hzkeys": "hz_release", "move": "release_move", "box": "release_box", "seek": "release_seek",
+                     "handle": "release_handle", "resize": "release_box_edit", "turn": "release_box_edit",
+                     "skew": "release_box_edit", "stretch": "release_stretch"}
+    # ... what runs first at a let go, before the notes catch up (a snap worked out, a big funnel's question)
+    RELEASE_FIRST = {"resize": "release_resize_first", "handle": "release_handle_first"}
     # ... and the ones whose let go is all their own (none of on_release's shared end: Hz warnings, Even settle...)
     RELEASE_ALONE = {"knife": "release_knife", "slice": "release_slice"}
 
@@ -1485,51 +1488,19 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         tool = self.tool_now()
         pt = self.draw_pt(e)
 
-        if not self.draft:  # first: a picked curve stroke's handles can be near its custom shape's box
-            i = self.hit_handle(e.x, e.y, tool == "select")
-            if i is not None:
-                if kept:  # (editing the one shape: the Select box stays where it is, user)
-                    self.box_kept = (kept, set(app.sels))
-                app.push_undo(name=tr("pianoroll.drag_a_point"))
-                self.drag = ("handle", i)
-                sh = app.selected()  # (a funnel: how many notes it could make now, for the let go's question)
-                self.held_big = ({"before": copy.deepcopy(sh), "most": app.notes_most(sh), "count": None}
-                                 if sh and sh["kind"] == "funnel" else None)
-                if isinstance(i, tuple) and i[0] == "ripple":  # (a Ripples source's centre point: picked too)
-                    app.pick_source(i[1])
-                return
-            if self.gliss_press(e):  # (the selected Glissando run's thickness handle / a note's right end)
-                if kept:
-                    self.box_kept = (kept, set(app.sels))
-                return
+        # first: a picked curve stroke's handles can be near its custom shape's box (roll_edits)
+        if not self.draft and self.press_point(e, kept, tool):
+            return
 
         hit = self.custom_hit(e.x, e.y)
         if hit and hit[0] != "inside":  # the selected custom shape's corner / side: resize, just outside: turn / skew
-            orig = copy.deepcopy(box_pts(app.selected()))  # (the box shown: a fitted one moves its frame along)
-            self.inside_fit = frame_in_box(app.selected())
-            if kept:  # (the Select box stays where it is, user: like changing a note's length in a box)
-                self.box_kept = (kept, set(app.sels))
-            app.push_undo(name=tr({"turn": "pianoroll.turn", "skew": "pianoroll.skew"}.get(hit[0], "pianoroll.resize")))
-            if hit[0] == "turn":
-                self.drag = ("turn", orig, self.screen_angle(orig, e.x, e.y), fx_copied(app.selected().get("fx")),
-                             steps_kept(app.selected()))  # (a piece of a shape with pages: a turn step too)
-            elif hit[0] == "skew":
-                self.drag = ("skew", hit[1], orig, self.event_pt(e, snap=False))
-            else:  # (a box shape: its top / bottom on the lines between keys, roll_custom.row_lines)
-                orig, self.resize_rows = self.row_lines(app.selected(), orig)
-                self.drag = ("resize", hit[1], orig, hit[0] == "side", self.event_pt(e, snap=False))
-            return
+            return self.press_box_edit(e, kept, hit)
 
         if not self.draft and self.ring_press(e):  # Stir window open: an Only inside a circle line (Select only)
             return
         on_box = self.on_kept_box(kept, e) if tool == "select" and not self.draft else None
-        if on_box and on_box != (0, 0):  # the kept Select box's side / corner: what's in it stretches
-            self.box_kept = (kept, set(app.sels))  # (kept with the undo step: undo puts the box back)
-            app.push_undo(name=tr("pianoroll.stretch"))
-            boxes, around = boxes_upright(kept)
-            self.box_kept = (boxes, set(app.sels))
-            self.drag = ("stretch", on_box, around, {j: copy.deepcopy(app.shapes[j]) for j in app.sels}, boxes)
-            return
+        if on_box and on_box != (0, 0):  # the kept Select box's side / corner: what's in it stretches (roll_edits)
+            return self.press_stretch(kept, on_box)
         if on_box:  # inside it: moving the shapes takes it along
             self.box_in = True
             self.box_moving = boxes_upright(kept)[0]
@@ -1604,94 +1575,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.gliss_drag(e)
         elif kind == "keyhold":
             self.key_hold_drag(e)
-        elif kind == "handle":
-            step = self.held_step([self.app.sel])
-            if isinstance(self.drag[1], tuple) and self.app.selected()["kind"] == "custom":
-                self.drag = ("handle", self.drag_stroke(self.app.selected(), self.drag[1], e))
-            elif isinstance(self.drag[1], tuple):
-                self.drag_funnel(self.app.selected(), self.drag[1], e)
-            elif pen_shape(self.app.selected()):
-                self.drag_curve(self.app.selected(), self.drag[1], e)
-            else:
-                sh, i = self.app.selected(), self.drag[1]
-                funnel = sh["kind"] == "funnel"
-                was, flat = ([list(p) for p in sh["pts"]], self.flattest(sh)) if funnel else (None, None)
-                sh["pts"][i] = pt = self.event_pt(e)
-                if funnel and i in (2, 3) and e.state & CTRL:  # the wall centred on the line
-                    mid = self.crossing(sh["pts"][:2], (sh["pts"][5 - i], pt))
-                    if mid:
-                        sh["pts"][5 - i] = [2 * mid[0] - pt[0], 2 * mid[1] - pt[1]]
-                if funnel and self.flattest(sh) < min(FLAT, flat):  # (no flatter than placing allows: it stops
-                    sh["pts"][:] = was                               # there; one already flatter may only open)
-            if self.unmoved(step):
-                return
-            if self.stayed_inside(step):
-                held = getattr(self, "held_big", None)
-                if held and self.app.too_many_to_drag(self.app.selected(), held):
-                    self.app.lines_only()  # (past 1 M notes: made only once the let go's question says yes)
-                else:
-                    self.app.shape_edited()
-        elif kind == "stretch":
-            self.stretch_to(e)
-        elif kind == "resize":
-            _, k, orig, side, start = self.drag
-            pt = self.resize_point(orig, k, side, start, e)
-            step = self.held_step([self.app.sel])
-            later = self.grid_later  # (a step stopped at the edge: its snap for let go is dropped too)
-            sh = self.app.selected()
-            box = self.resize_custom(orig, k, pt, e.state & CTRL, side)
-            rows_keep = bool(e.state & CTRL and not side and self.resize_rows and not e.state & SHIFT)
-            if rows_keep:  # (Ctrl on a box on the lines between keys: whole keys tall, width following, hunt)
-                box = self.keep_rows(orig, k, box)
-            sh["pts"] = self.frame_for_box(box)
-            even = even_on(sh)
-            if even:  # (Even steps: the moved side whole gates from the other, even_steps.py)
-                sh["pts"] = whole_width(sh["pts"], orig, sh, self.app.ppq)
-            if not e.state & SHIFT and not even and not rows_keep:
-                keep = e.state & CTRL
-                self.notes_onto_grid(
-                    self.app.selected(), lambda b: self.frame_for_box(self.resize_custom(orig, k, [b, pt[1]], keep, side)),
-                    pt[0])
-            else:  # (free: a snap saved for let go from an earlier step is off, user)
-                self.grid_later = None
-            if self.unmoved(step):
-                return
-            if self.stayed_inside(step):
-                self.app.shape_edited()
-            else:
-                self.grid_later = later
-        elif kind == "skew":  # slides in whole grid steps / keys, wherever it was grabbed
-            _, k, orig, start = self.drag
-            step = self.held_step([self.app.sel])
-            self.app.selected()["pts"] = self.frame_for_box(self.skew_custom(orig, k, *self.drag_steps(start, e)))
-            if self.unmoved(step):
-                return
-            if self.stayed_inside(step):
-                self.app.shape_edited()
-        elif kind == "turn":
-            _, orig, a0, fx0, steps = self.drag
-            angle = self.screen_angle(orig, e.x, e.y) - a0
-            angle = (angle + math.pi) % (2 * math.pi) - math.pi
-            if not e.state & SHIFT:
-                step = math.radians(15)
-                angle = round(angle / step) * step
-            sh = self.app.selected()
-            if self.limit is None:
-                self.limit = self.limits([sh])
-            was = sh["pts"]
-            sh["pts"] = self.frame_for_box(self.turn_custom(orig, angle))
-            if fx0 or steps:  # (its note tool pages' result is turned too, fx.py)
-                fx = fx_turned(fx_copied(fx0), math.degrees(angle), self.sy / self.sx, steps)
-                if fx:
-                    sh["fx"] = fx
-                else:
-                    sh.pop("fx", None)
-            db, dp = self.push_in(self.reach([sh]), self.limit)  # (pushed back inside the piano roll, user)
-            if db or dp:
-                sh["pts"] = [[b + db, p + dp] for b, p in sh["pts"]]
-            if sh["pts"] != was:  # (snapped to the same angle: nothing to redo)
-                self.app.shape_edited()
-            self.app.show_position(tr("pianoroll.turned", degrees=math.degrees(angle)))
         elif kind in self.DRAG_KINDS:  # (each tool's own drag: roll_drawtools)
             getattr(self, self.DRAG_KINDS[kind])(e)
 
@@ -1706,18 +1589,8 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             return
         self.after_idle(self.app.settle_history)  # (a click that changed nothing isn't a step)
         kind = self.drag[0]
-        if kind == "resize" and self.grid_later and not e.state & SHIFT:  # (too slow to snap the notes while
-            # dragging: done now, BEFORE the notes catch up, so they're made once, at the snapped spot)
-            if self.grid_soon(self.app.selected(), *self.grid_later):  # (the tries in the background: the notes
-                self.grid_later = None                                    # are made once it's snapped)
-            else:
-                step = self.held_step([self.app.sel])
-                self.notes_onto_grid(self.app.selected(), *self.grid_later, late=False)
-                self.grid_later = None
-                if self.stayed_inside(step):  # (the snap would pass an edge: it stays where it stopped)
-                    self.app.shape_edited()
-        if kind == "handle" and getattr(self, "held_big", None):
-            self.big_drag_asked()
+        if kind in self.RELEASE_FIRST:  # (before the notes catch up: a snap / a question; roll_edits)
+            getattr(self, self.RELEASE_FIRST[kind])(e)
         if not getattr(self, "grid_job", None):  # (a snap being worked out: its notes come with it, grid_soon)
             self.app.catch_up_notes()
         if kind == "sustop":
@@ -1766,11 +1639,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
             self.box_timer = None
         if kind in self.RELEASE_KINDS:  # (each tool's own let go: roll_select, roll_drawtools...)
             getattr(self, self.RELEASE_KINDS[kind])(e, still)
-        elif kind in ("resize", "turn", "skew") or kind == "handle" and self.app.selected()["kind"] == "custom":
-            self.app.sync_custom()  # (a stroke's point dragged: its gaps may have closed)
-        elif kind == "stretch":  # the box goes back to its size, the shapes stay stretched (user)
-            self.box_kept = (self.drag[4], set(self.app.sels))
-            self.app.sync_panel()
         if kind in ("handle", "move", "stretch"):
             self.app.sync_funnel()  # its note count
         if kind in ("handle", "move", "stretch", "resize", "turn", "skew"):
@@ -1781,19 +1649,6 @@ class PianoRoll(RollDrawing, LoadedNotes, CustomBox, CurveEditing, FunnelEditing
         self.draw_select_box()  # (the box stays, see kept_box)
         if self.box_kept and getattr(self.app, "loaded", None) is not None:  # (the red outline round the loaded notes
             self.request_redraw()  # in it is read only once no drag is held: nothing else redrew, user 2026-10-26)
-
-    def big_drag_asked(self):
-        """A funnel's handle / point let go: past 1 M notes (more than before the drag) it's asked first, like a typed
-        point (App.point_ok; hunt 2026-11-14: one handle drag made 80 M+ notes); No = the funnel as it was."""
-        held, self.held_big = self.held_big, None
-        sh = self.app.selected()
-        if sh is None or sh["kind"] != "funnel" or self.app.notes_most(sh) <= max(BIG, held["most"]):
-            return
-        if not self.app.point_ok(held["before"], sh):
-            sh.clear()
-            sh.update(copy.deepcopy(held["before"]))
-            self.app.sync_points()
-            self.app.notes_late = True  # (made again below, catch_up_notes)
 
     def on_double(self, e):
         # Tk turns a quick second click into a double-click; only polylines use it, everything else gets a normal click
