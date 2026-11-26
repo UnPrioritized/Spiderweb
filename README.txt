@@ -42,8 +42,8 @@ What it can do
 - Image to notes: turn an image into notes in up to 15 colours (16 with
   channel 10).
 - Note tools: Claw machine, Strum and Chop pages that change the notes of a
-  shape, Add between (shapes that step from one shape to another),
-  Recolour, Stir, Warp and Liquify (swirl, bend with a grid, or brush the
+  shape, Add between (shapes that step from one shape to another), Copy
+  along a path (copies that grow, shrink and turn as they go), Recolour, Stir, Warp and Liquify (swirl, bend with a grid, or brush the
   colours you drew, or the shape itself), Trim shape (with Wrapped
   slices), Gate extend, Fill gaps, Fold tracks (many tracks onto fewer),
   slicing (with a line, a Lasso loop or another shape) and merging. The Properties window lists every step done to a shape:
