@@ -132,6 +132,13 @@ BLOCK_S = 2.0  # seconds a block (the grey / remake / play unit)
 BLOCK = int(BLOCK_S * RATE)
 FIRST_RUN = 1  # blocks in the first piece of a run of missing blocks next to the play line (a quick start)
 RUN = 5  # blocks in a later piece (10 s)
+# made far enough ahead = no new piece until it's this much short of Render ahead (RUN blocks, at most HOLD_SHARE of
+# it: never near Lower it by itself's marks, render_ahead LOW_SHARE / RISE_SHARE), then a whole RUN at once (user
+# 2026-11-27: a 1-block piece every 2 s made the memory jump, and each Merlin piece leaves a few MB in the graphics
+# driver; 5x fewer pieces, Merlin's cost is mostly per piece)
+HOLD_SHARE = 0.25
+REFILL_MOST = 256 << 20  # ... such a piece copies about this much of a loaded MIDI at most (no hurry then: a dense
+# part's 10 s took ~5 GB to make, its 2 s pieces ~3 GB; light parts ~15 MB a block stay whole RUNs)
 PRE = 1.0  # seconds a piece starts early (dropped)
 POST_S = 0.3  # ... and its events go this far past its end: Merlin looks ahead (vs its render of the whole file,
 # Cats Dance 2026-11-03: 0.1 s = -43 dB in the last 10 ms, 0.3 s = -126 dB, 1 s = the same to the bit)
@@ -973,7 +980,8 @@ class Maker:
         """(window's thread, every tick) Takes in finished pieces, throws away far blocks / pieces, starts new
         pieces for the missing blocks nearest the anchor. Returns True when something changed (the grey)."""
         changed = self._collect()
-        want = self.wanted(anchor, min(ahead_s, self.room()))
+        limit = min(ahead_s, self.room())
+        want = self.wanted(anchor, limit)
         keep = set(want)
         with self._lock:
             # (behind the play line past BEHIND, or past the window: kept up to KEPT_MOST_S (and what free memory
@@ -993,6 +1001,14 @@ class Maker:
         self.threads = [t for t in self.threads if t.is_alive()]
         if self.song is None or self.error:
             return changed
+        held = min(RUN, int(HOLD_SHARE * limit / BLOCK_S))  # (blocks short of Render ahead it may get)
+        if want and want[-1] >= (self.span[1] - 1) // BLOCK:
+            held = 0  # (Render ahead reaches the song's end: the rest made as before, never waiting there)
+        line_made = 0  # (blocks made in a row from the play line's)
+        while line_made < len(want) and want[line_made] in self.blocks:
+            line_made += 1
+        if held > 1 and line_made and len(want) - line_made < held:
+            return changed  # (made from the line up to a few blocks short: the next piece once `held` are missing)
         if want and self.engine in ("merlin", "kestrel") and self._to_card is None:
             self._warm_card()
         most = GPU_WORKERS if self.engine in ("merlin", "kestrel") else CPU_WORKERS
@@ -1014,10 +1030,13 @@ class Maker:
                 if j != run[-1] + 1 or j in self.blocks or self._busy(j):
                     break
                 run.append(j)
+            if held > 1 and line_made and run[-1] == want[-1] and len(run) < held:
+                break  # (a short end piece at Render ahead's edge: it waits for the next whole RUN)
             fit = getattr(self.song, "blocks_fit", None)  # (a loaded MIDI: dense parts in shorter pieces, memory)
             cap = self.piece_most() if fit is not None else None
-            if fit is not None and len(run) > 1:
-                run = run[:fit(i, len(run), cap)]
+            if fit is not None and len(run) > 1:  # (a refill, far enough ahead: dense parts in short pieces; a block
+                # over REFILL_MOST is still one piece, made in parts only past cap as always)
+                run = run[:fit(i, len(run), min(cap, REFILL_MOST) if held > 1 and line_made else cap)]
             heavy = 0
             if fit is not None and most > 1:
                 # (BASSMIDI makes several at once: heavy pieces wait while the ones being made already copy BUSY_MOST
