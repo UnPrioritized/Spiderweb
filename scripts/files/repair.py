@@ -29,6 +29,7 @@ FINE = "--spiderweb-files-fine"
 FROM = os.environ.get("SPIDERWEB_REPAIR_FROM") or "%s/releases/download/v%s/" % (WEBSITE, VERSION)
 ZIP = "Spiderweb-%s.zip" % VERSION
 OLD_MARK = ".repair-old-"
+STARTER = "starter"  # (offer(): the question left to the starter; boot.py / spiderweb.py then end with 4)
 REPAIRED_LIST = "repaired-files.txt"  # (in user/: what the last repair put back; native/starter reads it)
 ENGLISH = {  # (used when the language files themselves are damaged)
     "repair.ask": "Spiderweb couldn't start: some of its program files seem to be damaged.\n\nRepair them now? "
@@ -116,9 +117,12 @@ def offer(exc):
     repair started on Yes; this program should end with boot's "said already" code, so the starter adds nothing).
     Right after a repair (sys.spiderweb_repaired): never another repair, the download page offered instead; after one
     that found every file fine (sys.spiderweb_files_fine): the files aren't the cause, the error log offered (no
-    problem report page: user 2026-11-27)."""
+    problem report page: user 2026-11-27). STARTER (not after a repair): an update's older version is still there,
+    so nothing is asked here: the starter asks instead, offering that version too (this program ends with 4)."""
     if not FROZEN or sys.platform != "win32" or not looks_damaged(exc):
         return False
+    if getattr(sys, "spiderweb_previous", "") and not getattr(sys, "spiderweb_repaired", False):
+        return STARTER
     try:
         if getattr(sys, "spiderweb_repaired", False):
             fine = getattr(sys, "spiderweb_files_fine", False)

@@ -164,7 +164,7 @@ pub fn choose(text: &str, choices: &[String]) -> usize {
     let f = if lib.is_null() { std::ptr::null_mut() } else {
         unsafe { GetProcAddress(lib, b"TaskDialogIndirect\0".as_ptr()) }
     };
-    if !f.is_null() && (2..=3).contains(&choices.len()) {
+    if !f.is_null() && (2..=4).contains(&choices.len()) {
         let dialog = unsafe { std::mem::transmute::<*mut c_void, TaskDialogIndirect>(f) };
         let texts: Vec<Vec<u16>> = choices.iter().map(|c| wide(OsStr::new(c))).collect();
         let buttons: Vec<TaskButton> = texts.iter().enumerate()
@@ -204,10 +204,13 @@ pub fn choose(text: &str, choices: &[String]) -> usize {
                    else { last };
         }
     }
-    // (the plain box: "Yes = ..., No = ..., Cancel = ...", each choice's first line)
+    // (the plain box: "Yes = ..., No = ..., Cancel = ...", each choice's first line; 4 choices: the first two + the
+    // last, Cancel)
     let words = ["Yes", "No", "Cancel"];
     let mut full = text.to_string() + "\n";
-    for (i, c) in choices.iter().take(3).enumerate() {
+    let shown: Vec<&String> = if choices.len() > 3 { vec![&choices[0], &choices[1], &choices[last]] }
+                              else { choices.iter().collect() };
+    for (i, c) in shown.iter().enumerate() {
         full += &format!("\n{} = {}", words[i], c.lines().next().unwrap_or(""));
     }
     let t = wide(OsStr::new(&full));

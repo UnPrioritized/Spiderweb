@@ -94,8 +94,10 @@ code is all there to read.
   autosave, settings, presets and saved shapes go in its "user" folder.
 - To update, press "Update and restart" when Spiderweb says a new version
   is out: the new version is unpacked beside the old one, Spiderweb switches
-  over as it closes and deletes the old version at a later start. Or unzip
-  the new zip into the same place, so its Spiderweb folder lands on yours.
+  over as it closes and deletes the old version once the new one has been
+  open for a minute (if the new one can't start, Spiderweb offers to start
+  the old one instead). Or unzip the new zip into the same place, so its
+  Spiderweb folder lands on yours.
   Your user and output folders stay either way.
 - Coming from 1.7.x (a single Spiderweb.exe)? Its "Update and restart"
   moves you over by itself: it fetches the small Spiderweb.exe from the

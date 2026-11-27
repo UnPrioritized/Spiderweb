@@ -10,6 +10,10 @@ What's new:
 
 • A crash while starting is now said at once, not only at the next start.
 
+• Start the previous version: when a new version can't start right after an update, the message now also offers to start the version you used before (its folder is kept until the new version has been open for a minute).
+
+• Running from the scripts: Spiderweb.bat now finds Python even when it isn't on the PATH, and on Linux and Mac a second start in the same folder says Spiderweb is already open instead of opening a second copy.
+
 • When program files the last repair put back go missing again, Spiderweb names them and says a security program (virus scanner) is probably removing them, so you can add Spiderweb's folder as an exception.
 
 • Fixed: the repair could ask the same question again and again when Spiderweb still couldn't start. A failed or cancelled repair now leaves Spiderweb closed, and after a repair that didn't help it offers the download page instead of another repair.

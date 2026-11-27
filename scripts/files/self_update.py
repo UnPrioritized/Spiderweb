@@ -35,7 +35,8 @@ ZIP = "Spiderweb-source.zip"
 FOLDER_ZIP = "Spiderweb-%s.zip"  # (the folder version's download: Spiderweb/Spiderweb.exe + Spiderweb/data/<version>/)
 DATA = os.path.join(HERE, "data")  # (the folder version's data/: version folders + version.txt)
 VERSION_TXT = os.path.join(DATA, "version.txt")
-CLEAN_AFTER_S = 30  # old version folders deleted this long after a start (a start that fails never deletes them)
+CLEAN_AFTER_S = 60  # old version folders deleted this long after a start (a start that fails never deletes them;
+# until then the starter can offer the previous version)
 STAGE = re.compile(r"[0-9A-Za-z._-]+\.part-[0-9a-f]{8}")  # (data/<version>.part-<random>: an unpacking's own name)
 SMALL_MOST = 64 * 1024  # the list and its signature (a few hundred bytes)
 BIG_MOST = 1 << 30  # the exe / zip (~90 MB)
@@ -324,12 +325,10 @@ def new_ready(new_size, exe=None):
 
 
 def start_new(exe=None):
-    """Starts the new exe as a program of its own (not sharing this one's unpacked files), told to wait for the
-    lock this one still holds. Raises OSError when Windows refuses (e.g. an antivirus)."""
-    env = dict(os.environ)
-    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    """Starts the new exe as a program of its own, told to wait for the lock this one still holds. Raises OSError
+    when Windows refuses (e.g. an antivirus)."""
     exe = exe or exe_path()
-    subprocess.Popen([exe, UPDATED], env=env, cwd=os.path.dirname(exe), close_fds=True)
+    subprocess.Popen([exe, UPDATED], cwd=os.path.dirname(exe), close_fds=True)
 
 
 def give_back(exe=None):

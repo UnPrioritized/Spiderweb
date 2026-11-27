@@ -14,6 +14,9 @@ sys.spiderweb_bundle = os.path.dirname(os.path.abspath(__file__))
 sys.argv[0] = sys.executable  # (Spiderweb.exe, as the user started it)
 FINE = "--spiderweb-files-fine"  # (with REPAIRED: that repair found every file fine)
 sys.spiderweb_repaired = REPAIRED in sys.argv
+# (the starter: an update's older version is still there and whole; files.repair.offer leaves its question to the
+# starter then, which offers that version too)
+sys.spiderweb_previous = os.environ.pop("SPIDERWEB_PREVIOUS", "")
 sys.spiderweb_files_fine = FINE in sys.argv
 for mark in (REPAIRED, FINE):
     while mark in sys.argv:
@@ -44,6 +47,8 @@ except BaseException as e:  # (an error before Spiderweb's own error handling is
         offered = repair.offer(e)
     except BaseException:  # noqa: BLE001 (the repair's own files damaged too: the plain error)
         offered = False
+    if offered == "starter":
+        sys.exit(4)  # (4: the starter asks, with the previous version among its choices)
     if offered:
         sys.exit(3)  # (3: said already; the starter adds no second question)
     raise

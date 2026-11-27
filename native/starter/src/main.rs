@@ -5,6 +5,8 @@
 //! of Windows, nothing read but the list, itself checked against the SHA-256 baked in at build: milliseconds).
 //! Missing / wrong = offer to repair (the program's repair mode); Python itself missing = offer the download page. Then data\<version>\python3NN.dll runs boot.pyc with the arguments
 //! given (python314._pth there sets Python's paths and keeps any other Python's settings out).
+//! An update's older version still in data\ and whole (kept until the new one has been up for a while): every message
+//! that ends a failed start also offers "Start the previous version" (version.txt names it again).
 #![windows_subsystem = "windows"]
 
 mod sha256;
@@ -48,6 +50,86 @@ const NO_PYTHON: c_int = 0x5357_0001;
 const MARK_ENV: &str = "SPIDERWEB_START_MARK";
 /// How often the watching starter looks at Spiderweb while it starts.
 const WATCH_MS: u64 = 150;
+/// Handed to Spiderweb when an older version's folder is still there and whole (files/repair.py offer: its own
+/// "repair?" question is left to this starter then, which can offer that version too).
+const PREVIOUS_ENV: &str = "SPIDERWEB_PREVIOUS";
+/// Spiderweb's exit code when it couldn't start because of damaged files and left the question to this starter.
+const STARTER_ASKS: c_int = 4;
+
+/// What a message's button does.
+#[derive(Clone, Copy, PartialEq)]
+enum Act { Repair, Without, Previous, Page, CrashLog, Close }
+
+/// A message with named buttons (win::choose; the last one = Esc / X): what the picked one does.
+fn pick(text: &str, items: Vec<(String, Act)>) -> Act {
+    let labels: Vec<String> = items.iter().map(|(t, _)| t.clone()).collect();
+    let i = win::choose(text, &labels);
+    items.get(i).map_or(Act::Close, |(_, a)| *a)
+}
+
+/// "1.8.1" -> [1, 8, 1]; None when it isn't plain numbers (a dev build).
+fn version_key(v: &str) -> Option<Vec<u64>> {
+    v.split('.').map(|p| p.parse::<u64>().ok()).collect()
+}
+
+/// The newest version in data\ older than `current` whose folder is whole (Python's files there, every listed file
+/// at its size): the one an update left behind (deleted once the new one has been up for a while,
+/// files/self_update.py clean_old_versions). None: none there.
+fn previous(data_root: &Path, current: &str) -> Option<String> {
+    let cur = version_key(current)?;
+    let mut older: Vec<(Vec<u64>, String)> = std::fs::read_dir(data_root).ok()?.flatten()
+        .filter_map(|e| {
+            let name = e.file_name().to_str()?.to_string();
+            let key = version_key(&name)?;
+            (usable_version(&name) && key < cur && e.path().is_dir()).then_some((key, name))
+        })
+        .collect();
+    older.sort();
+    older.into_iter().rev().map(|(_, n)| n).find(|n| {
+        let d = data_root.join(n);
+        core_ok(&d).is_some() && damaged(&d, false).is_some_and(|b| b.is_empty())
+    })
+}
+
+fn previous_button(texts: &texts::Texts, version: &str) -> String {
+    texts.get("starter.button_previous", None, "Start the previous version ({version})\nThe version you used \
+        before the update. Your own files stay as they are.", &[("version", version)])
+}
+
+fn page_button(texts: &texts::Texts) -> String {
+    texts.get("starter.button_page", None, "Open the download page\nUnpack the download over this Spiderweb \
+        folder: your settings, autosave and exports (the user and output folders) stay as they are.", &[])
+}
+
+fn close_button(texts: &texts::Texts) -> String {
+    texts.get("starter.button_close", None, "Close", &[])
+}
+
+/// "Start the previous version": data\version.txt names it again (written beside, then renamed over: never half
+/// written), then Spiderweb is started again with the arguments it was given. The newer version's folder stays (an
+/// update offers it again; nothing is deleted).
+fn start_previous(texts: &texts::Texts, exe: &Path, top: &Path, version: &str) {
+    let data = top.join("data");
+    let tmp = data.join("version.txt.tmp");
+    let done = std::fs::write(&tmp, format!("{version}\n")).and_then(|_| std::fs::rename(&tmp, data.join("version.txt")));
+    if let Err(e) = done {
+        let _ = std::fs::remove_file(&tmp);
+        win::tell(&texts.get("starter.previous_failed", None, "Spiderweb couldn't switch back to the previous \
+            version:\n{why}", &[("why", &e.to_string())]));
+        return;
+    }
+    let args: Vec<OsString> = std::env::args_os().skip(1)
+        .filter(|a| a != REPAIRED_ARG && a != FINE_ARG && a != REPAIR_ARG && a != CHILD_ARG).collect();
+    if let Ok(child) = std::process::Command::new(exe).args(args).current_dir(top).spawn() {
+        win::allow_front(child.id());
+    }
+}
+
+/// Spiderweb started again in repair mode, with the arguments this start was given.
+fn start_repair(exe: &Path, top: &Path) {
+    let args: Vec<OsString> = std::env::args_os().skip(1).filter(|a| a != REPAIRED_ARG && a != FINE_ARG).collect();
+    let _ = std::process::Command::new(exe).arg(REPAIR_ARG).args(args).current_dir(top).spawn();
+}
 
 fn usable_version(v: &str) -> bool {
     !v.is_empty() && v.len() <= 40 && v != "." && v != ".."
@@ -194,7 +276,20 @@ fn main() {
     let data = data_root.join(&version);
     let texts = texts::Texts::load(&top, &data);
     let folder = data.display().to_string();
+    // an update's older version still there and whole: offered in every message that ends a start that failed
+    let prev = previous(&data_root, &version);
     let broken = || {
+        if let Some(p) = &prev {
+            let text = texts.get("starter.broken_choose", None, "Spiderweb can't start: its program files are \
+                missing or damaged.\n\n{folder}", &[("folder", &folder)]);
+            match pick(&text, vec![(previous_button(&texts, p), Act::Previous), (page_button(&texts), Act::Page),
+                                   (close_button(&texts), Act::Close)]) {
+                Act::Previous => start_previous(&texts, &exe, &top, p),
+                Act::Page => win::open_page(DOWNLOADS),
+                _ => {}
+            }
+            std::process::exit(1);
+        }
         let ask = texts.get("starter.broken", None,
             "Spiderweb can't start: its program files are missing or damaged.\n\n{folder}\n\nOpen the download \
              page to get Spiderweb again? Unpack the download over this Spiderweb folder: your settings, autosave \
@@ -265,6 +360,9 @@ fn main() {
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
     let mut cmd = std::process::Command::new(&exe);
     cmd.arg(CHILD_ARG).env(MARK_ENV, &mark);
+    if let Some(p) = &prev {
+        cmd.env(PREVIOUS_ENV, p);
+    }
     if repair {
         cmd.arg(REPAIR_ARG);
     }
@@ -295,10 +393,10 @@ fn main() {
     }
     let written = ours(&read());
     // Crashed while starting (a dump in the log this start wrote, no closing line, never ready): said now.
-    if code != 0 && code != 3 && !repair && written && crashed_starting(&top) {
+    if code != 0 && code != 3 && code != STARTER_ASKS && !repair && written && crashed_starting(&top) {
         crash_answered(&log);  // (the next start doesn't ask about this crash again)
         if repaired {
-            still(&texts, &exe, &top, code, true);
+            still(&texts, &exe, &top, code, true, prev.as_deref());
         }
         // Repair / Start without your last session (only while there is one to set aside) / Close (user 2026-11-27;
         // "_choose": the old "crashed_now" key was a Yes / No question, an old translation of it must not show here)
@@ -311,19 +409,20 @@ fn main() {
             texts.get("starter.crashed_now_files", None,
                 "Spiderweb closed unexpectedly while starting. Its program files may be damaged.", &[])
         };
-        let mut choices = vec![texts.get("starter.button_repair", None, "Repair the program files\nSpiderweb \
-            downloads this version again and puts back only damaged files. Your own files stay as they are.", &[])];
+        let mut items = vec![(texts.get("starter.button_repair", None, "Repair the program files\nSpiderweb \
+            downloads this version again and puts back only damaged files. Your own files stay as they are.", &[]),
+            Act::Repair)];
         if session {
-            choices.push(without_text(&texts));
+            items.push((without_text(&texts), Act::Without));
         }
-        choices.push(texts.get("starter.button_close", None, "Close", &[]));
-        match (win::choose(&text, &choices), session) {
-            (0, _) => {
-                let args: Vec<OsString> = std::env::args_os().skip(1).filter(|a| a != REPAIRED_ARG && a != FINE_ARG)
-                    .collect();
-                let _ = std::process::Command::new(&exe).arg(REPAIR_ARG).args(args).current_dir(&top).spawn();
-            }
-            (1, true) => start_without(&texts, &exe, &top),
+        if let Some(p) = &prev {
+            items.push((previous_button(&texts, p), Act::Previous));
+        }
+        items.push((close_button(&texts), Act::Close));
+        match pick(&text, items) {
+            Act::Repair => start_repair(&exe, &top),
+            Act::Without => start_without(&texts, &exe, &top),
+            Act::Previous => start_previous(&texts, &exe, &top, prev.as_deref().unwrap_or_default()),
             _ => {}
         }
         std::process::exit(code);
@@ -331,21 +430,35 @@ fn main() {
     match Some(code) {
         // Ended with an error before Spiderweb even wrote its start line (crash-now.log untouched): damaged
         // Python parts fail there with no word at all (hunt 2026-11-26). Repair mode's own plain message exits 3.
-        Some(code) if code != 0 && code != 3 && !written => {
+        // STARTER_ASKS: Spiderweb found damaged files and left the question to this starter (an older version
+        // is there to offer too).
+        Some(code) if code == STARTER_ASKS || (code != 0 && code != 3 && !written) => {
             if repair {
                 broken();
             }
             if repaired {  // (a repair just ran: the download page, never another repair)
-                still(&texts, &exe, &top, code, false);
+                still(&texts, &exe, &top, code, false, prev.as_deref());
+            }
+            if let Some(p) = &prev {
+                let text = texts.get("starter.failed_choose", None,
+                    "Spiderweb couldn't start: some of its program files seem to be damaged.", &[]);
+                let repair_text = texts.get("starter.button_repair", None, "Repair the program files\nSpiderweb \
+                    downloads this version again and puts back only damaged files. Your own files stay as they are.",
+                    &[]);
+                match pick(&text, vec![(repair_text, Act::Repair), (previous_button(&texts, p), Act::Previous),
+                                       (close_button(&texts), Act::Close)]) {
+                    Act::Repair => start_repair(&exe, &top),
+                    Act::Previous => start_previous(&texts, &exe, &top, p),
+                    _ => {}
+                }
+                std::process::exit(code);
             }
             let ask = texts.get("starter.failed", None,
                 "Spiderweb couldn't start: some of its program files seem to be damaged.\n\nRepair them now? \
                  Spiderweb downloads this version again and puts back only the damaged files. Your own files stay \
                  as they are.\n\nNo = Spiderweb stays closed.", &[]);
             if win::ask(&ask) {
-                let args: Vec<OsString> = std::env::args_os().skip(1).filter(|a| a != REPAIRED_ARG && a != FINE_ARG)
-                    .collect();
-                let _ = std::process::Command::new(&exe).arg(REPAIR_ARG).args(args).current_dir(&top).spawn();
+                start_repair(&exe, &top);
             }
             std::process::exit(code);
         }
@@ -358,8 +471,9 @@ fn main() {
 /// that found every file fine (FINE_ARG) the files aren't the cause: Start without your last session (while there is
 /// one) / Open the crash log / Close instead (user 2026-11-27: no problem report page, the user is taking a break).
 /// `dump` = this start's crash log holds the crash: else (ended before writing it) neither button means anything
-/// (an older run's log, Spiderweb never reached the session): the text with Close only.
-fn still(texts: &texts::Texts, exe: &Path, top: &Path, code: c_int, dump: bool) -> ! {
+/// (an older run's log, Spiderweb never reached the session): the text with Close only. `prev` = an update's older
+/// version still there and whole: "Start the previous version" offered too.
+fn still(texts: &texts::Texts, exe: &Path, top: &Path, code: c_int, dump: bool, prev: Option<&str>) -> ! {
     if std::env::args_os().skip(1).any(|a| a == FINE_ARG) {
         if !dump {
             win::tell(&texts.get("starter.fine_still_files", None,
@@ -377,15 +491,29 @@ fn still(texts: &texts::Texts, exe: &Path, top: &Path, code: c_int, dump: bool) 
                 "Spiderweb still can't start, but its program files are all fine, so something else stops it: for \
                  example a graphics or sound driver, or a security program.", &[])
         };
-        let mut choices = Vec::new();
+        let mut items = Vec::new();
         if session {
-            choices.push(without_text(texts));
+            items.push((without_text(texts), Act::Without));
         }
-        choices.push(texts.get("starter.button_crash_log", None, "Open the crash log", &[]));
-        choices.push(texts.get("starter.button_close", None, "Close", &[]));
-        match win::choose(&text, &choices) + usize::from(!session) {
-            0 => start_without(texts, exe, top),
-            1 => win::open_file(&top.join("user").join("crash-now.log")),
+        if let Some(p) = prev {
+            items.push((previous_button(texts, p), Act::Previous));
+        }
+        items.push((texts.get("starter.button_crash_log", None, "Open the crash log", &[]), Act::CrashLog));
+        items.push((close_button(texts), Act::Close));
+        match pick(&text, items) {
+            Act::Without => start_without(texts, exe, top),
+            Act::Previous => start_previous(texts, exe, top, prev.unwrap_or_default()),
+            Act::CrashLog => win::open_file(&top.join("user").join("crash-now.log")),
+            _ => {}
+        }
+        std::process::exit(code);
+    }
+    if let Some(p) = prev {
+        let text = texts.get("repair.still_choose", None, "Spiderweb still can't start after the repair.", &[]);
+        match pick(&text, vec![(previous_button(texts, p), Act::Previous), (page_button(texts), Act::Page),
+                               (close_button(texts), Act::Close)]) {
+            Act::Previous => start_previous(texts, exe, top, p),
+            Act::Page => win::open_page(DOWNLOADS),
             _ => {}
         }
         std::process::exit(code);

@@ -740,7 +740,11 @@ if __name__ == "__main__":
     except Exception as e:  # couldn't start (errors inside the running window are caught by errors.install)
         try:  # (the folder version: damaged program files = the repair offered instead; files/repair.py)
             from files import repair
-            if repair.offer(e):
+            offered = repair.offer(e)
+            if offered == repair.STARTER:  # (the starter asks, with the previous version among its choices)
+                errors.write_log(*sys.exc_info(), "(starting up; the starter asks)")
+                sys.exit(4)
+            if offered:
                 errors.write_log(*sys.exc_info(), "(starting up; repair started)")
                 sys.exit(1)
         except ImportError:
