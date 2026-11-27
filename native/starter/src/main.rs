@@ -26,6 +26,10 @@ const LIST_SHA256: Option<&str> = option_env!("SPIDERWEB_LIST_SHA256");
 const DOWNLOADS: &str = "https://github.com/UnPrioritized/Spiderweb/releases/latest";
 /// Given to boot.pyc when the user picked Repair (the program's repair mode).
 const REPAIR_ARG: &str = "--spiderweb-repair";
+/// Given by a repair that worked to the Spiderweb it starts afterwards (a failed / cancelled one starts nothing): no file check, no
+/// "closed unexpectedly" question, and no new repair offer if it still can't start (no question loops). Passed on
+/// to boot.pyc, which takes it out.
+const REPAIRED_ARG: &str = "--spiderweb-repaired";
 
 fn usable_version(v: &str) -> bool {
     !v.is_empty() && v.len() <= 40 && v != "." && v != ".."
@@ -162,24 +166,25 @@ fn main() {
     let Some(dll) = core_ok(&data) else { broken() };
     // started FOR a repair (Help -> About's "Check program files", a repair offer): straight to it, no question
     let mut repair = std::env::args_os().skip(1).any(|a| a == REPAIR_ARG);
-    let bad = if repair { Some(0) } else { damaged(&data, version == BUILT_VERSION) };
+    let repaired = std::env::args_os().skip(1).any(|a| a == REPAIRED_ARG);
+    let bad = if repair || repaired { Some(0) } else { damaged(&data, version == BUILT_VERSION) };
     if bad != Some(0) {
         let text = match bad {
             Some(1) => texts.get("starter.repair", Some(1),
                 "1 of Spiderweb's program files is missing or damaged.\n\nRepair it now? Spiderweb downloads this \
-                 version again and puts back only that file. Your own files stay as they are.\n\nNo = start anyway.",
-                &[]),
+                 version again and puts back only that file. Your own files stay as they are.\n\nNo = try to start \
+                 with the missing or damaged file.", &[]),
             Some(n) => texts.get("starter.repair", Some(n),
                 "{n} of Spiderweb's program files are missing or damaged.\n\nRepair them now? Spiderweb downloads \
-                 this version again and puts back only those files. Your own files stay as they are.\n\nNo = start \
-                 anyway.", &[]),
+                 this version again and puts back only those files. Your own files stay as they are.\n\nNo = try to \
+                 start with the missing or damaged files.", &[]),
             None => texts.get("starter.repair_list", None,
                 "Spiderweb can't check its program files: their list is missing or damaged.\n\nRepair them now? \
                  Spiderweb downloads this version again and puts back what is missing or damaged. Your own files stay as \
-                 they are.\n\nNo = start anyway.", &[]),
+                 they are.\n\nNo = try to start without checking them.", &[]),
         };
         repair = win::ask(&text);
-    } else if !repair && crashed_starting(&top) {
+    } else if !repair && !repaired && crashed_starting(&top) {
         repair = win::ask(&texts.get("starter.crashed", None,
             "Spiderweb closed unexpectedly while starting last time. Its program files may be damaged.\n\nCheck and \
              repair them now? Spiderweb downloads this version again and puts back only damaged files. Your own \
@@ -195,12 +200,21 @@ fn main() {
             if repair {
                 broken();
             }
+            if repaired {  // (a repair just ran: the download page, never another repair)
+                let ask = texts.get("repair.still", None,
+                    "Spiderweb still can't start after the repair.\n\nOpen the download page to get Spiderweb again? \
+                     Your settings, autosave and exports (the user and output folders) stay as they are.", &[]);
+                if win::ask(&ask) {
+                    win::open_page(DOWNLOADS);
+                }
+                std::process::exit(code);
+            }
             let ask = texts.get("starter.failed", None,
                 "Spiderweb couldn't start: some of its program files seem to be damaged.\n\nRepair them now? \
                  Spiderweb downloads this version again and puts back only the damaged files. Your own files stay \
                  as they are.", &[]);
             if win::ask(&ask) {
-                let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+                let args: Vec<OsString> = std::env::args_os().skip(1).filter(|a| a != REPAIRED_ARG).collect();
                 let _ = std::process::Command::new(&exe).arg(REPAIR_ARG).args(args).current_dir(&top).spawn();
             }
             std::process::exit(code);

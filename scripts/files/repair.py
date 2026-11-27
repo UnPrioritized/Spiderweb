@@ -19,6 +19,10 @@ from files import folder_zip, signing
 from files.about import BUNDLE, FROZEN, HERE, VERSION, WEBSITE
 
 REPAIR = "--spiderweb-repair"  # (boot.py: run() instead of Spiderweb)
+# Given to the Spiderweb started after a repair that worked: the starter skips its file check and its
+# "closed unexpectedly" question for that start, and if Spiderweb still can't start nothing offers another repair,
+# only the download page (no question loops; user 2026-11-27). boot.py takes it out of sys.argv: sys.spiderweb_repaired.
+REPAIRED = "--spiderweb-repaired"
 FROM = os.environ.get("SPIDERWEB_REPAIR_FROM") or "%s/releases/download/v%s/" % (WEBSITE, VERSION)
 ZIP = "Spiderweb-%s.zip" % VERSION
 OLD_MARK = ".repair-old-"
@@ -33,8 +37,10 @@ ENGLISH = {  # (used when the language files themselves are damaged)
     "repair.done_one": "1 program file was repaired. Spiderweb starts now.",
     "repair.none": "All program files were fine: nothing was changed. Spiderweb starts now.",
     "repair.failed": "Spiderweb couldn't repair its program files.\n\n{why}\n\nOpen the download page to get Spiderweb "
-                     "again? Spiderweb starts either way, with its files as they are. Your settings, autosave and "
-                     "exports (the user and output folders) stay as they are.",
+                     "again? You can also try the repair again later: Spiderweb offers it the next time you start it. "
+                     "Your settings, autosave and exports (the user and output folders) stay as they are.",
+    "repair.still": "Spiderweb still can't start after the repair.\n\nOpen the download page to get Spiderweb again? "
+                    "Your settings, autosave and exports (the user and output folders) stay as they are.",
     "repair.files": "Checking and putting back files… {n} of {all}",
     "repair.cancel": "Cancel",
     "repair.other": "Something went wrong while repairing. Some files may already have been put back; the others are "
@@ -90,17 +96,21 @@ def start_repair(args=()):
 
 
 def offer(exc):
-    """Spiderweb couldn't start because of exc: True when it looked like damaged files and the user said Repair
-    (the repair started; this program should end)."""
+    """Spiderweb couldn't start because of exc: True when it looked like damaged files and the user was asked (a
+    repair started on Yes; this program should end with boot's "said already" code, so the starter adds nothing).
+    Right after a repair (sys.spiderweb_repaired): never another repair, the download page offered instead."""
     if not FROZEN or sys.platform != "win32" or not looks_damaged(exc):
         return False
     try:
-        if ask(t("repair.ask")):
+        if getattr(sys, "spiderweb_repaired", False):
+            if ask(t("repair.still")):
+                import webbrowser
+                webbrowser.open(WEBSITE + "/releases/latest")
+        elif ask(t("repair.ask")):
             start_repair(sys.argv[1:])
-            return True
+        return True
     except Exception:  # noqa: BLE001
-        pass
-    return False
+        return False
 
 
 def _sha(path):
@@ -255,9 +265,10 @@ def _crash_dealt_with():
 
 def run(args=()):
     """Repair mode (boot.py with --spiderweb-repair): repair with a small window (Cancel / X stop it while it is
-    still downloading: nothing changed yet), a message, then Spiderweb starts, given args (a project double-clicked)
-    AS IT WAS ASKED FOR, whatever happened: a failed or cancelled repair never leaves Spiderweb closed (hunt
-    2026-11-26). Exit code always 0 (everything was said here; the starter speaks only when this never ran)."""
+    still downloading: nothing changed yet), a message. A repair that worked starts Spiderweb, given args (a project
+    double-clicked) + REPAIRED; a failed or cancelled one leaves it closed (user 2026-11-27, option B: like other
+    apps; the next start asks again, where "No" still starts it). Exit code always 0 (everything was said here; the
+    starter speaks only when this never ran)."""
     import threading
     result = {}
     progress = [0, 0, False]
@@ -325,16 +336,16 @@ def run(args=()):
     except Exception:  # noqa: BLE001
         pass
     worker.join()
+    _crash_dealt_with()  # (whatever happened: the user has answered that crash's question)
     if result.get("fail") == "cancelled":
-        pass  # (nothing changed: Spiderweb as it was)
-    elif "fail" in result:
+        return 0  # (the user stopped it: nothing changed, Spiderweb stays closed)
+    if "fail" in result:
         why = t("repair.other") if result["fail"] == "other" else t("updates.fail." + result["fail"])
         if ask(t("repair.failed", why=why)):
             import webbrowser
             webbrowser.open(WEBSITE + "/releases/latest")
-    else:
-        n = result.get("fixed", 0)
-        _crash_dealt_with()
-        tell(t("repair.done", n) if n else t("repair.none"))
-    subprocess.Popen([sys.executable, *args], cwd=HERE, close_fds=True)  # (Spiderweb as usual: the starter checks
-    return 0                                                              # again, "No = start anyway" still works)
+        return 0  # (never half-started on files a repair couldn't fix; the next start asks again)
+    n = result.get("fixed", 0)
+    tell(t("repair.done", n) if n else t("repair.none"))
+    subprocess.Popen([sys.executable, REPAIRED, *args], cwd=HERE, close_fds=True)  # (no file check, no new offer)
+    return 0

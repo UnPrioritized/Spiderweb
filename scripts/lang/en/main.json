@@ -3640,7 +3640,8 @@
  "repair.done": "{n} program files were repaired. Spiderweb starts now.",
  "repair.done_one": "1 program file was repaired. Spiderweb starts now.",
  "repair.none": "All program files were fine: nothing was changed. Spiderweb starts now.",
- "repair.failed": "Spiderweb couldn't repair its program files.\n\n{why}\n\nOpen the download page to get Spiderweb again? Spiderweb starts either way, with its files as they are. Your settings, autosave and exports (the user and output folders) stay as they are.",
+ "repair.failed": "Spiderweb couldn't repair its program files.\n\n{why}\n\nOpen the download page to get Spiderweb again? You can also try the repair again later: Spiderweb offers it the next time you start it. Your settings, autosave and exports (the user and output folders) stay as they are.",
+ "repair.still": "Spiderweb still can't start after the repair.\n\nOpen the download page to get Spiderweb again? Your settings, autosave and exports (the user and output folders) stay as they are.",
  "repair.files": "Checking and putting back files… {n} of {all}",
  "repair.cancel": "Cancel",
  "repair.other": "Something went wrong while repairing. Some files may already have been put back; the others are as they were.",
@@ -3657,7 +3658,7 @@
  "starter.failed": "Spiderweb couldn't start: some of its program files seem to be damaged.\n\nRepair them now? Spiderweb downloads this version again and puts back only the damaged files. Your own files stay as they are.",
  "starter.crashed": "Spiderweb closed unexpectedly while starting last time. Its program files may be damaged.\n\nCheck and repair them now? Spiderweb downloads this version again and puts back only damaged files. Your own files stay as they are.\n\nNo = start as usual.",
  "starter.broken": "Spiderweb can't start: its program files are missing or damaged.\n\n{folder}\n\nOpen the download page to get Spiderweb again? Your settings, autosave and exports (the user and output folders) stay as they are.",
- "starter.repair": "{n} of Spiderweb's program files are missing or damaged.\n\nRepair them now? Spiderweb downloads this version again and puts back only those files. Your own files stay as they are.\n\nNo = start anyway.",
- "starter.repair_one": "1 of Spiderweb's program files is missing or damaged.\n\nRepair it now? Spiderweb downloads this version again and puts back only that file. Your own files stay as they are.\n\nNo = start anyway.",
- "starter.repair_list": "Spiderweb can't check its program files: their list is missing or damaged.\n\nRepair them now? Spiderweb downloads this version again and puts back what is missing or damaged. Your own files stay as they are.\n\nNo = start anyway."
+ "starter.repair": "{n} of Spiderweb's program files are missing or damaged.\n\nRepair them now? Spiderweb downloads this version again and puts back only those files. Your own files stay as they are.\n\nNo = try to start with the missing or damaged files.",
+ "starter.repair_one": "1 of Spiderweb's program files is missing or damaged.\n\nRepair it now? Spiderweb downloads this version again and puts back only that file. Your own files stay as they are.\n\nNo = try to start with the missing or damaged file.",
+ "starter.repair_list": "Spiderweb can't check its program files: their list is missing or damaged.\n\nRepair them now? Spiderweb downloads this version again and puts back what is missing or damaged. Your own files stay as they are.\n\nNo = try to start without checking them."
 }
