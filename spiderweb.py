@@ -588,6 +588,7 @@ if __name__ == "__main__":
         except Exception:
             pass
         open_files.start(app, given)
+        app.after_idle(lambda: app.after(50, errors.ready))  # (start-up over, first drawn: native/starter leaves)
         if errors.last_crash is not None:  # (the run before crashed: said once)
             app.after(400, lambda: errors.say_crash(app))
         if not_moved:  # (old files another program held: they stay beside Spiderweb, the user moves them)

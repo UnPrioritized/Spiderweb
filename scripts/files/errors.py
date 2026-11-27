@@ -33,6 +33,9 @@ _seen = {}  # error text -> times it happened this session (an error on every mo
 # changed since its last one. Lines start with NOTE so the next start can tell them from a crash's own lines.
 NOTE = "-- "
 CLOSED = "==== closed "  # (written at a normal end: a dump without it = Spiderweb really crashed)
+# This start's mark from the folder version's watching starter (native/starter): written into the start line and
+# the "ready" note, so the starter knows the lines are this start's (taken out: programs started from here get none).
+START_MARK = os.environ.pop("SPIDERWEB_START_MARK", "")
 last_crash = None  # (the run before this one crashed: what it had in use, {topic: text}; said by say_crash)
 last_crash_text = ""  # (that crash's whole dump: which code it was in, e.g. native.checked_level)
 _state = {}
@@ -217,7 +220,8 @@ def watch_crashes():
     try:
         _crash_file = open(CRASH_NOW, "w", encoding="utf-8")
         _crash_file.write(f"==== started {time.strftime('%Y-%m-%d %H:%M:%S')}   Spiderweb {VERSION}   Python "
-                          f"{platform.python_version()} {platform.architecture()[0]}   {system_text()}\n")
+                          f"{platform.python_version()} {platform.architecture()[0]}   {system_text()}"
+                          f"{'   start ' + START_MARK if START_MARK else ''}\n")
         _crash_file.flush()
         faulthandler.enable(_crash_file, all_threads=True)
         atexit.register(_closed)
@@ -227,6 +231,12 @@ def watch_crashes():
         note("PC", pc_text())
     except Exception:  # (only a log line: never stops Spiderweb from starting)
         pass
+
+
+def ready():
+    """(once start-up is over: window made, last session opened, first drawn) The "ready" note: the watching starter
+    leaves, and a crash after this is no longer a crash while starting."""
+    note("ready", START_MARK or "yes")
 
 
 def _closed():

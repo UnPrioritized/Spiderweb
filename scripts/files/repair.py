@@ -23,13 +23,17 @@ REPAIR = "--spiderweb-repair"  # (boot.py: run() instead of Spiderweb)
 # "closed unexpectedly" question for that start, and if Spiderweb still can't start nothing offers another repair,
 # only the download page (no question loops; user 2026-11-27). boot.py takes it out of sys.argv: sys.spiderweb_repaired.
 REPAIRED = "--spiderweb-repaired"
+# Given with REPAIRED when the repair found every file fine: if Spiderweb still can't start, the files aren't the cause
+# ("repair.fine_still": the crash log + the problem page, never the download page).
+FINE = "--spiderweb-files-fine"
+ISSUES = WEBSITE + "/issues"
 FROM = os.environ.get("SPIDERWEB_REPAIR_FROM") or "%s/releases/download/v%s/" % (WEBSITE, VERSION)
 ZIP = "Spiderweb-%s.zip" % VERSION
 OLD_MARK = ".repair-old-"
 ENGLISH = {  # (used when the language files themselves are damaged)
     "repair.ask": "Spiderweb couldn't start: some of its program files seem to be damaged.\n\nRepair them now? "
                   "Spiderweb downloads this version again and puts back only the damaged files. Your own files "
-                  "stay as they are.",
+                  "stay as they are.\n\nNo = Spiderweb stays closed.",
     "repair.title": "Repairing Spiderweb {version}",
     "repair.checking": "Checking the program files…",
     "repair.downloading": "Downloading Spiderweb {version}… {done} of {size} MB",
@@ -37,10 +41,24 @@ ENGLISH = {  # (used when the language files themselves are damaged)
     "repair.done_one": "1 program file was repaired. Spiderweb starts now.",
     "repair.none": "All program files were fine: nothing was changed. Spiderweb starts now.",
     "repair.failed": "Spiderweb couldn't repair its program files.\n\n{why}\n\nOpen the download page to get Spiderweb "
-                     "again? You can also try the repair again later: Spiderweb offers it the next time you start it. "
-                     "Your settings, autosave and exports (the user and output folders) stay as they are.",
+                     "again? Unpack the download over this Spiderweb folder: your settings, autosave and exports (the "
+                     "user and output folders) stay as they are.\n\nYou can also try the repair again later.",
     "repair.still": "Spiderweb still can't start after the repair.\n\nOpen the download page to get Spiderweb again? "
-                    "Your settings, autosave and exports (the user and output folders) stay as they are.",
+                    "Unpack the download over this Spiderweb folder: your settings, autosave and exports (the user and "
+                    "output folders) stay as they are.",
+    "repair.fine_still": "Spiderweb still can't start, but its program files are all fine, so something else stops it: "
+                         "for example a graphics or sound driver, or a security program.\n\nSpiderweb keeps a crash log "
+                         "in its folder (spiderweb-crash.log, or user\\crash-now.log). Open the page for reporting "
+                         "problems? Please add that log to your report.",
+    "repair.fail.disk": "Spiderweb couldn't write its files (the disk may be full, the folder read-only, or another "
+                        "program is using a file). Some files may already have been put back; the others are as they "
+                        "were.",
+    "repair.fail.bad_signature": "The download didn't pass the safety check, so it wasn't used and nothing was "
+                                 "changed. Someone may have changed the files on GitHub: please report it.",
+    "repair.fail.bad_file": "The downloaded file doesn't match its safety signature, so it wasn't used. Please report "
+                            "it.",
+    "repair.fail.wrong_version": "The download's safety signature is for another version, so it wasn't used and "
+                                 "nothing was changed. Please report it.",
     "repair.files": "Checking and putting back files… {n} of {all}",
     "repair.cancel": "Cancel",
     "repair.other": "Something went wrong while repairing. Some files may already have been put back; the others are "
@@ -98,14 +116,16 @@ def start_repair(args=()):
 def offer(exc):
     """Spiderweb couldn't start because of exc: True when it looked like damaged files and the user was asked (a
     repair started on Yes; this program should end with boot's "said already" code, so the starter adds nothing).
-    Right after a repair (sys.spiderweb_repaired): never another repair, the download page offered instead."""
+    Right after a repair (sys.spiderweb_repaired): never another repair, the download page offered instead; after one
+    that found every file fine (sys.spiderweb_files_fine): the files aren't the cause, the problem page."""
     if not FROZEN or sys.platform != "win32" or not looks_damaged(exc):
         return False
     try:
         if getattr(sys, "spiderweb_repaired", False):
-            if ask(t("repair.still")):
+            fine = getattr(sys, "spiderweb_files_fine", False)
+            if ask(t("repair.fine_still" if fine else "repair.still")):
                 import webbrowser
-                webbrowser.open(WEBSITE + "/releases/latest")
+                webbrowser.open(ISSUES if fine else WEBSITE + "/releases/latest")
         elif ask(t("repair.ask")):
             start_repair(sys.argv[1:])
         return True
@@ -263,6 +283,27 @@ def _crash_dealt_with():
         pass
 
 
+def repair_lock_name(exe=None):
+    """The lock a repair of this folder holds while it runs (native/starter repair_lock: same text): the starter then
+    says "being repaired" instead of a second repair or a start on half-replaced files."""
+    exe = exe or sys.executable
+    return "Local\\SpiderwebRepair-" + hashlib.sha256(exe.lower().encode("utf-8")).hexdigest()[:32]
+
+
+def _hold_lock():
+    """Takes the repair lock for the rest of this program (Windows lets go when it ends). None elsewhere."""
+    if sys.platform != "win32":
+        return None
+    try:
+        import ctypes
+        k = ctypes.WinDLL("kernel32")
+        k.CreateMutexW.restype = ctypes.c_void_p
+        k.CreateMutexW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_wchar_p]
+        return k.CreateMutexW(None, 0, repair_lock_name())
+    except (AttributeError, OSError):
+        return None
+
+
 def run(args=()):
     """Repair mode (boot.py with --spiderweb-repair): repair with a small window (Cancel / X stop it while it is
     still downloading: nothing changed yet), a message. A repair that worked starts Spiderweb, given args (a project
@@ -270,6 +311,7 @@ def run(args=()):
     apps; the next start asks again, where "No" still starts it). Exit code always 0 (everything was said here; the
     starter speaks only when this never ran)."""
     import threading
+    lock = _hold_lock()  # noqa: F841 (held until this program ends)
     result = {}
     progress = [0, 0, False]
     cancel = threading.Event()
@@ -340,12 +382,16 @@ def run(args=()):
     if result.get("fail") == "cancelled":
         return 0  # (the user stopped it: nothing changed, Spiderweb stays closed)
     if "fail" in result:
-        why = t("repair.other") if result["fail"] == "other" else t("updates.fail." + result["fail"])
+        fail = result["fail"]
+        why = t("repair.other") if fail == "other" else t("repair.fail." + fail)  # (a repair's own words if any)
+        if why == "repair.fail." + fail:
+            why = t("updates.fail." + fail)
         if ask(t("repair.failed", why=why)):
             import webbrowser
             webbrowser.open(WEBSITE + "/releases/latest")
         return 0  # (never half-started on files a repair couldn't fix; the next start asks again)
     n = result.get("fixed", 0)
     tell(t("repair.done", n) if n else t("repair.none"))
-    subprocess.Popen([sys.executable, REPAIRED, *args], cwd=HERE, close_fds=True)  # (no file check, no new offer)
+    marks = [REPAIRED] if n else [REPAIRED, FINE]  # (no file check, no new offer; FINE: files aren't the cause)
+    subprocess.Popen([sys.executable, *marks, *args], cwd=HERE, close_fds=True)
     return 0

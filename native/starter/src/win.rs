@@ -11,6 +11,58 @@ extern "system" {
 #[link(name = "user32")]
 extern "system" {
     fn MessageBoxW(hwnd: *mut c_void, text: *const u16, caption: *const u16, kind: u32) -> c_int;
+    fn AllowSetForegroundWindow(pid: u32) -> c_int;
+    fn EnumWindows(cb: extern "system" fn(*mut c_void, isize) -> c_int, data: isize) -> c_int;
+    fn GetWindowThreadProcessId(hwnd: *mut c_void, pid: *mut u32) -> u32;
+    fn IsWindowVisible(hwnd: *mut c_void) -> c_int;
+}
+
+#[link(name = "kernel32")]
+extern "system" {
+    fn OpenMutexW(access: u32, inherit: c_int, name: *const u16) -> *mut c_void;
+    fn CloseHandle(h: *mut c_void) -> c_int;
+}
+
+/// Whether some program holds the named lock `name` now.
+pub fn lock_taken(name: &str) -> bool {
+    let n = wide(OsStr::new(name));
+    let h = unsafe { OpenMutexW(0x0010_0000, 0, n.as_ptr()) };  // (SYNCHRONIZE)
+    if h.is_null() {
+        return false;
+    }
+    unsafe { CloseHandle(h) };
+    true
+}
+
+/// A message with OK.
+pub fn tell(text: &str) {
+    sharp();
+    let t = wide(OsStr::new(text));
+    let c = wide(OsStr::new("Spiderweb"));
+    unsafe { MessageBoxW(std::ptr::null_mut(), t.as_ptr(), c.as_ptr(), 0x40 | MB_SETFOREGROUND) };
+}
+
+/// Lets the process `pid` (Spiderweb, started by this starter) bring its window to the front: Windows only lets a
+/// program started by the one in front do that, and that is this starter, not Spiderweb.
+pub fn allow_front(pid: u32) {
+    unsafe { AllowSetForegroundWindow(pid) };
+}
+
+/// Whether the process `pid` shows a window.
+pub fn shows_window(pid: u32) -> bool {
+    extern "system" fn look(hwnd: *mut c_void, data: isize) -> c_int {
+        let seek = unsafe { &mut *(data as *mut (u32, bool)) };
+        let mut owner = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, &mut owner) };
+        if owner == seek.0 && unsafe { IsWindowVisible(hwnd) } != 0 {
+            seek.1 = true;
+            return 0;
+        }
+        1
+    }
+    let mut seek = (pid, false);
+    unsafe { EnumWindows(look, &mut seek as *mut (u32, bool) as isize) };
+    seek.1
 }
 #[link(name = "shell32")]
 extern "system" {

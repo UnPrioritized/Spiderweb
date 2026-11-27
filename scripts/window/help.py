@@ -865,7 +865,10 @@ class HelpWindow(tk.Toplevel):
         self.check_button.state(["disabled"])
 
         def work():
-            result["bad"] = repair.damaged(progress=lambda d, n: seen.__setitem__(slice(None), [d, n]))
+            try:
+                result["bad"] = repair.damaged(progress=lambda d, n: seen.__setitem__(slice(None), [d, n]))
+            except Exception as e:  # noqa: BLE001 (the check itself failed: said as such, never "checksum.txt damaged")
+                result["failed"] = str(e) or type(e).__name__
         worker = threading.Thread(target=work, daemon=True)
         worker.start()
 
@@ -895,6 +898,10 @@ class HelpWindow(tk.Toplevel):
                 parent = h if h is not None and h.winfo_exists() else app
             except tk.TclError:
                 parent = app
+            if "failed" in result:
+                messagebox.showwarning(tr("about.check_files"), tr("about.check_failed", why=result["failed"]),
+                                       parent=parent)
+                return
             bad = result.get("bad")
             if bad is None:
                 bad = ["checksum.txt"]

@@ -24,6 +24,9 @@ const LIST: &str = "checksum.txt";
 /// it); None in a plain build. Only checked when starting the version this starter was built with.
 const LIST_SHA256: Option<&str> = option_env!("SPIDERWEB_LIST_SHA256");
 const DOWNLOADS: &str = "https://github.com/UnPrioritized/Spiderweb/releases/latest";
+const ISSUES: &str = "https://github.com/UnPrioritized/Spiderweb/issues";
+/// Given with REPAIRED_ARG by a repair that found every file fine (files/repair.py FINE).
+const FINE_ARG: &str = "--spiderweb-files-fine";
 /// Given to boot.pyc when the user picked Repair (the program's repair mode).
 const REPAIR_ARG: &str = "--spiderweb-repair";
 /// Given by a repair that worked to the Spiderweb it starts afterwards (a failed / cancelled one starts nothing): no file check, no
@@ -34,6 +37,8 @@ const REPAIRED_ARG: &str = "--spiderweb-repaired";
 const CHILD_ARG: &str = "--spiderweb-child";
 /// The child's exit code when Python's DLL couldn't be loaded (the watching starter then offers the download page).
 const NO_PYTHON: c_int = 0x5357_0001;
+/// The watched start's own mark, handed to Spiderweb (files/errors.py writes it into crash-now.log).
+const MARK_ENV: &str = "SPIDERWEB_START_MARK";
 /// How often the watching starter looks at Spiderweb while it starts.
 const WATCH_MS: u64 = 150;
 
@@ -126,14 +131,15 @@ fn damaged(data: &Path, own_version: bool) -> Option<usize> {
     Some(bad)
 }
 
-/// Python's exit code; None when its DLL couldn't be loaded.
-/// The last start crashed before its window was up: user\crash-now.log (files/errors.py, rewritten at every start)
-/// holds a crash dump, no "==== closed " line and no "speed-ups:" note (written once the window is made). A damaged
+/// The last start crashed before it had fully started: user\crash-now.log (files/errors.py, rewritten at every
+/// start) holds a crash dump, no "==== closed " line and no "ready:" note (written once start-up is done, the last
+/// session opened; a log from before 1.8.1, without a start mark, counts its "speed-ups:" note instead). A damaged
 /// program file can crash Python itself, so nothing could be said then.
 fn crashed_starting(top: &Path) -> bool {
     let Ok(log) = std::fs::read_to_string(top.join("user").join("crash-now.log")) else { return false };
     let dump = log.lines().any(|l| !l.trim().is_empty() && !l.starts_with("==== ") && !l.starts_with("-- "));
-    log.contains("==== started") && dump && !log.contains("==== closed ") && !log.contains(" speed-ups: ")
+    let up = log.contains(" ready: ") || (!log.contains("   start ") && log.contains(" speed-ups: "));
+    log.contains("==== started") && dump && !log.contains("==== closed ") && !up
 }
 
 /// Python's exit code; None when its DLL couldn't be loaded.
@@ -165,14 +171,22 @@ fn main() {
     let broken = || {
         let ask = texts.get("starter.broken", None,
             "Spiderweb can't start: its program files are missing or damaged.\n\n{folder}\n\nOpen the download \
-             page to get Spiderweb again? Your settings, autosave and exports (the user and output folders) stay \
-             as they are.", &[("folder", &folder)]);
+             page to get Spiderweb again? Unpack the download over this Spiderweb folder: your settings, autosave \
+             and exports (the user and output folders) stay as they are.", &[("folder", &folder)]);
         if win::ask(&ask) {
             win::open_page(DOWNLOADS);
         }
         std::process::exit(1);
     };
     let Some(dll) = core_ok(&data) else { broken() };
+    // a repair of this folder still running (files/repair.py holds the lock): say so, never a second repair or a start
+    // on half-replaced files. Not for the start the repair itself makes at its end (REPAIRED_ARG: still holding it).
+    if !std::env::args_os().skip(1).any(|a| a == REPAIRED_ARG) && win::lock_taken(&repair_lock(&exe)) {
+        win::tell(&texts.get("repair.running", None,
+            "Spiderweb is being repaired right now. Wait until the repair is done: Spiderweb starts by itself \
+             afterwards.", &[]));
+        std::process::exit(0);
+    }
     // started FOR a repair (Help -> About's "Check program files", a repair offer): straight to it, no question
     let mut repair = std::env::args_os().skip(1).any(|a| a == REPAIR_ARG);
     let repaired = std::env::args_os().skip(1).any(|a| a == REPAIRED_ARG);
@@ -198,15 +212,18 @@ fn main() {
             "Spiderweb closed unexpectedly while starting last time. Its program files may be damaged.\n\nCheck and \
              repair them now? Spiderweb downloads this version again and puts back only damaged files. Your own \
              files stay as they are.\n\nNo = start as usual.", &[]));
+        crash_answered(&top.join("user").join("crash-now.log"));  // (asked once; Spiderweb doesn't say it again)
     }
     let log = top.join("user").join("crash-now.log");
-    let stamp = || std::fs::metadata(&log).and_then(|m| m.modified()).ok();
-    let before = stamp();
-    // Spiderweb runs as a second copy of this exe (CHILD_ARG) while this one watches it until its window is up, then
-    // leaves: a crash while starting (a damaged file can crash Python itself, taking the whole program with it) is
-    // still said at once, not silently (user 2026-11-27).
+    // Spiderweb runs as a second copy of this exe (CHILD_ARG) while this one watches it until it has fully started,
+    // then leaves: a crash while starting (a damaged file can crash Python itself, taking the whole program with it)
+    // is still said at once, not silently (user 2026-11-27). This start's own mark (MARK_ENV) goes into the log's
+    // start line and its "ready" note (files/errors.py), so another run's lines (an old Spiderweb closing after
+    // "Update and restart") never count.
+    let mark = format!("{}-{}", std::process::id(),
+        std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0));
     let mut cmd = std::process::Command::new(&exe);
-    cmd.arg(CHILD_ARG);
+    cmd.arg(CHILD_ARG).env(MARK_ENV, &mark);
     if repair {
         cmd.arg(REPAIR_ARG);
     }
@@ -214,22 +231,30 @@ fn main() {
     let Ok(mut child) = cmd.spawn() else {
         std::process::exit(match run(&dll, &exe, &data, repair) { Some(c) => c, None => broken() });
     };
+    win::allow_front(child.id());
+    let read = || std::fs::read_to_string(&log).unwrap_or_default();
+    let ours = |t: &str| t.contains(&format!("   start {mark}"));  // (this start rewrote the log)
     let code = loop {
         match child.try_wait() {
             Ok(Some(status)) => break status.code().unwrap_or(1),
             Ok(None) => {}
             Err(_) => std::process::exit(0),
         }
-        if stamp() != before && window_up(&log) {
-            std::process::exit(0);  // (Spiderweb's window is up: from here its own error handling takes over)
+        let t = read();
+        if t.contains(&format!(" ready: {mark}")) {
+            std::process::exit(0);  // (fully started: from here Spiderweb's own error handling takes over)
+        }
+        if !ours(&t) && win::shows_window(child.id()) {
+            std::process::exit(0);  // (its window is up but the log can't be written here: nothing more to watch)
         }
         std::thread::sleep(std::time::Duration::from_millis(WATCH_MS));
     };
     if code == NO_PYTHON {
         broken();
     }
-    // Crashed while starting (a dump in a crash-now.log it rewrote, no closing line, window never up): said now.
-    if code != 0 && code != 3 && !repair && stamp() != before && crashed_starting(&top) {
+    let written = ours(&read());
+    // Crashed while starting (a dump in the log this start wrote, no closing line, never ready): said now.
+    if code != 0 && code != 3 && !repair && written && crashed_starting(&top) {
         crash_answered(&log);  // (the next start doesn't ask about this crash again)
         if repaired {
             still(&texts, code);
@@ -237,8 +262,9 @@ fn main() {
         if win::ask(&texts.get("starter.crashed_now", None,
             "Spiderweb closed unexpectedly while starting. Its program files may be damaged.\n\nRepair them now? \
              Spiderweb downloads this version again and puts back only damaged files. Your own files stay as they \
-             are.", &[])) {
-            let args: Vec<OsString> = std::env::args_os().skip(1).filter(|a| a != REPAIRED_ARG).collect();
+             are.\n\nNo = Spiderweb stays closed.", &[])) {
+            let args: Vec<OsString> = std::env::args_os().skip(1).filter(|a| a != REPAIRED_ARG && a != FINE_ARG)
+                .collect();
             let _ = std::process::Command::new(&exe).arg(REPAIR_ARG).args(args).current_dir(&top).spawn();
         }
         std::process::exit(code);
@@ -246,7 +272,7 @@ fn main() {
     match Some(code) {
         // Ended with an error before Spiderweb even wrote its start line (crash-now.log untouched): damaged
         // Python parts fail there with no word at all (hunt 2026-11-26). Repair mode's own plain message exits 3.
-        Some(code) if code != 0 && code != 3 && stamp() == before => {
+        Some(code) if code != 0 && code != 3 && !written => {
             if repair {
                 broken();
             }
@@ -256,9 +282,10 @@ fn main() {
             let ask = texts.get("starter.failed", None,
                 "Spiderweb couldn't start: some of its program files seem to be damaged.\n\nRepair them now? \
                  Spiderweb downloads this version again and puts back only the damaged files. Your own files stay \
-                 as they are.", &[]);
+                 as they are.\n\nNo = Spiderweb stays closed.", &[]);
             if win::ask(&ask) {
-                let args: Vec<OsString> = std::env::args_os().skip(1).filter(|a| a != REPAIRED_ARG).collect();
+                let args: Vec<OsString> = std::env::args_os().skip(1).filter(|a| a != REPAIRED_ARG && a != FINE_ARG)
+                    .collect();
                 let _ = std::process::Command::new(&exe).arg(REPAIR_ARG).args(args).current_dir(&top).spawn();
             }
             std::process::exit(code);
@@ -268,20 +295,27 @@ fn main() {
     }
 }
 
-/// Right after a repair Spiderweb still can't start: the download page offered, never another repair.
+/// Right after a repair Spiderweb still can't start: the download page offered, never another repair. After a repair
+/// that found every file fine (FINE_ARG) the files aren't the cause: the crash log + the problem page instead.
 fn still(texts: &texts::Texts, code: c_int) -> ! {
+    if std::env::args_os().skip(1).any(|a| a == FINE_ARG) {
+        if win::ask(&texts.get("repair.fine_still", None,
+            "Spiderweb still can't start, but its program files are all fine, so something else stops it: for \
+             example a graphics or sound driver, or a security program.\n\nSpiderweb keeps a crash log in its \
+             folder (spiderweb-crash.log, or user\\crash-now.log). Open the page for reporting problems? Please add \
+             that log to your report.", &[])) {
+            win::open_page(ISSUES);
+        }
+        std::process::exit(code);
+    }
     let ask = texts.get("repair.still", None,
-        "Spiderweb still can't start after the repair.\n\nOpen the download page to get Spiderweb again? Your \
-         settings, autosave and exports (the user and output folders) stay as they are.", &[]);
+        "Spiderweb still can't start after the repair.\n\nOpen the download page to get Spiderweb again? Unpack the \
+         download over this Spiderweb folder: your settings, autosave and exports (the user and output folders) \
+         stay as they are.", &[]);
     if win::ask(&ask) {
         win::open_page(DOWNLOADS);
     }
     std::process::exit(code);
-}
-
-/// Spiderweb's window is up: its crash-now.log (rewritten at this start) has the "speed-ups:" note.
-fn window_up(log: &Path) -> bool {
-    std::fs::read_to_string(log).is_ok_and(|t| t.contains("==== started") && t.contains(" speed-ups: "))
 }
 
 /// The user was told about this start's crash: a closing line, so the next start doesn't ask about it again
@@ -291,6 +325,13 @@ fn crash_answered(log: &Path) {
     if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(log) {
         let _ = f.write_all(b"==== closed (told at start)\n");
     }
+}
+
+/// The name of the lock a repair of this folder holds (files/repair.py repair_lock: same text): from this exe's own
+/// full path, lower case.
+fn repair_lock(exe: &Path) -> String {
+    let hex = sha256::hex(exe.to_string_lossy().to_lowercase().as_bytes());
+    format!("Local\\SpiderwebRepair-{}", &hex[..32])
 }
 
 /// The copy started by the watching starter (CHILD_ARG): Spiderweb itself, in this process; the checks were done.

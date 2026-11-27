@@ -12,9 +12,12 @@ REPAIRED = "--spiderweb-repaired"  # (started after a repair: files.repair.offer
 
 sys.spiderweb_bundle = os.path.dirname(os.path.abspath(__file__))
 sys.argv[0] = sys.executable  # (Spiderweb.exe, as the user started it)
+FINE = "--spiderweb-files-fine"  # (with REPAIRED: that repair found every file fine)
 sys.spiderweb_repaired = REPAIRED in sys.argv
-while REPAIRED in sys.argv:
-    sys.argv.remove(REPAIRED)
+sys.spiderweb_files_fine = FINE in sys.argv
+for mark in (REPAIRED, FINE):
+    while mark in sys.argv:
+        sys.argv.remove(mark)
 if REPAIR in sys.argv:
     sys.argv.remove(REPAIR)
     try:
