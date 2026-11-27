@@ -26,4 +26,4 @@ Back at 128, notes above 127 are left out; the shapes stay as they are.
 
 With 256 keys, two ticks show next to Keys: 31-EDO and Audio, to see and hear the piano roll in 31 notes an octave (see [page:edo31|31-EDO]).
 
-If something goes wrong, the details go to spiderweb-error.log next to Spiderweb. If Spiderweb closes by itself, spiderweb-crash.log there says where it happened (written the next time Spiderweb starts, which also tells you it happened).
+If something goes wrong, the details go to spiderweb-error.log next to Spiderweb. If Spiderweb closes by itself, spiderweb-crash.log there says where it happened (written the next time Spiderweb starts, which also tells you it happened). A crash while Spiderweb is starting is told at once, with a choice to repair it or start without your last session (see [page:about#Program files|About]).
