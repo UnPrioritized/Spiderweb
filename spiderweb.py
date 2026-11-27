@@ -38,6 +38,13 @@ Files (the scripts live in scripts/, one subfolder per group):
     panel_freehand.py  the panel's Straighten setting for freehand strokes
     panel_gliss.py   the panel's Glissando settings: grids, step, thickness, note length, picked keys
     panel_text.py    the panel's text settings (font, size, spacing, threshold, grow)
+    panel_lasso.py   the panel's Lasso box (Cut / Cancel, the Magnetic lasso's Width)
+    panel_mask.py    the panel's Mask rows (a shape made a mask or a shape again, a mask's settings)
+    panel_nested.py  the panel's rows for Inside fill "Nested"
+    panel_ripples.py the panel's rows for Inside fill "Ripples"
+    panel_tiles.py   the panel's rows for Inside fill "Tiles"
+    panel_recolour.py the panel's Recolour row (which colour each note of a shape has)
+    panel_snap.py    the panel's "Notes by snap" row (a line's notes one snap step each, a staircase)
     font_dialog.py   the font window (type a font's name or pick one)
     widgets.py       small shared widgets: number boxes, dropdowns, lists (and every name from the three below)
     widgets_place.py where windows open: kept on the screen, remembered places, centred over the main window
@@ -57,6 +64,9 @@ Files (the scripts live in scripts/, one subfolder per group):
     settings_backup.py  an update's first start: the older version's settings + presets zipped into user/backups
     drawer.py        the custom shape drawer window
     drawer_library.py the drawer's shape library (shapes/*.json): names, loading, saving, renaming
+    drawer_list.py   the drawer's shape library list with sub folders (rows, picking, where a new shape is saved)
+    drawer_lasso.py  the drawer's Lasso tool on the board
+    layers.py        the drawer's layers list (one row per stroke: eye, lock, groups)
     shape_picture.py small rough pictures of library shapes beside the Shape list and the drawer's library
     drawer_trace.py  the drawer's tracing picture: a faint picture under the board, moved / sized, never saved
     warp_own.py      Warp own bends: named Warp grids saved by the user, flipped to look the same on any shape
@@ -84,6 +94,13 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_simplify.py   the Hz bass window's Simplify points… window (bend / loudness lines, live slider)
     hz_lfo.py        the Hz bass window's LFO… window (design a wobble live; drawn waves + the shape bank)
     hz_box.py        the Hz bass window's 8-handle box (Sketch: stretch notes in time + pitch, bends with them)
+    hz_draw.py       the Hz bass window's drawing tools (a path drawn over the notes -> notes joined by slides)
+    hz_bend.py       the Hz bass window's Bend tool (each note's own bend line)
+    hz_sketch.py     the Hz bass window's Sketch tool (a note drawn and shaped as a pitch line by hand)
+    hz_note_tools.py the Hz bass window's note tools in a note's right-click menu (Set Pitch… and the others)
+    hz_layers.py     the Hz bass window's layers strip (one row per layer, left of its piano roll)
+    hz_loud.py       the Hz bass window's loudness pane (each note's own line times the whole one's)
+    hz_trace.py      the Hz bass window's "Hz shape…" window (one wave drawn by hand)
     hz_effects.py    the effects pane under the Hz bass window's notes (lines with points)
     hz_preview.py    the Hz bass window's Preview: its sound made ahead (greyed until made) and played
     hz_live.py       the Hz bass live keys: a key held = its Hz bass, played with the quick sound
@@ -93,6 +110,8 @@ Files (the scripts live in scripts/, one subfolder per group):
     hz_knob_pics.py  its Knobs tab's small pictures (envelope, waves, pitch, wobbles, arpeggio...)
     hz_rack.py       its Effects tab: a rack of effects (chorus, flanger, echo, reverb, compressor look-alikes)
     hz_macros.py     its macros: big knobs that turn the knobs linked to them
+    hz_mod.py        its MOD tab: more LFOs and envelopes, and what each one moves
+    hz_steps.py      its Arpeggio box's step editor (the run's own steps, one lane at a time)
     hz_presets.py    its preset bar: ready-made sounds and the user's own (hz_presets.json)
     synth_look.py    its dark look: colours, boxes with a header strip, the big tabs, dark ttk styles
     preview_settings.py  its Settings window (Pitch, Gates, PPQ, shape length; preview: soundfont, voices, volume...)
@@ -122,6 +141,30 @@ Files (the scripts live in scripts/, one subfolder per group):
     chop_window.py   the Chop window (rhythm list, a strip to draw rhythms, saved rhythms) + quick chop (Ctrl+U)
     props_text.py    the Properties window's words and numbers (what each of its lines shows)
     track_pictures.py the track list's pictures: a loaded MIDI's rows painted, the strip under the list, its picker
+    track_list.py    the track list (Tab swaps it with the piano roll): one row per track the export writes
+    track_channels.py the track list's channels dragged between tracks
+    track_moves.py   the track list's notes moved / copied to other tracks and in time
+    track_tempo.py   the track list's Conductor row: tempo, time and key signatures in its boxes
+    track_windows.py the track list's Track Properties and Add Tracks windows
+    conductor_marks.py the Conductor pane's time + key signatures (short lines with their text)
+    catch_graph.py   a drawn catch-up's graph (Tempo pane: Catch-up shape Drawn)
+    jump_graph.py    Fill with tempo jumps' small graphs (the shape of each jump)
+    speed_graph.py   Copy along a path's Speed graph (where each copy lands along the path)
+    extend_window.py the Gate extend window
+    fold_window.py   the Fold tracks window (tracks folded down to fewer, previewed on the piano roll)
+    lines_window.py  the line tools' window (Flip each line sideways / upside down, Split into pieces)
+    liquify_window.py Recolour's Liquify… window (colours brushed around on the piano roll)
+    warp_window.py   Recolour's Warp… window (a grid on the piano roll bending the colours)
+    edit_line.py     the line the Stir / Warp / Liquify / Shares windows show while later colour steps are skipped
+    properties_window.py the Properties window (a shape's steps in order; Alt+Enter)
+    export_window.py the small window while a loaded MIDI is exported (its steps, a bar, Cancel)
+    load_extract.py  Load MIDI's Extract: the loaded notes inside a Select box taken out as your own
+    settings_new.py  Settings → New projects (the song settings a new project starts with)
+    font_list.py     the soundfonts list Settings → Sound and the Hz bass settings share (the one above wins)
+    look.py          the program's colours and fonts in one place (light and dark)
+    big_ask.py       the question before something big (lots of notes, more memory than is free), per action
+    copy_wait.py     Ctrl+C on huge shapes: the text to share made on a thread, the window keeps answering
+    lost_release.py  a mouse press whose let go never came (a window took the mouse mid-drag): let go for it
   roll/              the piano roll
     pianoroll.py     the piano roll canvas: view, hit testing, mouse clicks handed on to each tool's part
     roll_drawtools.py the drawing tools' press / drag / let go (Line, box tools, Polyline, Arc, Funnel, Custom, Freehand)
@@ -140,6 +183,10 @@ Files (the scripts live in scripts/, one subfolder per group):
     roll_text.py     the Text tool: typing on the roll, the caret
     roll_hz.py       the Hz bass tool: picking where a Hz bass starts
     roll_path.py     Copy along a path: the path drawn, B placed and its points dragged
+    roll_lasso.py    the Lasso tool on the piano roll (a loop that cuts pasted notes)
+    roll_liquify.py  Recolour's Liquify on the piano roll (a drag brushes the colours)
+    roll_warp.py     Recolour's Warp on the piano roll (its grid over each shape)
+    roll_sustain.py  Sustain's stops put by hand (lines across the shape, dragged)
     roll_centre.py   Recolour's Split: Clumps centre point dot, dragged on the piano roll
     roll_melody.py   Fill with tempo jumps: the notes it follows outlined on the piano roll
     roll_shared.py   colours, key names, modifier keys, outline caches
@@ -214,6 +261,32 @@ Files (the scripts live in scripts/, one subfolder per group):
     smooth.py        freehand made perfect: straight lines, smooth curves, perfect shapes
     pen.py           line tools' Thickness: a wide pen, one long note per key in the band
     picture.py       image to notes: a picture file -> a grid of up to 16 colours (picking, blending, details)
+    areas.py         a custom shape's areas (the pieces its lines cut it into), each can get its own colour
+    nested.py        Inside fill "Nested": copies of the shape one inside the other, a colour each
+    ripples.py       Inside fill "Ripples": rings growing out of shapes drawn inside, a colour each
+    tiles.py         Inside fill "Tiles": a library shape repeated like wallpaper inside, cut at the outline
+    even_steps.py    Even steps: a spam shape's straight sides made clean lines on the grid
+    mask.py          masks: a shape showing a note pattern through it (a preview, the shapes under it stay whole)
+    mould.py         Cut with this shape (a cookie cutter, row by row)
+    lasso.py         the Lasso tool's cutting: holes / bites in pasted notes
+    sliced.py        sliced pieces: a line cut in two keeps every note where it was
+    cut_share.py     cut pieces that only moved share the whole's notes (made once)
+    merge.py         Gate sensitive merge: two shapes' notes made one
+    extend.py        Gate extend: every note ends a little later, running over into the next
+    fillgaps.py      Fill gaps: the gaps between notes closed on each key row
+    gateflip.py      Gate aware flip: only how a spam shape's gates lie is flipped, not the drawing
+    lines.py         the lines inside each track (Flip each line, Split into pieces)
+    fold.py          Fold tracks: many tracks folded down to fewer
+    wrap.py          Wrapped slices: notes cut into curved slices as if wrapped round a ball or a can
+    recolour.py      Recolour: which colour each note has changes, the notes stay where they are
+    liquify.py       Recolour's Liquify: a brush pushing the colours around
+    warp.py          Recolour's Warp: a grid of points bending the colours like rubber
+    warp_presets.py  Warp's ready-made bends
+    shape_bend.py    Deform shapes: a Stir tab bending the shape itself, not its colours
+    steps.py         the order of every step done to a shape's notes after they're made
+    meter.py         time + key signatures (kept in the tempo line)
+    cc_names.py      names for the MIDI messages riding along with notes ("Pan 64", not numbers)
+    hz_trace.py      Hz bass: a path drawn in its window -> notes joined by slides that follow it
   files/            saving, MIDI, sound
     project.py       project files (.spwb packed, old .json plain), autosave (+ its backup), MIDI export
     dropfiles.py     files dragged in from Explorer onto the main window (Windows' OLE drop target)
@@ -270,6 +343,20 @@ Files (the scripts live in scripts/, one subfolder per group):
     mathexpr.py      math in number boxes (960*4 etc.)
     mathpaste.py     formulas as written elsewhere (LaTeX, 3t, sin^2(t), |t|) in mathexpr's words
     snap.py          the snap choices (bar, note lengths, custom ones) and their length in beats
+    lang.py          every text the program shows, from lang/<language>/ (English, other languages per text)
+    new_project.py   Settings → New projects' song settings (what New and Load MIDI start with)
+    shape_defaults.py the user's own defaults for tool windows (the "use as default" pin)
+    own_tracks.py    tracks added by hand in the track list (name, channel, port)
+    midi_saved.py    saved indexes of loaded MIDIs (user/midi-index/: the next load is quick)
+    midi_piece.py    Rendered ahead's pieces of a loaded MIDI (its bytes copied, never written again)
+    ahead_loaded.py  Rendered ahead with a loaded MIDI (the file + your shapes on one clock)
+    ahead_play.py    Rendered ahead's player (the made blocks joined and played)
+    notes_clip.py    Spiderweb Notes: the finished music on the clipboard for other programs, beside the shared line
+    domino_shapes.py Draw on Domino: which of Domino's notes came from which shape, found again from its notes
+    self_update.py   Update and restart: a release's files used only when its signed list checks out
+    signing.py       signed updates: a release list's signature checked with the public key
+    folder_zip.py    the folder version's zip unpacked safely, version folders deleted the way they came
+    repair.py        repairing the folder version's damaged program files
 """
 
 import ctypes
@@ -468,6 +555,9 @@ def first_instance():
     """Only one Spiderweb per folder (they'd share the autosave and settings): True when none is open yet. Otherwise
     the open one's window is brought to the front and False. Copies in other folders don't count."""
     global _lock
+    from files.system import WINDOWS
+    if not WINDOWS:
+        return first_by_file()
     from ctypes import wintypes
     k, u = ctypes.WinDLL("kernel32", use_last_error=True), ctypes.windll.user32
     k.CreateMutexW.restype = wintypes.HANDLE
@@ -491,13 +581,59 @@ def first_instance():
     return False
 
 
+def first_by_file():
+    """Linux / Mac: the same lock as a locked file, user/running.lock (the system lets go of it when Spiderweb ends,
+    a crash too). The open window can't be brought to the front from here: the user is told it's open. Files that
+    can't be locked there (some network folders): no lock, Spiderweb starts as before."""
+    global _lock
+    import fcntl
+    from files.about import USER
+    try:
+        os.makedirs(USER, exist_ok=True)
+        f = open(os.path.join(USER, "running.lock"), "a")
+    except OSError:
+        return True
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:  # (another Spiderweb holds it)
+        f.close()
+        return False
+    except OSError:
+        f.close()
+        return True
+    _lock = f
+    return True
+
+
+def say_already_open():
+    """Linux / Mac's second start with nothing to open: a short message (the open window can't be raised)."""
+    import tkinter as tk
+    from tkinter import messagebox
+    from files.lang import tr
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showinfo("Spiderweb", tr("about.already_open"))
+    root.destroy()
+
+
 def close_lock():
     """Lets go of this start's handle on the lock (a retry after the open Spiderweb closed: while any handle is
     open, the lock still counts as taken)."""
     global _lock
-    if _lock:
+    if hasattr(_lock, "close"):  # (Linux / Mac: the locked file)
+        _lock.close()
+    elif _lock:
         ctypes.windll.kernel32.CloseHandle(ctypes.c_void_p(_lock))
-        _lock = None
+    _lock = None
+
+
+def log_quietly(where):
+    """A start step that failed without stopping Spiderweb: its error goes into spiderweb-error.log (nothing shown),
+    so a cleanup that keeps failing can be found later."""
+    try:
+        errors.write_log(*sys.exc_info(), where)
+    except Exception:  # noqa: BLE001 (the log itself can't be written: nothing more to do)
+        pass
 
 
 if __name__ == "__main__":
@@ -537,6 +673,9 @@ if __name__ == "__main__":
                 sys.exit(0)
         if not first:
             if not given:
+                from files.system import WINDOWS
+                if not WINDOWS:
+                    say_already_open()
                 sys.exit(0)
             from window.open_files import hand_over, handed_taken
             handed = hand_over(given)  # (the open Spiderweb opens them)
@@ -550,13 +689,13 @@ if __name__ == "__main__":
                     break
             else:
                 sys.exit(0)
-    except (AttributeError, OSError):  # not Windows: no lock
-        pass
+    except (AttributeError, OSError) as e:  # (the lock couldn't be asked for: Spiderweb starts anyway)
+        errors.note("start lock", f"{type(e).__name__}: {e}")
     try:
         from files.self_update import clean_leftovers
         clean_leftovers()  # (an update's Spiderweb.exe.old / .new: exe only)
     except Exception:
-        pass
+        log_quietly("(starting up: update leftovers)")
     from files.about import FROZEN
     from files.system import WINE
     if WINE and FROZEN:  # (old one-file exes' unpacked copies a hard-ended session left in Temp)
@@ -577,7 +716,7 @@ if __name__ == "__main__":
     try:
         offer_extras()
     except Exception:  # (only an offer: never stops Spiderweb from starting)
-        pass
+        log_quietly("(starting up: package offer)")
     try:
         from window.app import App
         app = App()
@@ -586,7 +725,7 @@ if __name__ == "__main__":
             from files.self_update import clean_after_start
             clean_after_start(app)
         except Exception:
-            pass
+            log_quietly("(starting up: older versions' folders)")
         open_files.start(app, given)
         app.after_idle(lambda: app.after(50, errors.ready))  # (start-up over, first drawn: native/starter leaves)
         if errors.last_crash is not None:  # (the run before crashed: said once)
