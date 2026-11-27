@@ -22,7 +22,7 @@ Spiderweb's folder holds the MIDI files you export (output) and the user folder:
 
 Spiderweb.exe is small: the program itself sits in the data folder beside it (one folder per version), ready to use, so nothing is unpacked or written when it starts. Keep Spiderweb.exe and the data folder together.
 
-At every start Spiderweb.exe checks that its program files are all there and the right size. When some are missing or damaged, or when the last start crashed, it offers a repair: it downloads the same version again, checks its signature and puts back only the files that differ. Your own files stay as they are.
+At every start Spiderweb.exe checks that its program files are all there and the right size. When some are missing or damaged, or when the last start crashed, it offers a repair: it downloads the same version again, checks its signature and puts back only the files that differ. Your own files stay as they are. When Spiderweb closes unexpectedly while starting, you can also start without your last session: it is set aside in the user folder (never deleted) and Spiderweb tells you its name, so you can open it later with File → Open.
 
 Check program files (below) does the full check by hand: it compares every program file with its fingerprint, which also finds files that kept their size but changed. It takes a few seconds.
 

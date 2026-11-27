@@ -1,5 +1,23 @@
 What changed in each version, newest first. This page opens by itself the first time a new version starts.
 
+## Version 1.8.1
+
+What's new:
+
+• Start without your last session: when Spiderweb closes unexpectedly while starting, the message now offers to start with an empty project. Your last session (and its older copy) is set aside, never deleted, and Spiderweb tells you where it is, so you can open it later with File → Open. Before, a session that crashed Spiderweb every time could only be fixed by deleting the autosave by hand.
+
+• The messages after a crash while starting now have buttons that say what they do (Repair the program files, Start without your last session, Open the crash log, Close) instead of Yes / No.
+
+• A crash while starting is now said at once, not only at the next start.
+
+• When program files the last repair put back go missing again, Spiderweb names them and says a security program (virus scanner) is probably removing them, so you can add Spiderweb's folder as an exception.
+
+• Fixed: the repair could ask the same question again and again when Spiderweb still couldn't start. A failed or cancelled repair now leaves Spiderweb closed, and after a repair that didn't help it offers the download page instead of another repair.
+• Fixed: starting Spiderweb again while a repair was running started a second repair.
+• Fixed: when a repair found every file fine, it didn't say so.
+• Fixed: a crash later in a session, or after "Update and restart", could be reported as a failed start.
+• Fixed: Spiderweb's window sometimes opened behind other windows.
+
 ## Version 1.8.0
 ^^ 2026/11/27 06:23:30 UTC+07:00 · 8d3ea26d
 

@@ -85,6 +85,8 @@ and the `data` folder together.
 - **Damaged program files:** Spiderweb.exe checks its program files at every start and offers to repair them (it
   downloads the same version again and puts back only what's damaged). Help → About → **Check program files** checks
   every file's fingerprint by hand.
+- **Crash while starting:** Spiderweb.exe says so at once and can also start without your last session (set aside in
+  the user folder, never deleted), for a session that crashes Spiderweb every time.
 - **Update check:** Spiderweb can look on GitHub for a new version when it starts. It asks you once how often (every
   start, once a day, week or month, or never); change it later in File → Settings (Ctrl+,), General page. It only
   asks GitHub for the list of versions: nothing about you or your work is sent, and nothing is downloaded by itself.
