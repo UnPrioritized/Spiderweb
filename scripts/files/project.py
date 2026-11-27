@@ -788,18 +788,34 @@ class ProjectFiles:
 
     def tell_set_aside(self):
         """(at start) The starter set the last session aside ("Start without your last session"): where it is, said
-        once. Only for the real autosave (tests' own autosaves never read the user's note)."""
+        once: the note (line 1 = the session, line 2 = its older copy, the backup) is deleted only once the message
+        was closed, so a crash before that says it at the next start. Only for the real autosave (tests' own
+        autosaves never read the user's note)."""
         if os.path.normcase(os.path.abspath(self.autosave_path)) != os.path.normcase(os.path.abspath(AUTOSAVE)):
             return
         try:
             with open(SET_ASIDE, encoding="utf-8", errors="replace") as f:
-                name = os.path.basename(f.read().strip())
-            os.remove(SET_ASIDE)
+                names = [os.path.basename(line.strip()) for line in f.read().splitlines()]
         except OSError:
             return
-        if name:
-            self.after(300, lambda: messagebox.showinfo(
-                tr("project.spiderweb"), tr("project.set_aside", file=os.path.join(USER, name)), parent=self))
+        names = [n for n in names if n]
+        if not names:
+            self.forget_set_aside()
+            return
+        older = tr("project.set_aside_older", file=os.path.join(USER, names[1])) if len(names) > 1 else ""
+
+        def say():
+            messagebox.showinfo(tr("project.spiderweb"), tr("project.set_aside_said", file=os.path.join(
+                USER, names[0]), older=older), parent=self)
+            self.forget_set_aside()
+        self.after(300, say)
+
+    @staticmethod
+    def forget_set_aside():
+        try:
+            os.remove(SET_ASIDE)
+        except OSError:
+            pass
 
     def load_autosave(self):
         """At start: the autosave. If it won't open it's kept aside (renamed, never overwritten) and the backup
@@ -852,6 +868,8 @@ class ProjectFiles:
             try:
                 data = read_json(self.autosave_path)
             except (OSError, ValueError):  # damaged: load_autosave opens the backup, so take its window
+                if not os.path.exists(self.autosave_path):  # (none at all, e.g. "Start without your last
+                    raise                                    # session": load_autosave opens nothing, fresh window)
                 data = read_json(backup_path(self.autosave_path))
             win = data.get("window") or {}
         except (OSError, ValueError, AttributeError):

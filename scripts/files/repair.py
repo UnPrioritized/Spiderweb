@@ -46,7 +46,7 @@ ENGLISH = {  # (used when the language files themselves are damaged)
     "repair.still": "Spiderweb still can't start after the repair.\n\nOpen the download page to get Spiderweb again? "
                     "Unpack the download over this Spiderweb folder: your settings, autosave and exports (the user and "
                     "output folders) stay as they are.",
-    "repair.fine_still": "Spiderweb still can't start, but its program files are all fine, so something else stops it: "
+    "repair.fine_still_log": "Spiderweb still can't start, but its program files are all fine, so something else stops it: "
                          "for example a graphics or sound driver, or a security program.\n\nOpen the error log?",
     "repair.fail.disk": "Spiderweb couldn't write its files (the disk may be full, the folder read-only, or another "
                         "program is using a file). Some files may already have been put back; the others are as they "
@@ -122,7 +122,8 @@ def offer(exc):
     try:
         if getattr(sys, "spiderweb_repaired", False):
             fine = getattr(sys, "spiderweb_files_fine", False)
-            if ask(t("repair.fine_still" if fine else "repair.still")):
+            # ("_log": the old "repair.fine_still" offered the problem page; an old translation must not show here)
+            if ask(t("repair.fine_still_log" if fine else "repair.still")):
                 if fine:
                     from files import errors, system
                     errors.write_log(type(exc), exc, exc.__traceback__, "(starting up after a repair)")

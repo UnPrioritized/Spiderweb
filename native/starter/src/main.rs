@@ -28,6 +28,8 @@ const LIST_SHA256: Option<&str> = option_env!("SPIDERWEB_LIST_SHA256");
 const DOWNLOADS: &str = "https://github.com/UnPrioritized/Spiderweb/releases/latest";
 /// In user\: the last session (files/project.py AUTOSAVE).
 const AUTOSAVE: &str = "autosave.json";
+/// In user\: the last session's older copy (files/project.py backup_path).
+const BACKUP: &str = "autosave-backup.json";
 /// In user\: the name the last session was set aside as, for Spiderweb to say once (files/project.py SET_ASIDE).
 const SET_ASIDE: &str = "set-aside.txt";
 /// Given with REPAIRED_ARG by a repair that found every file fine (files/repair.py FINE).
@@ -296,12 +298,13 @@ fn main() {
     if code != 0 && code != 3 && !repair && written && crashed_starting(&top) {
         crash_answered(&log);  // (the next start doesn't ask about this crash again)
         if repaired {
-            still(&texts, &exe, &top, code);
+            still(&texts, &exe, &top, code, true);
         }
-        // Repair / Start without your last session (only while there is one to set aside) / Close (user 2026-11-27)
+        // Repair / Start without your last session (only while there is one to set aside) / Close (user 2026-11-27;
+        // "_choose": the old "crashed_now" key was a Yes / No question, an old translation of it must not show here)
         let session = top.join("user").join(AUTOSAVE).is_file();
         let text = if session {
-            texts.get("starter.crashed_now", None,
+            texts.get("starter.crashed_now_choose", None,
                 "Spiderweb closed unexpectedly while starting.\n\nIts program files may be damaged, or your last \
                  session may be what makes it crash.", &[])
         } else {
@@ -333,7 +336,7 @@ fn main() {
                 broken();
             }
             if repaired {  // (a repair just ran: the download page, never another repair)
-                still(&texts, &exe, &top, code);
+                still(&texts, &exe, &top, code, false);
             }
             let ask = texts.get("starter.failed", None,
                 "Spiderweb couldn't start: some of its program files seem to be damaged.\n\nRepair them now? \
@@ -354,8 +357,16 @@ fn main() {
 /// Right after a repair Spiderweb still can't start: the download page offered, never another repair. After a repair
 /// that found every file fine (FINE_ARG) the files aren't the cause: Start without your last session (while there is
 /// one) / Open the crash log / Close instead (user 2026-11-27: no problem report page, the user is taking a break).
-fn still(texts: &texts::Texts, exe: &Path, top: &Path, code: c_int) -> ! {
+/// `dump` = this start's crash log holds the crash: else (ended before writing it) neither button means anything
+/// (an older run's log, Spiderweb never reached the session): the text with Close only.
+fn still(texts: &texts::Texts, exe: &Path, top: &Path, code: c_int, dump: bool) -> ! {
     if std::env::args_os().skip(1).any(|a| a == FINE_ARG) {
+        if !dump {
+            win::tell(&texts.get("starter.fine_still_files", None,
+                "Spiderweb still can't start, but its program files are all fine, so something else stops it: for \
+                 example a graphics or sound driver, or a security program.", &[]));
+            std::process::exit(code);
+        }
         let session = top.join("user").join(AUTOSAVE).is_file();
         let text = if session {
             texts.get("starter.fine_still", None,
@@ -394,29 +405,49 @@ fn without_text(texts: &texts::Texts) -> String {
         can open it again later.", &[])
 }
 
-/// "Start without your last session" (user 2026-11-27): user\autosave.json renamed to autosave-kept-<date>.json
-/// (never deleted or replaced; the name files/project.py keep_aside gives), its name written in user\set-aside.txt
-/// (Spiderweb says where it is once it's up), then Spiderweb started again as usual (an empty project).
-fn start_without(texts: &texts::Texts, exe: &Path, top: &Path) {
-    let user = top.join("user");
-    let stamp = format!("autosave-kept-{}", win::stamp());
+/// A free name "<stem>-<date>[-n].json" in `folder` (files/project.py keep_aside's names): never an earlier one.
+fn free_name(folder: &Path, stem: &str) -> String {
+    let stamp = format!("{stem}-{}", win::stamp());
     let mut name = format!("{stamp}.json");
     let mut n = 1;
-    while user.join(&name).exists() {
+    while folder.join(&name).exists() {
         n += 1;
         name = format!("{stamp}-{n}.json");
     }
-    if let Err(e) = std::fs::rename(user.join(AUTOSAVE), user.join(&name)) {
-        win::tell(&texts.get("starter.set_aside_failed", None,
-            "Your last session couldn't be set aside, so Spiderweb stays closed:\n{file}\n\n{why}\n\nMove that file \
-             somewhere else (or close the program using it), then start Spiderweb again.",
-            &[("file", &user.join(AUTOSAVE).display().to_string()), ("why", &e.to_string())]));
-        return;
+    name
+}
+
+/// "Start without your last session" (user 2026-11-27): user\autosave.json renamed to autosave-kept-<date>.json and
+/// its older copy autosave-backup.json to autosave-backup-kept-<date>.json (never deleted or replaced: the older copy
+/// may be the last session that still worked; left, its window settings would come back), their names written in
+/// user\set-aside.txt (Spiderweb says where they are once it's up), then Spiderweb started again WITHOUT the files it
+/// was given (a double-clicked file may be what crashed it): an empty project. Already gone (set aside by another
+/// crash message meanwhile): just started again.
+fn start_without(texts: &texts::Texts, exe: &Path, top: &Path) {
+    let user = top.join("user");
+    let name = free_name(&user, "autosave-kept");
+    match std::fs::rename(user.join(AUTOSAVE), user.join(&name)) {
+        Ok(()) => {
+            let mut note = name;
+            let backup = user.join(BACKUP);
+            if backup.is_file() {
+                let older = free_name(&user, "autosave-backup-kept");
+                if std::fs::rename(&backup, user.join(&older)).is_ok() {
+                    note = format!("{note}\n{older}");
+                }
+            }
+            let _ = std::fs::write(user.join(SET_ASIDE), note.as_bytes());
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => {
+            win::tell(&texts.get("starter.set_aside_failed", None,
+                "Your last session couldn't be set aside, so Spiderweb stays closed:\n{file}\n\n{why}\n\nMove that \
+                 file somewhere else (or close the program using it), then start Spiderweb again.",
+                &[("file", &user.join(AUTOSAVE).display().to_string()), ("why", &e.to_string())]));
+            return;
+        }
     }
-    let _ = std::fs::write(user.join(SET_ASIDE), name.as_bytes());
-    let args: Vec<OsString> = std::env::args_os().skip(1)
-        .filter(|a| a != REPAIRED_ARG && a != FINE_ARG && a != REPAIR_ARG && a != CHILD_ARG).collect();
-    if let Ok(child) = std::process::Command::new(exe).args(args).current_dir(top).spawn() {
+    if let Ok(child) = std::process::Command::new(exe).current_dir(top).spawn() {
         win::allow_front(child.id());
     }
 }
