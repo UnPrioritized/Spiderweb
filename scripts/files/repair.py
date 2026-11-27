@@ -30,6 +30,7 @@ ISSUES = WEBSITE + "/issues"
 FROM = os.environ.get("SPIDERWEB_REPAIR_FROM") or "%s/releases/download/v%s/" % (WEBSITE, VERSION)
 ZIP = "Spiderweb-%s.zip" % VERSION
 OLD_MARK = ".repair-old-"
+REPAIRED_LIST = "repaired-files.txt"  # (in user/: what the last repair put back; native/starter reads it)
 ENGLISH = {  # (used when the language files themselves are damaged)
     "repair.ask": "Spiderweb couldn't start: some of its program files seem to be damaged.\n\nRepair them now? "
                   "Spiderweb downloads this version again and puts back only the damaged files. Your own files "
@@ -216,8 +217,6 @@ def repair(progress=None, cancel=None, putting_back=None):
     """Downloads, checks and puts back what differs. progress(done, size) while downloading, progress(n, all, True)
     while checking / putting back files (cancel is no longer looked at then: putting_back() is called first).
     Returns how many files were put back; raises Refused / NoConnection / OSError (disk)."""
-    import io
-    import zipfile
     if not signing.have_nacl():
         raise folder_zip.Refused("no_check")
     listed = _fetch(FROM + signing.LIST_NAME, 64 * 1024, cancel=cancel)
@@ -236,6 +235,28 @@ def repair(progress=None, cancel=None, putting_back=None):
     if putting_back:
         putting_back()
     inner = "%sdata/%s/" % (folder_zip.TOP, VERSION)
+    put_back = []
+    try:
+        return _put_back(data, inner, progress, put_back)
+    finally:
+        _remember_put_back(put_back)
+
+
+def _remember_put_back(places):
+    """user/repaired-files.txt = the places this repair put back (empty list = none): the starter names one that goes
+    missing again (a virus scanner removing it; native/starter gone_again)."""
+    try:
+        from files.about import USER
+        from files.safefile import write_text
+        os.makedirs(USER, exist_ok=True)  # (a folder never started yet has no user/)
+        write_text(os.path.join(USER, REPAIRED_LIST), "".join(p + "\n" for p in places))
+    except Exception:  # noqa: BLE001 (only a hint later: never stops a repair)
+        pass
+
+
+def _put_back(data, inner, progress, put_back):
+    import io
+    import zipfile
     fixed = 0
     with zipfile.ZipFile(io.BytesIO(data)) as z:
         try:
@@ -255,6 +276,7 @@ def repair(progress=None, cancel=None, putting_back=None):
                 same = False
             if not same:
                 _put(p, z.read(inner + rel))
+                put_back.append(rel)
                 fixed += 1
         here_list = os.path.join(BUNDLE, folder_zip.LIST)
         try:

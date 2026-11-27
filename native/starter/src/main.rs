@@ -20,6 +20,8 @@ const BUILT_VERSION: &str = match option_env!("SPIDERWEB_VERSION") {
 };
 /// The program files' list in data\<version>\ ("<size>\t<sha256>\t<place>" per file; build_folder.py writes it).
 const LIST: &str = "checksum.txt";
+/// In user\: the places the last repair put back, one a line (files/repair.py REPAIRED_LIST).
+const REPAIRED_LIST: &str = "repaired-files.txt";
 /// SHA-256 of this build's own checksum.txt (build_folder.py makes the list first, then builds this starter with
 /// it); None in a plain build. Only checked when starting the version this starter was built with.
 const LIST_SHA256: Option<&str> = option_env!("SPIDERWEB_LIST_SHA256");
@@ -80,12 +82,21 @@ fn core_ok(data: &Path) -> Option<PathBuf> {
     Some(dll)
 }
 
-/// How many files in checksum.txt are missing or have another size (None = the list itself is missing or
-/// damaged). The list is checked first: for this starter's own version, against the SHA-256 the build baked in
+/// A place from checksum.txt / repaired-files.txt as compared: "\" between folders, lower case.
+fn place_key(name: &str) -> String {
+    let name = name.trim().replace('/', "\\");
+    match name.rsplit_once('\\') {
+        Some((folder, file)) => format!("{}\\{}", folder.to_ascii_lowercase(), file.to_lowercase()),
+        None => name.to_lowercase(),
+    }
+}
+
+/// The files in checksum.txt that are missing or have another size, as place_key()s (None = the list itself is
+/// missing or damaged). The list is checked first: for this starter's own version, against the SHA-256 the build baked in
 /// (LIST_SHA256); for any version, every line must read and the list must end with a line break (cut short = not).
 /// Each folder is listed once (Windows hands back every file's size with the listing: ~60 folders, not ~1,250
 /// files asked one by one; a cold hard drive took 0.3 s that way).
-fn damaged(data: &Path, own_version: bool) -> Option<usize> {
+fn damaged(data: &Path, own_version: bool) -> Option<Vec<String>> {
     use std::collections::HashMap;
     let raw = std::fs::read(data.join(LIST)).ok()?;
     if let (true, Some(want)) = (own_version, LIST_SHA256) {
@@ -114,7 +125,7 @@ fn damaged(data: &Path, own_version: bool) -> Option<usize> {
         let (folder, file) = name.rsplit_once('\\').unwrap_or(("", &name));
         wanted.entry(folder.to_ascii_lowercase()).or_default().push((file.to_lowercase(), size));
     }
-    let mut bad = 0;
+    let mut bad = Vec::new();
     for (folder, files) in &wanted {
         let mut have: HashMap<String, u64> = HashMap::new();
         if let Ok(entries) = std::fs::read_dir(data.join(folder)) {
@@ -126,9 +137,19 @@ fn damaged(data: &Path, own_version: bool) -> Option<usize> {
                 }
             }
         }
-        bad += files.iter().filter(|(n, s)| have.get(n) != Some(s)).count();
+        bad.extend(files.iter().filter(|(n, s)| have.get(n) != Some(s))
+            .map(|(n, _)| if folder.is_empty() { n.clone() } else { format!("{folder}\\{n}") }));
     }
     Some(bad)
+}
+
+/// Of `bad`, the files the last repair put back (user\repaired-files.txt, files/repair.py): missing again = most
+/// likely a virus scanner removing them (hunt 2026-11-27 issue 7).
+fn gone_again(top: &Path, bad: &[String]) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(top.join("user").join(REPAIRED_LIST)) else { return Vec::new() };
+    let put_back: std::collections::HashSet<String> = text.lines().filter(|l| !l.trim().is_empty())
+        .map(place_key).collect();
+    bad.iter().filter(|b| put_back.contains(*b)).cloned().collect()
 }
 
 /// The last start crashed before it had fully started: user\crash-now.log (files/errors.py, rewritten at every
@@ -190,9 +211,24 @@ fn main() {
     // started FOR a repair (Help -> About's "Check program files", a repair offer): straight to it, no question
     let mut repair = std::env::args_os().skip(1).any(|a| a == REPAIR_ARG);
     let repaired = std::env::args_os().skip(1).any(|a| a == REPAIRED_ARG);
-    let bad = if repair || repaired { Some(0) } else { damaged(&data, version == BUILT_VERSION) };
-    if bad != Some(0) {
-        let text = match bad {
+    let bad = if repair || repaired { Some(Vec::new()) } else { damaged(&data, version == BUILT_VERSION) };
+    if bad.as_ref().map_or(true, |b| !b.is_empty()) {
+        let again = bad.as_deref().map(|b| gone_again(&top, b)).unwrap_or_default();
+        let shown = again.iter().take(6).cloned().collect::<Vec<_>>().join("\n")
+            + if again.len() > 6 { "\n…" } else { "" };
+        let text = if again.len() == 1 {
+            texts.get("starter.gone_again", Some(1),
+                "This program file went missing again after the last repair:\n{files}\n\nA security program \
+                 (virus scanner) is probably removing it. Add Spiderweb's folder as an exception (allowed \
+                 program or folder) in it, then repair.\n\nRepair now? No = try to start without it.",
+                &[("files", &shown)])
+        } else if !again.is_empty() {
+            texts.get("starter.gone_again", Some(again.len()),
+                "These program files went missing again after the last repair:\n{files}\n\nA security program \
+                 (virus scanner) is probably removing them. Add Spiderweb's folder as an exception (allowed \
+                 program or folder) in it, then repair.\n\nRepair now? No = try to start without them.",
+                &[("files", &shown)])
+        } else { match bad.as_ref().map(|b| b.len()) {
             Some(1) => texts.get("starter.repair", Some(1),
                 "1 of Spiderweb's program files is missing or damaged.\n\nRepair it now? Spiderweb downloads this \
                  version again and puts back only that file. Your own files stay as they are.\n\nNo = try to start \
@@ -205,7 +241,7 @@ fn main() {
                 "Spiderweb can't check its program files: their list is missing or damaged.\n\nRepair them now? \
                  Spiderweb downloads this version again and puts back what is missing or damaged. Your own files stay as \
                  they are.\n\nNo = try to start without checking them.", &[]),
-        };
+        } };
         repair = win::ask(&text);
     } else if !repair && !repaired && crashed_starting(&top) {
         repair = win::ask(&texts.get("starter.crashed", None,
