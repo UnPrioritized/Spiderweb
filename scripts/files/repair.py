@@ -26,7 +26,6 @@ REPAIRED = "--spiderweb-repaired"
 # Given with REPAIRED when the repair found every file fine: if Spiderweb still can't start, the files aren't the cause
 # ("repair.fine_still": the crash log + the problem page, never the download page).
 FINE = "--spiderweb-files-fine"
-ISSUES = WEBSITE + "/issues"
 FROM = os.environ.get("SPIDERWEB_REPAIR_FROM") or "%s/releases/download/v%s/" % (WEBSITE, VERSION)
 ZIP = "Spiderweb-%s.zip" % VERSION
 OLD_MARK = ".repair-old-"
@@ -48,9 +47,7 @@ ENGLISH = {  # (used when the language files themselves are damaged)
                     "Unpack the download over this Spiderweb folder: your settings, autosave and exports (the user and "
                     "output folders) stay as they are.",
     "repair.fine_still": "Spiderweb still can't start, but its program files are all fine, so something else stops it: "
-                         "for example a graphics or sound driver, or a security program.\n\nSpiderweb keeps a crash log "
-                         "in its folder (spiderweb-crash.log, or user\\crash-now.log). Open the page for reporting "
-                         "problems? Please add that log to your report.",
+                         "for example a graphics or sound driver, or a security program.\n\nOpen the error log?",
     "repair.fail.disk": "Spiderweb couldn't write its files (the disk may be full, the folder read-only, or another "
                         "program is using a file). Some files may already have been put back; the others are as they "
                         "were.",
@@ -118,15 +115,21 @@ def offer(exc):
     """Spiderweb couldn't start because of exc: True when it looked like damaged files and the user was asked (a
     repair started on Yes; this program should end with boot's "said already" code, so the starter adds nothing).
     Right after a repair (sys.spiderweb_repaired): never another repair, the download page offered instead; after one
-    that found every file fine (sys.spiderweb_files_fine): the files aren't the cause, the problem page."""
+    that found every file fine (sys.spiderweb_files_fine): the files aren't the cause, the error log offered (no
+    problem report page: user 2026-11-27)."""
     if not FROZEN or sys.platform != "win32" or not looks_damaged(exc):
         return False
     try:
         if getattr(sys, "spiderweb_repaired", False):
             fine = getattr(sys, "spiderweb_files_fine", False)
             if ask(t("repair.fine_still" if fine else "repair.still")):
-                import webbrowser
-                webbrowser.open(ISSUES if fine else WEBSITE + "/releases/latest")
+                if fine:
+                    from files import errors, system
+                    errors.write_log(type(exc), exc, exc.__traceback__, "(starting up after a repair)")
+                    system.open_path(errors.LOG, text=True)
+                else:
+                    import webbrowser
+                    webbrowser.open(WEBSITE + "/releases/latest")
         elif ask(t("repair.ask")):
             start_repair(sys.argv[1:])
         return True

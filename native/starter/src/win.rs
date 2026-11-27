@@ -97,6 +97,156 @@ pub fn ask(text: &str) -> bool {
     unsafe { MessageBoxW(std::ptr::null_mut(), t.as_ptr(), c.as_ptr(), MB_YESNO | MB_ICONWARNING | MB_SETFOREGROUND) == IDYES }
 }
 
+// Windows' task dialog (comctl32 6, which starter.manifest asks for): a message with buttons that say what they do.
+// Declared with 1-byte packing, as commctrl.h does.
+#[repr(C, packed(1))]
+struct TaskButton {
+    id: c_int,
+    text: *const u16,
+}
+#[repr(C, packed(1))]
+struct TaskConfig {
+    size: u32,
+    parent: *mut c_void,
+    instance: *mut c_void,
+    flags: u32,
+    common_buttons: u32,
+    title: *const u16,
+    main_icon: *const u16,
+    main_text: *const u16,
+    content: *const u16,
+    n_buttons: u32,
+    buttons: *const TaskButton,
+    default_button: c_int,
+    n_radios: u32,
+    radios: *const TaskButton,
+    default_radio: c_int,
+    verification: *const u16,
+    expanded: *const u16,
+    expanded_control: *const u16,
+    collapsed_control: *const u16,
+    footer_icon: *const u16,
+    footer: *const u16,
+    callback: Option<extern "system" fn(*mut c_void, u32, usize, isize, isize) -> i32>,
+    callback_data: isize,
+    width: u32,
+}
+type TaskDialogIndirect = extern "system" fn(*const TaskConfig, *mut c_int, *mut c_int, *mut c_int) -> i32;
+const TDF_ALLOW_DIALOG_CANCELLATION: u32 = 0x08;
+const TDF_USE_COMMAND_LINKS: u32 = 0x10;
+const TDN_CREATED: u32 = 0;
+const IDCANCEL: c_int = 2;
+const FIRST_ID: c_int = 100;
+const LOAD_LIBRARY_SEARCH_SYSTEM32: u32 = 0x0800;
+const MB_YESNOCANCEL: u32 = 0x03;
+const IDNO: c_int = 7;
+
+#[link(name = "user32")]
+extern "system" {
+    fn SetForegroundWindow(hwnd: *mut c_void) -> c_int;
+}
+
+extern "system" fn task_events(hwnd: *mut c_void, note: u32, _w: usize, _l: isize, _data: isize) -> i32 {
+    if note == TDN_CREATED {
+        unsafe { SetForegroundWindow(hwnd) };  // (as the Yes / No boxes' MB_SETFOREGROUND)
+    }
+    0
+}
+
+/// A message with one button per choice (a choice's text after "\n" = a smaller line under it): the index of the
+/// one picked. The LAST choice is what Esc / X give (Close). Without the task dialog (a build without the manifest):
+/// a Yes / No (/ Cancel) box naming what each button does.
+pub fn choose(text: &str, choices: &[String]) -> usize {
+    sharp();
+    let last = choices.len().saturating_sub(1);
+    let name = wide(OsStr::new("comctl32.dll"));
+    let lib = unsafe { LoadLibraryExW(name.as_ptr(), std::ptr::null_mut(), LOAD_LIBRARY_SEARCH_SYSTEM32) };
+    let f = if lib.is_null() { std::ptr::null_mut() } else {
+        unsafe { GetProcAddress(lib, b"TaskDialogIndirect\0".as_ptr()) }
+    };
+    if !f.is_null() && (2..=3).contains(&choices.len()) {
+        let dialog = unsafe { std::mem::transmute::<*mut c_void, TaskDialogIndirect>(f) };
+        let texts: Vec<Vec<u16>> = choices.iter().map(|c| wide(OsStr::new(c))).collect();
+        let buttons: Vec<TaskButton> = texts.iter().enumerate()
+            .map(|(i, t)| TaskButton { id: if i == last { IDCANCEL } else { FIRST_ID + i as c_int }, text: t.as_ptr() })
+            .collect();
+        let title = wide(OsStr::new("Spiderweb"));
+        let content = wide(OsStr::new(text));
+        let config = TaskConfig {
+            size: std::mem::size_of::<TaskConfig>() as u32,
+            parent: std::ptr::null_mut(),
+            instance: std::ptr::null_mut(),
+            flags: TDF_ALLOW_DIALOG_CANCELLATION | TDF_USE_COMMAND_LINKS,
+            common_buttons: 0,
+            title: title.as_ptr(),
+            main_icon: 0xFFFF as *const u16,  // (TD_WARNING_ICON)
+            main_text: std::ptr::null(),
+            content: content.as_ptr(),
+            n_buttons: buttons.len() as u32,
+            buttons: buttons.as_ptr(),
+            default_button: FIRST_ID,
+            n_radios: 0,
+            radios: std::ptr::null(),
+            default_radio: 0,
+            verification: std::ptr::null(),
+            expanded: std::ptr::null(),
+            expanded_control: std::ptr::null(),
+            collapsed_control: std::ptr::null(),
+            footer_icon: std::ptr::null(),
+            footer: std::ptr::null(),
+            callback: Some(task_events),
+            callback_data: 0,
+            width: 0,
+        };
+        let mut picked: c_int = 0;
+        if dialog(&config, &mut picked, std::ptr::null_mut(), std::ptr::null_mut()) == 0 {
+            return if picked >= FIRST_ID && ((picked - FIRST_ID) as usize) < last { (picked - FIRST_ID) as usize }
+                   else { last };
+        }
+    }
+    // (the plain box: "Yes = ..., No = ..., Cancel = ...", each choice's first line)
+    let words = ["Yes", "No", "Cancel"];
+    let mut full = text.to_string() + "\n";
+    for (i, c) in choices.iter().take(3).enumerate() {
+        full += &format!("\n{} = {}", words[i], c.lines().next().unwrap_or(""));
+    }
+    let t = wide(OsStr::new(&full));
+    let c = wide(OsStr::new("Spiderweb"));
+    let kind = if choices.len() >= 3 { MB_YESNOCANCEL } else { MB_YESNO };
+    let got = unsafe { MessageBoxW(std::ptr::null_mut(), t.as_ptr(), c.as_ptr(), kind | MB_ICONWARNING | MB_SETFOREGROUND) };
+    match got {
+        IDYES => 0,
+        IDNO if choices.len() >= 3 => 1,
+        _ => last,
+    }
+}
+
+/// Opens a file in its usual program (a .log: the text editor); Notepad when nothing is set up for it.
+pub fn open_file(path: &std::path::Path) {
+    let op = wide(OsStr::new("open"));
+    let p = wide(path.as_os_str());
+    let done = unsafe { ShellExecuteW(std::ptr::null_mut(), op.as_ptr(), p.as_ptr(), std::ptr::null(), std::ptr::null(), 1) };
+    if (done as isize) <= 32 {
+        let _ = std::process::Command::new("notepad.exe").arg(path).spawn();
+    }
+}
+
+#[repr(C)]
+struct SystemTime {
+    year: u16, month: u16, weekday: u16, day: u16, hour: u16, minute: u16, second: u16, ms: u16,
+}
+#[link(name = "kernel32")]
+extern "system" {
+    fn GetLocalTime(t: *mut SystemTime);
+}
+
+/// The local date and time as "YYYYMMDD-HHMMSS" (files/project.py keep_aside's names).
+pub fn stamp() -> String {
+    let mut t = SystemTime { year: 0, month: 0, weekday: 0, day: 0, hour: 0, minute: 0, second: 0, ms: 0 };
+    unsafe { GetLocalTime(&mut t) };
+    format!("{:04}{:02}{:02}-{:02}{:02}{:02}", t.year, t.month, t.day, t.hour, t.minute, t.second)
+}
+
 /// Opens a web page in the user's browser.
 pub fn open_page(url: &str) {
     let op = wide(OsStr::new("open"));

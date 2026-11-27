@@ -26,7 +26,10 @@ const REPAIRED_LIST: &str = "repaired-files.txt";
 /// it); None in a plain build. Only checked when starting the version this starter was built with.
 const LIST_SHA256: Option<&str> = option_env!("SPIDERWEB_LIST_SHA256");
 const DOWNLOADS: &str = "https://github.com/UnPrioritized/Spiderweb/releases/latest";
-const ISSUES: &str = "https://github.com/UnPrioritized/Spiderweb/issues";
+/// In user\: the last session (files/project.py AUTOSAVE).
+const AUTOSAVE: &str = "autosave.json";
+/// In user\: the name the last session was set aside as, for Spiderweb to say once (files/project.py SET_ASIDE).
+const SET_ASIDE: &str = "set-aside.txt";
 /// Given with REPAIRED_ARG by a repair that found every file fine (files/repair.py FINE).
 const FINE_ARG: &str = "--spiderweb-files-fine";
 /// Given to boot.pyc when the user picked Repair (the program's repair mode).
@@ -293,15 +296,32 @@ fn main() {
     if code != 0 && code != 3 && !repair && written && crashed_starting(&top) {
         crash_answered(&log);  // (the next start doesn't ask about this crash again)
         if repaired {
-            still(&texts, code);
+            still(&texts, &exe, &top, code);
         }
-        if win::ask(&texts.get("starter.crashed_now", None,
-            "Spiderweb closed unexpectedly while starting. Its program files may be damaged.\n\nRepair them now? \
-             Spiderweb downloads this version again and puts back only damaged files. Your own files stay as they \
-             are.\n\nNo = Spiderweb stays closed.", &[])) {
-            let args: Vec<OsString> = std::env::args_os().skip(1).filter(|a| a != REPAIRED_ARG && a != FINE_ARG)
-                .collect();
-            let _ = std::process::Command::new(&exe).arg(REPAIR_ARG).args(args).current_dir(&top).spawn();
+        // Repair / Start without your last session (only while there is one to set aside) / Close (user 2026-11-27)
+        let session = top.join("user").join(AUTOSAVE).is_file();
+        let text = if session {
+            texts.get("starter.crashed_now", None,
+                "Spiderweb closed unexpectedly while starting.\n\nIts program files may be damaged, or your last \
+                 session may be what makes it crash.", &[])
+        } else {
+            texts.get("starter.crashed_now_files", None,
+                "Spiderweb closed unexpectedly while starting. Its program files may be damaged.", &[])
+        };
+        let mut choices = vec![texts.get("starter.button_repair", None, "Repair the program files\nSpiderweb \
+            downloads this version again and puts back only damaged files. Your own files stay as they are.", &[])];
+        if session {
+            choices.push(without_text(&texts));
+        }
+        choices.push(texts.get("starter.button_close", None, "Close", &[]));
+        match (win::choose(&text, &choices), session) {
+            (0, _) => {
+                let args: Vec<OsString> = std::env::args_os().skip(1).filter(|a| a != REPAIRED_ARG && a != FINE_ARG)
+                    .collect();
+                let _ = std::process::Command::new(&exe).arg(REPAIR_ARG).args(args).current_dir(&top).spawn();
+            }
+            (1, true) => start_without(&texts, &exe, &top),
+            _ => {}
         }
         std::process::exit(code);
     }
@@ -313,7 +333,7 @@ fn main() {
                 broken();
             }
             if repaired {  // (a repair just ran: the download page, never another repair)
-                still(&texts, code);
+                still(&texts, &exe, &top, code);
             }
             let ask = texts.get("starter.failed", None,
                 "Spiderweb couldn't start: some of its program files seem to be damaged.\n\nRepair them now? \
@@ -332,15 +352,30 @@ fn main() {
 }
 
 /// Right after a repair Spiderweb still can't start: the download page offered, never another repair. After a repair
-/// that found every file fine (FINE_ARG) the files aren't the cause: the crash log + the problem page instead.
-fn still(texts: &texts::Texts, code: c_int) -> ! {
+/// that found every file fine (FINE_ARG) the files aren't the cause: Start without your last session (while there is
+/// one) / Open the crash log / Close instead (user 2026-11-27: no problem report page, the user is taking a break).
+fn still(texts: &texts::Texts, exe: &Path, top: &Path, code: c_int) -> ! {
     if std::env::args_os().skip(1).any(|a| a == FINE_ARG) {
-        if win::ask(&texts.get("repair.fine_still", None,
-            "Spiderweb still can't start, but its program files are all fine, so something else stops it: for \
-             example a graphics or sound driver, or a security program.\n\nSpiderweb keeps a crash log in its \
-             folder (spiderweb-crash.log, or user\\crash-now.log). Open the page for reporting problems? Please add \
-             that log to your report.", &[])) {
-            win::open_page(ISSUES);
+        let session = top.join("user").join(AUTOSAVE).is_file();
+        let text = if session {
+            texts.get("starter.fine_still", None,
+                "Spiderweb still can't start, but its program files are all fine, so something else stops it: maybe \
+                 your last session, a graphics or sound driver, or a security program.", &[])
+        } else {
+            texts.get("starter.fine_still_files", None,
+                "Spiderweb still can't start, but its program files are all fine, so something else stops it: for \
+                 example a graphics or sound driver, or a security program.", &[])
+        };
+        let mut choices = Vec::new();
+        if session {
+            choices.push(without_text(texts));
+        }
+        choices.push(texts.get("starter.button_crash_log", None, "Open the crash log", &[]));
+        choices.push(texts.get("starter.button_close", None, "Close", &[]));
+        match win::choose(&text, &choices) + usize::from(!session) {
+            0 => start_without(texts, exe, top),
+            1 => win::open_file(&top.join("user").join("crash-now.log")),
+            _ => {}
         }
         std::process::exit(code);
     }
@@ -352,6 +387,38 @@ fn still(texts: &texts::Texts, code: c_int) -> ! {
         win::open_page(DOWNLOADS);
     }
     std::process::exit(code);
+}
+
+fn without_text(texts: &texts::Texts) -> String {
+    texts.get("starter.button_without", None, "Start without your last session\nIt's set aside, never deleted: you \
+        can open it again later.", &[])
+}
+
+/// "Start without your last session" (user 2026-11-27): user\autosave.json renamed to autosave-kept-<date>.json
+/// (never deleted or replaced; the name files/project.py keep_aside gives), its name written in user\set-aside.txt
+/// (Spiderweb says where it is once it's up), then Spiderweb started again as usual (an empty project).
+fn start_without(texts: &texts::Texts, exe: &Path, top: &Path) {
+    let user = top.join("user");
+    let stamp = format!("autosave-kept-{}", win::stamp());
+    let mut name = format!("{stamp}.json");
+    let mut n = 1;
+    while user.join(&name).exists() {
+        n += 1;
+        name = format!("{stamp}-{n}.json");
+    }
+    if let Err(e) = std::fs::rename(user.join(AUTOSAVE), user.join(&name)) {
+        win::tell(&texts.get("starter.set_aside_failed", None,
+            "Your last session couldn't be set aside, so Spiderweb stays closed:\n{file}\n\n{why}\n\nMove that file \
+             somewhere else (or close the program using it), then start Spiderweb again.",
+            &[("file", &user.join(AUTOSAVE).display().to_string()), ("why", &e.to_string())]));
+        return;
+    }
+    let _ = std::fs::write(user.join(SET_ASIDE), name.as_bytes());
+    let args: Vec<OsString> = std::env::args_os().skip(1)
+        .filter(|a| a != REPAIRED_ARG && a != FINE_ARG && a != REPAIR_ARG && a != CHILD_ARG).collect();
+    if let Ok(child) = std::process::Command::new(exe).args(args).current_dir(top).spawn() {
+        win::allow_front(child.id());
+    }
 }
 
 /// The user was told about this start's crash: a closing line, so the next start doesn't ask about it again

@@ -73,6 +73,9 @@ from window.tempo_pane import ask_domino
 from roll.roll_draw import GHOST_FADE, STACK_MODES
 
 AUTOSAVE = os.path.join(USER, "autosave.json")
+# The folder version's starter, after "Start without your last session" (native/starter, user 2026-11-27): the
+# autosave was renamed and its new name written here; load_autosave says where it is once, then deletes this.
+SET_ASIDE = os.path.join(USER, "set-aside.txt")
 AFTER_STOP_S = 4.0  # (the autosave waits this long after Stop: a quick Stop -> Play stays smooth)
 OUTPUT_DIR = os.path.join(HERE, "output")
 
@@ -783,11 +786,27 @@ class ProjectFiles:
             ppq = None
         return ask_big(self, "open", sum(self.notes_about(sh, ppq) for sh in shapes))
 
+    def tell_set_aside(self):
+        """(at start) The starter set the last session aside ("Start without your last session"): where it is, said
+        once. Only for the real autosave (tests' own autosaves never read the user's note)."""
+        if os.path.normcase(os.path.abspath(self.autosave_path)) != os.path.normcase(os.path.abspath(AUTOSAVE)):
+            return
+        try:
+            with open(SET_ASIDE, encoding="utf-8", errors="replace") as f:
+                name = os.path.basename(f.read().strip())
+            os.remove(SET_ASIDE)
+        except OSError:
+            return
+        if name:
+            self.after(300, lambda: messagebox.showinfo(
+                tr("project.spiderweb"), tr("project.set_aside", file=os.path.join(USER, name)), parent=self))
+
     def load_autosave(self):
         """At start: the autosave. If it won't open it's kept aside (renamed, never overwritten) and the backup
         (the autosave as it was the last time the program started) opens instead; either way the user is told.
         True = a project opened (start_new_defaults: else the New projects settings)."""
         path, backup = self.autosave_path, backup_path(self.autosave_path)
+        self.tell_set_aside()
         def opens(p):
             try:
                 return self.load_file(p, quiet=True)
