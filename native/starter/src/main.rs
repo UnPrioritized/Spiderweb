@@ -30,6 +30,12 @@ const REPAIR_ARG: &str = "--spiderweb-repair";
 /// "closed unexpectedly" question, and no new repair offer if it still can't start (no question loops). Passed on
 /// to boot.pyc, which takes it out.
 const REPAIRED_ARG: &str = "--spiderweb-repaired";
+/// First argument of the copy the starter starts and watches (Spiderweb itself runs there; never passed to Python).
+const CHILD_ARG: &str = "--spiderweb-child";
+/// The child's exit code when Python's DLL couldn't be loaded (the watching starter then offers the download page).
+const NO_PYTHON: c_int = 0x5357_0001;
+/// How often the watching starter looks at Spiderweb while it starts.
+const WATCH_MS: u64 = 150;
 
 fn usable_version(v: &str) -> bool {
     !v.is_empty() && v.len() <= 40 && v != "." && v != ".."
@@ -138,7 +144,7 @@ fn run(dll: &Path, exe: &Path, data: &Path, repair: bool) -> Option<c_int> {
     if repair {
         args.push(REPAIR_ARG.into());
     }
-    args.extend(std::env::args_os().skip(1).filter(|a| a != REPAIR_ARG));
+    args.extend(std::env::args_os().skip(1).filter(|a| a != REPAIR_ARG && a != CHILD_ARG));
     let mut wides: Vec<Vec<u16>> = args.iter().map(|a| win::wide(a)).collect();
     let mut ptrs: Vec<*mut u16> = wides.iter_mut().map(|w| w.as_mut_ptr()).collect();
     ptrs.push(std::ptr::null_mut());
@@ -147,6 +153,9 @@ fn run(dll: &Path, exe: &Path, data: &Path, repair: bool) -> Option<c_int> {
 
 fn main() {
     let exe = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("Spiderweb.exe"));
+    if std::env::args_os().nth(1).is_some_and(|a| a == CHILD_ARG) {
+        child_main(&exe);
+    }
     let top = exe.parent().map(Path::to_path_buf).unwrap_or_default();
     let data_root = top.join("data");
     let version = version(&data_root);
@@ -193,7 +202,48 @@ fn main() {
     let log = top.join("user").join("crash-now.log");
     let stamp = || std::fs::metadata(&log).and_then(|m| m.modified()).ok();
     let before = stamp();
-    match run(&dll, &exe, &data, repair) {
+    // Spiderweb runs as a second copy of this exe (CHILD_ARG) while this one watches it until its window is up, then
+    // leaves: a crash while starting (a damaged file can crash Python itself, taking the whole program with it) is
+    // still said at once, not silently (user 2026-11-27).
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.arg(CHILD_ARG);
+    if repair {
+        cmd.arg(REPAIR_ARG);
+    }
+    cmd.args(std::env::args_os().skip(1).filter(|a| a != REPAIR_ARG && a != CHILD_ARG));
+    let Ok(mut child) = cmd.spawn() else {
+        std::process::exit(match run(&dll, &exe, &data, repair) { Some(c) => c, None => broken() });
+    };
+    let code = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.code().unwrap_or(1),
+            Ok(None) => {}
+            Err(_) => std::process::exit(0),
+        }
+        if stamp() != before && window_up(&log) {
+            std::process::exit(0);  // (Spiderweb's window is up: from here its own error handling takes over)
+        }
+        std::thread::sleep(std::time::Duration::from_millis(WATCH_MS));
+    };
+    if code == NO_PYTHON {
+        broken();
+    }
+    // Crashed while starting (a dump in a crash-now.log it rewrote, no closing line, window never up): said now.
+    if code != 0 && code != 3 && !repair && stamp() != before && crashed_starting(&top) {
+        crash_answered(&log);  // (the next start doesn't ask about this crash again)
+        if repaired {
+            still(&texts, code);
+        }
+        if win::ask(&texts.get("starter.crashed_now", None,
+            "Spiderweb closed unexpectedly while starting. Its program files may be damaged.\n\nRepair them now? \
+             Spiderweb downloads this version again and puts back only damaged files. Your own files stay as they \
+             are.", &[])) {
+            let args: Vec<OsString> = std::env::args_os().skip(1).filter(|a| a != REPAIRED_ARG).collect();
+            let _ = std::process::Command::new(&exe).arg(REPAIR_ARG).args(args).current_dir(&top).spawn();
+        }
+        std::process::exit(code);
+    }
+    match Some(code) {
         // Ended with an error before Spiderweb even wrote its start line (crash-now.log untouched): damaged
         // Python parts fail there with no word at all (hunt 2026-11-26). Repair mode's own plain message exits 3.
         Some(code) if code != 0 && code != 3 && stamp() == before => {
@@ -201,13 +251,7 @@ fn main() {
                 broken();
             }
             if repaired {  // (a repair just ran: the download page, never another repair)
-                let ask = texts.get("repair.still", None,
-                    "Spiderweb still can't start after the repair.\n\nOpen the download page to get Spiderweb again? \
-                     Your settings, autosave and exports (the user and output folders) stay as they are.", &[]);
-                if win::ask(&ask) {
-                    win::open_page(DOWNLOADS);
-                }
-                std::process::exit(code);
+                still(&texts, code);
             }
             let ask = texts.get("starter.failed", None,
                 "Spiderweb couldn't start: some of its program files seem to be damaged.\n\nRepair them now? \
@@ -222,4 +266,38 @@ fn main() {
         Some(code) => std::process::exit(code),
         None => broken(),
     }
+}
+
+/// Right after a repair Spiderweb still can't start: the download page offered, never another repair.
+fn still(texts: &texts::Texts, code: c_int) -> ! {
+    let ask = texts.get("repair.still", None,
+        "Spiderweb still can't start after the repair.\n\nOpen the download page to get Spiderweb again? Your \
+         settings, autosave and exports (the user and output folders) stay as they are.", &[]);
+    if win::ask(&ask) {
+        win::open_page(DOWNLOADS);
+    }
+    std::process::exit(code);
+}
+
+/// Spiderweb's window is up: its crash-now.log (rewritten at this start) has the "speed-ups:" note.
+fn window_up(log: &Path) -> bool {
+    std::fs::read_to_string(log).is_ok_and(|t| t.contains("==== started") && t.contains(" speed-ups: "))
+}
+
+/// The user was told about this start's crash: a closing line, so the next start doesn't ask about it again
+/// (files/errors.py still moves the dump into spiderweb-crash.log, as a dump in a run that closed).
+fn crash_answered(log: &Path) {
+    use std::io::Write;
+    if let Ok(mut f) = std::fs::OpenOptions::new().append(true).open(log) {
+        let _ = f.write_all(b"==== closed (told at start)\n");
+    }
+}
+
+/// The copy started by the watching starter (CHILD_ARG): Spiderweb itself, in this process; the checks were done.
+fn child_main(exe: &Path) -> ! {
+    let top = exe.parent().map(Path::to_path_buf).unwrap_or_default();
+    let data = top.join("data").join(version(&top.join("data")));
+    let repair = std::env::args_os().skip(1).any(|a| a == REPAIR_ARG);
+    let code = core_ok(&data).and_then(|dll| run(&dll, exe, &data, repair));
+    std::process::exit(code.unwrap_or(NO_PYTHON));
 }
