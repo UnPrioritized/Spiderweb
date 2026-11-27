@@ -71,8 +71,15 @@ START = {1: 0, 2: 0, 4: 0, 5: 0, 7: 100, 8: 64, 10: 64, 11: 127, 64: 0, 65: 0, 6
          **{c: 64 for c in range(71, 80)}, 84: 0, 91: 40, 93: 0, 94: 0, 95: 0}
 POOL = 12  # windows' arrays kept for use again at most
 POOL_LONGEST = 1 << 23  # ... each this long at most (a wall's big ones go)
+POOL_FIT = 4  # ... and at most this many times longer than the window they last held
 WINDOW_MOST = 4 * WANT  # a window holding more events is read again shorter (one tick: stepped over, counted only)
 QUEUE_MOST = 8 * WANT  # events read ahead at most (hunt 2026-10-25: a wall's offs read ahead took 16-30 GB)
+# the reading memory a wall grew (scratch + pool) given back once no window held more than WANT events for SHRINK_S
+# (user 2026-11-27: Shinki's wall left ~5 GB held until Stop; measured dev/scratch/mem_play.py). Not sooner: fresh
+# memory every window cost more than the reading
+SHRINK_S = 3.0
+SHRINK_MB = 256  # ... only when more than this is held
+POOL_LIGHT = 1 << 22  # (a pooled window's arrays kept after that: up to this long, what a light window needs)
 NO_COUNT = np.zeros(1, np.int64)
 READY_S = 0.5  # seconds of the song read before the play line starts
 SIDE_SPAN = 1 << 18  # a window of more ticks is put in order on one thread (the side by side way's tables: ticks x
@@ -94,10 +101,20 @@ class _Scratch:
         self.file = open(path, "rb") if path else None
         self.t, self.m, self.k = np.empty(0, np.int64), np.empty(0, np.int32), np.empty(0, np.int32)
 
-    def room(self, n, more):
-        """The arrays hold n events + more."""
+    def held(self):
+        """Bytes its arrays hold."""
+        return self.t.nbytes + self.m.nbytes + self.k.nbytes + (self.buf.nbytes if self.buf is not None else 0)
+
+    def let_go(self):
+        """Its arrays given back (grown again by the next read)."""
+        self.buf = None
+        self.t, self.m, self.k = np.empty(0, np.int64), np.empty(0, np.int32), np.empty(0, np.int32)
+
+    def room(self, n, more, top=None):
+        """The arrays hold n events + more (top: doubling stops there, a window's most)."""
         if n + more > len(self.t):
-            size = max(n + more, 2 * len(self.t), 1 << 20)
+            twice = 2 * len(self.t) if top is None else min(2 * len(self.t), top)
+            size = max(n + more, twice, 1 << 20)
 
             def grow(a, kind):
                 return np.concatenate([a[:n], np.empty(size - n, kind)])
@@ -313,8 +330,12 @@ class LoadedPlayer:
             more = []
             for lo in range(0, len(slots), 4096):  # (batches: the buffer stays small)
                 ss, zz = slots[lo:lo + 4096], size[lo:lo + 4096]
-                cut = np.searchsorted(np.cumsum(zz), BATCH // 8 if counting else BATCH, "right") + 1  # (about BATCH
-                # bytes a call; counting: the room kept for what it may hold stays small)
+                cap = BATCH // 8 if counting else BATCH  # (about BATCH bytes a call; counting: the room kept for
+                # what it may hold stays small)
+                if most is not None:  # (near a window's most: smaller calls, so a window too full is found before
+                    # room for the worst case of a whole BATCH was made; a wall's offs grew 4 threads to ~5 GB, 11-27)
+                    cap = min(cap, max(1 << 20, 2 * (most - n)))
+                cut = np.searchsorted(np.cumsum(zz), cap, "right") + 1
                 ss, zz = ss[:cut], zz[:cut]
                 if cut < len(slots[lo:lo + 4096]):
                     more.append(slots[lo:lo + 4096][cut:])
@@ -326,7 +347,7 @@ class LoadedPlayer:
                 tick, run = self.tick[ss].copy(), self.run[ss].copy()
                 nxt, used = np.empty(len(ss), np.int64), np.empty(len(ss), np.int64)
                 sk_i = self.sk_i[ss].copy()
-                n = sc.room(n, total // 2 + 2 * len(ss))
+                n = sc.room(n, total // 2 + 2 * len(ss), None if most is None else most + (1 << 20))
                 n = read(sc.buf, at, zz, t1, tick, run, nxt, used, self.num32[ss], sc.t, sc.m, sc.k, n,
                          self.pos[ss], self.sk, sk_i, self.sk_end[ss], counting, count, ss)
                 self.tick[ss], self.run[ss], self.nxt[ss], self.sk_i[ss] = tick, run, nxt, sk_i
@@ -388,7 +409,8 @@ class LoadedPlayer:
         them back once played). Several parts: counted and placed side by side on the helper threads."""
         n = sum(len(p[0]) for p in parts)
         with self._lock:
-            i = next((i for i, b in enumerate(self._pool) if len(b[0]) >= n), None)
+            fit = [(len(b[0]), i) for i, b in enumerate(self._pool) if len(b[0]) >= n]  # (the smallest that fits)
+            i = min(fit)[1] if fit else None
             got = None if i is None else self._pool.pop(i)  # (by place: remove() compares the arrays)
         if got is None:
             size = 1 << max(16, (n - 1).bit_length())
@@ -754,6 +776,7 @@ class LoadedPlayer:
             self._pool_x = ThreadPoolExecutor(max(1, len(self._helpers)), thread_name_prefix="loaded-read")
             self._table()
             start = t0
+            self._big_at = time.perf_counter()  # (when a window last held more than WANT events: _shrink)
             while not self._stop.is_set():
                 began = time.perf_counter()
                 self.off = self._off_now()  # (muted tracks never read: as if the file hadn't them)
@@ -789,10 +812,12 @@ class LoadedPlayer:
                         continue
                     if w0 > last:
                         self.ready.set()
+                        self._shrink()
                         time.sleep(0.02)
                         continue
                     if self._ahead(w0) > AHEAD_S or (self.player._clock is None and len(self._queue) > 8):
                         self.ready.set()  # (read far enough: the line may start)
+                        self._shrink()
                         time.sleep(0.005)
                         continue
                     w1 = w0 + span
@@ -843,6 +868,8 @@ class LoadedPlayer:
                     kept = [a.copy() for a in (self.pos, self.tick, self.run, self.nxt, self.want, self.done,
                                                self.sk_i)]
                     got = self._read_side(todo, w1, WINDOW_MOST)
+                    if got is None or sum(len(g[0]) for g in got) > WANT:
+                        self._big_at = time.perf_counter()
                     if got is None:  # (too many events in it: a shorter window from the same place)
                         self.pos, self.tick, self.run, self.nxt, self.want, self.done, self.sk_i = kept
                         if w1 - w0 > 1:
@@ -870,6 +897,7 @@ class LoadedPlayer:
                         self.ready.set()  # for it; a head start, else a dense part ran dry at once, hunt 10-25)
                     self.windows += 1
                     self.read_s += time.perf_counter() - began
+                    self._shrink()
                     # (the next window: about WANT events)
                     span = w1 - w0
                     if len(ts) > 2 * WANT:
@@ -891,6 +919,31 @@ class LoadedPlayer:
                 self._pool_x.shutdown(wait=True)
             for sc in [self._sc] + self._helpers:
                 sc.close()
+
+    def _give_back(self, cur):
+        """(A feeder, under _lock) a played window's arrays into the pool for a later window; a wall's go, and so do
+        ones far bigger than the window they held (a dense part's, now used by light ones: kept, they held ~0.5 GB
+        until Stop, 2026-11-27)."""
+        got = cur[5]
+        if got is not None and len(self._pool) < POOL and len(got[0]) <= POOL_LONGEST and \
+                len(got[0]) <= max(POOL_FIT * len(cur[0]), 1 << 16):
+            self._pool.append(got)
+
+    def _shrink(self):
+        """(The reader, between windows: nothing reads into the scratch then) the memory a dense part grew given
+        back once no window was big for SHRINK_S: every scratch's arrays, the pooled windows' past POOL_LIGHT."""
+        if time.perf_counter() - self._big_at < SHRINK_S:
+            return
+        scratch = [self._sc] + self._helpers
+        with self._lock:
+            pooled = sum(a.nbytes for b in self._pool for a in b)
+        if sum(sc.held() for sc in scratch) + pooled <= SHRINK_MB << 20:
+            return
+        for sc in scratch:
+            sc.let_go()
+        with self._lock:
+            self._pool = [b for b in self._pool if len(b[0]) <= POOL_LIGHT]
+        self._big_at = time.perf_counter()  # (a light song stays under SHRINK_MB: not looked at again for a while)
 
     def _leave_part(self):
         """(The reader) the part read ahead the feeder stopped playing at tick tm (a track muted meanwhile: a part
@@ -1156,8 +1209,7 @@ class LoadedPlayer:
                     self.thinned += max(0, ons - int(kept.sum()))
                 if i >= len(ts):
                     with self._lock:
-                        if cur[5] is not None and len(self._pool) < POOL and len(cur[5][0]) <= POOL_LONGEST:
-                            self._pool.append(cur[5])  # (its arrays: for a later window; a wall's go)
+                        self._give_back(cur)
                         cur = self._queue.popleft() if self._queue and self._gen == gen else None
                         if cur is not None:
                             self._took(cur, line)
@@ -1313,8 +1365,7 @@ class LoadedPlayer:
                     cur[3] = i = i1
                 if i >= len(ts):
                     with self._lock:
-                        if cur[5] is not None and len(self._pool) < POOL and len(cur[5][0]) <= POOL_LONGEST:
-                            self._pool.append(cur[5])
+                        self._give_back(cur)
                         cur = unmuted(self._queue.popleft()) if self._queue and self._gen == gen and \
                             self._unpart is None else None
                         wall["floor"] = 0.0
